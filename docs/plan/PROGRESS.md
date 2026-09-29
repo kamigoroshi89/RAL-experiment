@@ -14,3 +14,8 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 - [x] **F9 Verifica finale** — tools/check_plan.py scritto ed eseguito: OK su 103 task, 18 contratti, 31 rilievi; verificato con 9 mutazioni che i controlli falliscono quando devono
 
 ## Note
+
+- Correzioni alle note sopra: F4 contiene 18 contratti (non 17); il log ADR arriva a ADR-023 (021-023 aggiunti in F6). I file 04-review-traceability.md, CLAUDE.md e tools/check_plan.py sono stati creati durante F6 e committati con i commit F6/F7.
+- Discrepanze prompt/fonti registrate in `03-decisions.md`: ADR-012 (docs/source/review.md è un estratto di analisi §2), ADR-014 (collocazione dei punti §9 0.4/0.5 in WS12), ADR-015 (run-plan.sh fa cd in prompt/).
+- Scelte autonome in attesa di conferma umana (tag [DA-CONFERMARE]): ADR-011, 012, 013, 014, 015, 016, 017, 021, 022, 023.
+- Prossimo passo operativo: task `ready` con owner agent e percorso critico: WS05-T01 (scaffolding); task umani subito eseguibili: WS00-T01, T04, T05, T08, T09.
