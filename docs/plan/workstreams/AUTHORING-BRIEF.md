@@ -61,7 +61,7 @@ Size: a task is about one working day of an agent and touches at most six paths.
 2. **Cite sources.** Every task names the analisi sections it derives from and, where relevant, the reviewer findings it closes.
 3. **Use the contracts.** Refer to types and names exactly as in `02-interfaces.md`. If a contract seems wrong or incomplete, do not edit it; describe the issue in your final report.
 4. **Glossary.** Use the binding terms of `01-conventions.md` section 7 (tier/module/node, forecaster, conformal calibrator, pathway template and patient care plan, DISPENSE and INTAKE, alert and violation and attributed cause, robustness reserved to STL).
-5. **Forbidden tokens** in your files: `TODO`, `TBD`, `???`, `lorem`. (`[DA-CONFERMARE]` is allowed only in `03-decisions.md`.)
+5. **Forbidden tokens**: the four placeholder markers listed in section F9 of `PROMPT.md` (an unfinished-work marker, a to-be-decided marker, a triple question mark and the classic dummy-text word) must not appear in any plan file; `tools/check_plan.py` enforces this. (`[DA-CONFERMARE]` is allowed only in `03-decisions.md`.)
 6. **Non-negotiable** tasks (`non_negotiable: yes`) must say so in their Obiettivo and must not be described as optional or cuttable.
 7. **Human tasks** (`owner: human`): Done when names an artefact under `docs/plan/workstreams/<WSxx-slug>/outputs/<task-id>.md` with the required fields listed in the task, so an agent can check it exists and is complete. Do not put outputs there yourself.
 8. **Optional tasks** say "OPTIONAL" in the Obiettivo and cite the cut order (`00-master-plan.md` section 7) where it applies.

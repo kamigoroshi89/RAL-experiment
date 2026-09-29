@@ -21,7 +21,7 @@ Effort per workstream is taken from analisi §9. WS00 rows come from the phase-0
 
 | WS | Content (§9 item) | Effort | Depends on (§9) |
 |---|---|---|---|
-| WS00 | Admin and human decisions: CFP check (0.1), scope decisions (0.2), clinician and RV collaborator (0.3), PhysioNet credentialing (0.6), TIAGo availability (0.7) | 0.1: 0.5 d; 0.2: 2-3 d; 0.6: 1 d + wait; 0.7: 1 d; 0.3: contacts | 0.2 after 0.1 |
+| WS00 | Admin and human decisions: CFP check (0.1), scope decisions (0.2), clinician and RV collaborator (0.3), PhysioNet credentialing (0.6), TIAGo availability (0.7); plus hand-offs added at reconciliation (ADR-023): ethics rules check, clinician review of the registry, reference PDFs, open datasets, provenance verification | 0.1: 0.5 d; 0.2: 2-3 d; 0.6: 1 d + wait; 0.7: 1 d; 0.3: contacts; hand-offs: 0.5-1 d each (not in analisi §9) | 0.2 after 0.1 |
 | WS01 | Formalization: problem formulation, templates, normalisation, ρ, three-valued semantics, Proposition 1 (1) | 3-4 pw | 0.2 |
 | WS02 | Threat model, fault model, diagnosability matrix, attribution rule with abstention (2) | 1-2 pw | WS01 |
 | WS03 | Related work and verified references (3) | 1.5 pw | parallel |
@@ -36,14 +36,14 @@ Effort per workstream is taken from analisi §9. WS00 rows come from the phase-0
 | WS12 | Writing, internal devil's-advocate review, title (0.4) and abstract (0.5) (12) | 2-3 pw | all |
 | WS13 | Open-source repository (13) | 1 pw | WS05, WS04 |
 
-Analisi §9 states a total of about 33-42 pw, feasible for 3-4 people in 3-4 months (roughly 14-16 weeks for the full submission) if WS04, WS05 and WS07 run in parallel.
+The plan's task estimates add up to about 201 person-days (about 40 pw) including the optional second pathology; the total of analisi §9 is about 33-42 pw, feasible for 3-4 people in 3-4 months (roughly 14-16 weeks for the full submission) if WS04, WS05 and WS07 run in parallel.
 
 ## 3. Milestones
 
 | Id | Milestone | Gate (verifiable) |
 |---|---|---|
 | M0 | Commitment letter ready (analisi §9, weeks 1-2) | WS00-T01, T02 done; title and abstract without numbers written (WS12) |
-| M1 | Formalization frozen | WS01 done; `02-interfaces.md` versions agreed; template table, normalisation and verdict semantics reviewed by the clinician (WS00-T03) |
+| M1 | Formalization frozen | WS01 done (the freeze WS01-T08 follows the clinician review WS00-T07 of registry, normalisation, verdict semantics and taxonomy); contract amendments decided by ADR (ADR-021); `02-interfaces.md` versions agreed |
 | M2 | Core running offline | WS04 generator produces traces with latent ground truth; WS05 monitor emits verdicts and alerts on them; unit and property tests green |
 | M3 | Baselines and main results | WS06 B1-B5 run on the same traces; WS08 main table and A1-A4 produced |
 | M4 | Robot evidence | WS07 latency and robot-fault results; WS10 lab demo (or fallback video, see cut order) |

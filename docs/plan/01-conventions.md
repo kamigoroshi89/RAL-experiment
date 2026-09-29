@@ -17,22 +17,23 @@ RAL experiment/
 │   ├── benchmark/                 PriorSource, latent patient, PK/PD, measurement process, injection, ground truth
 │   ├── baselines/                 B1-B5
 │   └── eval/                      metrics of analisi §5.5
-├── tests/                         mirrors src/ralmon (tests/spec/test_*.py ...)
+├── configs/                       registry/, priors/, benchmark/, diagnosability.yaml (owned by WS01, WS02, WS04)
+├── tests/                         mirrors src/ralmon (tests/spec/test_*.py ...); also tests/tools/, tests/study/, tests/hardware/
 ├── ros2/                          thin ROS 2 packages (wrappers only, no logic): ralmon_ros, ralmon_sim
 ├── experiments/                   configs and run scripts for WS08 (one YAML per experiment)
-├── hardware/                      lab demo material (WS10)
+├── hardware/                      lab demo material (WS10; code in hardware/lab_demo/)
 ├── study/                         vignette study material (WS11)
-├── paper/                         LaTeX sources (WS12)
+├── paper/                         LaTeX sources (WS12); paper/refs/ (WS03), paper/figures/ and paper/tables/ (WS09)
 ├── data/raw/                      never committed (gitignored)
 ├── outputs/                       never committed (gitignored)
-├── tools/                         repo tooling (tools/check_plan.py)
-└── docs/                          source/, superpowers/specs/, plan/
+├── tools/                         repo tooling (tools/check_plan.py, tools/check_bib.py, tools/figures/)
+└── docs/                          source/, superpowers/specs/, plan/, and working documents formal/ (WS01), models/ (WS02), related-work/ (WS03), benchmark/ (WS04)
 ```
 
 Rules:
 
 - `src/ralmon` never imports ROS 2 (`rclpy`, `rclcpp`). ROS 2 packages under `ros2/` import `ralmon` and contain no monitoring logic. This keeps the core testable with plain `pytest`.
-- Package dependency direction: `signals` ← `spec` ← `monitor` ← `attribution`; `conformal` used by `monitor`; `benchmark` depends only on `signals` and the trace schema; `baselines` and `eval` depend on the public API of the others. No cycles. Consumers import only from a package's `__init__` (its public API as defined in `02-interfaces.md`).
+- Package dependency direction: `signals` ← `spec` ← `monitor` ← `attribution`; `conformal` used by `monitor`; `benchmark` depends on `signals` and the trace schema, with one exception: the ground-truth labeller and the benchmark validation (WS04-T10, WS04-T12) and the prior registry loader (WS04-T02) may import `spec` and `monitor` because ground truth is computed offline by running phi_CP on the latent trace (ADR-022); `baselines` and `eval` depend on the public API of the others. No cycles. Where a type would create a cycle (for example `Rho` and `PredictedViolation`), the type lives in the lower package and is re-exported (decisions recorded by WS05-T01 and WS05-T06). Consumers import only from a package's `__init__` (its public API as defined in `02-interfaces.md`).
 - Docs and code comments in English. Identifiers in English.
 
 ## 2. Python style

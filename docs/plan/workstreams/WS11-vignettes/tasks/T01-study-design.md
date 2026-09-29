@@ -1,0 +1,79 @@
+---
+id: WS11-T01
+title: Vignette study design and measures
+workstream: WS11-vignettes
+owner: agent
+status: blocked
+depends_on: [WS00-T03, WS00-T06, WS01-T07]
+critical_path: false
+non_negotiable: false
+estimate_pd: 2
+sources: ["analisi §5.7", "analisi §2 R3 weakness 6"]
+interfaces: ["02-interfaces.md#alert"]
+review_items: ["R3-W6"]
+---
+## Obiettivo
+
+OPTIONAL: this workstream is the first item in the cut order (`docs/plan/00-master-plan.md` section 7; analisi §9), so nothing on the critical path may wait for it. Write the pre-specified protocol of the within-subject online vignette study of analisi §5.7 as three files: `study/design.md` (prose), `study/protocol.yaml` (machine-readable protocol, instruments and analysis parameters read by WS11-T02, T04 and T06) and `study/ethics-dossier.md` (material for the ethics approval or exemption established in WS00-T06). The protocol fixes conditions, event families, the five measures, counterbalancing and the analysis before any vignette is generated and before anybody is invited, and it states what the study can and cannot say about reviewer concern R3-W6 (alert workflow, alarm fatigue, natural-language rendering verified with users).
+
+## Contesto
+
+- `docs/source/analisi.md` §5.7 (format, conditions, measures), §2 R3 weakness 6 and question 5, §4.8 (traceability wording, "complementary"), §4.5 (diagnosability matrix: source of the event families), §4.9 items 3 and 4 (cascades, clinician in the loop).
+- `docs/plan/02-interfaces.md#alert` (the tuple ⟨τ, κ, σ̃, ρ, ξ⟩ shown in the RSM condition; alert ordering uses `rank_alerts` from `#template`).
+- `docs/plan/workstreams/WS00-admin/outputs/` : `WS00-T03.md` (sections `Clinician`, `Agreed involvement`, `Partner hospital access`) and `WS00-T06.md` (sections `Vignette study`, `Data protection for study data`, `Decision and schedule`).
+- `docs/plan/03-decisions.md`: ADR-003 (alerts reach the nurse; when the robot is unavailable the fallback escalates to the nurse), ADR-004 (DISPENSE is not INTAKE), ADR-009 (ranking), ADR-018 (unverified references are flagged).
+- `docs/plan/01-conventions.md` (glossary section 7, results section 9).
+
+Unblocked when WS00-T03, WS00-T06 and WS01-T07 are `done`: the first two give the clinician, the partner hospital and the ethics outcome; WS01-T07 gives the alert tuple definition, the traceability wording and the FHIR and BPMN mapping sketch. If `outputs/WS00-T06.md` says the study is dropped, stop and record it in the completion note.
+
+## File toccati
+
+- `study/design.md` (create)
+- `study/protocol.yaml` (create)
+- `study/ethics-dossier.md` (create)
+
+## Test
+
+Verification checks (documents; a reviewer runs or inspects each):
+
+1. `study/design.md` has these H2 headings: `Research questions`, `Conditions and information parity`, `Event families`, `Divergence of severity and confidence`, `Measures`, `Design, counterbalancing and sample`, `Analysis plan`, `Threats to validity`, `Coverage of reviewer concern R3-W6`, `Decisions recorded`.
+2. Research questions RQ1 to RQ5 exist; each maps to exactly one measure M1 to M5 (M1 action correctness, M2 decision time, M3 perceived interpretability, M4 trust, M5 behaviour when σ̃ and ρ diverge), and each measure has an instrument entry in `study/protocol.yaml` and an entry in `## Analysis plan`. Every expectation is written as exploratory and names the observation that would contradict it.
+3. The conditions table has three rows, `THR` (threshold alarm), `ANOM` (anomaly score) and `RSM` (alert). The `RSM` row lists all five fields of the alert tuple (τ, κ, σ̃, ρ, ξ) and the priority; the `THR` and `ANOM` rows list none of them. The section states the parity rule: every condition shows exactly what the corresponding detector produces (B1 for `THR`, B2 for `ANOM`, the attribution package for `RSM`) on top of a context block that is identical across conditions.
+4. `## Event families` lists at least these types, each with its source row in analisi §4.5 or §5.1, its ground-truth class (C1, C2, C3), and the behaviour the RSM is expected to show: genuine clinical deviation with coherent channels; evident device failure; robot late for a care-plan window; cascade (one C2 root cause with a downstream count violation, shown as one root alert in `RSM`); double take versus sensor bounce (UNDETERMINED or resolved by content evidence); integrity violation (replay or falsified DISPENSE); a case that is undetectable by construction (silent bias or informed injection) to expose over-trust. The count of rotating families is a multiple of three and equals the sum of the three family sets; the practice families (at least one per condition, not scored) and the urgency-ranking set (see check 6) are listed separately.
+5. `## Divergence of severity and confidence` defines the 2 by 2 cells (severity high or low by confidence high or low), states that only `RSM` shows both σ̃ and ρ, and fixes the block design: an RSM-only block seen by all participants after the three condition blocks, containing at least one alert per cell. It states that the cut-offs between high and low are derived by T02 from the distribution of σ̃ and ρ over the benchmark alerts (default: median split) and are design parameters, not clinical values.
+6. `## Measures` records for each measure the instrument, the unit and the scoring. M1: closed action catalogue per family drawn from the generic vocabulary in `protocol.yaml` (no drug or dose actions), four scoring classes (`expected`, `acceptable`, `incorrect`, `unsafe`), the key defined per family and independent of the condition. M2: milliseconds from display to submission, plus time the tab was hidden. M3: own Likert items, identical wording in all conditions, declared not validated. M4: Jian et al. 2000 scale, flagged unverified, items empty in `protocol.yaml`, administered once per condition block. M5: per-vignette forced-choice cue question (severity, confidence, both, neither) and the action chosen, per cell. The urgency-ranking block (analisi §5.5: agreement between the ordering by normalised severity and the clinicians' ordering, computed with `severity_rank_agreement` of `02-interfaces.md#metrics`) is included by default, as one set of RSM alerts that every participant orders by urgency after the divergence block; it is excluded only with a recorded reason from the session-length budget.
+7. `study/protocol.yaml` has the top-level keys `study_id`, `conditions`, `event_families`, `divergence`, `ranking`, `measures`, `instruments`, `counterbalancing`, `sample`, `response_schema`, `exclusions`, `analysis`, `trust_scale`; `ranking` states `included`, the number of alerts in the set and their source. `trust_scale` has `source_ref` stating "Jian et al. 2000, International Journal of Cognitive Ergonomics (unverified, analisi §5.7)", `verified_by: null` and `items: []`. No trust item wording appears anywhere in the three files.
+8. `counterbalancing` states the scheme and its balance rule (default: cyclic Latin square over three condition orders with three family sets, so that every pair of family set and condition, and every pair of condition and block position, occurs equally often when the number of participants is a multiple of three). `sample` states 8 to 15 participants (analisi §5.7), the recommended values that keep the scheme balanced, and how an unbalanced final count is reported. The assignment of participants to sequences uses an explicit integer seed (`01-conventions.md` section 2).
+9. `exclusions` gives a provisional rule for excluding a vignette from M2 because of hidden time, marked "provisional, confirmed or changed in WS11-T03 from pilot timings", and states that such a vignette stays in M1 and M3.
+10. `## Coverage of reviewer concern R3-W6` has three parts and no overclaim: verification of the natural-language rendering with users (covered here); who receives an alert, through which channel and with which escalation (a design statement from ADR-003 and the WS01-T07 mapping sketch; only the escalation choices are observed here); expected alert load per shift and alarm fatigue (not measured here; false alarms per patient-day come from WS04-T12 and WS08; the debrief adds qualitative answers only).
+11. `study/ethics-dossier.md` has the H2 headings `Outcome of WS00-T06`, `Purpose and design`, `Participants and recruitment`, `Information text`, `Consent text`, `Data collected and pseudonymisation`, `Storage, retention and access`, `Withdrawal`, `Risks and benefits`. `Outcome of WS00-T06` quotes the outcome for the vignette study (approval required, exemption, or not required) and the lead time as recorded there. The file contains no personal name, no hospital name and no committee name. `Consent text` is a self-contained section that WS11-T04 embeds unchanged.
+12. Terminology: `grep -nE 'intrinsic explainab|orthogonal|ensures' study/design.md study/ethics-dossier.md` prints nothing; "alert" is used only for the RSM output (the threshold condition says "alarm", the anomaly condition says "anomaly score"); "violation" is used only for a violated sub-formula; the text uses "attributed cause" and "specification-level traceability".
+13. No placeholder tokens (see the pattern in Done when).
+
+## Passi
+
+1. Read the inputs of Contesto. From `outputs/WS00-T03.md` take the professions available (nurses, physicians) and the partner hospital access; from `outputs/WS00-T06.md` take the ethics outcome and lead time. Do not write the hospital or committee name into any file.
+2. Write `## Research questions` with RQ1 to RQ5 and the exploratory expectations. RQ5 restates the question of Section IV of the workshop paper: how clinicians and nursing staff interpret RSM outputs, especially when severity and confidence diverge. For M4 the expectation is two-sided (the RSM text may raise or lower trust). State that with 8 to 15 participants no result is confirmatory.
+3. Write `## Conditions and information parity`: the three conditions, the fields each shows, the fairness principle, and the identical context block (scenario, care-plan summary from the `CarePlan`, observed recent samples only, never latent values). Fix how σ̃ and ρ are displayed in `RSM` (numeric with verbal anchors, one form for all vignettes), how the anomaly score and its cut-off are displayed (whatever B2 emits, without extra interpretation), and the plain-language labels of κ (clinical, system or device, data integrity, cannot tell).
+4. Write `## Event families` and the matching `event_families` block of `protocol.yaml`, from the diagnosability matrix of analisi §4.5 and the confounders of §5.1 item 4. Partition the rotating families into three sets of comparable difficulty. Fix the generic action vocabulary (closed list of nursing-level actions such as re-measure manually, check or replace the device, notify the physician, continue routine monitoring, verify the dispenser content) and record that clinical wording is confirmed by the clinician in WS11-T03. Do not include drug or dose actions.
+5. Write `## Divergence of severity and confidence` and the `divergence` block.
+6. Write `## Measures` and the `measures` and `instruments` blocks: Likert items authored here (each a statement about understanding why the alert was raised, how severe the situation is, and what to do next; same wording per condition except the noun), the point count and anchors, the cue question, the debrief questions (including two qualitative questions on acceptable alert load per shift and on escalation preferences, labelled qualitative), minimal demographics (profession, experience band; no name, no age, no employer). Add the `response_schema`: participant code, profession, sequence id, block index, position, family id, condition, action id, decision time and hidden time as integer milliseconds, Likert item ratings, cue answer, block-level trust ratings, ranking (item id to rank), debrief text.
+7. Write `## Design, counterbalancing and sample` and the `counterbalancing` and `sample` blocks. State the session-length budget as a value to be checked in the pilot, and the rule for dropping families if the pilot shows the budget is exceeded (drop from the end of the priority order written here, never the practice families).
+8. Write `## Analysis plan` and the `analysis` block, to be executed unchanged by WS11-T06: per-condition share of `expected` or `acceptable` actions and separate share of `unsafe`, with participant-clustered bootstrap intervals from a seeded generator; decision times on the log scale with per-participant medians; Likert and trust as per-participant condition scores; Friedman omnibus across the three conditions followed by paired Wilcoxon signed-rank comparisons with Holm adjustment; effect sizes with intervals; divergence cells tabulated descriptively with a paired contrast between concordant and divergent cells; role subgroups descriptive only; the ranking analysis through `severity_rank_agreement` (`02-interfaces.md#metrics`), reported as median and range of the per-participant agreement. Name the statistics library that T06 records; do not invent function names.
+9. Write `## Threats to validity`: the RSM condition shows more information than the baselines, so the study compares packages, not components; synthetic vignettes and no real workload; one hospital; small sample; single expert key unless a second clinician reviews it; order and carry-over effects; stimulus language; over-trust risk (the undetectable family); trust measured after synthetic cases only.
+10. Write `## Coverage of reviewer concern R3-W6` and `## Decisions recorded` (numbered: stimulus language, family count, Likert points, counterbalancing scheme, exclusion rule, display of σ̃ and ρ, ranking block in or out (default in), session budget, incentive: none unless the ethics body or partner hospital states otherwise), each with a one-line rationale.
+11. Write `study/ethics-dossier.md` from `outputs/WS00-T06.md` and the protocol: the sections of check 11, an information text and a consent text in plain language (voluntary, may withdraw before submission, what is collected, pseudonymous code, no patient data, results reported in aggregate, who to contact left as a field the human fills in the submission and not in the repository). State the data-protection points exactly as `outputs/WS00-T06.md` records them.
+12. Run the checks of Done when, fix, then commit on branch `ws11-t01-study-design` with message `WS11-T01: add vignette study protocol` and set `status: done`.
+
+## Done when
+
+From the repository root, each command exits 0 and prints nothing except where stated:
+
+- `test -f study/design.md && test -f study/protocol.yaml && test -f study/ethics-dossier.md`
+- `for h in "Research questions" "Conditions and information parity" "Event families" "Divergence of severity and confidence" "Measures" "Design, counterbalancing and sample" "Analysis plan" "Threats to validity" "Coverage of reviewer concern R3-W6" "Decisions recorded"; do grep -q "^## $h\$" study/design.md || echo "missing: $h"; done` prints nothing.
+- `for k in study_id conditions event_families divergence ranking measures instruments counterbalancing sample response_schema exclusions analysis trust_scale; do grep -q "^$k:" study/protocol.yaml || echo "missing: $k"; done` prints nothing.
+- `grep -q 'verified_by: null' study/protocol.yaml && grep -q 'items: \[\]' study/protocol.yaml`
+- `python3 -c "import yaml; yaml.safe_load(open('study/protocol.yaml'))"` (use the YAML library that `ralmon.spec` loads the registry with if PyYAML is not installed).
+- `grep -nE 'TO(DO)|TB(D)|[?]{3}|lor(em)' study/design.md study/protocol.yaml study/ethics-dossier.md` prints nothing.
+- `grep -nE 'intrinsic explainab|orthogonal|ensures' study/design.md study/ethics-dossier.md` prints nothing.
+- Inspection: checks 3, 4, 5, 10 and 11 hold.

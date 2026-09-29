@@ -8,7 +8,7 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 - [x] **F3 01-conventions.md** — conventions: layout repo/pacchetti, stile Python, TDD, git per task, glossario §8.1 vincolante
 - [x] **F4 02-interfaces.md** — interfaces: 17 contratti versionati con firme Python (trace, PriorSource, template, verdict, alert, evidence, monitor, conformal, detector, metrics, ROS2, API pubblica)
 - [x] **F5 03-decisions.md** — decisions: ADR-001..020 (6 richiesti + scelte autonome marcate [DA-CONFERMARE]: 011,012,013,014,015,016,017)
-- [ ] **F6 Workstream (in parallelo)**
+- [x] **F6 Workstream (in parallelo)** — 14 workstream (README + 103 task) scritti da 14 subagent in parallelo; riconciliati: dipendenze mancanti (ADR-023), 3 task umani aggiunti (WS00-T08..T10), gap dei contratti registrati (ADR-021), layout (ADR-022); check_plan OK
 - [ ] **F7 04-review-traceability.md**
 - [ ] **F8 CLAUDE.md**
 - [ ] **F9 Verifica finale**

@@ -16,3 +16,6 @@ outputs/
 # Agent tooling
 .claude/logs/
 ruvector.db
+agentdb.rvf
+agentdb.rvf.lock
+**/ruvector.db

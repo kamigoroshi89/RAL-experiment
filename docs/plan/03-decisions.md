@@ -2,7 +2,7 @@
 
 Format per entry: context, decision, alternatives, consequences, status. Status values: `accepted` (from the sources or from an explicit user answer), `proposed` (chosen autonomously; tag `[DA-CONFERMARE]` means a human must confirm or overturn it). A contract in `02-interfaces.md` changes only through an ADR added here.
 
-Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DISPENSE vs INTAKE; 005 PriorSource; 006 multi-file plan layout; 007 past-time formulation; 008 three-valued verdicts; 009 normalisation; 010 attribution rule; 011 ROS 2 distribution; 012 source files; 013 RTAMT; 014 workstream placement of §9 items; 015 run location of the loop script; 016 Python toolchain; 017 time unit; 018 reference verification; 019 optional second pathology; 020 unverified clinical parameters.
+Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DISPENSE vs INTAKE; 005 PriorSource; 006 multi-file plan layout; 007 past-time formulation; 008 three-valued verdicts; 009 normalisation; 010 attribution rule; 011 ROS 2 distribution; 012 source files; 013 RTAMT; 014 workstream placement of §9 items; 015 run location of the loop script; 016 Python toolchain; 017 time unit; 018 reference verification; 019 optional second pathology; 020 unverified clinical parameters; 021 contract-gap register; 022 layout and package-dependency amendments; 023 dependency reconciliation and extra WS00 tasks.
 
 ---
 
@@ -147,7 +147,7 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 - **Context.** The analysis marks many references with a dagger (unverified venue, year or authors) and states all must be checked on DBLP or Google Scholar before citation (analisi §3).
 - **Decision.** WS03 agents assemble bibliography entries with a `verified` flag defaulting to false. A human sets it after checking. The paper build (WS12) fails if a cited entry is unverified. No network access is assumed for agents.
 - **Alternatives.** Agents verify from memory (rejected).
-- **Consequences.** A human review task exists in WS03.
+- **Consequences.** A human review task exists in WS03 (WS03-T06). Citations added later by WS12 are checked in WS12-T07 (claim audit) and must go through the same verification before the paper build; WS00-T08 supplies full texts of the key papers so that details can be checked on the paper itself.
 - **Status.** accepted (analisi §3 note).
 
 ## ADR-019 Second pathology is optional and last
@@ -161,7 +161,39 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 ## ADR-020 Clinical parameter values are unverified until reviewed
 
 - **Context.** Values in analisi §4.1 are explicitly illustrative; onset and peak times vary by hours across antihypertensive drugs (analisi §2 R3 weakness 3).
-- **Decision.** The parameter registry starts empty of clinical claims: any value carries `rationale` and `reviewed_by`; values with no review are reported in the paper as unverified. No agent assigns a drug or guideline anchor from memory; WS01 defines the procedure and WS00-T03 the clinical review.
+- **Decision.** The parameter registry starts empty of clinical claims: any value carries `rationale` and `reviewed_by`; values with no review are reported in the paper as unverified. No agent assigns a drug or guideline anchor from memory; WS01 defines the procedure and WS00-T07 performs the clinical review (WS00-T03 recruits the clinician).
 - **Alternatives.** Pick a specific drug and guideline now (rejected: invention risk).
 - **Consequences.** M1 requires the clinician's review of the registry.
 - **Status.** accepted.
+
+## ADR-021 Contract-gap register: amendments are decided at M1 [DA-CONFERMARE]
+
+- **Context.** During phase F6 the fourteen workstream authors, reading `02-interfaces.md` against analisi, reported gaps and ambiguities. None was edited during authoring, because contracts change only through an ADR. The reports concern:
+  - `Template`, `Verdict`, `Alert`: the unit of mixed-atom templates (HOLD, RESP, SYS), the treatment of sigma = 0, the range of `sigma_norm` and the direction of `priority`, the "possible" variant needing a lower quantile, whether `creates_robot_obligation` also holds for INT, a measurement-count template, `VerdictRecord` without a sub-formula path or predicted severity, `Detection` without a template field, the attributed cause of predicted alerts;
+  - `EvidenceVector`: no field for dispenser content or dispense interval (needed for the double-take versus bounce rows of analisi §4.5), `seq_gap_or_replay` mixing message loss (C2) and replay (C3), no clock-health field, undefined key of the evidence mapping, and no owner for building an `EvidenceVector` from an observed day and a verdict record;
+  - `Trace schema`: impulse signals are events only, no carry-over across midnight, no benchmark reader;
+  - `PriorSource`: `PatientParams`, `AdherenceParams` and `DeviceErrorModel` lack fields the generator needs;
+  - `Conformal calibrator`: no model-version token for the recalibration rule, `CalibrationEpisode` tied to `TemplateId` and normalised sigma while B4 and B5 work on other residuals, `sigma_true` wording versus the rule that detectors fit on training ground truth only;
+  - `Metrics` and `Experiment config`: `Matching` undefined, no first-decidable instant in `GroundTruthEvent`, no alpha grid, bootstrap settings or shift conditions, macro-F1 and abstention rate without a function;
+  - `Signals`: no robot ETA or task-queue signal for deadline forecasting; `Time and units`: no time-compression rule for the lab demo;
+  - `Package public API`: names used elsewhere but missing (`TimeMs`, `DurationMs`, `Forecaster`, `Forecast`, concrete monitor and attributor, `Matching`, four metrics functions, a benchmark reader, a factory for the proposed detector "ours").
+- **Decision.** (a) The public-API omissions are editorial and are added now (contract `Package public API` moves to 0.1.1); the semantic gaps are not edited during bootstrap. (b) Each semantic gap is resolved by the owning task through a proposed ADR, and all are consolidated at the M1 freeze: WS01-T08 resolves the template, verdict and alert points (its README lists them as CP1 to CP13), WS02-T03 the evidence points, WS04-T02 the prior and trace points, WS05-T01, T04, T06 the monitor, calibrator and cycle points, WS08-T01 the metrics and experiment points, WS07-T03 and WS10-T04 the time-compression rule. (c) No implementation task that consumes a gap may start before the ADR of the owning task is `accepted`; the owning tasks precede consumers in `depends_on` (see ADR-023).
+- **Alternatives.** Edit `02-interfaces.md` now (rejected: guesses would bypass the owning workstreams and the clinician review); ignore (rejected: agents would diverge).
+- **Consequences.** Contract versions bump at M1. Agents reading a contract before M1 must also read this ADR and the "contract points" section of the owning README.
+- **Status.** proposed [DA-CONFERMARE].
+
+## ADR-022 Layout and package-dependency amendments [DA-CONFERMARE]
+
+- **Context.** Authors of WS02, WS03, WS04, WS05, WS09, WS10, WS11 and WS13 needed places for documents, configs, tool tests and lab code that `01-conventions.md` did not list, and WS04 needs `spec` and `monitor` for ground-truth labelling.
+- **Decision.** `01-conventions.md` section 1 now lists `configs/`, `docs/formal|models|related-work|benchmark`, `paper/refs|figures|tables`, `tools/check_bib.py`, `tools/figures/`, `hardware/lab_demo/`, `tests/tools|study|hardware`. `benchmark` may import `spec` and `monitor` only in the labeller, validation and prior-registry loader modules; the generator itself depends on `signals` only. `tools/check_plan.py` keeps its rule 8 (no file in `src/`) for the bootstrap; WS05-T01 relaxes it to "no file in `src/` outside the scaffold" once the scaffold exists (its task text carries the change).
+- **Alternatives.** Force all such items into existing folders (rejected: hides ownership).
+- **Consequences.** Layout is a convention, not a contract, but the dependency exception is recorded here so that an import-linter rule can encode it.
+- **Status.** proposed [DA-CONFERMARE].
+
+## ADR-023 Dependency reconciliation and extra WS00 tasks [DA-CONFERMARE]
+
+- **Context.** The F6 authors reported missing dependency edges between workstreams and human hand-offs with no owner. The index skeleton was regenerated and all task files patched consistently.
+- **Decision.** Edges added: WS00-T07 after WS01-T04, WS01-T05, WS02-T04; WS01-T08 after WS00-T07 (M1 requires the clinician review); WS05-T02 after WS01-T01, WS01-T02; WS05-T08 after WS01-T08; WS04-T06 after WS05-T02, WS00-T09; WS04-T07 and WS04-T08 after WS02-T03; WS06-T01 after WS05-T03, WS05-T07; WS06-T02 after WS05-T02; WS06-T04 after WS05-T04; WS06-T05 after WS05-T05; WS06-T06 after WS05-T04, WS05-T05, WS00-T08; WS07-T04 after WS05-T05; WS07-T06 after WS05-T05, WS08-T01, WS04-T11; WS07-T07 after WS08-T01; WS09-T02 after WS09-T01; WS09-T04 after WS09-T01, WS05-T03; WS09-T05 after WS08-T04; WS10-T01 after WS02-T05; WS10-T04 after WS10-T03; WS10-T06 after WS08-T01; WS11-T02 after WS06-T02, WS06-T03; WS12-T03 and WS12-T04 after WS00-T07; WS12-T05 after WS07-T07, WS10-T06; WS13-T02 after WS09-T02, WS09-T03, WS09-T04; WS13-T03 after WS13-T04, WS00-T01; WS13-T04 after WS13-T01. New human tasks: WS00-T08 (full texts of key papers, needed by WS06-T06), WS00-T09 (download of open datasets, needed by WS04-T06), WS00-T10 (verification of the literature-prior provenance table, non-blocking). Not added on purpose: WS12-T01 does not wait for PhysioNet credentialing (the commitment-letter abstract must not depend on an external wait; it is worded so that it holds with or without MIMIC); WS12 does not depend on the optional vignette study.
+- **Alternatives.** Leave the edges to the executing agents (rejected: parallel agents would start on missing inputs).
+- **Consequences.** The critical chain now includes the clinician review WS00-T07 before the M1 freeze. WS10-T06 (analysis or fallback video) precedes the experiments section, so the section can be written whether the lab demo is completed or cut. Total estimate is 200.75 person-days.
+- **Status.** proposed [DA-CONFERMARE].

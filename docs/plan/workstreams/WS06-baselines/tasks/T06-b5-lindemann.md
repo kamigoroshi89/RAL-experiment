@@ -1,0 +1,86 @@
+---
+id: WS06-T06
+title: B5 conformal STL predictive monitoring after Lindemann et al. 2023, with failure analysis
+workstream: WS06-baselines
+owner: agent
+status: blocked
+depends_on: ["WS06-T01", "WS05-T03", "WS05-T06", "WS05-T04", "WS05-T05", "WS00-T08"]
+critical_path: true
+non_negotiable: true
+estimate_pd: 3.5
+sources: ["analisi §5.4 (B5)", "analisi §3.2", "analisi §10 (2)", "analisi §9 (do not cut B5)", "analisi §4.4"]
+interfaces: ["02-interfaces.md#detector", "02-interfaces.md#conformal-calibrator"]
+review_items: ["AE-3"]
+---
+## Obiettivo
+
+NON-NEGOTIABLE. Implement `B5ConformalSTL`, the closest published method, conformal STL predictive monitoring after Lindemann, Qin, Deshmukh and Pappas (ICCPS 2023), applied to the same pathway templates, and deliver an explicit failure analysis showing where it fails on this problem: sparse sampling, mixed units, no attribution (analisi §5.4 B5, §10 objection 2). B5 is indispensable to defend novelty (analisi §3.2, risk "MOLTO ALTO"; analisi §9: "Non tagliate B5"; `00-master-plan.md` section 5). It is neither optional nor cuttable, and no cheaper substitute (B4 relabelled, B5 without the failure analysis, a paraphrase of the method from memory) satisfies this task. Concrete output: the implementation and its tests, a deviation record (`notes/B5-deviations.md`) and the failure analysis (`notes/B5-failure-analysis.md`), both under `docs/plan/workstreams/WS06-baselines/notes/`.
+
+Rule of this task: nothing in this file describes the published algorithm. The implementer reads the paper, a human supplies the PDF, and every statement about the method in code docstrings, notes and tests carries a locator (section, equation or page) into that PDF. Where the implementation departs from the paper, the departure is recorded as a deviation.
+
+## Contesto
+
+- `02-interfaces.md#detector` and `02-interfaces.md#conformal-calibrator` (`CalibrationEpisode`, `ConformalCalibrator.fit/quantile/predict`, `PredictedViolation`; calibration unit and marginal coverage rules).
+- The harness of WS06-T01 in `src/ralmon/baselines/`, and the public APIs of the spec package (WS05-T03) and the conformal calibrator (WS05-T06); read their docstrings for the quantile rule and the sign convention.
+- `docs/source/analisi.md` §5.4 row B5, §3.2 (closest work and its risk), §10 objection 2 (what must be shown: at least one result where B5 fails, with the difference sentence: sparse event-driven sampling, formal separation of measured and predicted verdict, normalised severity over mixed units, attribution with abstention).
+- The PDF of Lindemann et al. (ICCPS 2023), bibliography key `lindemann-conformal-stl` (WS03). A human supplies it through WS00-T08 (file `data/raw/papers/lindemann2023-conformal-stl.pdf`, listed in `outputs/WS00-T08.md`); the agent never downloads it and never reconstructs it from memory.
+- Blocked until `WS06-T01`, `WS05-T03` and `WS05-T06` are `done` and `WS00-T08` is `done` (the PDF exists at the path above). If the PDF is missing, stop at Passi step 1, keep `status: blocked`, and write the request in the completion note. No WS03 task supplies the PDF and no `depends_on` edge covers it (see the workstream README).
+
+## File toccati
+
+- `src/ralmon/baselines/b5_conformal_stl.py` (create)
+- `src/ralmon/baselines/raw_robustness.py` (create only if WS06-T04 has not created it yet; otherwise reuse it)
+- `tests/baselines/test_b5_conformal_stl.py` (create)
+- `tests/baselines/test_b5_failure_modes.py` (create)
+- `src/ralmon/baselines/__init__.py` (modify: export `B5ConformalSTL`)
+- `docs/plan/workstreams/WS06-baselines/notes/` (create; `B5-deviations.md` and `B5-failure-analysis.md`)
+
+## Test
+
+Write these after Passi steps 1 and 2 (the deviation record fixes what is being implemented) and before any implementation. Test-local numbers are illustrative and unverified (analisi §4.1 and §4.2 examples: band 110 to 140 mmHg, scales 20 mmHg, 30 min, 1 dose); they demonstrate mechanisms and are not clinical claims. Timing: `step_ms=60_000`, `reorder_delay_ms=0`. Stub forecaster and stub evaluator as in WS06-T03 and WS06-T04. Expected quantiles assume the usual finite-sample rule (the `ceil((n + 1) * (1 - alpha))`th smallest score); re-derive them by hand if the `SplitConformal` docstring documents another rule. Coverage statements read "marginal over patient episodes under exchangeability".
+
+`tests/baselines/test_b5_conformal_stl.py`
+
+1. `test_deviation_note_has_required_sections`: `notes/B5-deviations.md` has the headings `## Published method as read`, `## Mapping to the pathway templates`, `## Deviations`; every bullet under the first heading contains the text `locator:`; the Deviations table has at least one row with columns aspect, paper, this implementation, reason, effect on B5 strength.
+2. `test_b5_signature_name_and_labels`: `name == "B5"`, `run` matches the `Detector` signature, every `label` is `None`.
+3. `test_b5_ignores_evidence`: identical output with `evidence=None` and with a populated mapping.
+4. `test_b5_never_touches_latent_or_ground_truth`: with poisoned days (latent and ground truth raise on access), `fit` reads only `observed` on calibration days and `run` works from the `ObservedDay`.
+5. `test_b5_decision_rule_worked_example`: a worked example transcribed from the paper (locator in the docstring) or, if the paper has none, a hand-computed instance of its decision rule (derivation in the docstring) gives the expected detect and no-detect decisions, including the boundary case.
+6. `test_b5_uses_calibrator_public_api_only`: with a stub `ConformalCalibrator`, B5 calls only members of the protocol, and calls `fit` with episodes built from observed calibration days only.
+7. `test_b5_raw_robustness_never_normalised`: `ralmon.spec.normalise` and `rank_alerts` monkeypatched to raise; the run passes; no `scale_param` or `priority_param` name appears in the registry read log.
+8. `test_b5_conjunction_is_min_of_raw_instance_robustness`: instance robustness `[-12.0 (mmHg), 3.0 (time robustness), -1.0 (dose)]` gives a conjunction value of `-12.0` with `aggregation="conjunction"` and three separate values with `aggregation="per_template"`.
+9. `test_b5_per_template_variant_calibrates_each_template_separately`: the calibrator factory is called once per template in the per-template variant and once in the conjunction variant; names are `"B5"` (the variant the paper prescribes for a multi-formula specification, recorded in the deviation note) and `"B5-per-template"`.
+10. `test_b5_reduces_to_measured_prefix_at_deadline`: at and after a template's deadline the decision equals the sign of the measured raw robustness from the stub evaluator (no predicted part left).
+11. `test_b5_is_causal_property` (Hypothesis): detections with `t_ms <= T` are the same for the full day and for the day truncated to inputs with `t_rx_ms <= T`.
+12. `test_b5_deterministic`: two fits on the same days give identical outputs.
+13. `test_b5_control_dense_exchangeable_days`: control experiment. 200 synthetic calibration days and 2000 synthetic test days (`numpy.random.Generator` seeded 0), each dense (one value per step, Gaussian random walk from a common start, persistence forecaster, one single-predicate template evaluated by the stub as `limit - value`). The rate of the error event that the paper states for its decision rule (locator in the docstring; for the rule of `02-interfaces.md#conformal-calibrator`, "detection emitted and true robustness >= 0") stays at or below `alpha + 3 * sqrt(alpha * (1 - alpha) / 2000)` for `alpha = 0.1`. This shows the implementation works where its assumptions hold, so the failures below come from the setting and not from a defect.
+
+`tests/baselines/test_b5_failure_modes.py`
+
+14. `test_failure_sparse_sampling_region_never_exits_safe_region`: 20 calibration episodes of sparse-sampling forecast residuals, five copies each of `-50, -20, +20, +50` mmHg (with about five BP measurements a day, analisi §4.3, the gap between samples is hours and the forecast spread widens; the spread is test-local), `alpha = 0.1`, real `SplitConformal`: `q = 50`. For predicted BP 150 (`sigma_hat = -10` against the band) no violation is emitted, and none is emitted for any predicted BP between 140 and 190 (`sigma_hat + q >= 0`). The same test with dense-sampling residuals (five copies each of `-5, -2, +2, +5`, `q = 5`) emits for 150 (`-10 + 5 < 0`).
+15. `test_failure_sparse_sampling_no_predictive_part_for_event_templates`: for a template whose signals are all events or counters (COUNT, SCHED, INT), B5 raises no detection before the deadline; the decision is B3-like measured-prefix only (the paper's trajectory model has no event predictor; deviation recorded).
+16. `test_failure_mixed_units_raw_min_masks_dose_violation`: 20 conjunction episodes with `sigma_hat = 10.0` and `sigma_true` alternating `18.0` and `2.0` (residual `+8` and `-8`, mmHg-scale), `alpha = 0.1`, real `SplitConformal`: `q = 8`. A predicted raw conjunction `sigma_hat = -1.0` (one dose over the limit) gives `-1 + 8 > 0`: not emitted. The same violation calibrated per template in normalised units (dose scale 1, residuals `+0.5` and `-0.5`, `q = 0.5`, `normalise(-1.0, 1.0) = -1.0`) gives `-1 + 0.5 < 0`: emitted.
+17. `test_failure_mixed_units_raw_min_misranks_severity`: raw instance values `range = -12.0` (mmHg) and `count = -1.0` (dose): the raw minimum is the range instance; with scales 20 mmHg and 1 dose the normalised values are `-0.6` and `-1.0` and the minimum is the count instance.
+18. `test_failure_no_attribution_same_range_detection_for_c1_and_c2_days`: two days with the same BP 152; one clean, one with `CUFF_HEALTH = 0.0` and a cuff `DEVICE_ERROR` event. The detection at the BP-152 step has the same `t_ms`, `score` and `label` (`None`) in both days; B5 has no field that could carry the cause. All labels are `None`.
+19. `test_failure_analysis_note_lists_all_modes`: `notes/B5-failure-analysis.md` has the headings `## Sparse sampling`, `## Mixed units`, `## No attribution`, `## Control: where B5 works`, `## Benchmark-scale evidence`, and each of the first three cites at least one test name of this file.
+
+## Passi
+
+1. Confirm the unblock conditions and that the PDF is present; otherwise stop and record the request. Branch `ws06-t06-b5-lindemann`; `status: in_progress`.
+2. Read the paper (the WS03 note `docs/related-work/conformal-predictive-monitoring.md` may help with wording of the closest work, never with the algorithm). Create `notes/B5-deviations.md` with the sections named in test 1. `## Published method as read`: what the method takes as input (trajectory form, sampling assumption), how the predictor and the conformal region are used, what is guaranteed and under which assumption, the decision rule; one bullet per statement, each ending `(locator: section, equation or page)`. `## Mapping to the pathway templates`: how each template instance becomes an input to that method. `## Deviations`: one table row per decision that the paper does not settle or that our data forces. At minimum decide and record: how sparse and event-driven signals are put on the trajectory form the paper expects; how signals that the `Forecaster` cannot predict (events, counters, schedule ticks known from `plan.schedule`) are completed; whether the guarantee is applied to the conjunction of all instances or to each template (the primary variant `B5` follows the paper for a multi-formula specification, the other is `B5-per-template`, the strongest fair setting); calibration unit, split and target trace (observed, never latent, unless `AccessPolicy(calib_latent=True)` is the shared policy of WS06-T07); prediction horizon; confidence level parameterisation; absence of alpha allocation over the many instances per patient-day.
+3. Write the 19 tests; run them; watch them fail (tests 1 and 19 fail until the notes are complete).
+4. Implement `B5ConformalSTL(BaselineBase)` with `name = "B5"`, constructor arguments `templates`, `registry`, `forecaster`, `calibrator_factory` (default `SplitConformal`), `alpha`, `aggregation` (`"conjunction"` or `"per_template"`), `timing` and an optional `evaluator_factory`. Use the public API of `ralmon.conformal` for the calibrator; build episodes from observed calibration days; use raw robustness only. Steelman rule: B5 receives every advantage the published method allows (same forecaster class and seed as the proposed method, same calibration days, the same `alpha` grid as WS08, both aggregations available); B5 is never weakened to make it fail. The class docstring cites the paper and contains `Hyperparameter selection` (operating parameter `alpha`, swept by WS08; nothing tuned on test days).
+5. Raw robustness adapter: import `RawRobustnessEvaluator` and `make_evaluator` from `raw_robustness.py` if WS06-T04 created it. If not, create the module with the same public names and the contract described in WS06-T04 (`reset(instance)`, `step(t_ms, values) -> float | None`); the later task reconciles duplicates. Never re-implement STL semantics.
+6. Write `notes/B5-failure-analysis.md`. Sections, in this order: `## Setup and reproduction` (commands and seeds); `## Sparse sampling`; `## Mixed units`; `## No attribution`; `## Other differences that are not failures` (formal separation of measured and predicted verdict, no alpha allocation, no abstention; documented, not tested); `## Control: where B5 works`; `## Benchmark-scale evidence`; `## Wording for the paper` (two sentences using the difference sentence of analisi §10 objection 2, with the qualifiers of analisi §4.8). For each failure mode: the mechanism, the micro-scenario with its test name and numbers, what the proposed method does instead (cite the contract), and what remains to be measured. In `## Benchmark-scale evidence`: if `WS04-T11` is `done`, build the smallest benchmark the builder offers, run B3, B4 and B5 through the harness with declared seeds, and report the measured numbers (recall on C1, C2 and C3; fraction of days on which the predictive part emitted anything; median conformal half-width relative to the band margin); if it is not `done`, write "Not measured in WS06-T06: benchmark builder not available; WS08-T02 adds these numbers" and repeat that in the completion note. If a failure mode does not reproduce, report that as found; do not tune B5 to produce it.
+7. Run `ruff format`, `ruff check src tests`, `mypy src/ralmon`, `pytest tests/baselines -q`; refactor.
+8. Commit `WS06-T06: add B5 conformal STL baseline and failure analysis`; `status: done`; paste outputs in the completion note, with the list of deviations and the state of the benchmark-scale section.
+
+## Done when
+
+- `pytest tests/baselines/test_b5_conformal_stl.py tests/baselines/test_b5_failure_modes.py -q` exits 0, and `pytest tests/baselines -q` still exits 0.
+- `ruff check src tests` and `mypy src/ralmon` exit 0.
+- `python -c "from ralmon.baselines import B5ConformalSTL"` exits 0.
+- `test -f docs/plan/workstreams/WS06-baselines/notes/B5-deviations.md && test -f docs/plan/workstreams/WS06-baselines/notes/B5-failure-analysis.md` exits 0.
+- `grep -c -E '^## (Sparse sampling|Mixed units|No attribution|Control: where B5 works|Benchmark-scale evidence)$' docs/plan/workstreams/WS06-baselines/notes/B5-failure-analysis.md` prints `5`.
+- `grep -c 'locator:' docs/plan/workstreams/WS06-baselines/notes/B5-deviations.md` prints a number greater than 0.
+- `grep -lE 'LatentDay|GroundTruthEvent|normalise|rank_alerts|scale_param|priority_param' src/ralmon/baselines/b5_conformal_stl.py` prints nothing.
