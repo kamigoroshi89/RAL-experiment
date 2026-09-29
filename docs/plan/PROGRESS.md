@@ -6,7 +6,7 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 - [x] **F1 Spec** — spec di design (opzione A, motivazione vs B/C, riferimenti alle fonti)
 - [x] **F2 00-master-plan.md** — master plan: obiettivo, milestone M0-M5, percorso critico, stime da §9, cosa non tagliare, ordine di attacco
 - [x] **F3 01-conventions.md** — conventions: layout repo/pacchetti, stile Python, TDD, git per task, glossario §8.1 vincolante
-- [ ] **F4 02-interfaces.md**
+- [x] **F4 02-interfaces.md** — interfaces: 17 contratti versionati con firme Python (trace, PriorSource, template, verdict, alert, evidence, monitor, conformal, detector, metrics, ROS2, API pubblica)
 - [ ] **F5 03-decisions.md**
 - [ ] **F6 Workstream (in parallelo)**
 - [ ] **F7 04-review-traceability.md**
