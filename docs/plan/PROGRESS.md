@@ -10,7 +10,7 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 - [x] **F5 03-decisions.md** — decisions: ADR-001..020 (6 richiesti + scelte autonome marcate [DA-CONFERMARE]: 011,012,013,014,015,016,017)
 - [x] **F6 Workstream (in parallelo)** — 14 workstream (README + 103 task) scritti da 14 subagent in parallelo; riconciliati: dipendenze mancanti (ADR-023), 3 task umani aggiunti (WS00-T08..T10), gap dei contratti registrati (ADR-021), layout (ADR-022); check_plan OK
 - [x] **F7 04-review-traceability.md** — tracciabilità: 31 rilievi (26 debolezze R1-R3 + AE-1..5) mappati a task, più 4 obiezioni residue di §10; nota: il file era già incluso nel commit F6; verificato da check_plan
-- [ ] **F8 CLAUDE.md**
+- [x] **F8 CLAUDE.md** — CLAUDE.md (radice, 81 righe): scopo, mappa documenti, glossario, scelta del task, regole; verificato <200 righe; incluso nel commit F7
 - [ ] **F9 Verifica finale**
 
 ## Note
