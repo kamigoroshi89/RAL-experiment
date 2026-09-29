@@ -1,0 +1,48 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Task",
+      "TodoWrite",
+      "Skill",
+      "Bash(git init)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git rev-list:*)",
+      "Bash(mkdir:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(grep:*)",
+      "Bash(python3 tools/check_plan.py)",
+      "Bash(python3 tools/check_plan.py:*)"
+    ],
+    "deny": [
+      "WebFetch",
+      "WebSearch",
+      "Bash(git push:*)",
+      "Bash(git remote:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(ssh:*)",
+      "Bash(pip:*)",
+      "Bash(pip3:*)",
+      "Bash(npm:*)",
+      "Bash(sudo:*)",
+      "Bash(rm -rf:*)",
+      "Edit(docs/source/**)",
+      "Write(docs/source/**)",
+      "Write(src/**)"
+    ]
+  }
+}
