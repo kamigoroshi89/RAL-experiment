@@ -7,7 +7,7 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 - [x] **F2 00-master-plan.md** — master plan: obiettivo, milestone M0-M5, percorso critico, stime da §9, cosa non tagliare, ordine di attacco
 - [x] **F3 01-conventions.md** — conventions: layout repo/pacchetti, stile Python, TDD, git per task, glossario §8.1 vincolante
 - [x] **F4 02-interfaces.md** — interfaces: 17 contratti versionati con firme Python (trace, PriorSource, template, verdict, alert, evidence, monitor, conformal, detector, metrics, ROS2, API pubblica)
-- [ ] **F5 03-decisions.md**
+- [x] **F5 03-decisions.md** — decisions: ADR-001..020 (6 richiesti + scelte autonome marcate [DA-CONFERMARE]: 011,012,013,014,015,016,017)
 - [ ] **F6 Workstream (in parallelo)**
 - [ ] **F7 04-review-traceability.md**
 - [ ] **F8 CLAUDE.md**
