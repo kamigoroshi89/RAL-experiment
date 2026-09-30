@@ -101,3 +101,9 @@ grep -rniE 'subsystem|edge cloud|embodied (medical )?ai|clinical robotic archite
 grep -rn 'ensures' docs/formal | grep -v ':| "'                                       # prints nothing
 ! grep -rnE 'T[O]DO|T[B]D|[?][?][?]|lore[m]' docs/formal configs/registry            # exit 0
 ```
+
+## Notes
+
+### Flag from the WS01-T03 review (orchestrator, 2026-09-30)
+
+The cross-document check that greps every formula symbol in `configs/registry/hypertension.yaml` now prints `not in registry:` for `meas_min_day` (deliberately not registered: WS01-T02 adopted no measurement-count obligation), `priority_param` and `scale_param` (field names picked up by the regex, not registry entries). WS01 README item 3 ("every parameter name used in a docs/formal document is an entry, a derived bound or a declared unset name") is likewise not literally met for `meas_min_day`, `step_ms` and `reorder_delay_ms`. Adapt the check when this task runs. Also decide the open points of `docs/formal/03-parameter-registry.md` section 7 (OP-5 `window_parameters` as a required top-level key, OP-2 and OP-4 marked "ADR: yes") and ADR-027 (proposed).

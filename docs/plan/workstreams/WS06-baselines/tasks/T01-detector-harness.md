@@ -80,3 +80,9 @@ Write these first (`pytest tests/baselines -q` must fail with import errors befo
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `python -c "from ralmon.baselines import Detector"` exits 0.
 - `grep -rnE 'LatentDay|GroundTruthEvent' src/ralmon/baselines/base.py` prints nothing (only `access.py` touches those types).
+
+## Notes
+
+### Flag from the WS01-T03 review (orchestrator, 2026-09-30)
+
+Test 21 ("every name used by `stub_registry` is an entry name in hypertension.yaml") uses a 30 min window "chosen for the test only", whose registry name (`sched_window`) is `unset` in `configs/registry/hypertension.yaml` (WS01-T03, open point OP-11). Kept `blocked`; align after ADR-027 (proposed) is decided.

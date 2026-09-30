@@ -3,7 +3,7 @@ id: WS01-T03
 title: Parameter registry design, YAML schema and anchoring procedure
 workstream: WS01-formalization
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS01-T02"]
 critical_path: true
 non_negotiable: true
@@ -126,3 +126,11 @@ CP10 (float value for int quantities; `PhysioBounds` without provenance), unset 
 ### Not done, by design
 
 No clinician review (WS00-T07 not performed; `reviewed_by` null everywhere, decision cells of section 6 empty). No drug, guideline or clinical value assigned. WS00 artefacts not created.
+
+### Post-task review
+
+- Produced: `docs/formal/03-parameter-registry.md` (seven sections: purpose and rules, YAML schema and loader proposal, entry inventory of 41 names, anchoring procedure in 12 numbered steps, versioning and per-patient overrides, review sheet of 34 rows with empty decision cells, open points OP-1 to OP-11), `configs/registry/hypertension.yaml` (17 seeded entries, all `reviewed_by: null`, each rationale ending "illustrative, unverified"; 7 derived latencies; 17 names `unset`) and `configs/registry/registry.schema.json`. Orchestrator re-ran the "Done when" block (exit 0, 17 entries), validated the YAML against the schema with the system Python's `jsonschema` (nothing installed), and ran the full suite (175 tests) and `check_plan` (exit 0). Independent review: PASS, no BLOCKER. All 17 values traced to analisi (110, 140, 100, the 60 min and 5 min windows, `c_d` limits of 2, [50, 250] mmHg, "20 mmHg, 30 min, 1 dose", the order hold > range > sched) or to fixture F0 with the assignment disclosed; no fixture-only value leaked into the registry; no drug or guideline named; 29 schema mutations rejected.
+- Deviations from the task text: extra required top-level key `window_parameters` (T01 CG-1; OP-5, to be ratified by WS01-T08); `unset` and `derived` items written as one-line flow mappings so that the Done-when per-key counts hold; four extra unset bound names and `clock_skew_max_ms` (OP-7, OP-8); a schema rule tying a null `reviewed_by` to the rationale ending "illustrative, unverified"; no paper-excerpt section (the task's heading list has none). All disclosed.
+- Dependents: WS01-T04 to WS01-T07, WS05-T03 and the WS04-T02 chain read this registry. Four tasks have assumptions that no longer hold and were flagged (notes in their task files, proposed ADR-027 `[DA-CONFERMARE]`, kept `blocked`): WS01-T08 (its cross-document grep now prints three names), WS00-T07 (34 review-sheet rows versus 17 expected; no notion of `unset`), WS06-T02 (`sched_window` unset, step 2 would stop) and WS06-T01 (test 21 stub registry). The plan has a real gap: no task creates a fixture registry for runs before the clinician review (OP-11).
+- Open MINOR: (1) the headers of the YAML (lines 3 to 5) and of the document (line 5) say every value is "taken from the analysis document", but the scale and priority assignments come from F0 (disclosed elsewhere); the `priority_*` rationales do not name F0 as the source of "1 = highest"; (2) `delta1` and `delta2` cite only analisi §4.6; analisi line 113 ("risposta in 1-3 h") supports the same numbers; (3) section 2.5 (loader) and section 5.2 (exact-string plan pinning) are worker proposals, not labelled "design proposal"; (4) the schema does not enforce `value >= 0`, `priority >= 1`, `scale > 0`, unique names, window alignment or `review_status` consistency (loader rules for WS05-T03); (5) the four `bound_inflation_ms_*` and `bound_dose_count_*` names are speculative pending WS01-T05, and `clock_skew_max_ms` conflicts with WS01-T02 section 3.4 ("monitor configuration, not a clinical registry entry"); (6) WS04 README lists `delta_resp`, `sched_window`, `cuff_inflation_min` and `cuff_error_sd` as working names to read, all four unset; (7) WS05-T03 tests 10 to 18 match the YAML, but its F0 copy needs a rationale ending "illustrative, unverified" and cannot store `step_ms`.
+- Risks: nothing in the registry is clinically reviewed (`reviewed_by` null everywhere); the numbers are illustrative and unverified (ADR-020). The registry stays a design until WS00-T07, which does not exist yet as an artefact.
