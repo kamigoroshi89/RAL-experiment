@@ -4,18 +4,20 @@ from __future__ import annotations
 
 from ralmon.benchmark._stubs import (
     AdherenceParams,
-    BenchmarkDay,
     DeviceErrorModel,
-    GroundTruthEvent,
-    InjectedClass,
-    LatentDay,
     LiteraturePriorSource,
-    ObservedDay,
     ParamProvenance,
     PatientParams,
     PriorSource,
     generate_benchmark,
     load_benchmark,
+)
+from ralmon.benchmark.trace import (
+    BenchmarkDay,
+    GroundTruthEvent,
+    InjectedClass,
+    LatentDay,
+    ObservedDay,
 )
 
 __all__ = [

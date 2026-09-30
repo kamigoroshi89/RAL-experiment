@@ -1,0 +1,168 @@
+{
+  "care_plan_id": "plan-fixture",
+  "day_index": 0,
+  "events": [
+    {
+      "kind": "measurement",
+      "payload": {
+        "n_attempts": 1,
+        "ok": true
+      },
+      "seq": 0,
+      "source": "fx_cuff",
+      "t_device_ms": 59000,
+      "t_rx_ms": 60000
+    },
+    {
+      "kind": "dispense",
+      "payload": {},
+      "seq": null,
+      "source": "fx_dispenser",
+      "t_device_ms": 120000,
+      "t_rx_ms": 120000
+    },
+    {
+      "kind": "intake",
+      "payload": {
+        "confidence": 0.75,
+        "count": 2,
+        "verified": true,
+        "witness": "fx_cam"
+      },
+      "seq": 1,
+      "source": "fx_robot",
+      "t_device_ms": 180000,
+      "t_rx_ms": 180000
+    },
+    {
+      "kind": "schedule_tick",
+      "payload": {
+        "step": "fx_step_1"
+      },
+      "seq": null,
+      "source": "fx_schedule",
+      "t_device_ms": 300000,
+      "t_rx_ms": 300000
+    },
+    {
+      "kind": "robot_task",
+      "payload": {
+        "success": false
+      },
+      "seq": 2,
+      "source": "fx_robot",
+      "t_device_ms": 420000,
+      "t_rx_ms": 420000
+    },
+    {
+      "kind": "device_error",
+      "payload": {
+        "code": 3
+      },
+      "seq": null,
+      "source": "fx_cuff",
+      "t_device_ms": 480000,
+      "t_rx_ms": 480000
+    }
+  ],
+  "patient_id": "p001",
+  "samples": [
+    {
+      "quality": 1.0,
+      "seq": 0,
+      "signal": "fx_a",
+      "t_device_ms": 0,
+      "t_rx_ms": 0,
+      "value": 0.1
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "fx_b",
+      "t_device_ms": 59500,
+      "t_rx_ms": 60000,
+      "value": 0.25
+    },
+    {
+      "quality": 0.5,
+      "seq": 1,
+      "signal": "fx_a",
+      "t_device_ms": 120000,
+      "t_rx_ms": 120000,
+      "value": 1.0
+    },
+    {
+      "quality": 0.75,
+      "seq": null,
+      "signal": "fx_b",
+      "t_device_ms": 179500,
+      "t_rx_ms": 180000,
+      "value": 2.5
+    },
+    {
+      "quality": null,
+      "seq": 2,
+      "signal": "fx_a",
+      "t_device_ms": 240000,
+      "t_rx_ms": 240000,
+      "value": 3.0
+    },
+    {
+      "quality": 1.0,
+      "seq": null,
+      "signal": "fx_b",
+      "t_device_ms": 299500,
+      "t_rx_ms": 300000,
+      "value": 0.5
+    },
+    {
+      "quality": 0.25,
+      "seq": 3,
+      "signal": "fx_a",
+      "t_device_ms": 360000,
+      "t_rx_ms": 360000,
+      "value": 1e-07
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "fx_b",
+      "t_device_ms": 419500,
+      "t_rx_ms": 420000,
+      "value": 100.0
+    },
+    {
+      "quality": 0.9,
+      "seq": 4,
+      "signal": "fx_a",
+      "t_device_ms": 480000,
+      "t_rx_ms": 480000,
+      "value": 7.75
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "fx_b",
+      "t_device_ms": 539500,
+      "t_rx_ms": 540000,
+      "value": 0.3
+    },
+    {
+      "quality": 1.0,
+      "seq": 5,
+      "signal": "fx_a",
+      "t_device_ms": 600000,
+      "t_rx_ms": 600000,
+      "value": 12345.678
+    },
+    {
+      "quality": 0.0,
+      "seq": null,
+      "signal": "fx_b",
+      "t_device_ms": 659500,
+      "t_rx_ms": 660000,
+      "value": 2.0
+    }
+  ],
+  "seed": 7
+}

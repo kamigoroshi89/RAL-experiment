@@ -3,7 +3,7 @@ id: WS04-T01
 title: Trace schema dataclasses, serialisation and manifest
 workstream: WS04-benchmark
 owner: agent
-status: ready
+status: done
 depends_on: ["WS05-T01"]
 critical_path: true
 non_negotiable: false
@@ -71,3 +71,24 @@ Fixture numbers are arithmetic and fixture-only. Write these tests first; each m
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `python -c "from ralmon.benchmark import ObservedDay, LatentDay, BenchmarkDay, GroundTruthEvent, InjectedClass; from ralmon.signals import Sample, Event, EventKind"` exits 0.
 - `grep -c '^## ADR-' docs/plan/03-decisions.md` has increased by one and the new entry names `manifest.json`, `days/` and `truth/`.
+
+## Notes
+
+Implementation notes (worker, branch `ws04-t01-trace-io`; `status` left `in_progress` for the orchestrator to set after review).
+
+- Step 1: `ralmon.signals` exported only placeholders for `Sample`, `Event`, `EventKind`, so `src/ralmon/signals/trace_types.py` was created with the contract text verbatim and re-exported from `ralmon/signals/__init__.py`; the three placeholders were removed from `signals/_stubs.py`. WS05-T02 must import them and not redefine them. `SignalId` is still a placeholder; fixture signal names (`fx_a`, `fx_b`) are fixture-only.
+- The five day-schema placeholders were removed from `benchmark/_stubs.py`. `ralmon.benchmark.__all__` is unchanged (contract names only); the extra names (`Manifest`, readers, writers, errors, `TruthRecord`, `validate_day`, `file_sha256`, `observed_relpath`, `truth_relpath`) are public in `ralmon.benchmark.trace` only, because the public API table lists no other names.
+- Extra beyond the letter of the task, each small: `TruthRecord` (return type of `read_truth`), `file_sha256`, `observed_relpath`/`truth_relpath`, `SplitLeakError` is a subclass of `ManifestError`, the writer of observed days refuses payload keys containing `latent` or `ground_truth`, patient ids used as directory names must not contain a path separator.
+- Split leak: `patients` is a mapping, so a patient cannot appear twice in memory; `SplitLeakError` is raised for a duplicate patient key in `manifest.json` with differing entries and for a `split` given as a list of several splits.
+- The manifest is strict on top-level keys (unknown key is a `ManifestError`), which also enforces "no wall-clock field".
+- Sequences are read back as tuples; `ObservedDay(samples=[...])` built from lists would not compare equal to a read-back day.
+- Golden fixtures were first derived from the canonical rules by an independent throwaway script (not by the writer), then confirmed by `test_fixture_bytes_equal_writer_output`.
+- ADR-025 added (proposed, `[DA-CONFERMARE]`). No contract text changed.
+
+### Post-task review
+
+- Produced: `src/ralmon/benchmark/trace.py` (day schema, `validate_day`, canonical JSON readers and writers, `Manifest`, four error classes), `src/ralmon/signals/trace_types.py` (`Sample`, `Event`, `EventKind`, contract-exact; WS05-T02 imports them, does not redefine), 17 tests, three hand-derived golden fixtures, ADR-025 (`proposed`, `[DA-CONFERMARE]`). Orchestrator re-ran every "Done when" command and the full suite (152 tests): all exit 0. Independent review: PASS, no BLOCKER.
+- Deviations from the task text: extra names in `trace.py` (`TruthRecord`, `file_sha256`, `observed_relpath`, `truth_relpath`) not exported by `ralmon.benchmark`; strict manifest key set; payload-key guard; `SplitLeakError` as a `ManifestError` subclass. All judged acceptable.
+- Dependents: WS04-T02, WS06-T01 and WS07-T03 stay `blocked` on other tasks. No dependent assumption is broken. WS06-T01 needs only `ObservedDay` and `BenchmarkDay` from the package root. WS08-T01 and WS07-T03 read through the WS04-T11 loader (`open_benchmark`, `BenchmarkReader`), whose export in `__all__` must be added to the contract table first (WS04-T11 already tests that export).
+- Open MINOR: (1) ADR-025 Consequences say WS06, WS07-T03 and WS08-T01 read "through `ralmon.benchmark.trace`", but `test_cross_package_imports_use_package_root_only` forbids submodule imports from `baselines` and `eval`, and `__all__` is frozen to the table; the sentence should say the WS04-T11 loader is the reader those packages use (fix when ADR-025 is confirmed). (2) Days are read back as tuples: generators (WS04-T02 onward) must compare with tuples. (3) `read_manifest` raises a raw `TypeError` on `"prior_provenance": null` (`trace.py` around line 837). (4) The payload-key guard is case-sensitive and write-only. (5) ruff 0.16.9 is unpinned and enables SIM and PLR by default; lint results can drift between machines (WS05-T01 concern). (6) Small gaps: no range check on `Sample.quality`, negative `day_index` accepted, no float `t_rx_ms` test on `Event`.
+- Risks: a new top-level manifest key needs an ADR (strict key set); WS04-T11 must place extra manifest information in `settings` or a patient entry.
