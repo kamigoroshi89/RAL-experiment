@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "registry.schema.json",
+  "title": "Parameter registry file (WS01-T03), version 0.1.0",
+  "description": "Serialisation of the contract 02-interfaces.md#parameter-registry. An element of `entries` has exactly the fields of RegistryEntry; PhysioBounds are composed at load time from the entries bound_<signal>_lower and bound_<signal>_upper. Values are unverified until reviewed_by is set (ADR-020). Normative description: docs/formal/03-parameter-registry.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registry_version",
+    "pathology",
+    "review_status",
+    "window_parameters",
+    "entries",
+    "derived",
+    "unset"
+  ],
+  "properties": {
+    "registry_version": {
+      "description": "Semantic version of the registry (docs/formal/03-parameter-registry.md section 5). A CarePlan pins this string.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "pathology": {
+      "type": "string",
+      "minLength": 1
+    },
+    "review_status": {
+      "description": "unreviewed: every reviewed_by is null. reviewed: every entry has a reviewer and unset is empty. partially_reviewed: otherwise. The loader checks the consistency of this field with the entries.",
+      "type": "string",
+      "enum": ["unreviewed", "partially_reviewed", "reviewed"]
+    },
+    "window_parameters": {
+      "description": "Names (entries or unset) that are window parameters: offsets or bounds of a temporal operator, look-backs and deadline offsets. The alignment rule (integer multiple of step_ms) is checked for these names only. Not a field of RegistryEntry; see section 2.4 of the document.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/name" }
+    },
+    "entries": {
+      "description": "Parameters that have a value. Each element has exactly the fields of RegistryEntry, in this order: name, value, unit, rationale, source_ref, reviewed_by.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "derived": {
+      "description": "Names computed by the loader from a formula over registry names and step_ms (latency bounds). Never free parameters.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/derived" }
+    },
+    "unset": {
+      "description": "Names that a template or another consumer needs and that have no value yet. Asking the loader for one raises UnsetParameterError.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/unset" }
+    },
+    "overrides": {
+      "description": "Clinician-approved ranges inside which a per-patient value carried in TemplateInstance.param_values may lie. Empty in version 0.1.0 (no per-patient override supported).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/override" }
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "unit": {
+      "description": "mmHg, ms, dose, or 1 (dimensionless counts and ranks).",
+      "type": "string",
+      "enum": ["mmHg", "ms", "dose", "1"]
+    },
+    "templateId": {
+      "type": "string",
+      "enum": ["range", "sched", "hold", "count", "resp", "sys", "int"]
+    },
+    "reviewer": {
+      "description": "Clinician identifier, or null until reviewed.",
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value", "unit", "rationale", "source_ref", "reviewed_by"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "value": { "type": "number" },
+        "unit": { "$ref": "#/$defs/unit" },
+        "rationale": {
+          "description": "Drug or guideline anchoring, or a text that ends with the string 'illustrative, unverified'.",
+          "type": "string",
+          "minLength": 1
+        },
+        "source_ref": {
+          "description": "Analisi section, guideline or protocol reference. A reference is marked [ref-needed: WS03] until verified (ADR-018).",
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewed_by": { "$ref": "#/$defs/reviewer" }
+      },
+      "if": {
+        "properties": { "reviewed_by": { "type": "null" } },
+        "required": ["reviewed_by"]
+      },
+      "then": {
+        "properties": {
+          "rationale": { "pattern": "illustrative, unverified$" }
+        }
+      }
+    },
+    "derived": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "unit", "formula", "template"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "unit": { "$ref": "#/$defs/unit" },
+        "formula": {
+          "description": "Sum of terms; a term is a registry name or step_ms. Evaluated by the loader grammar, never by eval.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*( \\+ [a-z][a-z0-9_]*)*$"
+        },
+        "template": { "$ref": "#/$defs/templateId" }
+      }
+    },
+    "unset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parameter", "unit", "required_by", "note"],
+      "properties": {
+        "parameter": { "$ref": "#/$defs/name" },
+        "unit": { "$ref": "#/$defs/unit" },
+        "required_by": {
+          "description": "Template ids that need the name; empty for a name needed by another consumer (see note).",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/templateId" }
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "override": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "min", "max", "rationale", "source_ref", "reviewed_by"],
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "rationale": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "reviewed_by": { "$ref": "#/$defs/reviewer" }
+      }
+    }
+  }
+}

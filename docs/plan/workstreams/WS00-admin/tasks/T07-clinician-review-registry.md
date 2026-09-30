@@ -65,3 +65,9 @@ From the repository root:
 - `grep -cE '^## (Reviewer and registry version|Entry review|Physiological bounds review|Scales and priorities review|Drug and guideline anchoring|Taxonomy review|Unreviewed entries|Change requests to WS01|M1 sign-off)$' docs/plan/workstreams/WS00-admin/outputs/WS00-T07.md` prints `9`.
 - `grep -c '^completed_by: .\+' docs/plan/workstreams/WS00-admin/outputs/WS00-T07.md` prints `1`.
 - Inspection: check 3 (rows equal registry entries), check 8 (`reviewed_by` consistent with the artefact and unreviewed entries listed) and check 10 hold.
+
+## Notes
+
+### Flag from the WS01-T03 review (orchestrator, 2026-09-30)
+
+The review sheet produced by WS01-T03 (`docs/formal/03-parameter-registry.md` section 6) has 34 rows: 17 seeded entries plus 17 `unset` names, whereas test 3 expects "the number of rows equals the number of entries in the file" (17). Test 4 ("one row for every `PhysioBounds` signal") clashes with bounds stored as entries `bound_<signal>_lower` and `bound_<signal>_upper` (counted twice). This task has no notion of `unset`, and its rule "any structural change goes to Change requests to WS01" conflicts with WS01-T03 section 4.2 step 9, which moves an unset name into `entries:` once the clinician gives a value. Kept `blocked`; reconcile the counting rule (entries plus unset, bounds once) after ADR-027 (proposed) is decided.

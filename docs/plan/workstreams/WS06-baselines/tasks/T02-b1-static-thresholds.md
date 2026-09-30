@@ -73,3 +73,9 @@ Write these first. Fixtures use the `stub_registry` and builders from WS06-T01. 
 - `python -c "from ralmon.baselines import B1StaticThresholds"` exits 0.
 - `grep -rnE '\b(110|140)\b' src/ralmon/baselines` prints nothing (no clinical constant in `src/`).
 - `grep -lE 'LatentDay|GroundTruthEvent' src/ralmon/baselines/b1_static_thresholds.py` prints nothing.
+
+## Notes
+
+### Flag from the WS01-T03 review (orchestrator, 2026-09-30)
+
+Step 2 asks which registry entry plays the schedule-window role and says to stop if a role has no entry. `sched_window` is `unset` in `configs/registry/hypertension.yaml` (WS01-T03) until the clinician review, so this step would stop. Kept `blocked` until ADR-027 (proposed, fixture registry for runs before the clinician review) is decided. Test 14 ("exists in hypertension.yaml") is ambiguous for an unset name.
