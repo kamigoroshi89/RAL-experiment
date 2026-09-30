@@ -3,7 +3,7 @@ id: WS12-T01
 title: Title selection and abstract without numbers (commitment letter)
 workstream: WS12-paper
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS00-T02"]
 critical_path: true
 non_negotiable: false

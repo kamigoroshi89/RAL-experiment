@@ -3,7 +3,7 @@ id: WS00-T02
 title: "Scope decisions: one pathology, C3 as integrity violations, distributed architecture"
 workstream: WS00-admin
 owner: human
-status: blocked
+status: done
 depends_on: ["WS00-T01"]
 critical_path: true
 non_negotiable: false
@@ -74,3 +74,9 @@ From the repository root:
 - `grep -cE '^## ADR-01[2-7] .*\[DA-' docs/plan/03-decisions.md` prints `0`.
 - `grep -cE '\(WS00-T02, [0-9]{4}-[0-9]{2}-[0-9]{2}\)' docs/plan/03-decisions.md` prints at least `9` (ADR-001, 002, 003 and ADR-012 to ADR-017).
 - Inspection: ADR-011 is either resolved by WS00-T05 or listed as `delegated to WS00-T05` in the artefact.
+
+## Notes
+
+### Status update (user attestation)
+
+Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T02.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report. `docs/plan/03-decisions.md` still carries `[DA-CONFERMARE]` on ADR-011 to ADR-017 (and 021 to 025), so the Done-when checks on those tags do not hold; the agent did not edit any ADR.

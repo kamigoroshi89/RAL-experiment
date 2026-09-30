@@ -3,7 +3,7 @@ id: WS00-T08
 title: "Obtain full text of the key reference papers needed by implementers (Lindemann et al. ICCPS 2023 first)"
 workstream: WS00-admin
 owner: human
-status: ready
+status: done
 depends_on: []
 critical_path: false
 non_negotiable: false
@@ -49,3 +49,9 @@ Verification checks:
 - `test -f docs/plan/workstreams/WS00-admin/outputs/WS00-T08.md` exits 0.
 - `grep -c '^file: data/raw/papers/' docs/plan/workstreams/WS00-admin/outputs/WS00-T08.md` prints at least `1`, and `test -f data/raw/papers/lindemann2023-conformal-stl.pdf` exits 0.
 - `git status --short data/raw` prints nothing.
+
+## Notes
+
+### Status update (user attestation)
+
+Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T08.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report. `data/raw/papers/` does not exist in the repository, so reference verification (WS03-T06) and any task that reads the papers cannot rely on the PDFs being present.

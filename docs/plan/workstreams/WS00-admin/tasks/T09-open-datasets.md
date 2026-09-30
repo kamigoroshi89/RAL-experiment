@@ -3,7 +3,7 @@ id: WS00-T09
 title: "Download the open datasets into data/raw/ and record their licences (VitalDB, MIT-BIH noise stress test, BIDMC, CinC 2015)"
 workstream: WS00-admin
 owner: human
-status: ready
+status: done
 depends_on: []
 critical_path: true
 non_negotiable: false
@@ -50,3 +50,9 @@ Verification checks:
 - `test -f docs/plan/workstreams/WS00-admin/outputs/WS00-T09.md` exits 0 and `grep -c '^## ' docs/plan/workstreams/WS00-admin/outputs/WS00-T09.md` prints at least `4`.
 - `for d in vitaldb nstdb bidmc cinc2015; do (cd data/raw/$d && sha256sum -c SHA256SUMS >/dev/null) || echo FAIL $d; done` prints nothing.
 - `git status --short data/raw` prints nothing.
+
+## Notes
+
+### Status update (user attestation)
+
+Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T09.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report. `data/raw/` does not exist in the repository, so any task that reads the open datasets (VitalDB, NSTDB, BIDMC, CinC 2015) cannot run until they are downloaded.

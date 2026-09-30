@@ -3,7 +3,7 @@ id: WS01-T01
 title: "Problem formulation: signals, sampling semantics, time, decomposition"
 workstream: WS01-formalization
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS00-T02"]
 critical_path: true
 non_negotiable: true

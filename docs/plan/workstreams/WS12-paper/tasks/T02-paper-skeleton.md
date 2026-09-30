@@ -3,7 +3,7 @@ id: WS12-T02
 title: Paper skeleton with page budget
 workstream: WS12-paper
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS00-T01"]
 critical_path: false
 non_negotiable: false

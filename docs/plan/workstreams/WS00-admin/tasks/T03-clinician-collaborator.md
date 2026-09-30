@@ -3,7 +3,7 @@ id: WS00-T03
 title: "Recruit a clinician and, if possible, an RV/STL collaborator"
 workstream: WS00-admin
 owner: human
-status: blocked
+status: ready
 depends_on: ["WS00-T02"]
 critical_path: false
 non_negotiable: false

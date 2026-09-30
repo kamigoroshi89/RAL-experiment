@@ -3,7 +3,7 @@ id: WS00-T04
 title: "Start PhysioNet credentialing for MIMIC-IV and eICU"
 workstream: WS00-admin
 owner: human
-status: ready
+status: done
 depends_on: []
 critical_path: true
 non_negotiable: false
@@ -59,3 +59,9 @@ From the repository root:
 - `grep -cE '^## (Account and course|MIMIC-IV application|eICU-CRD application|Data handling constraints|Open-access datasets|Timeline and fallback)$' docs/plan/workstreams/WS00-admin/outputs/WS00-T04.md` prints `6`.
 - `grep -E '^access_status: (granted|refused)$' docs/plan/workstreams/WS00-admin/outputs/WS00-T04.md` prints two lines, one per dataset. This final condition is what sets the task to `done`; a `refused` line requires its consequence in `## Timeline and fallback`.
 - `grep -c '^access_verified_on: [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}' docs/plan/workstreams/WS00-admin/outputs/WS00-T04.md` prints a number equal to the count of datasets with `access_status: granted`.
+
+## Notes
+
+### Status update (user attestation)
+
+Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T04.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report. No `access_status` line exists in the repository, so the credentialed datasets (MIMIC-IV, eICU-CRD) are not usable by agent tasks until the artefact is recorded.

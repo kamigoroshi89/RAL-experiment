@@ -3,7 +3,7 @@ id: WS00-T05
 title: "Check real TIAGo or TIAGo Pro availability and ROS 2 simulation packages"
 workstream: WS00-admin
 owner: human
-status: ready
+status: done
 depends_on: []
 critical_path: false
 non_negotiable: false
@@ -64,3 +64,9 @@ From the repository root:
 - `grep -cE '^## ADR-011 .*\[DA-' docs/plan/03-decisions.md` prints `0`.
 - `grep -cE '\(WS00-T05, [0-9]{4}-[0-9]{2}-[0-9]{2}\)' docs/plan/03-decisions.md` prints at least `1`.
 - Inspection: checks 3 to 6 hold; every value has a `Source:` line or the text `not stated in <source>` with the date the question was sent.
+
+## Notes
+
+### Status update (user attestation)
+
+Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T05.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report.

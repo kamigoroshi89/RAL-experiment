@@ -3,7 +3,7 @@ id: WS00-T06
 title: "Check ethics rules for lab volunteers and the vignette study"
 workstream: WS00-admin
 owner: human
-status: blocked
+status: ready
 depends_on: ["WS00-T02"]
 critical_path: false
 non_negotiable: false

@@ -3,7 +3,7 @@ id: WS00-T01
 title: "Verify CFP: deadlines, page limit, prior-publication policy, commitment letter content"
 workstream: WS00-admin
 owner: human
-status: ready
+status: done
 depends_on: []
 critical_path: true
 non_negotiable: false
@@ -62,3 +62,9 @@ From the repository root:
 - `grep -cE '^## (Source|Deadlines|Page limit|Prior publication policy|Workshop proceedings archival status|Commitment letter content|Author and title changes|Review mode and format|Impact on plan)$' docs/plan/workstreams/WS00-admin/outputs/WS00-T01.md` prints `9`.
 - `grep -c '^completed_by: .\+' docs/plan/workstreams/WS00-admin/outputs/WS00-T01.md` prints `1`, and the same for `completed_on`.
 - Inspection: no field body is empty, and every field satisfies check 3 above.
+
+## Notes
+
+### Status update (user attestation)
+
+Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T01.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report.
