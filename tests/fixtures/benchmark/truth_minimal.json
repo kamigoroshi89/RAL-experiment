@@ -1,0 +1,68 @@
+{
+  "behaviour_log": [
+    {
+      "dose": 0,
+      "outcome": "fx_on_time"
+    }
+  ],
+  "ground_truth": [
+    {
+      "cls": "C1",
+      "confounder_group": null,
+      "end_ms": null,
+      "injected": false,
+      "onset_ms": 60000,
+      "subtype": "fx_spike",
+      "template_id": "fx_range"
+    },
+    {
+      "cls": "C2",
+      "confounder_group": "fx_group",
+      "end_ms": 180000,
+      "injected": true,
+      "onset_ms": 120000,
+      "subtype": "fx_dropout",
+      "template_id": null
+    }
+  ],
+  "injection_log": [
+    {
+      "level": "fx",
+      "magnitude": 1.5,
+      "subtype": "fx_dropout"
+    }
+  ],
+  "latent": {
+    "day_index": 0,
+    "events": [
+      {
+        "kind": "intake",
+        "payload": {},
+        "seq": null,
+        "source": "fx_latent_src",
+        "t_device_ms": 30000,
+        "t_rx_ms": 30000
+      }
+    ],
+    "patient_id": "p001",
+    "samples": [
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "fx_a",
+        "t_device_ms": 0,
+        "t_rx_ms": 0,
+        "value": 0.5
+      },
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "fx_a",
+        "t_device_ms": 60000,
+        "t_rx_ms": 60000,
+        "value": 0.75
+      }
+    ],
+    "seed": 7
+  }
+}

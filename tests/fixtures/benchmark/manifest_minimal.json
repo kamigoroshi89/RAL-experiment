@@ -1,0 +1,44 @@
+{
+  "benchmark_version": "fx-0",
+  "event_counts": {
+    "C1/fx_spike": 1,
+    "C2/fx_dropout": 1
+  },
+  "files": {
+    "days/p001/0.json": "7a9a158ae1472c59089c9ff3552bcd50ba433e887baa4c0ff1aec8adbe20b4b5",
+    "truth/p001/0.json": "c9622ed2b39948eed287acf2708f8214196e09611c13b886fd1f83d9f396a8a8"
+  },
+  "fixture_only": true,
+  "generation_seed": 0,
+  "generator_git_rev": "fixture-rev",
+  "n_unfilled": 0,
+  "n_unverified": 1,
+  "patients": {
+    "p001": {
+      "cohort": "fx",
+      "split": "train"
+    },
+    "p002": {
+      "cohort": "fx",
+      "split": "calibration"
+    },
+    "p003": {
+      "cohort": "fx_shift",
+      "pair": "p001",
+      "role": "fx_role",
+      "split": "test"
+    }
+  },
+  "prior_provenance": [
+    {
+      "name": "fx_param",
+      "source_ref": "fixture-only",
+      "verified_by": null
+    }
+  ],
+  "prior_source_name": "fixture_prior",
+  "settings": {
+    "days_per_patient": 1,
+    "note": "fixture-only"
+  }
+}
