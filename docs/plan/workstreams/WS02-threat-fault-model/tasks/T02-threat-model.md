@@ -3,7 +3,7 @@ id: WS02-T02
 title: "Threat model: attacker capabilities, attack classes, exclusions"
 workstream: WS02-threat-fault-model
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS01-T01"]
 critical_path: true
 non_negotiable: false
