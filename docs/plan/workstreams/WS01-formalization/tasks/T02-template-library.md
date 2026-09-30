@@ -3,7 +3,7 @@ id: WS01-T02
 title: Past-time STL template library with units and robot obligations
 workstream: WS01-formalization
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS01-T01"]
 critical_path: true
 non_negotiable: true

@@ -1,0 +1,604 @@
+# Golden examples of the past-time template library (WS01-T02).
+# Fixture registry F0 (test-only; NOT the clinical registry) and 26 hand-computed cases.
+# Times are integer milliseconds; the hh:mm label is in a comment. step_ms = 60000, reorder_delay_ms = 0.
+# Values that look like clinical numbers are illustrative and unverified (analisi §4.1, ADR-020) or FIXTURE-ONLY.
+# Sign convention: sigma_raw >= 0 means satisfied (non-strict atoms); -.inf is a failed guard.
+# sigma_norm = clip(sigma_raw / scale, -1, 1) with the scale of the template (registry name scale_<id>).
+# Extra keys used by this file: inputs.template, inputs.anchor_ms, inputs.anchor_kind, inputs.generated,
+# inputs.channels_unavailable, expected.guard_failed, expected.workshop_form.
+
+fixture_registry:
+  - names: [bp_band_low]
+    row_name_cell: "`bp_band_low`"
+    value_cell: "110"
+    values: [110]
+    unit: "mmHg"
+    origin: "analisi §4.1 (illustrative, unverified)"
+  - names: [bp_band_high]
+    row_name_cell: "`bp_band_high`"
+    value_cell: "140"
+    values: [140]
+    unit: "mmHg"
+    origin: "analisi §4.1 (illustrative, unverified)"
+  - names: [bp_hold_threshold]
+    row_name_cell: "`bp_hold_threshold`"
+    value_cell: "100"
+    values: [100]
+    unit: "mmHg"
+    origin: "analisi §4.1 (illustrative, unverified)"
+  - names: [hold_lookback]
+    row_name_cell: "`hold_lookback`"
+    value_cell: "3600000"
+    values: [3600000]
+    unit: "ms"
+    origin: "analisi §4.1, 60 min (illustrative, unverified)"
+  - names: [dose_max_24h]
+    row_name_cell: "`dose_max_24h`"
+    value_cell: "2"
+    values: [2]
+    unit: "dose"
+    origin: "analisi §4.1 (illustrative, unverified)"
+  - names: [dose_min_day_end]
+    row_name_cell: "`dose_min_day_end`"
+    value_cell: "2"
+    values: [2]
+    unit: "dose"
+    origin: "analisi §4.1 (illustrative, unverified)"
+  - names: [int_window]
+    row_name_cell: "`int_window`"
+    value_cell: "300000"
+    values: [300000]
+    unit: "ms"
+    origin: "analisi §4.1, 5 min (illustrative, unverified)"
+  - names: [delta1]
+    row_name_cell: "`delta1`"
+    value_cell: "3600000"
+    values: [3600000]
+    unit: "ms"
+    origin: "analisi §4.6 window [08:00, 10:00] of a 07:00 dispense (illustrative, unverified)"
+  - names: [delta2]
+    row_name_cell: "`delta2`"
+    value_cell: "10800000"
+    values: [10800000]
+    unit: "ms"
+    origin: "same source"
+  - names: [bound_bp_lower, bound_bp_upper]
+    row_name_cell: "`bound_bp_lower`, `bound_bp_upper`"
+    value_cell: "50, 250"
+    values: [50, 250]
+    unit: "mmHg"
+    origin: "analisi §4.7 example (illustrative, unverified)"
+  - names: [scale_range]
+    row_name_cell: "`scale_range`"
+    value_cell: "20"
+    values: [20]
+    unit: "mmHg"
+    origin: "analisi §4.2 example"
+  - names: [scale_sched]
+    row_name_cell: "`scale_sched`"
+    value_cell: "1800000"
+    values: [1800000]
+    unit: "ms"
+    origin: "analisi §4.2 example, 30 min"
+  - names: [scale_count]
+    row_name_cell: "`scale_count`"
+    value_cell: "1"
+    values: [1]
+    unit: "dose"
+    origin: "analisi §4.2 example"
+  - names: [priority_hold, priority_range, priority_sched]
+    row_name_cell: "`priority_hold`, `priority_range`, `priority_sched`"
+    value_cell: "1, 2, 3"
+    values: [1, 2, 3]
+    unit: "rank, 1 = highest"
+    origin: "analisi §4.2 order example (hold > range > sched)"
+  - names: [meas_min_day]
+    row_name_cell: "`meas_min_day`"
+    value_cell: "5"
+    values: [5]
+    unit: "count"
+    origin: "analisi §2 R2 weakness 5 and §4.6 (five measurements a day); used only if T02 adopts a measurement-count obligation (CP2)"
+  - names: [sched_window]
+    row_name_cell: "`sched_window`"
+    value_cell: "1800000"
+    values: [1800000]
+    unit: "ms"
+    origin: "FIXTURE-ONLY"
+  - names: [delta_resp]
+    row_name_cell: "`delta_resp`"
+    value_cell: "10"
+    values: [10]
+    unit: "mmHg"
+    origin: "FIXTURE-ONLY"
+  - names: [cuff_inflation_min]
+    row_name_cell: "`cuff_inflation_min`"
+    value_cell: "30000"
+    values: [30000]
+    unit: "ms"
+    origin: "FIXTURE-ONLY"
+  - names: [scale_hold, scale_resp]
+    row_name_cell: "`scale_hold`, `scale_resp`"
+    value_cell: "20"
+    values: [20, 20]
+    unit: "mmHg"
+    origin: "FIXTURE-ONLY (same as `scale_range`)"
+  - names: [scale_sys]
+    row_name_cell: "`scale_sys`"
+    value_cell: "30000"
+    values: [30000]
+    unit: "ms"
+    origin: "FIXTURE-ONLY"
+  - names: [scale_int]
+    row_name_cell: "`scale_int`"
+    value_cell: "300000"
+    values: [300000]
+    unit: "ms"
+    origin: "FIXTURE-ONLY"
+  - names: [priority_count, priority_resp]
+    row_name_cell: "`priority_count`, `priority_resp`"
+    value_cell: "2, 2"
+    values: [2, 2]
+    unit: "rank"
+    origin: "FIXTURE-ONLY"
+  - names: [priority_sys, priority_int]
+    row_name_cell: "`priority_sys`, `priority_int`"
+    value_cell: "3, 3"
+    values: [3, 3]
+    unit: "rank"
+    origin: "FIXTURE-ONLY"
+  - names: [cuff_error_sd]
+    row_name_cell: "`cuff_error_sd`"
+    value_cell: "6"
+    values: [6]
+    unit: "mmHg"
+    origin: "FIXTURE-ONLY (Gaussian error model of rho, T06)"
+  - names: [step_ms]
+    row_name_cell: "`step_ms` (T_s)"
+    value_cell: "60000"
+    values: [60000]
+    unit: "ms"
+    origin: "FIXTURE-ONLY monitor configuration"
+  - names: [reorder_delay_ms]
+    row_name_cell: "`reorder_delay_ms` (D)"
+    value_cell: "0; 30000 in the reorder examples"
+    values: [0]
+    unit: "ms"
+    origin: "FIXTURE-ONLY monitor configuration"
+
+cases:
+- id: G-RANGE-1
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: range
+    anchor_ms: 32400000
+    samples:
+      - {signal: bp, t_device_ms: 32400000, t_rx_ms: 32400000, value: 125.0, seq: null, quality: null}   # 09:00 bp 125
+    events:
+      - {kind: measurement, t_device_ms: 32400000, t_rx_ms: 32400000, source: cuff, payload: {}, seq: null}   # 09:00 measurement event
+  eval_at_ms: 32400000   # 09:00
+  expected: {sigma_raw: 15.0, unit: mmHg, sigma_norm: 0.75, boolean: satisfied}
+  hand_calculation: "Anchor 32400000 (09:00), k_d = ceil(32400000 / 60000) = 540; bp_540 = 125 (sample device time 32400000 <= t_540 = 32400000). Body: min(bp - bp_band_low, bp_band_high - bp) = min(125 - 110, 140 - 125) = min(15, 15) = 15 mmHg. All other steps have m = 0, so their implication value is +inf and the min over the history is 15. sigma_norm = clip(15 / 20, -1, 1) = 0.75. sigma >= 0: satisfied."
+
+- id: G-RANGE-2
+  contract: ["02-interfaces.md#template"]
+  source: "analisi §4.6 row 08:55 (arithmetic 140 - 152; the time 09:05 is a fixture label, not the analisi time)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: range
+    anchor_ms: 32700000
+    samples:
+      - {signal: bp, t_device_ms: 32700000, t_rx_ms: 32700000, value: 152.0, seq: null, quality: null}   # 09:05 bp 152
+    events:
+      - {kind: measurement, t_device_ms: 32700000, t_rx_ms: 32700000, source: cuff, payload: {}, seq: null}   # 09:05 measurement event
+  eval_at_ms: 32700000   # 09:05
+  expected: {sigma_raw: -12.0, unit: mmHg, sigma_norm: -0.6, boolean: violated}
+  hand_calculation: "Anchor 32700000 (09:05), k_d = ceil(32700000 / 60000) = 545; bp_545 = 152. Body: min(152 - 110, 140 - 152) = min(42, -12) = -12 mmHg. sigma_norm = clip(-12 / 20, -1, 1) = -0.6. sigma < 0: violated."
+
+- id: G-RANGE-3
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: range
+    anchor_ms: 32400000
+    samples:
+      - {signal: bp, t_device_ms: 32400000, t_rx_ms: 32400000, value: 104.0, seq: null, quality: null}   # 09:00 bp 104
+    events:
+      - {kind: measurement, t_device_ms: 32400000, t_rx_ms: 32400000, source: cuff, payload: {}, seq: null}   # 09:00 measurement event
+  eval_at_ms: 32400000   # 09:00
+  expected: {sigma_raw: -6.0, unit: mmHg, sigma_norm: -0.3, boolean: violated}
+  hand_calculation: "k_d = ceil(32400000 / 60000) = 540; bp_540 = 104. Body: min(104 - 110, 140 - 104) = min(-6, 36) = -6 mmHg (below the lower limit). sigma_norm = clip(-6 / 20, -1, 1) = -0.3. sigma < 0: violated."
+
+- id: G-RANGE-4
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (boundary)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: range
+    anchor_ms: 32400000
+    samples:
+      - {signal: bp, t_device_ms: 32400000, t_rx_ms: 32400000, value: 140.0, seq: null, quality: null}   # 09:00 bp 140
+    events:
+      - {kind: measurement, t_device_ms: 32400000, t_rx_ms: 32400000, source: cuff, payload: {}, seq: null}   # 09:00 measurement event
+  eval_at_ms: 32400000   # 09:00
+  expected: {sigma_raw: 0.0, unit: mmHg, sigma_norm: 0.0, boolean: satisfied}
+  hand_calculation: "k_d = 540; bp_540 = 140. Body: min(140 - 110, 140 - 140) = min(30, 0) = 0 mmHg. sigma_norm = clip(0 / 20, -1, 1) = 0. Tie: sigma = 0 and all atoms are non-strict, so the Boolean value is satisfied (strictness of ties is WS01-T05, CP3)."
+
+- id: G-RANGE-5
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (clipping)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: range
+    anchor_ms: 32400000
+    samples:
+      - {signal: bp, t_device_ms: 32400000, t_rx_ms: 32400000, value: 200.0, seq: null, quality: null}   # 09:00 bp 200
+    events:
+      - {kind: measurement, t_device_ms: 32400000, t_rx_ms: 32400000, source: cuff, payload: {}, seq: null}   # 09:00 measurement event
+  eval_at_ms: 32400000   # 09:00
+  expected: {sigma_raw: -60.0, unit: mmHg, sigma_norm: -1.0, boolean: violated}
+  hand_calculation: "k_d = 540; bp_540 = 200. Body: min(200 - 110, 140 - 200) = min(90, -60) = -60 mmHg. sigma_norm = clip(-60 / 20, -1, 1) = clip(-3, -1, 1) = -1 (clipped). sigma < 0: violated."
+
+- id: G-COUNT-1
+  contract: ["02-interfaces.md#template"]
+  source: "analisi §4.6 row 21:02 (counter 3 over 2: -1 dose, not -8)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: count
+    anchor_ms: 75720000
+    anchor_kind: dispense
+    samples: []
+    events:
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # 21:00 dispense
+      - {kind: dispense, t_device_ms: 75720000, t_rx_ms: 75720000, source: dispenser, payload: {}, seq: null}   # 21:02 dispense
+  eval_at_ms: 75720000   # 21:02
+  expected: {sigma_raw: -1.0, unit: dose, sigma_norm: -1.0, boolean: violated}
+  hand_calculation: "Instance of the dispense at 75720000 (21:02): k_d = ceil(75720000 / 60000) = 1262. c_d(t_1262) counts dispenses with device time in (75720000 - 86400000, 75720000] = (-10680000, 75720000]: 25200000, 75600000 and 75720000, so c_d = 3. Body of the limit: dose_max_24h - c_d = 2 - 3 = -1 dose. The earlier instances give 2 - 1 = 1 (07:00) and 2 - 2 = 0 (21:00), so the min over the history is -1. sigma_norm = clip(-1 / 1, -1, 1) = -1.0. The day-end conjunct is vacuous (+inf) before the closing step. sigma < 0: violated. (The workshop Table I value -8 has no defined unit; the counter margin is -1 dose.)"
+
+- id: G-COUNT-2
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (boundary)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: count
+    anchor_ms: 75600000
+    anchor_kind: dispense
+    samples: []
+    events:
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # 21:00 dispense
+  eval_at_ms: 75600000   # 21:00
+  expected: {sigma_raw: 0.0, unit: dose, sigma_norm: 0.0, boolean: satisfied}
+  hand_calculation: "Instance of the dispense at 75600000 (21:00): k_d = ceil(75600000 / 60000) = 1260. c_d(t_1260) counts dispenses in (75600000 - 86400000, 75600000] = (-10800000, 75600000]: 25200000 and 75600000, so c_d = 2. Body: dose_max_24h - c_d = 2 - 2 = 0 dose. The 07:00 instance gives 2 - 1 = 1, so the min is 0. sigma_norm = 0 / 1 = 0. Tie on a non-strict predicate (c_d <= limit): satisfied."
+
+- id: G-COUNT-3
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (day-end obligation)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: count
+    anchor_ms: 86400000
+    anchor_kind: day_end
+    samples: []
+    events:
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+    generated: [{signal: day_end, t_ms: 86400000}]
+  eval_at_ms: 86400000   # 24:00 closing step K = 1440
+  expected: {sigma_raw: -1.0, unit: dose, sigma_norm: -1.0, boolean: violated}
+  hand_calculation: "day_end is generated at the closing step K = 86400000 / 60000 = 1440. c_d(t_1440) counts dispenses in (86400000 - 86400000, 86400000] = (0, 86400000]: 25200000, so c_d = 1. Day-end body: c_d - dose_min_day_end = 1 - 2 = -1 dose. The limit conjunct at the 07:00 dispense gives dose_max_24h - c_d = 2 - 1 = +1, so the min of the two conjuncts is min(1, -1) = -1. sigma_norm = clip(-1 / 1, -1, 1) = -1.0. sigma < 0: violated."
+
+- id: G-HOLD-1
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (analisi §4.1 aspect 3)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: hold
+    anchor_ms: 75600000
+    anchor_kind: dispense
+    samples:
+      - {signal: bp, t_device_ms: 74100000, t_rx_ms: 74100000, value: 128.0, seq: null, quality: null}   # 20:35 bp 128
+    events:
+      - {kind: measurement, t_device_ms: 74100000, t_rx_ms: 74100000, source: cuff, payload: {}, seq: null}   # 20:35 measurement event
+      - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # 21:00 dispense
+  eval_at_ms: 75600000   # 21:00
+  expected: {sigma_raw: 28.0, unit: mmHg, sigma_norm: 1.0, boolean: satisfied}
+  hand_calculation: "Dispense 75600000: k_d = 1260; look-back window length 3600000 / 60000 = 60 steps (hold_lookback / step_ms), window [1260 - 60, 1260] = [1200, 1260]. Measurement 74100000 gives k = 74100000 / 60000 = 1235, inside the window (age 1260 - 1235 = 25 steps = 25 min), so the recency guard is +inf. bp_1260 = 128 (latest held). Margin: bp - bp_hold_threshold = 128 - 100 = 28 mmHg. sigma_norm = clip(28 / 20, -1, 1) = clip(1.4, -1, 1) = 1.0. sigma >= 0: satisfied."
+
+- id: G-HOLD-2
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (analisi §4.1 aspect 3)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: hold
+    anchor_ms: 25200000
+    anchor_kind: dispense
+    samples:
+      - {signal: bp, t_device_ms: 24600000, t_rx_ms: 24600000, value: 94.0, seq: null, quality: null}   # 06:50 bp 94
+    events:
+      - {kind: measurement, t_device_ms: 24600000, t_rx_ms: 24600000, source: cuff, payload: {}, seq: null}   # 06:50 measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+  eval_at_ms: 25200000   # 07:00
+  expected: {sigma_raw: -6.0, unit: mmHg, sigma_norm: -0.3, boolean: violated}
+  hand_calculation: "Dispense 25200000: k_d = 420; window [420 - 60, 420] = [360, 420]. Measurement 24600000 gives k = 24600000 / 60000 = 410, inside the window (age 10 steps), guard +inf. bp_420 = 94. Margin: 94 - 100 = -6 mmHg. sigma_norm = clip(-6 / 20, -1, 1) = -0.3. sigma < 0: violated."
+
+- id: G-HOLD-3
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (workshop form versus refined form, analisi §4.1 aspect 3)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: hold
+    anchor_ms: 25200000
+    anchor_kind: dispense
+    samples:
+      - {signal: bp, t_device_ms: 22500000, t_rx_ms: 22500000, value: 120.0, seq: null, quality: null}   # 06:15 bp 120
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 90.0, seq: null, quality: null}   # 06:55 bp 90
+    events:
+      - {kind: measurement, t_device_ms: 22500000, t_rx_ms: 22500000, source: cuff, payload: {}, seq: null}   # 06:15 measurement event
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+  eval_at_ms: 25200000   # 07:00
+  expected: {sigma_raw: -10.0, unit: mmHg, sigma_norm: -0.5, boolean: violated, workshop_form: {sigma_raw: 20.0, unit: mmHg, sigma_norm: 1.0, boolean: satisfied}}
+  hand_calculation: "Dispense 25200000: k_d = 420; window [360, 420]. Measurements 22500000 (k = 375) and 24900000 (k = 415) are both inside the window, so the recency guard is +inf. Refined form (adopted): the latest held value is bp_420 = 90, margin 90 - 100 = -10 mmHg, sigma_norm = clip(-10 / 20, -1, 1) = -0.5, violated. Workshop form once[0, hold_lookback](m and bp >= bp_hold_threshold): the max over the window of min(m_j, bp_j - 100) has candidates j = 375: min(+inf, 120 - 100) = 20 and j = 415: min(+inf, 90 - 100) = -10, so max(20, -10) = +20 mmHg, sigma_norm = clip(20 / 20, -1, 1) = 1.0, satisfied. The workshop form accepts a low latest reading (90) because an earlier reading (120) in the window is high."
+
+- id: G-HOLD-4
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (recency guard)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: hold
+    anchor_ms: 25200000
+    anchor_kind: dispense
+    samples:
+      - {signal: bp, t_device_ms: 19800000, t_rx_ms: 19800000, value: 120.0, seq: null, quality: null}   # 05:30 (value is irrelevant) bp 120
+    events:
+      - {kind: measurement, t_device_ms: 19800000, t_rx_ms: 19800000, source: cuff, payload: {}, seq: null}   # 05:30 measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+  eval_at_ms: 25200000   # 07:00
+  expected: {sigma_raw: -.inf, unit: mmHg, sigma_norm: -1.0, boolean: violated, guard_failed: no_recent_measurement}
+  hand_calculation: "Dispense 25200000: k_d = 420; window [360, 420]. The only measurement is 19800000, k = 19800000 / 60000 = 330 < 360 (age 420 - 330 = 90 steps = 90 min > 60 min), so no measurement lies in the window: the recency guard once[0, hold_lookback] m is max over the window of -inf = -inf. Value of the body: min(-inf, 120 - 100) = -inf, guard_failed no_recent_measurement. sigma_norm = clip(-inf / 20, -1, 1) = -1. sigma < 0: violated. The bp value of the 05:30 sample (120, a fixture choice) does not affect the result."
+
+- id: G-RESP-1
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (analisi §4.6 window [08:00, 10:00])"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: resp
+    anchor_ms: 25200000
+    anchor_kind: dispense
+    samples:
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 150.0, seq: null, quality: null}   # 06:55 pre-dose bp 150
+      - {signal: bp, t_device_ms: 30600000, t_rx_ms: 30600000, value: 132.0, seq: null, quality: null}   # 08:30 bp 132
+    events:
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 pre-dose measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: measurement, t_device_ms: 30600000, t_rx_ms: 30600000, source: cuff, payload: {}, seq: null}   # 08:30 measurement event
+  eval_at_ms: 36000000   # 10:00 decision step k_d = 600
+  expected: {sigma_raw: 8.0, unit: mmHg, sigma_norm: 0.4, boolean: satisfied}
+  hand_calculation: "Dispense 25200000 (07:00): k_a = 420. The latest bp sample with device time <= 25200000 is the 06:55 sample (24900000), so pre_i = 150. Decision step k_d = k_a + 10800000 / 60000 = 420 + 180 = 600 (36000000, 10:00), where 10800000 is delta2. Window length: delta2 - delta1 = 10800000 - 3600000 = 7200000 ms and 7200000 / 60000 = 120 steps, so the window is [600 - 120, 600] = [480, 600] = [08:00, 10:00]. Measurement 30600000: k = 510, inside [480, 600]; bp_510 = 132; drop r = 150 - 132 = 18 mmHg. Margin: r - delta_resp = 18 - 10 = 8 mmHg. sigma_norm = clip(8 / 20, -1, 1) = 0.4. sigma >= 0: satisfied."
+
+- id: G-RESP-2
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: resp
+    anchor_ms: 25200000
+    anchor_kind: dispense
+    samples:
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 150.0, seq: null, quality: null}   # 06:55 pre-dose bp 150
+      - {signal: bp, t_device_ms: 30600000, t_rx_ms: 30600000, value: 145.0, seq: null, quality: null}   # 08:30 bp 145
+    events:
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 pre-dose measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: measurement, t_device_ms: 30600000, t_rx_ms: 30600000, source: cuff, payload: {}, seq: null}   # 08:30 measurement event
+  eval_at_ms: 36000000   # 10:00 decision step k_d = 600
+  expected: {sigma_raw: -5.0, unit: mmHg, sigma_norm: -0.25, boolean: violated}
+  hand_calculation: "Dispense 25200000 (07:00): k_a = 420. The latest bp sample with device time <= 25200000 is the 06:55 sample (24900000), so pre_i = 150. Decision step k_d = k_a + 10800000 / 60000 = 420 + 180 = 600 (36000000, 10:00), where 10800000 is delta2. Window length: delta2 - delta1 = 10800000 - 3600000 = 7200000 ms and 7200000 / 60000 = 120 steps, so the window is [600 - 120, 600] = [480, 600] = [08:00, 10:00]. Measurement 30600000: k = 510, inside the window; bp_510 = 145; r = 150 - 145 = 5. Margin: 5 - 10 = -5 mmHg. sigma_norm = clip(-5 / 20, -1, 1) = -0.25. sigma < 0: violated."
+
+- id: G-RESP-3
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (max over the window: a later, larger drop rescues the obligation)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: resp
+    anchor_ms: 25200000
+    anchor_kind: dispense
+    samples:
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 150.0, seq: null, quality: null}   # 06:55 pre-dose bp 150
+      - {signal: bp, t_device_ms: 30600000, t_rx_ms: 30600000, value: 145.0, seq: null, quality: null}   # 08:30 bp 145
+      - {signal: bp, t_device_ms: 34200000, t_rx_ms: 34200000, value: 138.0, seq: null, quality: null}   # 09:30 bp 138
+    events:
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 pre-dose measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: measurement, t_device_ms: 30600000, t_rx_ms: 30600000, source: cuff, payload: {}, seq: null}   # 08:30 measurement event
+      - {kind: measurement, t_device_ms: 34200000, t_rx_ms: 34200000, source: cuff, payload: {}, seq: null}   # 09:30 measurement event
+  eval_at_ms: 36000000   # 10:00 decision step k_d = 600
+  expected: {sigma_raw: 2.0, unit: mmHg, sigma_norm: 0.1, boolean: satisfied}
+  hand_calculation: "Dispense 25200000 (07:00): k_a = 420. The latest bp sample with device time <= 25200000 is the 06:55 sample (24900000), so pre_i = 150. Decision step k_d = k_a + 10800000 / 60000 = 420 + 180 = 600 (36000000, 10:00), where 10800000 is delta2. Window length: delta2 - delta1 = 10800000 - 3600000 = 7200000 ms and 7200000 / 60000 = 120 steps, so the window is [600 - 120, 600] = [480, 600] = [08:00, 10:00]. Measurements 30600000 (k = 510) and 34200000 (k = 570) are both inside [480, 600]. Candidates: j = 510: r = 150 - 145 = 5, margin 5 - 10 = -5; j = 570: r = 150 - 138 = 12, margin 12 - 10 = 2. The once operator is the max over the window: max(-5, 2) = +2 mmHg. sigma_norm = clip(2 / 20, -1, 1) = 0.1. sigma >= 0: satisfied."
+
+- id: G-RESP-4
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (measurement obligation unmet)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: resp
+    anchor_ms: 25200000
+    anchor_kind: dispense
+    samples:
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 150.0, seq: null, quality: null}   # 06:55 pre-dose bp 150
+      - {signal: bp, t_device_ms: 27900000, t_rx_ms: 27900000, value: 140.0, seq: null, quality: null}   # 07:45 (value is irrelevant) bp 140
+      - {signal: bp, t_device_ms: 37800000, t_rx_ms: 37800000, value: 130.0, seq: null, quality: null}   # 10:30 (value is irrelevant) bp 130
+    events:
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 pre-dose measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: measurement, t_device_ms: 27900000, t_rx_ms: 27900000, source: cuff, payload: {}, seq: null}   # 07:45 (value is irrelevant) measurement event
+      - {kind: measurement, t_device_ms: 37800000, t_rx_ms: 37800000, source: cuff, payload: {}, seq: null}   # 10:30 (value is irrelevant) measurement event
+  eval_at_ms: 36000000   # 10:00 decision step k_d = 600
+  expected: {sigma_raw: -.inf, unit: mmHg, sigma_norm: -1.0, boolean: violated, guard_failed: obligation_unmet}
+  hand_calculation: "Dispense 25200000 (07:00): k_a = 420. The latest bp sample with device time <= 25200000 is the 06:55 sample (24900000), so pre_i = 150. Decision step k_d = k_a + 10800000 / 60000 = 420 + 180 = 600 (36000000, 10:00), where 10800000 is delta2. Window length: delta2 - delta1 = 10800000 - 3600000 = 7200000 ms and 7200000 / 60000 = 120 steps, so the window is [600 - 120, 600] = [480, 600] = [08:00, 10:00]. Measurement 27900000 has k = 465 < 480 (before the window); measurement 37800000 has k = 630 > 600 (after the decision step; it is not observed at 10:00 and would be outside the window anyway). No measurement lies in [480, 600], so the guard m is false at every step of the window and once[0, delta2 - delta1](m and r >= delta_resp) = max of -inf = -inf; guard_failed obligation_unmet. sigma_norm = clip(-inf / 20, -1, 1) = -1. sigma < 0: violated."
+
+- id: G-SCHED-1
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (analisi §4.2 example scale 30 min)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: sched
+    anchor_ms: 32400000
+    anchor_kind: sched_tick
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+      - {kind: measurement, t_device_ms: 32700000, t_rx_ms: 32700000, source: cuff, payload: {}, seq: null}   # 09:05 measurement event
+  eval_at_ms: 34200000   # 09:30 decision step k_d = 570
+  expected: {sigma_raw: 1500000.0, unit: ms, sigma_norm: 0.8333333333333334, boolean: satisfied}
+  hand_calculation: "Tick 32400000 (09:00): k_a = ceil(32400000 / 60000) = 540. w = 1800000 / 60000 = 30 steps (sched_window / step_ms), k_d = 540 + 30 = 570 (34200000, 09:30). For a measurement at step j >= k_a the deadline slack is t_570 - t_j = (570 - j) * 60000; the value is the max over the measurements in [k_a, evaluation step]. Measurement 32700000: k = 545 in [540, 570]. Slack = 34200000 - 32700000 = 1500000 ms (25 min). sigma_norm = clip(1500000 / 1800000, -1, 1) = 0.8333333333333334 (5/6). sigma >= 0: satisfied."
+
+- id: G-SCHED-2
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (on the deadline)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: sched
+    anchor_ms: 32400000
+    anchor_kind: sched_tick
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+      - {kind: measurement, t_device_ms: 34200000, t_rx_ms: 34200000, source: cuff, payload: {}, seq: null}   # 09:30 measurement event
+  eval_at_ms: 34200000   # 09:30 decision step k_d = 570
+  expected: {sigma_raw: 0.0, unit: ms, sigma_norm: 0.0, boolean: satisfied}
+  hand_calculation: "Tick 32400000 (09:00): k_a = ceil(32400000 / 60000) = 540. w = 1800000 / 60000 = 30 steps (sched_window / step_ms), k_d = 540 + 30 = 570 (34200000, 09:30). For a measurement at step j >= k_a the deadline slack is t_570 - t_j = (570 - j) * 60000; the value is the max over the measurements in [k_a, evaluation step]. Measurement 34200000: k = 570 = k_d, in [540, 570]. Slack = 34200000 - 34200000 = 0 ms. sigma_norm = 0 / 1800000 = 0. Tie: the measurement is visible at the decision step, the window is closed on the right, the predicate is non-strict: satisfied."
+
+- id: G-SCHED-3
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (late measurement, graded lateness)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: sched
+    anchor_ms: 32400000
+    anchor_kind: sched_tick
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+      - {kind: measurement, t_device_ms: 35460000, t_rx_ms: 35460000, source: cuff, payload: {}, seq: null}   # 09:51 measurement event
+  eval_at_ms: 35460000   # 09:51, the step at which the late measurement is observed
+  expected: {sigma_raw: -1260000.0, unit: ms, sigma_norm: -0.7, boolean: violated}
+  hand_calculation: "Tick 32400000 (09:00): k_a = ceil(32400000 / 60000) = 540. w = 1800000 / 60000 = 30 steps (sched_window / step_ms), k_d = 540 + 30 = 570 (34200000, 09:30). For a measurement at step j >= k_a the deadline slack is t_570 - t_j = (570 - j) * 60000; the value is the max over the measurements in [k_a, evaluation step]. Measurement 35460000: k = 35460000 / 60000 = 591, in [k_a, k_e] = [540, 591], after the decision step 570. Slack = 34200000 - 35460000 = -1260000 ms (21 min late). sigma_norm = clip(-1260000 / 1800000, -1, 1) = -0.7. sigma < 0: violated. At the decision step 570 itself no measurement had been observed, so the value there was -inf (guard no_measurement_after_tick) and the verdict was already VIOLATED; the value -1260000 is the graded lateness available from the step 591 (section 2 of the document)."
+
+- id: G-SCHED-4
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (measurement before the tick does not count)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: sched
+    anchor_ms: 32400000
+    anchor_kind: sched_tick
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+      - {kind: measurement, t_device_ms: 31800000, t_rx_ms: 31800000, source: cuff, payload: {}, seq: null}   # 08:50 measurement event
+  eval_at_ms: 34200000   # 09:30 decision step k_d = 570
+  expected: {sigma_raw: -.inf, unit: ms, sigma_norm: -1.0, boolean: violated, guard_failed: no_measurement_after_tick}
+  hand_calculation: "Tick 32400000 (09:00): k_a = ceil(32400000 / 60000) = 540. w = 1800000 / 60000 = 30 steps (sched_window / step_ms), k_d = 540 + 30 = 570 (34200000, 09:30). For a measurement at step j >= k_a the deadline slack is t_570 - t_j = (570 - j) * 60000; the value is the max over the measurements in [k_a, evaluation step]. The only measurement is 31800000: k = 530 < k_a = 540, on the near side of the trigger, so it is not a candidate. No measurement in [540, 570]: max over an empty set = -inf, guard_failed no_measurement_after_tick. sigma_norm = clip(-inf / 1800000, -1, 1) = -1. sigma < 0: violated."
+
+- id: G-SYS-1
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: sys
+    anchor_ms: 36000000
+    samples:
+      - {signal: cuff_health, t_device_ms: 36000000, t_rx_ms: 36000000, value: 1.0, seq: null, quality: null}   # cuff_health 1
+      - {signal: inflation_ms, t_device_ms: 36000000, t_rx_ms: 36000000, value: 45000.0, seq: null, quality: null}   # inflation_ms 45000
+    events:
+      - {kind: measurement, t_device_ms: 36000000, t_rx_ms: 36000000, source: cuff, payload: {}, seq: null}   # 10:00 measurement event
+  eval_at_ms: 36000000   # 10:00
+  expected: {sigma_raw: 15000.0, unit: ms, sigma_norm: 0.5, boolean: satisfied}
+  hand_calculation: "Measurement 36000000: k_d = 600. cuff_health_600 = 1 (guard cuff_health == 1 is +inf). inflation_ms_600 = 45000. Margin: inflation_ms - cuff_inflation_min = 45000 - 30000 = 15000 ms. sigma_norm = clip(15000 / 30000, -1, 1) = 0.5. sigma >= 0: satisfied."
+
+- id: G-SYS-2
+  contract: ["02-interfaces.md#template"]
+  source: "analisi §4.6 row 15:00 (30 - 9 = 21, read in seconds there; here 30000 - 9000 = 21000 ms)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: sys
+    anchor_ms: 36000000
+    samples:
+      - {signal: cuff_health, t_device_ms: 36000000, t_rx_ms: 36000000, value: 1.0, seq: null, quality: null}   # cuff_health 1
+      - {signal: inflation_ms, t_device_ms: 36000000, t_rx_ms: 36000000, value: 9000.0, seq: null, quality: null}   # inflation_ms 9000
+    events:
+      - {kind: measurement, t_device_ms: 36000000, t_rx_ms: 36000000, source: cuff, payload: {}, seq: null}   # 10:00 measurement event
+  eval_at_ms: 36000000   # 10:00
+  expected: {sigma_raw: -21000.0, unit: ms, sigma_norm: -0.7, boolean: violated}
+  hand_calculation: "Measurement 36000000: k_d = 600. cuff_health_600 = 1 (guard +inf). inflation_ms_600 = 9000. Margin: 9000 - 30000 = -21000 ms. sigma_norm = clip(-21000 / 30000, -1, 1) = -0.7. sigma < 0: violated."
+
+- id: G-SYS-3
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: sys
+    anchor_ms: 36000000
+    samples:
+      - {signal: cuff_health, t_device_ms: 36000000, t_rx_ms: 36000000, value: 0.0, seq: null, quality: null}   # cuff_health 0
+      - {signal: inflation_ms, t_device_ms: 36000000, t_rx_ms: 36000000, value: 45000.0, seq: null, quality: null}   # inflation_ms 45000
+    events:
+      - {kind: measurement, t_device_ms: 36000000, t_rx_ms: 36000000, source: cuff, payload: {}, seq: null}   # 10:00 measurement event
+  eval_at_ms: 36000000   # 10:00
+  expected: {sigma_raw: -.inf, unit: ms, sigma_norm: -1.0, boolean: violated, guard_failed: cuff_unhealthy}
+  hand_calculation: "Measurement 36000000: k_d = 600. cuff_health_600 = 0, so the guard cuff_health == 1 is -inf and the body is min(-inf, 45000 - 30000) = -inf; guard_failed cuff_unhealthy. sigma_norm = clip(-inf / 30000, -1, 1) = -1. sigma < 0: violated (a violation of phi_SYS, not of the care plan)."
+
+- id: G-INT-1
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (analisi §4.1 phi_INT)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: int
+    anchor_ms: 25200000
+    anchor_kind: dispense
+    samples:
+      - {signal: presence, t_device_ms: 25080000, t_rx_ms: 25080000, value: 1.0, seq: null, quality: null}   # 06:58 patient present
+      - {signal: presence, t_device_ms: 25140000, t_rx_ms: 25140000, value: 0.0, seq: null, quality: null}   # 06:59 patient no longer observed
+    events:
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+  eval_at_ms: 25200000   # 07:00
+  expected: {sigma_raw: 180000.0, unit: ms, sigma_norm: 0.6, boolean: satisfied}
+  hand_calculation: "Dispense 25200000 (07:00): k_d = 420, decision at the dispense step. Witness candidates are the steps j <= 420 where presence, intake or auth is 1; age = t_420 - t_j; the value is the max over candidates of int_window - age (the near side, steps after 420, does not count). presence is a held level: 1 from step 25080000 / 60000 = 418, 0 from step 25140000 / 60000 = 419. The last step with presence = 1 is 418; age = 25200000 - 25080000 = 120000 ms (2 min). Margin: int_window - age = 300000 - 120000 = 180000 ms. sigma_norm = clip(180000 / 300000, -1, 1) = 0.6. sigma >= 0: satisfied. No authenticated event exists (auth = 0)."
+
+- id: G-INT-2
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (analisi §4.1 phi_INT)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: int
+    anchor_ms: 25200000
+    anchor_kind: dispense
+    samples:
+      - {signal: presence, t_device_ms: 24720000, t_rx_ms: 24720000, value: 1.0, seq: null, quality: null}   # 06:52 patient present
+      - {signal: presence, t_device_ms: 24780000, t_rx_ms: 24780000, value: 0.0, seq: null, quality: null}   # 06:53 patient no longer observed
+    events:
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+  eval_at_ms: 25200000   # 07:00
+  expected: {sigma_raw: -180000.0, unit: ms, sigma_norm: -0.6, boolean: violated}
+  hand_calculation: "Dispense 25200000 (07:00): k_d = 420, decision at the dispense step. Witness candidates are the steps j <= 420 where presence, intake or auth is 1; age = t_420 - t_j; the value is the max over candidates of int_window - age (the near side, steps after 420, does not count). presence = 1 only at step 24720000 / 60000 = 412 (0 from step 24780000 / 60000 = 413). age = 25200000 - 24720000 = 480000 ms (8 min). Margin: int_window - age = 300000 - 480000 = -180000 ms. sigma_norm = clip(-180000 / 300000, -1, 1) = -0.6. sigma < 0: violated (the witness is older than the window; a stale witness is graded, a missing one is a guard failure). No authenticated event exists."
+
+- id: G-INT-3
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture (authenticated dispense, no robot)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+  inputs:
+    template: int
+    anchor_ms: 75600000
+    anchor_kind: dispense
+    samples:
+      - {signal: auth, t_device_ms: 75600000, t_rx_ms: 75600000, value: 1.0, seq: null, quality: null}   # 21:00 authenticated dispense
+    events:
+      - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # 21:00 dispense
+    channels_unavailable: [presence, intake]
+  eval_at_ms: 75600000   # 21:00
+  expected: {sigma_raw: 300000.0, unit: ms, sigma_norm: 1.0, boolean: satisfied}
+  hand_calculation: "Dispense 75600000 (21:00): k_d = 1260. The robot channels presence and intake are unavailable (robot not co-located), so w is unknown at every step (never 0). auth = 1 at step 75600000 / 60000 = 1260 (a witness by authentication, guard +inf). age = 75600000 - 75600000 = 0. Margin: int_window - age = 300000 - 0 = 300000 ms. The disjunction (unknown or unknown or true) is true, so unknown channels do not change the value (lower and upper bound coincide). sigma_norm = clip(300000 / 300000, -1, 1) = 1.0. sigma >= 0: satisfied."
