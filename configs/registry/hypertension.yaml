@@ -1,0 +1,166 @@
+# Parameter registry for hypertension (WS01-T03). Schema: configs/registry/registry.schema.json.
+# Normative description: docs/formal/03-parameter-registry.md.
+#
+# Status: NOTHING IN THIS FILE HAS BEEN REVIEWED BY A CLINICIAN. Every value below is taken from the
+# analysis document (analisi §4.1, §4.2, §4.6, §4.7), is labelled "illustrative, unverified" and is not
+# anchored to a drug or a guideline (ADR-020). Validation in this project is technical and pre-clinical.
+# Every other parameter needed by the templates is listed under `unset:` and awaits a human value
+# (WS00-T07). Values chosen only for hand arithmetic (fixture registry F0, marked FIXTURE-ONLY in the
+# WS01 README) are deliberately absent from this file.
+#
+# Layout rules (checked by the WS01-T03 verification): an element of `entries:` starts with `  - name:`
+# and has, at four-space indent and in this order, value, unit, rationale, source_ref, reviewed_by.
+# Elements of `derived:` and `unset:` are written as one-line flow mappings so that the line counts
+# of the entry keys stay equal to the number of entries.
+registry_version: "0.1.0"
+pathology: hypertension
+review_status: unreviewed
+
+# Names that are window parameters (offsets, look-backs, deadline offsets of temporal operators).
+# The alignment rule (integer multiple of step_ms) applies to these names only.
+window_parameters:
+  - sched_window
+  - hold_lookback
+  - int_window
+  - delta1
+  - delta2
+
+entries:
+  - name: bp_band_low
+    value: 110.0
+    unit: mmHg
+    rationale: "illustrative, unverified"
+    source_ref: "analisi §4.1"
+    reviewed_by: null
+  - name: bp_band_high
+    value: 140.0
+    unit: mmHg
+    rationale: "illustrative, unverified"
+    source_ref: "analisi §4.1"
+    reviewed_by: null
+  - name: bp_hold_threshold
+    value: 100.0
+    unit: mmHg
+    rationale: "illustrative, unverified"
+    source_ref: "analisi §4.1"
+    reviewed_by: null
+  - name: hold_lookback
+    value: 3600000.0
+    unit: ms
+    rationale: "60 min of the hold formula, converted to ms: illustrative, unverified"
+    source_ref: "analisi §4.1"
+    reviewed_by: null
+  - name: dose_max_24h
+    value: 2.0
+    unit: dose
+    rationale: "illustrative, unverified"
+    source_ref: "analisi §4.1"
+    reviewed_by: null
+  - name: dose_min_day_end
+    value: 2.0
+    unit: dose
+    rationale: "illustrative, unverified"
+    source_ref: "analisi §4.1"
+    reviewed_by: null
+  - name: int_window
+    value: 300000.0
+    unit: ms
+    rationale: "5 min of the integrity formula, converted to ms: illustrative, unverified"
+    source_ref: "analisi §4.1"
+    reviewed_by: null
+  - name: delta1
+    value: 3600000.0
+    unit: ms
+    rationale: "start of the response window [08:00, 10:00] after a 07:00 dispense (1 h), converted to ms: illustrative, unverified"
+    source_ref: "analisi §4.6"
+    reviewed_by: null
+  - name: delta2
+    value: 10800000.0
+    unit: ms
+    rationale: "end of the response window [08:00, 10:00] after a 07:00 dispense (3 h), converted to ms: illustrative, unverified"
+    source_ref: "analisi §4.6"
+    reviewed_by: null
+  - name: bound_bp_lower
+    value: 50.0
+    unit: mmHg
+    rationale: "lower end of the example interval [50, 250] mmHg for systolic pressure: illustrative, unverified"
+    source_ref: "analisi §4.7 (step 2)"
+    reviewed_by: null
+  - name: bound_bp_upper
+    value: 250.0
+    unit: mmHg
+    rationale: "upper end of the example interval [50, 250] mmHg for systolic pressure: illustrative, unverified"
+    source_ref: "analisi §4.7 (step 2)"
+    reviewed_by: null
+  - name: scale_range
+    value: 20.0
+    unit: mmHg
+    rationale: "example scale of 20 mmHg (analisi §4.2 gives 20 mmHg, 30 min and 1 dose as examples; their assignment to range, sched and count follows the fixture registry F0 of the WS01 README): illustrative, unverified"
+    source_ref: "analisi §4.2"
+    reviewed_by: null
+  - name: scale_sched
+    value: 1800000.0
+    unit: ms
+    rationale: "example scale of 30 min, converted to ms (assignment to sched as for scale_range): illustrative, unverified"
+    source_ref: "analisi §4.2"
+    reviewed_by: null
+  - name: scale_count
+    value: 1.0
+    unit: dose
+    rationale: "example scale of 1 dose (assignment to count as for scale_range): illustrative, unverified"
+    source_ref: "analisi §4.2"
+    reviewed_by: null
+  - name: priority_hold
+    value: 1.0
+    unit: "1"
+    rationale: "first place of the example order hold > range > sched, coded as rank 1 with 1 = highest: illustrative, unverified"
+    source_ref: "analisi §4.2"
+    reviewed_by: null
+  - name: priority_range
+    value: 2.0
+    unit: "1"
+    rationale: "second place of the example order hold > range > sched, coded as rank 2 with 1 = highest: illustrative, unverified"
+    source_ref: "analisi §4.2"
+    reviewed_by: null
+  - name: priority_sched
+    value: 3.0
+    unit: "1"
+    rationale: "third place of the example order hold > range > sched, coded as rank 3 with 1 = highest: illustrative, unverified"
+    source_ref: "analisi §4.2"
+    reviewed_by: null
+
+# Computed by the loader from the formula; never free parameters (docs/formal/02-templates.md section 3.2).
+# step_ms is the monitor step T_s, supplied by the monitor configuration and not stored in this file.
+derived:
+  - {name: max_latency_range, unit: ms, formula: "step_ms", template: range}
+  - {name: max_latency_sched, unit: ms, formula: "sched_window + step_ms", template: sched}
+  - {name: max_latency_hold, unit: ms, formula: "step_ms", template: hold}
+  - {name: max_latency_count, unit: ms, formula: "step_ms", template: count}
+  - {name: max_latency_resp, unit: ms, formula: "delta2 + step_ms", template: resp}
+  - {name: max_latency_sys, unit: ms, formula: "step_ms", template: sys}
+  - {name: max_latency_int, unit: ms, formula: "step_ms", template: int}
+
+# Needed by a template or another consumer, no value yet. Asking the loader for one of these names
+# raises UnsetParameterError. Each is to be set and reviewed by the clinician review (WS00-T07).
+unset:
+  - {parameter: sched_window, unit: ms, required_by: [sched], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: delta_resp, unit: mmHg, required_by: [resp], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: cuff_inflation_min, unit: ms, required_by: [sys], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: scale_hold, unit: mmHg, required_by: [hold], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: scale_resp, unit: mmHg, required_by: [resp], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: scale_sys, unit: ms, required_by: [sys], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: scale_int, unit: ms, required_by: [int], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: priority_count, unit: "1", required_by: [count], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: priority_resp, unit: "1", required_by: [resp], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: priority_sys, unit: "1", required_by: [sys], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: priority_int, unit: "1", required_by: [int], note: "value to be set and reviewed by WS00-T07"}
+  - {parameter: bound_inflation_ms_lower, unit: ms, required_by: [sys], note: "value to be set and reviewed by WS00-T07; physiological or device bound used to complete unknown future values of inflation_ms in the robustness interval; whether it is needed is decided by WS01-T05"}
+  - {parameter: bound_inflation_ms_upper, unit: ms, required_by: [sys], note: "value to be set and reviewed by WS00-T07; see bound_inflation_ms_lower"}
+  - {parameter: bound_dose_count_lower, unit: dose, required_by: [count], note: "value to be set and reviewed by WS00-T07; bound used to complete unknown future values of the derived counter dose_count in the robustness interval; whether it is needed is decided by WS01-T05"}
+  - {parameter: bound_dose_count_upper, unit: dose, required_by: [count], note: "value to be set and reviewed by WS00-T07; see bound_dose_count_lower"}
+  - {parameter: cuff_error_sd, unit: mmHg, required_by: [], note: "value to be set and reviewed by WS00-T07; not used by a template: parameter of the device error model of rho (WS01-T06); its source is a device validation protocol and is verified by a human"}
+  - {parameter: clock_skew_max_ms, unit: ms, required_by: [], note: "value to be set and reviewed by WS00-T07; not used by a template: maximum device clock skew assumed by the time semantics (docs/formal/01-signals-sampling.md section 4.4); monitor configuration, not a clinical parameter"}
+
+# Clinician-approved ranges for per-patient values (docs/formal/03-parameter-registry.md section 5).
+# No per-patient override is supported in version 0.1.0.
+overrides: []

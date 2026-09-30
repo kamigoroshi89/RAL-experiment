@@ -3,7 +3,7 @@ id: WS01-T03
 title: Parameter registry design, YAML schema and anchoring procedure
 workstream: WS01-formalization
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS01-T02"]
 critical_path: true
 non_negotiable: true
@@ -80,3 +80,49 @@ for h in "## 1 Purpose and rules" "## 2 YAML schema" "## 3 Entry inventory" "## 
 ```
 
 All commands succeed or print nothing. The `entries:` count printed by `echo` equals the number of analisi-derived names of check 4.
+
+## Notes
+
+Status left `in_progress` on purpose (the orchestrator sets `done` after review). Work is on branch `ws01-t03-parameter-registry`; nothing is merged.
+
+### Verification record (real outputs)
+
+Checks 1 to 13 of "Test", plus two consistency checks (14: every registry name used by a template string of `02-templates.md` section 3.1 is an entry, unset or derived name, units of `scale_<id>` agree with the template unit, no YAML name is unused; 15: header and placeholder scan), were written as scripts in `/tmp/t03/` (not committed). Run against the empty state (no files) all 15 failed with "missing file". After the artefacts were written:
+
+```
+check  1 headings                 PASS  7 headings present
+check  2 entry format             PASS  17 entries, layout ok
+check  3 nothing reviewed         PASS  reviewed_by null, rationale and source_ref ok
+check  4 only sourced values      PASS  17 names equal the analisi-derived list; values equal F0
+check  5 unset list               PASS  17 unset items
+check  6 derived                  PASS  7 derived latencies, formulas equal 02-templates section 3.2
+check  7 physio bounds            PASS  bounds stored as entries; composition stated
+check  8 types CP10               PASS  casts stated
+check  9 schema                   PASS  valid: metaschema ok, document valid, 15 negative mutations rejected, 2 positive variants accepted
+check 10 anchoring                PASS  12 numbered steps; keywords present
+check 11 versioning               PASS  versioning and overrides stated; overrides empty
+check 12 review sheet             PASS  34 rows = entries + unset; decision cells empty
+check 13 terminology              PASS  terminology and wording ok
+check 14 template consistency     PASS  33 template names all declared; scale/priority units consistent; no unused yaml name
+check 15 header / placeholders    PASS  header ok
+```
+
+"Done when" block, run verbatim (each line's exit code): file existence 0; `json.load` of the schema 0; `entries: 17`; the five key-count loop printed nothing; `reviewed_by: null` count equals 17: 0; no unset name as entry: 0; `unset:`, `derived:`, `registry_version:` present: 0; heading loop printed nothing; placeholder scan: 0. `pytest -q`: 175 passed, exit 0. `python3 tools/check_plan.py`: `check_plan: OK (103 tasks, 18 contracts, 31 findings)`, exit 0.
+
+Schema validation: `jsonschema` is not in the repo `.venv`; the system `/usr/bin/python3` already has `jsonschema` 4.19.2 (nothing was installed). The YAML was converted to JSON by the venv PyYAML and validated by the system python in `/tmp/t03/t03_validate.py` (metaschema check, document valid, 15 negative mutations rejected, 2 positive variants accepted).
+
+### Deviations from the task text
+
+1. Extra top-level key `window_parameters` (list of names to which the alignment rule applies) in the YAML and schema. Reason: T01 CG-1 asks for a mechanical window role and WS05-T03 test 15 expects the schema to mark windows; an entry cannot carry a role field without leaving the `RegistryEntry` fields. Recorded as OP-5.
+2. `derived:` and `unset:` elements are one-line flow mappings (`  - {parameter: x, unit: ..., ...}`), not block mappings. Reason: a block element would put `    unit:` at four-space indent and break the "Done when" per-key counts (which must equal the entry count). The key `parameter` is still greppable.
+3. Unset list has 17 names: the 12 named in check 5, plus bounds `bound_inflation_ms_lower/upper` and `bound_dose_count_lower/upper` (check 5: "bounds of every signal whose future values are completed by bounds"; whether they are needed is WS01-T05's, OP-8) and `clock_skew_max_ms` (T01 section 4.4 asks T03 to register it; OP-7). Names only, no values.
+4. Schema adds an if/then rule: `reviewed_by` null implies `rationale` ends with `illustrative, unverified` (mechanical ADR-020).
+5. No paper-excerpt section (the task heading list has none), OP-15.
+
+### Contract gaps recorded for WS01-T08 (section 7 of the document; no contract edited)
+
+CP10 (float value for int quantities; `PhysioBounds` without provenance), unset names and error classes not in the API, `load_registry` signature, `param_values` semantics, `max_verdict_latency_param` as derived name, `cuff_error_sd` versus `DeviceErrorModel.cuff_error_sd_mmhg`, `clock_skew_max_ms` versus `MonitorConfig`, version compatibility, review_status granularity, experiments before WS00-T07 need a fixture registry outside `hypertension.yaml` (OP-11).
+
+### Not done, by design
+
+No clinician review (WS00-T07 not performed; `reviewed_by` null everywhere, decision cells of section 6 empty). No drug, guideline or clinical value assigned. WS00 artefacts not created.
