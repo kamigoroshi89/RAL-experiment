@@ -99,3 +99,9 @@ From the repository root, inside `.venv`:
 - `python -c "from ralmon.spec import load_registry, load_templates; r = load_registry(); print(len(load_templates(registry=r)))"` prints 7.
 - `! grep -rn "^from ralmon\.\(attribution\|monitor\|conformal\)\|^import ralmon\.\(attribution\|monitor\|conformal\)" src/ralmon/spec` succeeds.
 - `grep -c "^## ADR-" docs/plan/03-decisions.md` has increased by one and the new entry names `HMAC-SHA256`.
+
+## Notes
+
+### Flag from the WS01-T04 review (orchestrator, 2026-09-30)
+
+Test 7 ("equal `(priority, sigma_norm)` keep input order") conflicts with the tie-break `(t_ms, instance_key)` of `docs/formal/04-normalisation-ranking.md` (K0, OP-6). Test 9 ("a local dataclass with only those two fields is accepted") conflicts with K0, which needs `t_ms` and `xi.instance_key`. Test 1 (golden loader) must handle N-7 (`sigma_norm` as a two-element list over `calls`) and N-8 and N-9 (`expected.error`). Kept `blocked` until ADR-028 (proposed, `[DA-CONFERMARE]`) is decided; then adapt tests 7 and 9.

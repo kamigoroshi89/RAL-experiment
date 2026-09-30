@@ -3,7 +3,7 @@ id: WS01-T04
 title: Normalised robustness and lexicographic alert ranking
 workstream: WS01-formalization
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS01-T02"]
 critical_path: true
 non_negotiable: true
@@ -156,3 +156,11 @@ A second review found one blocker and five minor wording defects, all in `docs/f
 - **Nits (section 7, A3-prio).** Clip ties at `+1` for predicted alerts with `sigma_hat >= 1` added; a fixture-arithmetic line states that different scales do not always change the order (scales 20 and 40, `sigma = -10`, `-30`).
 
 Verification: "Done when" block extracted from this file and run as written (exit 0; counts 10, 6, 16; no missing heading or word; no placeholder); uncommitted checker `/tmp/t04/verify.py` exit 0, no failure; `pytest -q` 175 passed, exit 0; `python3 tools/check_plan.py` OK, exit 0. Section 9 (paper excerpt) untouched.
+
+### Post-task review
+
+- Produced: `docs/formal/04-normalisation-ranking.md` (ten sections: the unit problem, normalised robustness `sigma_tilde = clip(sigma / s, -1, 1)` with errors and float caveats, where normalisation applies, lexicographic ranking with key K0 = (priority, sigma_tilde, t_ms, instance_key), alternatives, why not the conformal width, ablation A3 and A3-prio and baseline B3, optional agreement with a clinician ranking, paper excerpt, open points OP-1 to OP-16) and `docs/formal/golden/ranking.yaml` (10 normalisation cases N-1 to N-10 and 6 ranking cases RK-1 to RK-6, F0 rows copied from the README). Orchestrator re-ran the "Done when" block (10, 6, 16; exit 0), the full suite (175 tests) and `check_plan` (exit 0), and ran an own seeded test of the P-N4 precondition (1027 failures of 262799 draws without the subnormal condition, 0 of 258208 with it). Review 1: FAIL (one BLOCKER, a false claim about the A3-prio variant). Fix round 1 (`cd23a4f`). Review 2: FAIL (one BLOCKER, property P-N4 false for subnormal `k * s`). Fix round 2 (`1554b3a`). Final review: PASS, no BLOCKER; every property tested with seeded random draws in exact rationals and in doubles (800000 draws for P-N4, 3000 sets per ranking property), all 16 golden cases VERIFIED by an independent evaluator, golden file unchanged since the first commit.
+- Deviations from the task text: the golden file is a top-level list with the F0 rows in a header comment and per case; RK-2 has an extra sub-input with swapped times (the specified case cannot show that `sigma_norm` outranks `t_ms`); RK-5 and RK-6 use `resp` alerts (fixture-only `priority_resp`, `scale_resp`); N-8 lists three more inputs that must raise. All judged sound.
+- Dependents: WS01-T05 to WS01-T08, WS05-T03, WS06-T04, WS08-T03 read these documents. Assumptions that no longer hold were flagged (notes in their task files, proposed ADR-028 `[DA-CONFERMARE]`, kept `blocked`): WS05-T03 (tests 7 and 9 versus the tie-break, test 1 loader shapes), WS05-T04 step 8 and WS05-T08 tests 5 and 15 (`predicted_sigma_norm` as `sigma_hat + q` versus the point forecast), WS01-T07 line 40 (the "upper end" rule is not stated here). All are recorded in this document as OP-6, OP-14, OP-15 and OP-16.
+- Open MINOR: (1) caveat (b) (line 83) "a few ulps for general floats" is over-broad when `k * sigma` is subnormal (the absolute error stays below 1.1e-16, so the approx property is unaffected); (2) K1 restates Lemma 8 (4) as "same priority and same verdict class", but P-R3 is not adjusted (fails literally under K1 in 1230 of 3000 sets; WS05 adapts it if K1 is accepted); (3) the list of where A3-prio differs omits float ties of adjacent doubles (negligible); (4) "the excess is below one ulp" (caveat (d)) is empirical (a subnormal tie case reaches exactly 1 ulp; the 8-ulp advice is unaffected); (5) a Python `int` above float range raises `OverflowError` (outside the contract).
+- Risks: no scale or priority is clinically anchored (WS00-T07 has not happened); with registry 0.1.0 only RANGE and SCHED have both a scale and a priority, HOLD can be ranked but not normalised, COUNT normalised but not ranked, RESP, SYS and INT neither (OP-10); the severity of VIOLATED and predicted alerts (OP-14, OP-15) is unresolved until WS01-T05 to T07.
