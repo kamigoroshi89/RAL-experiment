@@ -3,7 +3,7 @@ id: WS04-T01
 title: Trace schema dataclasses, serialisation and manifest
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS05-T01"]
 critical_path: true
 non_negotiable: false
