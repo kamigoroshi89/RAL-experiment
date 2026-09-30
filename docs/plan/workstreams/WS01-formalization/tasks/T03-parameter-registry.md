@@ -3,7 +3,7 @@ id: WS01-T03
 title: Parameter registry design, YAML schema and anchoring procedure
 workstream: WS01-formalization
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS01-T02"]
 critical_path: true
 non_negotiable: true

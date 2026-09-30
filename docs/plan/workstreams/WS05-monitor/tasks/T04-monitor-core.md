@@ -105,3 +105,9 @@ From the repository root, inside `.venv`:
 - `python -c "import ralmon.monitor as m; d = m.StreamingMonitor.__doc__ or ''; assert 'O(' in d and 'latency' in d.lower()"` exits 0.
 - `python -c "import ralmon.monitor as m, ralmon.spec as s; assert m.Rho is s.Rho"` exits 0.
 - `grep -n "make_point_evaluator" docs/plan/03-decisions.md` shows the ADR-013 entry; `python tools/check_plan.py` exits 0.
+
+## Notes
+
+### Flag from the WS01-T02 review (orchestrator, 2026-09-30)
+
+Test 5 expects an early SATISFIED (`decided_at_ms == 32_700_000`) for G-SCHED-1, while WS01-T01 section 3.7 and WS01-T02 section 1.5 decide at the decision step `k_d` (09:30, 34_200_000); the document nowhere permits early decision. WS01-T05 (three-valued semantics) rules on this ("at the latest at k_d" is the suggested reading). The INT obligation of this task is static and backward per WS01-T02 section 5.3 (ADR-026 proposed). No status change: this task was already `blocked`.

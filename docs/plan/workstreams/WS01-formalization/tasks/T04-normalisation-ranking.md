@@ -3,7 +3,7 @@ id: WS01-T04
 title: Normalised robustness and lexicographic alert ranking
 workstream: WS01-formalization
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS01-T02"]
 critical_path: true
 non_negotiable: true
