@@ -3,7 +3,7 @@ id: WS03-T01
 title: Bibliography infrastructure with verified flag and check tool
 workstream: WS03-related-work
 owner: agent
-status: ready
+status: in_progress
 depends_on: []
 critical_path: false
 non_negotiable: false
