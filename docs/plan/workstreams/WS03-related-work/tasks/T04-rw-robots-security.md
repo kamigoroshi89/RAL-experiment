@@ -3,7 +3,7 @@ id: WS03-T04
 title: "Related work: assistive ward robots and wearable-device security"
 workstream: WS03-related-work
 owner: agent
-status: ready
+status: done
 depends_on: []
 critical_path: false
 non_negotiable: false
@@ -124,3 +124,29 @@ Steps.
 - The thirteen checks under "Test" pass; the completion note pastes the output of checks 2 to 7 and 12 (if the tool exists).
 - `grep -c '^@' paper/refs/fragments/ws03-t04.bib` prints 22 and `grep -c 'verified *= *{true}' paper/refs/fragments/ws03-t04.bib` prints 0.
 - `docs/related-work/wearable-device-security.md` states the scope line of step 4 and `docs/related-work/assistive-ward-robots.md` lists Moxi as unresolved without any entry in the fragment.
+
+## Notes
+
+- Inventory transcribed literally. In the `topic` field of two entries the inventory wording was adapted so that it stays meaningful outside the table: row 6 says "extended version of `gombolay-care-coordination-conf`" instead of "of row 5", and row 12 says "analisi 3.5" instead of "analisi §3.5" (no section sign in the `.bib`, as in the WS03-T03 fragment).
+- Moxi: no entry; listed only under "Unresolved" in `docs/related-work/assistive-ward-robots.md`.
+
+### Post-task review
+
+- Produced: `paper/refs/fragments/ws03-t04.bib` (22 entries, all `verified = {false}`, no DOI, URL, pages or invented field), `docs/related-work/assistive-ward-robots.md` and `docs/related-work/wearable-device-security.md` (six `##` headings each, shared fourth-paragraph sentence of 61 words, Moxi without an entry and only under Unresolved, C3 claim scoped by ADR-002 to integrity or plausibility violations against declared attack classes). Orchestrator re-ran the "Done when" commands, the full suite (175 tests) and `check_plan` (exit 0). Independent review: PASS; all 22 inventory rows compared with analisi §3.5 and §3.6 and all 22 entries compared field by field with both, all clean.
+- Outputs of checks 2 to 7 and 12 (orchestrator run, as "Done when" requires):
+
+```
+check 2: entries=22; duplicate keys: []
+check 3: verified={false}=22; verified={true}=0
+check 4: verified=22 uncertain=22 ref_status=22 analisi=22 task=22 topic=22 
+check 5: uncertain={true}=13; ref_status={partial}=3; title=6
+check 6: dagger keys: camara-medical-device-security-survey choi-control-invariants cosar-enrichme dixon-webster-care-robot-verification garbelini-sweyntooth gombolay-care-coordination-conf gombolay-care-coordination-ext kyrarini-healthcare-robots-survey li-insulin-pump ljungblad-hospital-logistics-robots rostami-heart-to-heart shoukry-pycra webster-care-robot-verification-thms 
+check 7: rows robots=12 security=10; key diff:
+  (empty: equal)
+check 12: entries=22 cited=0 unverified=0 missing=0 incomplete=0 duplicate=0 invalid=0 status=OK; exit=0
+```
+
+- Deviations from the task text: two `topic` fields reworded (row 6 refers to the conference key instead of "row 5"; row 12 writes "analisi 3.5" without the section sign). Judged acceptable.
+- Dependents: WS03-T05 stays `blocked` (waits on WS03-T02). It needs no individual T04 key. No dependent assumption is broken.
+- Open MINOR: (1) `author = {{ISO}}` for ISO 13482 and ISO 14971 and `{{IEC}}` for IEC 62304 are inferred from the number prefix (analisi names no publishing body); the human confirms the body in WS03-T06; (2) the `recalled` and `partial` flags are derived by the README rule, not stated by analisi; (3) the worker did not paste the check outputs (added here).
+- Risks: 13 entries are flagged `uncertain` and 3 standards are `partial` (no author, year or venue); the IJRR year and the FDA guidance title are absent on purpose. None may be cited until a human verifies them (WS00-T08 provides the PDFs).
