@@ -3,7 +3,7 @@ id: WS03-T05
 title: Related Work section draft (four paragraphs with difference sentences)
 workstream: WS03-related-work
 owner: agent
-status: ready
+status: done
 depends_on: ["WS03-T01", "WS03-T02", "WS03-T03", "WS03-T04"]
 critical_path: false
 non_negotiable: false
@@ -80,3 +80,43 @@ Verification checks (paths relative to the repository root). The word and key ca
 - `python3 tools/check_bib.py --src docs/related-work/related-work-draft.tex` prints `missing=0` and `cited=N` with N at most 25 (exit code 1 is expected: cited entries are unverified until WS03-T06).
 - `grep -v '^%' docs/related-work/related-work-draft.tex | sed -E 's/\\cite[a-z]*(\[[^]]*\])*\{[^}]*\}//g' | wc -w` prints at most 500; `grep -c '^%DIFF$' docs/related-work/related-work-draft.tex` prints 4.
 - `python3 -m pytest tests/tools -q` exits 0 and `test -f docs/related-work/citation-selection.md` succeeds.
+
+## Notes
+
+Worker run on branch `ws03-t05-rw-section-draft` (the repository has only `master`; `main` in the docs means `master`). Status left `in_progress` by instruction; the orchestrator closes the task after review.
+
+- Red state before the work (against the header-only bib, no draft): check 2 gave `grep -c '^@'` = 0, `entries=0` and the fragments still existed; checks 3 to 12 failed with "No such file". After the merge and the draft they pass as below.
+- Merge: the three fragments are appended verbatim (each is contained byte for byte in `references.bib`, verified with a script), in the order T02, T03, T04, each under a banner comment; the header sentence "intentionally empty of entries" was replaced by a sentence saying the fragments were merged. `paper/refs/fragments/` was removed with `git rm`. No duplicate keys, so no key needed conversion.
+- Selection: 25 distinct keys (P1 8, P2 7, P3 6, P4 4), all with `verified = {false}`. Deshmukh conference version, Bortolussi conference version and `huang-rosrv` chosen; recorded in `citation-selection.md`. No FHIR or BPMN mapping clause: WS01-T07 is `blocked`.
+- All cited keys are still unverified (`unverified=25`), so they cannot appear in the submission until a human verifies them (WS00-T08, WS03-T06). The draft is under `docs/related-work/`, not `paper/`, so the WS12 gate is not affected.
+- Review findings applied: (1) the P2 difference sentence keeps the four elements and `lindemann-conformal-stl`; the hedge that "dense predicted trajectories" is the WS03-T02 wording built on analisi 3.2 ("traiettorie dense", no "predicted"), unchecked against the paper and mandatory in WS03-T06, is in a `%` comment above the `%DIFF` marker and in `citation-selection.md` (Handover). It sits above the marker so that check 9 (which reads every line after `%DIFF`) counts only the sentence. (2) P3 sentence ends "attribute a cause, or abstain, for each alert" instead of "we attribute a cause to each alert" (ADR-010); it is 62 words. (3) The Asbru statement carries a `%` comment naming analisi 3.4 as source, unchecked against the paper; the process-mining characterization and the other descriptions are limited to the notes' roles and are listed for T06 in the selection note. (4) The MATLAB remark on Breach and S-TaLiRo (ADR-013, `[DA-CONFERMARE]`) is left out of the draft; the selection note says so. (5) The claim that ablations A1 and A2 test the "formal separation of measured and predicted verdict" is not carried into the draft (the sentence states the design, not a test result).
+- Deviations from the task text: (a) the two-line header of the draft is followed by no extra text; the P2 hedge and the Asbru source comment are `%` lines inside the paragraph or just above `%DIFF` (LaTeX ignores them). (b) STL is not expanded in P1 (to stay at 494 words); the introduction or problem formulation must define it before this section (WS12). (c) The P3 clause on FHIR says the paper "takes FHIR PlanDefinition and CarePlan as the standard representation to target", a statement about this work that must stay consistent with WS01-T07. (d) Header sentence of `references.bib` reworded (see above), a change beyond appending entries.
+- Not run: no network, no LaTeX compilation (the draft is body only).
+
+Outputs of the checks (real, from the final state):
+
+```
+check 2: grep -c '^@' -> 85
+  python3 tools/check_bib.py --schema -> entries=85 cited=0 unverified=0 missing=0 incomplete=0 duplicate=0 invalid=0 status=OK   (exit 0)
+  verified={false}=85  verified={true}=0  uncertain={true}=35  ref_status={partial}=10  title=20
+  test ! -e paper/refs/fragments -> succeeds
+check 3: %P count 4, %DIFF count 4; order 3:%P1 5:%DIFF 8:%P2 13:%DIFF 16:%P3 20:%DIFF 23:%P4 25:%DIFF; \section count 0
+check 5: 494
+check 6: entries=85 cited=25 unverified=25 missing=0 incomplete=0 duplicate=0 invalid=0 status=FAIL   (exit 1, expected until WS03-T06)
+check 7: every must-cite key count >= 1 (lindemann-conformal-stl 2, others 1); bortolussi-conf 1, huang-rosrv 1, deshmukh-conf 1; -ext versions and gombolay: 0
+check 8: 0
+check 9: difference sentence word counts: 1 46, 2 57, 3 62, 4 60; required terms of each sentence all present (scripted grep, no MISSING line)
+check 10: no output
+check 12: grep -c '^## ' -> 5 (Budget, Cited keys, Not cited, Trim order, Handover to T06); 25 table rows starting with a backticked key
+check 13: python3 -m pytest tests/tools -q -> 23 passed (exit 0)
+check 14: no output
+full suite: pytest -q -> 175 passed (exit 0); python3 tools/check_plan.py -> check_plan: OK (103 tasks, 18 contracts, 31 findings) (exit 0)
+```
+
+### Post-task review
+
+- Produced: `paper/refs/references.bib` (the three fragments merged byte-identically, 85 entries, all `verified = {false}`; the fragments directory removed), `docs/related-work/related-work-draft.tex` (four paragraphs, four `%DIFF` sentences of 46, 57, 62 and 60 words, 494 words by the task's counting rule, no `\section`) and `docs/related-work/citation-selection.md` (25 cited keys, trim order, handover to WS03-T06). Orchestrator re-ran the "Done when" commands: `check_bib.py --schema` exit 0 (`entries=85`), default gate on `paper/` exit 0, `check_bib.py --src` on the draft exit 1 with `cited=25 unverified=25 missing=0` (expected), a script comparison of the 85 merged entries with the three fragments on `master` (identical), the full suite (175 tests) and `check_plan` (exit 0). Independent review: PASS, no BLOCKER; every statement about a cited work is supported by analisi, a note or a `%` hedge.
+- Deviations from the task text: header sentence of `references.bib` reworded (the "empty of entries" claim became false); STL not expanded in P1 (word cap); no FHIR or BPMN clause beyond one sentence, since WS01-T07 is still `blocked`. All judged acceptable.
+- Dependents: WS03-T06 (`owner: human`, reference verification) now has every dependency `done` and is `ready`. It expects the draft, the selection note and the Lindemann hedge, all present. No dependent assumption is broken.
+- Open MINOR (apply at the next touch of the draft, WS03-T06 or WS12-T06): (M1, should fix) draft line 9 "requires exchangeability within the calibration unit, here the patient episode" is imprecise; the frozen plan (WS01-T06 H1, WS05 README D6) has exchangeability across calibration episodes, never across time steps: write "requires exchangeability across calibration units (here, patient episodes)"; (M2) "these works ... reason offline" drops the "often" of analisi 3.4, and "Guideline formalisms such as Asbru express" extends a property analisi states only for Asbru: write "often offline" and "Asbru, for example, expresses"; (M3) the process-mining statement has no `%` source comment in the `.tex`; (M4) "we take FHIR PlanDefinition and CarePlan as the standard representation to target" is a commitment WS01-T07 (still `blocked`) may not honour, since it delivers only a partial mapping sketch and must not claim automatic translation; replace by "a partial mapping from standard representations such as FHIR PlanDefinition and CarePlan to our templates" once WS01-T07 closes; (M5) none of the six P3 keys is a specification-based monitor of a single device, so the P3 contrast has no cited antecedent (`bufo-icu-ventilation-stl` was cut for the cap; it carries a dagger); (M6) the P4 contrast with Heart-to-Heart (invariant-based) is left implicit; (M7) the six notes and the T02 to T05 task texts still point at the removed `paper/refs/fragments/` paths.
+- Risks: all 25 cited keys are unverified, so the draft cannot enter `paper/` and no key may appear in the submission until a human verifies them (WS03-T06, WS00-T08); the WS12 build gate will fail until then, by design. The contrast with Lindemann et al. still rests on analisi's recollection of the paper.
