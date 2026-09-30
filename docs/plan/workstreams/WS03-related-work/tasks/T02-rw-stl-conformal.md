@@ -3,7 +3,7 @@ id: WS03-T02
 title: "Related work: STL runtime monitoring, RV in robotics, conformal and predictive monitoring"
 workstream: WS03-related-work
 owner: agent
-status: ready
+status: done
 depends_on: []
 critical_path: false
 non_negotiable: false
@@ -130,3 +130,104 @@ Steps.
 - The twelve checks under "Test" pass; the completion note pastes the output of checks 2 to 7 and 11 (if the tool exists).
 - `grep -c '^@' paper/refs/fragments/ws03-t02.bib` prints 32 and `grep -c 'verified *= *{true}' paper/refs/fragments/ws03-t02.bib` prints 0.
 - `docs/related-work/conformal-predictive-monitoring.md` contains the sentence of step 4(d) (or a shortened one that passes check 9).
+
+## Notes
+
+Completion note (WS03-T02, worker run on branch `ws03-t02-rw-stl-conformal`; status left `in_progress` for the orchestrator after review).
+
+Red state: before the artefacts existed, check 1 exited 1 and checks 2 to 11 failed with "No such file or directory" (no red commit, none prescribed).
+
+Inventory versus analisi: all 32 rows were compared with analisi 3.1, 3.2 and 2 (R1 weaknesses 2 and 10). Every author, year and venue matches analisi; no unsupported row. Points worth a look: rows 1, 20 and 21 come from the reviewer text (`analisi = {2 (...)}`), as the task prescribes; the accents in `Ni{\v c}kovi{\'c}` for row 1 follow the task table (analisi writes "Nickovic" in R1 weakness 2 and "Ni{\v c}kovi{\'c}" in 3.1); row 24 has no year because analisi gives none; the dagger of the Bortolussi line covers both versions (README rule). Counts: daggers 6 (3.1) + 4 (3.2) = 10, partial 3, titles 7.
+
+Real output of the checks (script kept outside the repository, `/tmp/t02_checks.sh`, run from the repository root):
+
+```
+== check1
+exit=0
+== check2
+32
+dups-above (none expected)
+== check3
+32
+0
+== check4
+32
+32
+32
+32
+32
+32
+== check5
+10
+3
+7
+== check6
+bortolussi-neural-predictive-monitoring-conf
+bortolussi-neural-predictive-monitoring-ext
+brim-stl-star
+cairoli-conformal-quantitative-monitoring
+ferrando-rosmonitoring
+huang-rosrv
+mehdipour-agm-robustness
+mehdipour-weighted-stl
+rodionova-time-robustness
+zhao-robust-conformal-stl
+== check7
+21
+11
+keysets equal
+== check8
+6
+## Scope
+## Reference table
+## What the reviewer expects
+## Difference
+## Risk and handling in the text
+## Unresolved and for human verification
+6
+## Scope
+## Reference table
+## What the reviewer expects
+## Difference
+## Risk and handling in the text
+## Unresolved and for human verification
+== check9
+sparse: 4
+event-driven: 4
+PENDING: 2
+measured: 4
+normali[sz]ed: 3
+mixed units: 3
+abstain: 1
+lindemann-conformal-stl: 2
+== check10
+RTAMT: 5
+Breach: 4
+S-TaLiRo: 4
+ROSRV: 3
+ROSMonitoring: 3
+complexity: 2
+WS05-T04: 1
+== check11
+entries=32 cited=0 unverified=0 missing=0 incomplete=0 duplicate=0 invalid=0 status=OK
+exit=0
+== check12
+grep exit=1 (1 = nothing found)
+```
+
+Full suite and plan checks:
+
+```
+pytest -q                     -> 175 passed in 0.87s (exit 0)
+python3 tools/check_plan.py   -> check_plan: OK (103 tasks, 18 contracts, 31 findings) (exit 0)
+python3 tools/check_bib.py --schema --bib paper/refs/fragments/ws03-t02.bib --bib paper/refs/fragments/ws03-t03.bib --bib paper/refs/fragments/ws03-t04.bib
+                              -> entries=85 ... duplicate=0 invalid=0 status=OK (exit 0; no key clash across fragments)
+```
+
+### Post-task review
+
+- Produced: `paper/refs/fragments/ws03-t02.bib` (32 entries, all `verified = {false}`; the only `volume` field, LNCS 10457, is stated in analisi §3.1), `docs/related-work/stl-rv-robotics.md` (closes R1-W10: RTAMT, Breach, S-TaLiRo, ROSRV, ROSMonitoring named; complexity remark points to WS05-T04 and WS01-T05 without a bound) and `docs/related-work/conformal-predictive-monitoring.md` (Lindemann et al. difference sentence with the four elements, the key `lindemann-conformal-stl` and the hedge). The completion note above pastes the outputs of checks 2 to 7 and 11 as "Done when" requires. Orchestrator re-ran the "Done when" commands, `check_bib.py --schema` (exit 0, `entries=32`), the full suite (175 tests) and `check_plan` (exit 0). Independent review: PASS; 32 inventory rows and 32 entries compared with analisi §3.1, §3.2 and the review text, all clean.
+- Deviations from the task text: none. The three fragments together give the numbers WS03-T05 expects: 85 entries, 35 `uncertain`, 10 `partial`, 20 titles, no duplicate key across fragments.
+- Dependents: WS03-T05 had all four dependencies `done` and is now `ready`; its assumptions (85 entries, the named keys `lindemann-conformal-stl` and others, the six notes) hold. No dependent assumption is broken.
+- Open MINOR: (1) the hedge says "dense predicted trajectories" comes from analisi §3.2, but analisi says only "traiettorie dense"; "predicted" is added by the task's own sentence, so the hedge should state that "predicted" is not in analisi (WS03-T05 or WS03-T06, mandatory check against the paper); (2) the Notes above say analisi writes "Ni{\v c}kovi{\'c}"; analisi writes the Unicode form and the bib value follows the task schema; (3) the traceability row "formal separation of measured and predicted verdict" cites ablations A1 and A2 (ADR-008) as component tests, a slight stretch because neither ablation tests the separation directly; (4) the Breach and S-TaLiRo "MATLAB dependence" remark is attributed to ADR-013, which is still `[DA-CONFERMARE]`; the note does not say so.
+- Risks: the difference to Lindemann et al. is the highest novelty risk of the paper (analisi §3.2, MOLTO ALTO) and rests on analisi's recollection of the paper; the human check in WS03-T06 must confirm it before the sentence is used in the submission. 10 entries are `uncertain` and 3 are `partial`; none may be cited until verified (WS00-T08).
