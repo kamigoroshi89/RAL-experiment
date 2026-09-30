@@ -3,7 +3,7 @@ id: WS03-T02
 title: "Related work: STL runtime monitoring, RV in robotics, conformal and predictive monitoring"
 workstream: WS03-related-work
 owner: agent
-status: in_progress
+status: done
 depends_on: []
 critical_path: false
 non_negotiable: false
@@ -223,3 +223,11 @@ python3 tools/check_plan.py   -> check_plan: OK (103 tasks, 18 contracts, 31 fin
 python3 tools/check_bib.py --schema --bib paper/refs/fragments/ws03-t02.bib --bib paper/refs/fragments/ws03-t03.bib --bib paper/refs/fragments/ws03-t04.bib
                               -> entries=85 ... duplicate=0 invalid=0 status=OK (exit 0; no key clash across fragments)
 ```
+
+### Post-task review
+
+- Produced: `paper/refs/fragments/ws03-t02.bib` (32 entries, all `verified = {false}`; the only `volume` field, LNCS 10457, is stated in analisi §3.1), `docs/related-work/stl-rv-robotics.md` (closes R1-W10: RTAMT, Breach, S-TaLiRo, ROSRV, ROSMonitoring named; complexity remark points to WS05-T04 and WS01-T05 without a bound) and `docs/related-work/conformal-predictive-monitoring.md` (Lindemann et al. difference sentence with the four elements, the key `lindemann-conformal-stl` and the hedge). The completion note above pastes the outputs of checks 2 to 7 and 11 as "Done when" requires. Orchestrator re-ran the "Done when" commands, `check_bib.py --schema` (exit 0, `entries=32`), the full suite (175 tests) and `check_plan` (exit 0). Independent review: PASS; 32 inventory rows and 32 entries compared with analisi §3.1, §3.2 and the review text, all clean.
+- Deviations from the task text: none. The three fragments together give the numbers WS03-T05 expects: 85 entries, 35 `uncertain`, 10 `partial`, 20 titles, no duplicate key across fragments.
+- Dependents: WS03-T05 had all four dependencies `done` and is now `ready`; its assumptions (85 entries, the named keys `lindemann-conformal-stl` and others, the six notes) hold. No dependent assumption is broken.
+- Open MINOR: (1) the hedge says "dense predicted trajectories" comes from analisi §3.2, but analisi says only "traiettorie dense"; "predicted" is added by the task's own sentence, so the hedge should state that "predicted" is not in analisi (WS03-T05 or WS03-T06, mandatory check against the paper); (2) the Notes above say analisi writes "Ni{\v c}kovi{\'c}"; analisi writes the Unicode form and the bib value follows the task schema; (3) the traceability row "formal separation of measured and predicted verdict" cites ablations A1 and A2 (ADR-008) as component tests, a slight stretch because neither ablation tests the separation directly; (4) the Breach and S-TaLiRo "MATLAB dependence" remark is attributed to ADR-013, which is still `[DA-CONFERMARE]`; the note does not say so.
+- Risks: the difference to Lindemann et al. is the highest novelty risk of the paper (analisi §3.2, MOLTO ALTO) and rests on analisi's recollection of the paper; the human check in WS03-T06 must confirm it before the sentence is used in the submission. 10 entries are `uncertain` and 3 are `partial`; none may be cited until verified (WS00-T08).
