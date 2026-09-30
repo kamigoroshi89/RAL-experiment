@@ -3,7 +3,7 @@ id: WS03-T05
 title: Related Work section draft (four paragraphs with difference sentences)
 workstream: WS03-related-work
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS03-T01", "WS03-T02", "WS03-T03", "WS03-T04"]
 critical_path: false
 non_negotiable: false
