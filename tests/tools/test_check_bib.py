@@ -76,7 +76,10 @@ def test_parse_bib_handles_nested_braces_and_quotes(cb: ModuleType) -> None:
     )
     entries = cb.parse_bib(text)
     assert entries[0].type == "article"
-    assert entries[0].fields["title"] == "Conformal prediction for {STL} runtime verification"
+    assert (
+        entries[0].fields["title"]
+        == "Conformal prediction for {STL} runtime verification"
+    )
     assert entries[0].fields["year"] == "2023"
     assert entries[0].fields["journal"] == "J. Fixture"
     assert entries[1].fields["year"] == "2023"
