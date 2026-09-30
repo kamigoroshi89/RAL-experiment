@@ -92,3 +92,13 @@ Pytest tests in `tests/tools/test_check_bib.py` (CLI tests call `subprocess.run(
 - `python3 tools/check_bib.py` exits 0 (no citations under `paper` yet).
 - `ruff check tools/check_bib.py tests/tools` exits 0 when ruff is installed (state in the completion note if it is not).
 - `test -f paper/refs/references.bib && test -f docs/related-work/bib-conventions.md && grep -c '^## ' docs/related-work/bib-conventions.md` prints 4.
+
+## Notes
+
+- Implementation notes (worker run, status left `in_progress` for orchestrator review):
+  - The suite has 23 tests, not 22: `test_no_citations_in_src_is_not_an_error` was added to cover the stated rule "a `--src` that exists but contains no citations is not an error". All 23 pass.
+  - `INCOMPLETE` is applied to every entry with `verified = {true}` (cited or not, and also in `--schema` mode), following the literal wording of the spec and WS03-T06 test 5.
+  - `--all` scans sources only if `--src` is given explicitly (default `paper` applies to the default mode only); every entry counts as cited, so `cited=` is the number of distinct entry keys.
+  - Duplicate keys give one `DUPLICATE` line per key (location of the first repeated occurrence); findings are deduplicated per (kind, key).
+  - The tool has no shebang (ruff EXE001 on a non-executable file); it is run as `python3 tools/check_bib.py`.
+  - Fixtures under `tests/tools/fixtures/` are fake entries, marked `FIXTURE` in a header comment; `paper/refs/references.bib` has zero entries.
