@@ -3,7 +3,7 @@ id: WS01-T01
 title: "Problem formulation: signals, sampling semantics, time, decomposition"
 workstream: WS01-formalization
 owner: agent
-status: ready
+status: done
 depends_on: ["WS00-T02"]
 critical_path: true
 non_negotiable: true
@@ -86,3 +86,60 @@ for w in W1 W2 W3 W4 W5 W6 W7 CP7 CP12; do grep -q "$w" "$f" || echo "missing: $
 ```
 
 All commands print nothing and the last exits 0.
+
+## Notes
+
+Completion note of the executing agent (status left `in_progress`; the orchestrator sets `done` after review).
+
+**Done when, run from the repository root.**
+
+| Command | Exit | Output |
+|---|---|---|
+| `test -f docs/formal/01-signals-sampling.md` | 0 | none |
+| heading loop (9 headings, `grep -qF`) | 0 | prints nothing |
+| signal loop (17 `SignalId`, `grep -qw`) | 0 | prints nothing |
+| `W1 ... W7 CP7 CP12` loop | 0 | prints nothing |
+| `! grep -nE 'T[O]DO\|T[B]D\|[?][?][?]\|lore[m]'` | 0 | prints nothing |
+
+**Test section checks 1 to 14.** Run with a script kept outside the repository (`/tmp/check_ws01_t01.py`); it failed on all checks before the document existed ("file missing", exit 1) and passes now (exit 0):
+
+```
+check  1 PASS  exact H2 list: 9 headings, exact order
+check  2 PASS  17 signals with symbol, kind, unit, producer, unavailability: 17 rows complete
+check  3 PASS  DISPENSE vs INTAKE and w: ok
+check  4 PASS  grid rules, ceiling, O[W,W], anchoring, alignment: ok
+check  5 PASS  multiplicity: ok
+check  6 PASS  undefined vs unavailable: ok
+check  7 PASS  two clocks, buffer, late policy, skew, replay: ok
+check  8 PASS  three latency terms: ok
+check  9 PASS  derived signals and day boundary: ok
+check 10 PASS  decomposition: ok
+check 11 PASS  worked examples W1-W7: 7 examples with inputs, expected, hand calculation
+check 12 PASS  parameters table: ok (numeric audit is manual)
+check 13 PASS  paper excerpt (0.5 page): words=492 []
+check 14 PASS  open points: ok
+check 15 PASS  glossary/claim hygiene: no hits
+```
+
+Check 12 (no clinical constants) was completed by hand: every numeric token of the document was listed and is a section number, an ADR or analisi reference, an example time with its millisecond conversion, an F0 value, or fixture arithmetic. Check 13: the 492 tokens include LaTeX command words; the excerpt has no operator tutorial.
+
+**Second calculation of W1 to W7.** Each worked example was recomputed by an independent simulation (`/tmp/w_verify.py`, not committed). Result: 22 assertions PASS, last line `ALL OK`. It includes the equality, on 300 random events, of the device-time and the binned form of `dose_count` (needs `T_s | T_day`).
+
+**Full suite.** `pytest -q`: `175 passed`, exit 0. `python3 tools/check_plan.py`: `check_plan: OK (103 tasks, 18 contracts, 31 findings)`, exit 0.
+
+**Deviations from the task text (all recorded in `docs/formal/01-signals-sampling.md` section 9).**
+
+1. W3: the pair 21:00:00.000 and 21:00:00.500 falls in two bins under the ceiling rule (steps 21:00 and 21:01), so it does not give "one impulse". The document uses 20:59:59.500 and 21:00:00.000 (same bin, `c_d` increment 2) and shows the original pair as a note (CG-8).
+2. Grid rule (Test check 4): "all registry time values must be integer multiples of `T_s`" would reject F0 itself (`cuff_inflation_min` 30000 ms, `scale_sys` 30000 ms and `D` = 30000 ms in W5 with `T_s` = 60000). The rule is applied to window parameters (operator offsets, look-backs, deadline offsets) only (CG-1).
+3. The scope artefact `docs/plan/workstreams/WS00-admin/outputs/WS00-T02.md` is missing; ADR-001 to ADR-003 were used as the scope source and nothing was reconstructed.
+4. Branch base is `master` (the repository has no `main`).
+
+**Contract gaps and tensions (no contract or ADR edited).** CP7, CP12 with proposed resolutions; CG-1 to CG-14 as listed in section 9, notably: the widened `O[W,W+T_s]` is redundant on the aligned grid under the ceiling rule and, evaluated without anchoring, makes the string stricter than the per-instance semantics (CG-2, W4 case b); `pending_until_ms` anchor reading (CG-3); event-time versus end-to-end latency bound (CG-4); no `EventKind` for `auth`, `presence`, `day_end`, `cuff_health` (CG-5); `hold_last` cannot carry `None` (CG-6); the look-back direction of phi_INT prevents `intake` from contributing at the dispense step (CG-7).
+
+### Post-task review
+
+- Produced: `docs/formal/01-signals-sampling.md` (nine sections: 17-signal table mapped to analisi §4.1, sampling semantics with the ceiling rule and the one-instance-per-anchor convention for `O[W,W]`, clocks and reorder buffer with verdict latency, derived signals, decomposition phi = phi_CP and phi_SYS and phi_INT, worked examples W1 to W7, paper excerpt, open points CG-1 to CG-14 with proposals for CP7 and CP12). Orchestrator re-ran the "Done when" block (exit 0, nothing printed), the full suite (175 tests) and `check_plan` (exit 0); only the two expected files changed. Independent review: PASS, no BLOCKER. The reviewer recomputed every number of W1 to W7 and of sections 2 to 6 with an independent script (all verified), re-derived the ceiling rule and `O[W,W]` analysis (two consecutive true steps, naive string versus per-instance convention, latency bound B <= L_ev < B + T_s, redundancy of the widening on the aligned grid) and confirmed it.
+- Deviations from the task text: W3 replaced (the pair 21:00:00.000 and 21:00:00.500 falls in two bins under the ceiling rule; the task wording is wrong); the "all registry time values are multiples of T_s" rule restricted to window parameters (`sched_window`, `hold_lookback`, `int_window`, `delta1`, `delta2`) because fixture F0 itself has 30000 ms values; the missing WS00-T02 artefact was not reconstructed (ADR-001 to ADR-003 used). Both deviations verified sound.
+- Dependents: WS01-T02, WS02-T01 and WS02-T02 had WS01-T01 as their only open dependency and are now `ready`; WS05-T02 still waits on WS01-T02. Two reviewer points touch dependents and were checked: `day_end` (WS04-T10 adds the impulse itself and WS04-T06 does not mention it, so no conflict, but the trace form "none (generated)" must be reconciled with WS04), and lateness (WS05 README D4 defers to this document, section 4; WS05-T04 must follow the step-watermark definition here). No dependent assumption is broken.
+- Open MINOR for WS01-T08 or the next touch: (1) the anchoring convention says the consequent is evaluated "over [k_a, k_d]", true for SCHED only; RESP uses its own window ending at k_d; add that the naive string's second decision has latency in [B+T_s, B+2T_s), which exceeds the contract bound (the strongest argument for the convention); (2) `sched_tick` is produced by the monitor yet also has a trace form `Event SCHEDULE_TICK`: a de-duplication rule is needed for WS05; (3) reword "w is a function of presence, intake and auth" (auth does not enter `w`); (4) `day_end` transport form versus WS04 (see above) and the K step at exactly T_day; (5) the source of robot availability is the `EvidenceVector`, but the Monitor protocol has no input path for it (for example `NODE_STATE` events); (6) lateness by step watermark (here) versus "at or below the released watermark" (WS05 D4): WS05-T04 follows this document; (7) at the closing step K the window is (0, T_day], so a dispense at exactly 00:00:00.000 is not counted for its own day (asymmetric with `meas_count`); (8) M1, M5 and M6 are clinical-semantics choices (presence as a witness, pre-dose ordering, day ownership) that should be named for the clinician review WS00-T07; (9) CG-4 should cite `time-and-units` rule 3 ("measured against t_device_ms after reordering") as partial guidance; (10) the warm-up prefix must include samples (`bp` age can exceed H) and the text must say whether `bp` at 00:00 of day 2 is NaN or carried over; (11) device clock skew feeds the lateness test, so D must cover skew plus transport delay; (12) first-person "I could not find a case" in a formal document (style).
+- Risks: this is a non-negotiable document; its M1 to M6 choices and the 14 gaps feed WS01-T08 (freeze) and, through the clinician review WS00-T07, the M1 gate. CG-5, CG-6 and CG-11 need ADRs before WS05-T02 depends on them; none was written here.
