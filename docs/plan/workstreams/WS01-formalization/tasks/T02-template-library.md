@@ -112,3 +112,94 @@ for c in CP1 CP2 CP9 CP11; do grep -q "$c" "$f" || echo "missing $c"; done   # p
 ```
 
 Also inspect by hand that the `fixture_registry` section equals the F0 table of `docs/plan/workstreams/WS01-formalization/README.md` row for row.
+
+## Notes
+
+Completion note of the executing agent (status left `in_progress`; the orchestrator sets `done` after review, and the orchestrator merges). Work is on branch `ws01-t02-template-library` (base `master`; the repository has no `main`).
+
+**Order of work.** Golden file first (commit `WS01-T02: add golden template examples ...`), then the document. Before any artefact existed, the "Done when" block failed (`FAIL: files missing`, nine `missing heading:` lines, seven `missing template:` lines, four `missing CP` lines, `id count` and `hand_calculation` counts not 26). All checks below were run after the artefacts existed.
+
+**Done when, run from the repository root (real exit codes).**
+
+| Command | Exit | Output |
+|---|---|---|
+| `test -f "$f" && test -f "$g"` | 0 | none |
+| heading loop (9 headings, `grep -qF`) | 0 | prints nothing |
+| template loop (RANGE SCHED HOLD COUNT RESP SYS INT) | 0 | prints nothing |
+| `grep -c '^- id: G-' "$g"` | 0 | `26` |
+| `grep -c 'hand_calculation:' "$g"` | 0 | `26` |
+| `grep -q '^fixture_registry:' "$g"` | 0 | none |
+| CP loop (CP1 CP2 CP9 CP11) | 0 | prints nothing |
+| `! grep -nE 'T[O]DO\|T[B]D\|[?][?][?]\|lore[m]' "$f" "$g"` | 0 | prints nothing |
+
+`fixture_registry` versus the F0 table of the WS01 README, row for row: checked by a script in `/tmp` (not committed) that parses the README table and compares the verbatim cells (name cell, value cell, unit, origin) and the parsed names and values with the yaml: `F0 rows in README: 26 rows in yaml: 26 mismatching rows: 0`. The yaml section was generated from the README table, not typed.
+
+**Test section checks 1 to 15** (script `/tmp/ws01t02/test_checks.py`, not committed; check 16 is an extra wording hygiene check). Exit 0:
+
+```
+ok   check 1: nine headings present and in order
+ok   check 2: EBNF, RTAMT statement, recursive semantics, empty windows
+ok   check 3: seven rows, ten fields, kinds, SignalIds, names, derived latency formulas
+ok   check 4: LaTeX block and indicator/margin statement in each of the seven subsections
+ok   check 5: margin and guard rule, time margin, symmetric distance, ref-needed
+ok   check 6: HOLD workshop and refined forms, G-HOLD-3, decision
+ok   check 7: five aspects
+ok   check 8: decomposition tags and wording
+ok   check 9: obligation record, creation, feasibility
+ok   check 10: COUNT and measurement count, listed for ADR
+ok   check 11: instance semantics and relation
+ok   check 12: future-time forms
+ok   check 13: 26 cases with the eight keys in order and a fixture_registry
+ok   check 14: Table I LaTeX and Section IV-A text   (Section IV-A text: 340 words, excluding the table)
+ok   check 15: open points list CP1, CP2, CP9, CP11 with resolution
+ok   check 16: no forbidden wording ("ensures", "orthogonal", "intrinsic explainab", "distribution-free", "Clinical Pathway", "PILL")
+```
+
+These checks are mechanical (presence and structure); the substantive review of the semantics is by hand and by the evaluator below.
+
+**Golden cases: hand calculation plus two independent computations.** Every hand calculation is written out in the yaml. Independent script `/tmp/ws01t02/verify.py` (not committed; integer arithmetic on the grid, ceiling rule `(t + T_s - 1) // T_s`, half-open 24 h counter window, per-instance `pre_i`, unknown read as `[-inf, +inf]`): path A parses the seven strings of the section 3.1 table (extracted from the document, so the table strings are checked against the EBNF) with a recursive-descent parser of the EBNF and evaluates them on the whole trace grid (`historically` over all steps, widened antecedent, `age` relative to the enclosing temporal operator); path B computes the per-instance formula per template directly. Both are compared with `expected` (raw value, unit, normalised value, Boolean, guard marker, and for G-HOLD-3 the workshop form). Result, exit 0:
+
+```
+PASS G-RANGE-1 A=15.0 B=15.0 exp=15.0      PASS G-HOLD-4 A=-inf B=-inf exp=-inf       PASS G-SCHED-4 A=-inf B=-inf exp=-inf
+PASS G-RANGE-2 A=-12.0 B=-12.0 exp=-12.0   PASS G-RESP-1 A=8.0 B=8.0 exp=8.0          PASS G-SYS-1 A=15000.0 B=15000.0 exp=15000.0
+PASS G-RANGE-3 A=-6.0 B=-6.0 exp=-6.0      PASS G-RESP-2 A=-5.0 B=-5.0 exp=-5.0       PASS G-SYS-2 A=-21000.0 B=-21000.0 exp=-21000.0
+PASS G-RANGE-4 A=0.0 B=0.0 exp=0.0         PASS G-RESP-3 A=2.0 B=2.0 exp=2.0          PASS G-SYS-3 A=-inf B=-inf exp=-inf
+PASS G-RANGE-5 A=-60.0 B=-60.0 exp=-60.0   PASS G-RESP-4 A=-inf B=-inf exp=-inf       PASS G-INT-1 A=180000 B=180000 exp=180000.0
+PASS G-COUNT-1 A=-1 B=-1 exp=-1.0          PASS G-SCHED-1 A=1500000 B=1500000 exp=1500000.0   PASS G-INT-2 A=-180000 B=-180000 exp=-180000.0
+PASS G-COUNT-2 A=0 B=0 exp=0.0             PASS G-SCHED-2 A=0 B=0 exp=0.0             PASS G-INT-3 A=300000 B=300000 exp=300000.0
+PASS G-COUNT-3 A=-1 B=-1 exp=-1.0          PASS G-SCHED-3 A=-1260000 B=-1260000 exp=-1260000.0
+PASS G-HOLD-1 A=28.0 B=28.0 exp=28.0       (G-HOLD-2 -6.0 and G-HOLD-3 -10.0, workshop +20.0, also PASS)
+total fail: 0
+```
+
+Caveat on G-SCHED-3: the whole-string evaluation (path A) cannot see the graded lateness, because the string is the decision-time form; for this case path A is checked only at the decision step 570 (value `[-inf, -inf]`, asserted) and the graded value `-1260000` is verified by path B (document sections 1.5 and 2.3). Other verifications: a mutation of one expected value (G-RESP-3 `2.0` to `3.0`) makes the script report `FAIL` (exit 1); an arithmetic checker of the equations written in the `hand_calculation` strings: `equations checked: 59 mismatches: 0`; the `hh:mm` comments against the millisecond values: `labelled times checked: 99 bad: 0`.
+
+Demonstrations quoted in document section 1.5 (same evaluator): SCHED tick 09:00 with measurements 09:00 and 09:20: string `1800000` at step 570 and `660000` at 571 (instance value `1800000`); with a measurement only at 09:00: string `1800000` at 570 and `-inf` at 571 (the Boolean verdict of the string differs); RESP with a sole qualifying measurement at 08:00 after a 07:00 dispense: string `10.0` at 600 and `-inf` at 601.
+
+**Full suite.** `pytest -q`: `175 passed`, exit 0. `python3 tools/check_plan.py`: `check_plan: OK (103 tasks, 18 contracts, 31 findings)`, exit 0. (Run before this Notes section was appended; re-run below.)
+
+**Deviations from the task text.**
+
+1. INT obligation creation (Test check 9 says "dynamic at each DISPENSE for RESP and INT"): INT is created statically from the dispense ticks of the schedule (anticipatory window `[a - int_window, a]`); RESP is dynamic. Reason: the INT window looks back from the dispense (fixed by the goldens G-INT-1 to G-INT-3), so an obligation created when the DISPENSE event arrives is created after its window has closed and cannot change the verdict. `creates_robot_obligation` for INT is True as recommended (CP1). The alternative (forward witness after each dispense) is an open design question (document section 9, TG-8).
+2. Goldens G-INT-1 and G-INT-2 carry an explicit `presence = 0.0` sample one step after the observation, and G-RESP-1 to G-RESP-4 carry a pre-dose measurement (150 mmHg at 06:55): the task table lists neither. `presence` is a held level (T01 section 2.1), so without the `0.0` sample the witness would still be present at the dispense (age 0); `pre_i` needs a measurement before the dose. Numbers of the task table are unchanged. G-INT-3 declares presence and intake channels unavailable ("no presence").
+3. G-SCHED-3 is evaluated at 09:51 (the step at which the late measurement is visible); at the decision step 09:30 the value is `-inf` (guard). The task table lists only the graded value.
+4. Extra keys inside `inputs` and `expected` of the golden file (listed in its header); the eight required case keys are present in the required order. `fixture_registry` entries carry the verbatim README cells plus parsed `names` and `values`.
+5. The scope artefact of WS00-T02 is missing; ADR-001 to ADR-003 are the scope source, nothing reconstructed, no ADR edited.
+6. Section IV-A text is 340 words (excluding Table I); sized to the 0.5 page of analisi §7 with the table.
+
+**Contract gaps and tensions (no contract or ADR edited); details in document section 9.** CP1, CP2, CP9, CP11 resolved at document level (ADR needed for CP1 comment, CP9 new contract; CP2 only if adopted; CP11 clarification). TG-1 `CarePlan.schedule` has no tick kind; TG-2 `Template` has no anchor, deadline offset or guard-name fields; TG-3 `max_verdict_latency_param` is a "registry entry" but declared derived; TG-4 graded lateness after the decision step; TG-5 the `age` term and the tool string (WS05-T02 spike); TG-6 string versus reference semantics for SCHED and RESP (T01 CG-2, conditions (A1) and (A2)); TG-7 HOLD refined form needs confirmation; TG-8 INT direction and forward witness; TG-9 `presence` as a held level; TG-10 `normalise` and infinities; TG-11 ties (CP3); TG-12 COUNT limit stated with a trigger; TG-13 RANGE during drug onset (clinical question); TG-14 fixture choices.
+
+**Modelling choices made here and why.**
+
+1. Guards are `+-inf`, not `+-1` (a `+-1` guard would be compared with mmHg or ms margins); a failed guard is normalised `-1` and carries `guard_failed`. Touches: none of M1 to M6.
+2. Time margin is the slack to the far edge, computed on grid times (sign coincides with the grid Boolean verdict, T01 section 3.3). Touches CG-3 (deadline `t_{k_up(a)} + B`, adopted).
+3. SCHED and INT grade beyond the window (time is their margin dimension); HOLD and RESP treat timing as a guard (G-HOLD-4 versus G-INT-2). SCHED grading needs an evaluation after the decision step (TG-4), with a proposed horizon (next tick or closing step). Touches T01 anchoring "evaluated once": the state is fixed at `k_d`, only the raw value of a violated instance is refined.
+4. Instance semantics is the reference; the strings of SCHED and RESP (widened antecedent) coincide with it at `k = k_d` and under (A1) and (A2), and are never weaker afterwards. Answers CG-2; keeps the widening of ADR-007.
+5. New reserved instance term `age` (time from an event to the decision step), not a `SignalId`, with a Boolean skeleton for tools.
+6. HOLD: refined form recommended (recency guard, margin on the latest held `bp`). COUNT: limit restated with the trigger `dispense` (same value; one instance per dispense). Touches CG-14 (persistence unchanged).
+7. INT decided at the dispense step (CG-7 resolved: look-back), `intake` kept in the disjunction (M1) although in a look-back window it can only come from an earlier dose.
+8. Measurement-count obligation not part of COUNT (CP2).
+9. `max_latency_<id>` is the event-time bound `B + step_ms` (CG-4 provisional structure of T01 section 4.6; WS01-T05 confirms).
+10. Robot obligation record (nine fields), static SCHED and INT, dynamic RESP; load-time feasibility checks F1 to F7.
+
+**What a reviewer should check hardest.** (a) The arithmetic and inputs of each golden case in `docs/formal/golden/templates.yaml` (especially G-COUNT-3 day-end window `(0, T_day]`, G-HOLD-3 both forms, G-RESP-3 max over the window, G-SCHED-3 graded lateness at 09:51, G-INT-1 and G-INT-2 with the `presence = 0.0` fixture sample). (b) Sign conventions and the guard rule (sections 1.3, 2.1, 2.5): `sigma >= 0` satisfied, ties satisfied, `-inf` guard versus clipped `-1`. (c) The instance versus string relation and the conditions (A1), (A2) in section 1.5, and the claim that B = 0 templates coincide exactly. (d) The robot-obligation formulas of section 5.3 (windows, deadlines, `created_at_ms`) and deviation 1 (INT static). (e) That the seven strings of the section 3.1 table parse under the EBNF (they do, by the script) and carry only `SignalId` values in `signals`. (f) Wording: no "ensures", no clinical claim, DISPENSE never intake.
