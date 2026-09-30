@@ -3,7 +3,7 @@ id: WS03-T03
 title: "Related work: medical CPS monitoring and guideline formalization"
 workstream: WS03-related-work
 owner: agent
-status: ready
+status: in_progress
 depends_on: []
 critical_path: false
 non_negotiable: false
@@ -132,3 +132,10 @@ Steps.
 - The thirteen checks under "Test" pass; the completion note pastes the output of checks 2 to 7 and 12 (if the tool exists).
 - `grep -c '^@' paper/refs/fragments/ws03-t03.bib` prints 31 and `grep -c 'verified *= *{true}' paper/refs/fragments/ws03-t03.bib` prints 0.
 - `grep -c 'Asbru' docs/related-work/guideline-formalization.md` prints a number greater than 0 and the file states that no novelty is claimed for guidelines as monitorable specifications.
+
+## Notes
+
+- Red state before implementation: check 1 exited 1 (files absent) and check 12 exited 2 (fragment absent).
+- The fragment header comment avoids the literal string of the `verified` field, so that check 3 counts exactly the 31 entries.
+- Table columns of the notes show the exact `author` string without LaTeX accents (Ničković); a row without author shows its title in the author column.
+- `status` left at `in_progress` on purpose: the orchestrator reviews and closes the task.
