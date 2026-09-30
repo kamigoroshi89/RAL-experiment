@@ -3,7 +3,7 @@ id: WS01-T01
 title: "Problem formulation: signals, sampling semantics, time, decomposition"
 workstream: WS01-formalization
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS00-T02"]
 critical_path: true
 non_negotiable: true
@@ -86,3 +86,52 @@ for w in W1 W2 W3 W4 W5 W6 W7 CP7 CP12; do grep -q "$w" "$f" || echo "missing: $
 ```
 
 All commands print nothing and the last exits 0.
+
+## Notes
+
+Completion note of the executing agent (status left `in_progress`; the orchestrator sets `done` after review).
+
+**Done when, run from the repository root.**
+
+| Command | Exit | Output |
+|---|---|---|
+| `test -f docs/formal/01-signals-sampling.md` | 0 | none |
+| heading loop (9 headings, `grep -qF`) | 0 | prints nothing |
+| signal loop (17 `SignalId`, `grep -qw`) | 0 | prints nothing |
+| `W1 ... W7 CP7 CP12` loop | 0 | prints nothing |
+| `! grep -nE 'T[O]DO\|T[B]D\|[?][?][?]\|lore[m]'` | 0 | prints nothing |
+
+**Test section checks 1 to 14.** Run with a script kept outside the repository (`/tmp/check_ws01_t01.py`); it failed on all checks before the document existed ("file missing", exit 1) and passes now (exit 0):
+
+```
+check  1 PASS  exact H2 list: 9 headings, exact order
+check  2 PASS  17 signals with symbol, kind, unit, producer, unavailability: 17 rows complete
+check  3 PASS  DISPENSE vs INTAKE and w: ok
+check  4 PASS  grid rules, ceiling, O[W,W], anchoring, alignment: ok
+check  5 PASS  multiplicity: ok
+check  6 PASS  undefined vs unavailable: ok
+check  7 PASS  two clocks, buffer, late policy, skew, replay: ok
+check  8 PASS  three latency terms: ok
+check  9 PASS  derived signals and day boundary: ok
+check 10 PASS  decomposition: ok
+check 11 PASS  worked examples W1-W7: 7 examples with inputs, expected, hand calculation
+check 12 PASS  parameters table: ok (numeric audit is manual)
+check 13 PASS  paper excerpt (0.5 page): words=492 []
+check 14 PASS  open points: ok
+check 15 PASS  glossary/claim hygiene: no hits
+```
+
+Check 12 (no clinical constants) was completed by hand: every numeric token of the document was listed and is a section number, an ADR or analisi reference, an example time with its millisecond conversion, an F0 value, or fixture arithmetic. Check 13: the 492 tokens include LaTeX command words; the excerpt has no operator tutorial.
+
+**Second calculation of W1 to W7.** Each worked example was recomputed by an independent simulation (`/tmp/w_verify.py`, not committed). Result: 22 assertions PASS, last line `ALL OK`. It includes the equality, on 300 random events, of the device-time and the binned form of `dose_count` (needs `T_s | T_day`).
+
+**Full suite.** `pytest -q`: `175 passed`, exit 0. `python3 tools/check_plan.py`: `check_plan: OK (103 tasks, 18 contracts, 31 findings)`, exit 0.
+
+**Deviations from the task text (all recorded in `docs/formal/01-signals-sampling.md` section 9).**
+
+1. W3: the pair 21:00:00.000 and 21:00:00.500 falls in two bins under the ceiling rule (steps 21:00 and 21:01), so it does not give "one impulse". The document uses 20:59:59.500 and 21:00:00.000 (same bin, `c_d` increment 2) and shows the original pair as a note (CG-8).
+2. Grid rule (Test check 4): "all registry time values must be integer multiples of `T_s`" would reject F0 itself (`cuff_inflation_min` 30000 ms, `scale_sys` 30000 ms and `D` = 30000 ms in W5 with `T_s` = 60000). The rule is applied to window parameters (operator offsets, look-backs, deadline offsets) only (CG-1).
+3. The scope artefact `docs/plan/workstreams/WS00-admin/outputs/WS00-T02.md` is missing; ADR-001 to ADR-003 were used as the scope source and nothing was reconstructed.
+4. Branch base is `master` (the repository has no `main`).
+
+**Contract gaps and tensions (no contract or ADR edited).** CP7, CP12 with proposed resolutions; CG-1 to CG-14 as listed in section 9, notably: the widened `O[W,W+T_s]` is redundant on the aligned grid under the ceiling rule and, evaluated without anchoring, makes the string stricter than the per-instance semantics (CG-2, W4 case b); `pending_until_ms` anchor reading (CG-3); event-time versus end-to-end latency bound (CG-4); no `EventKind` for `auth`, `presence`, `day_end`, `cuff_health` (CG-5); `hold_last` cannot carry `None` (CG-6); the look-back direction of phi_INT prevents `intake` from contributing at the dispense step (CG-7).
