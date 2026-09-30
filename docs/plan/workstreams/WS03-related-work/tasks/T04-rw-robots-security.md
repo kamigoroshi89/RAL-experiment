@@ -3,7 +3,7 @@ id: WS03-T04
 title: "Related work: assistive ward robots and wearable-device security"
 workstream: WS03-related-work
 owner: agent
-status: ready
+status: in_progress
 depends_on: []
 critical_path: false
 non_negotiable: false
@@ -124,3 +124,8 @@ Steps.
 - The thirteen checks under "Test" pass; the completion note pastes the output of checks 2 to 7 and 12 (if the tool exists).
 - `grep -c '^@' paper/refs/fragments/ws03-t04.bib` prints 22 and `grep -c 'verified *= *{true}' paper/refs/fragments/ws03-t04.bib` prints 0.
 - `docs/related-work/wearable-device-security.md` states the scope line of step 4 and `docs/related-work/assistive-ward-robots.md` lists Moxi as unresolved without any entry in the fragment.
+
+## Notes
+
+- Inventory transcribed literally. In the `topic` field of two entries the inventory wording was adapted so that it stays meaningful outside the table: row 6 says "extended version of `gombolay-care-coordination-conf`" instead of "of row 5", and row 12 says "analisi 3.5" instead of "analisi §3.5" (no section sign in the `.bib`, as in the WS03-T03 fragment).
+- Moxi: no entry; listed only under "Unresolved" in `docs/related-work/assistive-ward-robots.md`.
