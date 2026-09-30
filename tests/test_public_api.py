@@ -51,7 +51,9 @@ def parse_contract_table() -> dict[str, list[str]]:
 
 
 def contract_pairs() -> list[tuple[str, str]]:
-    return [(pkg, name) for pkg, names in parse_contract_table().items() for name in names]
+    return [
+        (pkg, name) for pkg, names in parse_contract_table().items() for name in names
+    ]
 
 
 def exported_objects() -> list[tuple[str, str, object]]:
@@ -89,7 +91,7 @@ def test_only_eight_package_directories() -> None:
 
 
 def test_stub_functions_raise_not_implemented_naming_owner() -> None:
-    for pkg, name, obj in exported_objects():
+    for _pkg, _name, obj in exported_objects():
         owner = getattr(obj, STUB_ATTR, None)
         if owner is None or not inspect.isfunction(obj):
             continue
@@ -98,7 +100,7 @@ def test_stub_functions_raise_not_implemented_naming_owner() -> None:
 
 
 def test_stub_classes_cannot_be_instantiated_silently() -> None:
-    for pkg, name, obj in exported_objects():
+    for _pkg, _name, obj in exported_objects():
         owner = getattr(obj, STUB_ATTR, None)
         if owner is None or not inspect.isclass(obj):
             continue
@@ -113,7 +115,9 @@ def test_every_stub_owner_is_a_real_task() -> None:
             continue
         match = re.fullmatch(r"WS(\d\d)-T(\d\d)", owner)
         assert match is not None, f"{pkg}.{name}: malformed owner {owner!r}"
-        pattern = f"docs/plan/workstreams/WS{match.group(1)}-*/tasks/T{match.group(2)}-*.md"
+        pattern = (
+            f"docs/plan/workstreams/WS{match.group(1)}-*/tasks/T{match.group(2)}-*.md"
+        )
         assert list(ROOT.glob(pattern)), f"{pkg}.{name}: no task file for {owner}"
 
 

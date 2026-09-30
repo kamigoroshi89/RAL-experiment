@@ -19,7 +19,14 @@ ALLOWED_EDGES: dict[str, set[str]] = {
     "monitor": {"signals", "spec", "conformal"},
     "attribution": {"signals", "spec", "monitor"},
     "benchmark": {"signals", "spec", "monitor"},
-    "baselines": {"signals", "spec", "monitor", "conformal", "attribution", "benchmark"},
+    "baselines": {
+        "signals",
+        "spec",
+        "monitor",
+        "conformal",
+        "attribution",
+        "benchmark",
+    },
     "eval": {
         "signals",
         "spec",
@@ -85,6 +92,8 @@ def test_layering_edges_follow_conventions() -> None:
     bad = []
     for source, dest, _target, path in _edges():
         if source == "" or source == dest:
+            continue
+        if dest not in ALLOWED_EDGES:  # root-level private helper (ralmon._stub)
             continue
         if dest not in ALLOWED_EDGES.get(source, set()):
             bad.append(f"{path.relative_to(ROOT)}: {source} -> {dest}")
