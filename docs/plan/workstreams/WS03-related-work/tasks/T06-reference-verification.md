@@ -3,7 +3,7 @@ id: WS03-T06
 title: Human verification of every reference marked unverified
 workstream: WS03-related-work
 owner: human
-status: blocked
+status: ready
 depends_on: ["WS03-T05"]
 critical_path: true
 non_negotiable: false

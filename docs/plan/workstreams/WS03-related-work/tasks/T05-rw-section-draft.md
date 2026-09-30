@@ -3,7 +3,7 @@ id: WS03-T05
 title: Related Work section draft (four paragraphs with difference sentences)
 workstream: WS03-related-work
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS03-T01", "WS03-T02", "WS03-T03", "WS03-T04"]
 critical_path: false
 non_negotiable: false
@@ -112,3 +112,11 @@ check 13: python3 -m pytest tests/tools -q -> 23 passed (exit 0)
 check 14: no output
 full suite: pytest -q -> 175 passed (exit 0); python3 tools/check_plan.py -> check_plan: OK (103 tasks, 18 contracts, 31 findings) (exit 0)
 ```
+
+### Post-task review
+
+- Produced: `paper/refs/references.bib` (the three fragments merged byte-identically, 85 entries, all `verified = {false}`; the fragments directory removed), `docs/related-work/related-work-draft.tex` (four paragraphs, four `%DIFF` sentences of 46, 57, 62 and 60 words, 494 words by the task's counting rule, no `\section`) and `docs/related-work/citation-selection.md` (25 cited keys, trim order, handover to WS03-T06). Orchestrator re-ran the "Done when" commands: `check_bib.py --schema` exit 0 (`entries=85`), default gate on `paper/` exit 0, `check_bib.py --src` on the draft exit 1 with `cited=25 unverified=25 missing=0` (expected), a script comparison of the 85 merged entries with the three fragments on `master` (identical), the full suite (175 tests) and `check_plan` (exit 0). Independent review: PASS, no BLOCKER; every statement about a cited work is supported by analisi, a note or a `%` hedge.
+- Deviations from the task text: header sentence of `references.bib` reworded (the "empty of entries" claim became false); STL not expanded in P1 (word cap); no FHIR or BPMN clause beyond one sentence, since WS01-T07 is still `blocked`. All judged acceptable.
+- Dependents: WS03-T06 (`owner: human`, reference verification) now has every dependency `done` and is `ready`. It expects the draft, the selection note and the Lindemann hedge, all present. No dependent assumption is broken.
+- Open MINOR (apply at the next touch of the draft, WS03-T06 or WS12-T06): (M1, should fix) draft line 9 "requires exchangeability within the calibration unit, here the patient episode" is imprecise; the frozen plan (WS01-T06 H1, WS05 README D6) has exchangeability across calibration episodes, never across time steps: write "requires exchangeability across calibration units (here, patient episodes)"; (M2) "these works ... reason offline" drops the "often" of analisi 3.4, and "Guideline formalisms such as Asbru express" extends a property analisi states only for Asbru: write "often offline" and "Asbru, for example, expresses"; (M3) the process-mining statement has no `%` source comment in the `.tex`; (M4) "we take FHIR PlanDefinition and CarePlan as the standard representation to target" is a commitment WS01-T07 (still `blocked`) may not honour, since it delivers only a partial mapping sketch and must not claim automatic translation; replace by "a partial mapping from standard representations such as FHIR PlanDefinition and CarePlan to our templates" once WS01-T07 closes; (M5) none of the six P3 keys is a specification-based monitor of a single device, so the P3 contrast has no cited antecedent (`bufo-icu-ventilation-stl` was cut for the cap; it carries a dagger); (M6) the P4 contrast with Heart-to-Heart (invariant-based) is left implicit; (M7) the six notes and the T02 to T05 task texts still point at the removed `paper/refs/fragments/` paths.
+- Risks: all 25 cited keys are unverified, so the draft cannot enter `paper/` and no key may appear in the submission until a human verifies them (WS03-T06, WS00-T08); the WS12 build gate will fail until then, by design. The contrast with Lindemann et al. still rests on analisi's recollection of the paper.
