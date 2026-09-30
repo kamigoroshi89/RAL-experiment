@@ -3,7 +3,7 @@ id: WS05-T01
 title: "Scaffolding of src/ralmon and toolchain"
 workstream: WS05-monitor
 owner: agent
-status: ready
+status: in_progress
 depends_on: []
 critical_path: true
 non_negotiable: false
