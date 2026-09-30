@@ -3,7 +3,7 @@ id: WS03-T01
 title: Bibliography infrastructure with verified flag and check tool
 workstream: WS03-related-work
 owner: agent
-status: ready
+status: done
 depends_on: []
 critical_path: false
 non_negotiable: false
@@ -92,3 +92,21 @@ Pytest tests in `tests/tools/test_check_bib.py` (CLI tests call `subprocess.run(
 - `python3 tools/check_bib.py` exits 0 (no citations under `paper` yet).
 - `ruff check tools/check_bib.py tests/tools` exits 0 when ruff is installed (state in the completion note if it is not).
 - `test -f paper/refs/references.bib && test -f docs/related-work/bib-conventions.md && grep -c '^## ' docs/related-work/bib-conventions.md` prints 4.
+
+## Notes
+
+- Implementation notes (worker run, status left `in_progress` for orchestrator review):
+  - The suite has 23 tests, not 22: `test_no_citations_in_src_is_not_an_error` was added to cover the stated rule "a `--src` that exists but contains no citations is not an error". All 23 pass.
+  - `INCOMPLETE` is applied to every entry with `verified = {true}` (cited or not, and also in `--schema` mode), following the literal wording of the spec and WS03-T06 test 5.
+  - `--all` scans sources only if `--src` is given explicitly (default `paper` applies to the default mode only); every entry counts as cited, so `cited=` is the number of distinct entry keys.
+  - Duplicate keys give one `DUPLICATE` line per key (location of the first repeated occurrence); findings are deduplicated per (kind, key).
+  - The tool has no shebang (ruff EXE001 on a non-executable file); it is run as `python3 tools/check_bib.py`.
+  - Fixtures under `tests/tools/fixtures/` are fake entries, marked `FIXTURE` in a header comment; `paper/refs/references.bib` has zero entries.
+
+### Post-task review
+
+- Produced: `tools/check_bib.py` (standard library only, exit 0/1/2, finding kinds UNVERIFIED, MISSING, INCOMPLETE, DUPLICATE, INVALID), 23 tests with 10 fixture files (each `.bib` marked FIXTURE), the header-only `paper/refs/references.bib` (zero entries) and `docs/related-work/bib-conventions.md` (four `##` headings). Orchestrator re-ran every "Done when" command and the full suite (175 tests): all exit 0. Independent review: PASS, no BLOCKER; no false negative found for the commands named in the frozen spec.
+- Deviations from the task text: 23 tests instead of 22; no shebang in `check_bib.py` (ruff EXE001); no `tests/tools/__init__.py`; `INCOMPLETE` applies to every `verified = {true}` entry, cited or not, also in `--schema` mode; `--all` scans sources only with an explicit `--src`. All judged acceptable.
+- Dependents: WS03-T05 stays `blocked` (waits on WS03-T02, T03 and T04 too). WS03-T02 to T04 use `--schema --bib <fragment>` and read `entries=N`; WS03-T05, WS03-T06 and WS12 read only the exit code and the `missing`/`cited` counts, so the finding order (kind then key, `MISSING` before `UNVERIFIED`) does not matter. No dependent assumption is broken.
+- Open MINOR: (1) the cite-command list follows the frozen spec, so `\Citep`, `\cites`, `\citenum`, `\footcite`, `\citetitle` and `\fullcite` are not counted as citations and an unverified key cited only that way would pass the gate; WS12 must use only listed commands, or the spec must be widened by an ADR (recommended before WS12); (2) a repeated `verified` field inside one entry takes the last value (BibTeX takes the first); (3) `--schema` with a nonexistent `--src` exits 2 although the spec says `--schema` ignores `--src`; (4) missing blank line before `## Key naming` in `bib-conventions.md`; (5) `mypy tools/check_bib.py` reports `error` return type `None` versus `Never` at line 354 (mypy covers only `src/ralmon`; fix with `-> NoReturn`); (6) the worker reported 11 fixture files, the diff has 10.
+- Risks: the gate is only as strong as its cite-command list; nobody may set `verified = {true}` without the evidence the WS03 README requires (human artefact WS00-T08 for PDFs).

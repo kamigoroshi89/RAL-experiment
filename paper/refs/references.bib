@@ -1,0 +1,11 @@
+% Bibliography of the RA-L paper (ADR-018).
+%
+% Purpose: single source of BibTeX entries cited by the paper. Entry schema, key naming and the
+% verification workflow are defined in docs/related-work/bib-conventions.md.
+%
+% Rule: the field `verified` defaults to {false}. Only a human sets it to {true}, after checking
+% the reference against DBLP, Google Scholar or the publisher page (WS03-T06). Agents never do.
+% The build gate is `python3 tools/check_bib.py`: it fails if a cited entry is unverified.
+%
+% This file is intentionally empty of entries. WS03-T05 merges the fragments from
+% paper/refs/fragments/ into it.
