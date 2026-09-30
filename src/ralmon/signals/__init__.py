@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from ralmon.signals._stubs import (
     DerivedSignal,
-    Event,
-    EventKind,
     ObservedTrace,
-    Sample,
     SignalId,
     default_derived_signals,
     event_to_sample,
@@ -16,6 +13,7 @@ from ralmon.signals._stubs import (
     impulses_on_grid,
     minutes,
 )
+from ralmon.signals.trace_types import Event, EventKind, Sample
 from ralmon.signals.units import (
     MS_PER_HOUR,
     MS_PER_MINUTE,

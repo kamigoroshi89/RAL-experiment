@@ -11,26 +11,6 @@ from typing import NoReturn
 from ralmon._stub import stub_class, stub_function
 
 
-@stub_class("WS04-T01")
-class BenchmarkDay: ...
-
-
-@stub_class("WS04-T01")
-class ObservedDay: ...
-
-
-@stub_class("WS04-T01")
-class LatentDay: ...
-
-
-@stub_class("WS04-T01")
-class GroundTruthEvent: ...
-
-
-@stub_class("WS04-T01")
-class InjectedClass: ...
-
-
 @stub_class("WS04-T02")
 class PriorSource: ...
 

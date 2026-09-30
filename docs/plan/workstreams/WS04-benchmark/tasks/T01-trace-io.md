@@ -71,3 +71,16 @@ Fixture numbers are arithmetic and fixture-only. Write these tests first; each m
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `python -c "from ralmon.benchmark import ObservedDay, LatentDay, BenchmarkDay, GroundTruthEvent, InjectedClass; from ralmon.signals import Sample, Event, EventKind"` exits 0.
 - `grep -c '^## ADR-' docs/plan/03-decisions.md` has increased by one and the new entry names `manifest.json`, `days/` and `truth/`.
+
+## Notes
+
+Implementation notes (worker, branch `ws04-t01-trace-io`; `status` left `in_progress` for the orchestrator to set after review).
+
+- Step 1: `ralmon.signals` exported only placeholders for `Sample`, `Event`, `EventKind`, so `src/ralmon/signals/trace_types.py` was created with the contract text verbatim and re-exported from `ralmon/signals/__init__.py`; the three placeholders were removed from `signals/_stubs.py`. WS05-T02 must import them and not redefine them. `SignalId` is still a placeholder; fixture signal names (`fx_a`, `fx_b`) are fixture-only.
+- The five day-schema placeholders were removed from `benchmark/_stubs.py`. `ralmon.benchmark.__all__` is unchanged (contract names only); the extra names (`Manifest`, readers, writers, errors, `TruthRecord`, `validate_day`, `file_sha256`, `observed_relpath`, `truth_relpath`) are public in `ralmon.benchmark.trace` only, because the public API table lists no other names.
+- Extra beyond the letter of the task, each small: `TruthRecord` (return type of `read_truth`), `file_sha256`, `observed_relpath`/`truth_relpath`, `SplitLeakError` is a subclass of `ManifestError`, the writer of observed days refuses payload keys containing `latent` or `ground_truth`, patient ids used as directory names must not contain a path separator.
+- Split leak: `patients` is a mapping, so a patient cannot appear twice in memory; `SplitLeakError` is raised for a duplicate patient key in `manifest.json` with differing entries and for a `split` given as a list of several splits.
+- The manifest is strict on top-level keys (unknown key is a `ManifestError`), which also enforces "no wall-clock field".
+- Sequences are read back as tuples; `ObservedDay(samples=[...])` built from lists would not compare equal to a read-back day.
+- Golden fixtures were first derived from the canonical rules by an independent throwaway script (not by the writer), then confirmed by `test_fixture_bytes_equal_writer_output`.
+- ADR-025 added (proposed, `[DA-CONFERMARE]`). No contract text changed.

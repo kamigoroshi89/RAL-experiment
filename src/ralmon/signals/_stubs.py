@@ -16,18 +16,6 @@ class SignalId: ...
 
 
 @stub_class("WS05-T02")
-class Sample: ...
-
-
-@stub_class("WS05-T02")
-class Event: ...
-
-
-@stub_class("WS05-T02")
-class EventKind: ...
-
-
-@stub_class("WS05-T02")
 class DerivedSignal: ...
 
 

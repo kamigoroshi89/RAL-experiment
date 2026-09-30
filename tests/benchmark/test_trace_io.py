@@ -16,8 +16,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-import ralmon.benchmark as benchmark
-import ralmon.signals as signals
+from ralmon import benchmark, signals
 from ralmon.benchmark import trace
 from ralmon.benchmark.trace import (
     BenchmarkDay,
@@ -94,7 +93,9 @@ def fixture_day() -> ObservedDay:
             {"step": "fx_step_1"},
             None,
         ),
-        Event(EventKind.ROBOT_TASK, 420_000, 420_000, "fx_robot", {"success": False}, 2),
+        Event(
+            EventKind.ROBOT_TASK, 420_000, 420_000, "fx_robot", {"success": False}, 2
+        ),
         Event(EventKind.DEVICE_ERROR, 480_000, 480_000, "fx_cuff", {"code": 3}, None),
     )
     return ObservedDay("p001", 0, 7, samples, events, "plan-fixture")
@@ -189,7 +190,9 @@ def regenerate_fixtures() -> None:
         root = Path(tmp)
         build_fixture_tree(root)
         FIXTURES.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(root / "days/p001/0.json", FIXTURES / "observed_day_minimal.json")
+        shutil.copyfile(
+            root / "days/p001/0.json", FIXTURES / "observed_day_minimal.json"
+        )
         shutil.copyfile(root / "truth/p001/0.json", FIXTURES / "truth_minimal.json")
         shutil.copyfile(root / "manifest.json", FIXTURES / "manifest_minimal.json")
 
@@ -338,7 +341,9 @@ def test_fixture_bytes_equal_writer_output(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def make_day(samples: tuple[Sample, ...], events: tuple[Event, ...] = ()) -> ObservedDay:
+def make_day(
+    samples: tuple[Sample, ...], events: tuple[Event, ...] = ()
+) -> ObservedDay:
     return ObservedDay("p001", 0, 0, samples, events, "plan-fixture")
 
 
@@ -383,7 +388,11 @@ def test_time_values_must_be_integer_ms(tmp_path: Path) -> None:
             write_truth(
                 tmp_path,
                 fixture_latent(),
-                (GroundTruthEvent(InjectedClass.C1, "fx", bad, None, False, None, None),),  # type: ignore[arg-type]
+                (
+                    GroundTruthEvent(
+                        InjectedClass.C1, "fx", bad, None, False, None, None
+                    ),
+                ),  # type: ignore[arg-type]
             )
         with pytest.raises(TraceTypeError):
             write_truth(
@@ -402,9 +411,7 @@ def test_non_finite_values_rejected() -> None:
             validate_day(make_day((Sample("fx_a", 0, 0, 1.0, None, bad),)))
         with pytest.raises(TraceTypeError):
             validate_day(
-                make_day(
-                    (), (Event(EventKind.DISPENSE, 0, 0, "d", {"x": bad}, None),)
-                )
+                make_day((), (Event(EventKind.DISPENSE, 0, 0, "d", {"x": bad}, None),))
             )
 
 
