@@ -1,0 +1,26 @@
+% WS03-T05 Related Work draft (four paragraphs, each closed by a difference sentence).
+% Body only, WS12-T06 inserts it under the Related Work section; all citations unverified until WS03-T06.
+%P1
+STL monitoring rests on robust semantics \cite{fainekos-pappas-robustness,donze-maler-robust}, time robustness \cite{donze-maler-robust}, and online monitoring with robustness intervals on partial traces \cite{deshmukh-online-monitoring-conf}. Three-valued semantics are treated in \cite{bauer-leucker-schallhart-three-valued}. Tools include RTAMT \cite{nickovic-yamaguchi-rtamt}, Breach \cite{breach-tool} and S-TaLiRo \cite{staliro-tool}; ROSRV \cite{huang-rosrv} addresses runtime verification (RV) for ROS.
+%DIFF
+Our contribution is not the monitoring algorithm: it is a class of specifications derived from patient care plans over sparse, irregular, mixed continuous and event signals, a severity normalized with clinical scales, and the coupling of the clinical specification with the tasks of the assistive robot.
+
+%P2
+Conformal prediction has been combined with STL runtime verification \cite{lindemann-conformal-stl}, the closest work to ours. Predictive monitoring \cite{bortolussi-neural-predictive-monitoring-conf} and conformal quantitative predictive monitoring of STL requirements \cite{cairoli-conformal-quantitative-monitoring} form a related line; robust conformal prediction addresses distribution shift \cite{zhao-robust-conformal-stl}. In robotics, conformal prediction has been used for safe planning \cite{lindemann-safe-planning}. Adaptive conformal inference \cite{gibbs-candes-adaptive-conformal} and conformal prediction beyond exchangeability \cite{barber-beyond-exchangeability} address non-exchangeable data. Coverage is marginal and requires exchangeability within the calibration unit, here the patient episode; we evaluate an adaptive variant under shift.
+% The Lindemann et al. sentence below is the binding sentence of conformal-predictive-monitoring.md (d). "Dense predicted trajectories"
+% is the wording of WS03-T02 built on analisi 3.2, which says only "traiettorie dense" (the word "predicted" is not in analisi).
+% It has not been checked against the paper; the check is mandatory in WS03-T06 and the sentence is corrected there if needed.
+%DIFF
+Unlike conformal STL runtime verification on dense predicted trajectories \cite{lindemann-conformal-stl}, our monitor works on sparse, event-driven samples; it separates formally the verdict on measured data from the predictive verdict, confining conformal prediction to the PENDING state; it ranks alerts by a clinically normalized severity over mixed units; and it attributes each alert to a cause, or abstains.
+
+%P3
+Medical cyber-physical systems are surveyed in \cite{lee-sokolsky-medical-cps}. The external validation of a proprietary sepsis prediction model \cite{wong-sepsis-external-validation} motivates specification-based approaches over opaque deterioration models, and alarm fatigue \cite{sendelbach-funk-alarm-fatigue} makes the alert load a design concern.
+% Source of the Asbru statement: analisi 3.4 (risk paragraph). Not checked against the Asbru paper; check in WS03-T06.
+Guideline formalisms such as Asbru \cite{shahar-miksch-johnson-asbru} express intentions and temporal conditions that can be monitored during execution, so we do not claim novelty for treating guidelines as monitorable specifications. Process mining in healthcare \cite{munoz-gama-process-mining-healthcare} works on recorded events of the clinical record, and we take FHIR PlanDefinition and CarePlan \cite{hl7-fhir-plandefinition} as the standard representation to target.
+%DIFF
+Unlike these works, which monitor a single device, controller or physiological property, or which reason offline over discrete events of the clinical record for decision support and retrospective conformance, we monitor adherence to a care process that spans several devices, the patient and an assistive robot, online, on continuous signals with quantitative robustness, and attribute a cause, or abstain, for each alert.
+
+%P4
+Healthcare robotics is overviewed in \cite{riek-healthcare-robotics}, and design-time verification of care robots has been studied \cite{dixon-webster-care-robot-verification}. Attacks on pacemakers and implantable defibrillators have been reported \cite{halperin-pacemaker-icd}, and detection with physical or physiological invariants has been proposed, for example Heart-to-Heart \cite{rostami-heart-to-heart}. Our claim excludes an informed attacker injecting plausible, cross-modally consistent data, which is undetectable by construction; such cases are reported as a result.
+%DIFF
+Unlike work on logistics, acceptance and design-time verification of care robots, we monitor adherence to the care plan at runtime, with the robot both executing specification-constrained tasks and providing evidence; and unlike cryptographic protection or active sensor probing, we detect integrity or plausibility violations against declared attack classes using cross-modal invariants derived from the clinical specification and an embodied witness.
