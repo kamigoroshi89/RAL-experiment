@@ -3,7 +3,7 @@ id: WS04-T01
 title: Trace schema dataclasses, serialisation and manifest
 workstream: WS04-benchmark
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS05-T01"]
 critical_path: true
 non_negotiable: false
@@ -84,3 +84,11 @@ Implementation notes (worker, branch `ws04-t01-trace-io`; `status` left `in_prog
 - Sequences are read back as tuples; `ObservedDay(samples=[...])` built from lists would not compare equal to a read-back day.
 - Golden fixtures were first derived from the canonical rules by an independent throwaway script (not by the writer), then confirmed by `test_fixture_bytes_equal_writer_output`.
 - ADR-025 added (proposed, `[DA-CONFERMARE]`). No contract text changed.
+
+### Post-task review
+
+- Produced: `src/ralmon/benchmark/trace.py` (day schema, `validate_day`, canonical JSON readers and writers, `Manifest`, four error classes), `src/ralmon/signals/trace_types.py` (`Sample`, `Event`, `EventKind`, contract-exact; WS05-T02 imports them, does not redefine), 17 tests, three hand-derived golden fixtures, ADR-025 (`proposed`, `[DA-CONFERMARE]`). Orchestrator re-ran every "Done when" command and the full suite (152 tests): all exit 0. Independent review: PASS, no BLOCKER.
+- Deviations from the task text: extra names in `trace.py` (`TruthRecord`, `file_sha256`, `observed_relpath`, `truth_relpath`) not exported by `ralmon.benchmark`; strict manifest key set; payload-key guard; `SplitLeakError` as a `ManifestError` subclass. All judged acceptable.
+- Dependents: WS04-T02, WS06-T01 and WS07-T03 stay `blocked` on other tasks. No dependent assumption is broken. WS06-T01 needs only `ObservedDay` and `BenchmarkDay` from the package root. WS08-T01 and WS07-T03 read through the WS04-T11 loader (`open_benchmark`, `BenchmarkReader`), whose export in `__all__` must be added to the contract table first (WS04-T11 already tests that export).
+- Open MINOR: (1) ADR-025 Consequences say WS06, WS07-T03 and WS08-T01 read "through `ralmon.benchmark.trace`", but `test_cross_package_imports_use_package_root_only` forbids submodule imports from `baselines` and `eval`, and `__all__` is frozen to the table; the sentence should say the WS04-T11 loader is the reader those packages use (fix when ADR-025 is confirmed). (2) Days are read back as tuples: generators (WS04-T02 onward) must compare with tuples. (3) `read_manifest` raises a raw `TypeError` on `"prior_provenance": null` (`trace.py` around line 837). (4) The payload-key guard is case-sensitive and write-only. (5) ruff 0.16.9 is unpinned and enables SIM and PLR by default; lint results can drift between machines (WS05-T01 concern). (6) Small gaps: no range check on `Sample.quality`, negative `day_index` accepted, no float `t_rx_ms` test on `Event`.
+- Risks: a new top-level manifest key needs an ADR (strict key set); WS04-T11 must place extra manifest information in `settings` or a patient entry.
