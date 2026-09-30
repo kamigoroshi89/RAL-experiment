@@ -3,7 +3,7 @@ id: WS03-T02
 title: "Related work: STL runtime monitoring, RV in robotics, conformal and predictive monitoring"
 workstream: WS03-related-work
 owner: agent
-status: ready
+status: in_progress
 depends_on: []
 critical_path: false
 non_negotiable: false
@@ -130,3 +130,96 @@ Steps.
 - The twelve checks under "Test" pass; the completion note pastes the output of checks 2 to 7 and 11 (if the tool exists).
 - `grep -c '^@' paper/refs/fragments/ws03-t02.bib` prints 32 and `grep -c 'verified *= *{true}' paper/refs/fragments/ws03-t02.bib` prints 0.
 - `docs/related-work/conformal-predictive-monitoring.md` contains the sentence of step 4(d) (or a shortened one that passes check 9).
+
+## Notes
+
+Completion note (WS03-T02, worker run on branch `ws03-t02-rw-stl-conformal`; status left `in_progress` for the orchestrator after review).
+
+Red state: before the artefacts existed, check 1 exited 1 and checks 2 to 11 failed with "No such file or directory" (no red commit, none prescribed).
+
+Inventory versus analisi: all 32 rows were compared with analisi 3.1, 3.2 and 2 (R1 weaknesses 2 and 10). Every author, year and venue matches analisi; no unsupported row. Points worth a look: rows 1, 20 and 21 come from the reviewer text (`analisi = {2 (...)}`), as the task prescribes; the accents in `Ni{\v c}kovi{\'c}` for row 1 follow the task table (analisi writes "Nickovic" in R1 weakness 2 and "Ni{\v c}kovi{\'c}" in 3.1); row 24 has no year because analisi gives none; the dagger of the Bortolussi line covers both versions (README rule). Counts: daggers 6 (3.1) + 4 (3.2) = 10, partial 3, titles 7.
+
+Real output of the checks (script kept outside the repository, `/tmp/t02_checks.sh`, run from the repository root):
+
+```
+== check1
+exit=0
+== check2
+32
+dups-above (none expected)
+== check3
+32
+0
+== check4
+32
+32
+32
+32
+32
+32
+== check5
+10
+3
+7
+== check6
+bortolussi-neural-predictive-monitoring-conf
+bortolussi-neural-predictive-monitoring-ext
+brim-stl-star
+cairoli-conformal-quantitative-monitoring
+ferrando-rosmonitoring
+huang-rosrv
+mehdipour-agm-robustness
+mehdipour-weighted-stl
+rodionova-time-robustness
+zhao-robust-conformal-stl
+== check7
+21
+11
+keysets equal
+== check8
+6
+## Scope
+## Reference table
+## What the reviewer expects
+## Difference
+## Risk and handling in the text
+## Unresolved and for human verification
+6
+## Scope
+## Reference table
+## What the reviewer expects
+## Difference
+## Risk and handling in the text
+## Unresolved and for human verification
+== check9
+sparse: 4
+event-driven: 4
+PENDING: 2
+measured: 4
+normali[sz]ed: 3
+mixed units: 3
+abstain: 1
+lindemann-conformal-stl: 2
+== check10
+RTAMT: 5
+Breach: 4
+S-TaLiRo: 4
+ROSRV: 3
+ROSMonitoring: 3
+complexity: 2
+WS05-T04: 1
+== check11
+entries=32 cited=0 unverified=0 missing=0 incomplete=0 duplicate=0 invalid=0 status=OK
+exit=0
+== check12
+grep exit=1 (1 = nothing found)
+```
+
+Full suite and plan checks:
+
+```
+pytest -q                     -> 175 passed in 0.87s (exit 0)
+python3 tools/check_plan.py   -> check_plan: OK (103 tasks, 18 contracts, 31 findings) (exit 0)
+python3 tools/check_bib.py --schema --bib paper/refs/fragments/ws03-t02.bib --bib paper/refs/fragments/ws03-t03.bib --bib paper/refs/fragments/ws03-t04.bib
+                              -> entries=85 ... duplicate=0 invalid=0 status=OK (exit 0; no key clash across fragments)
+```
