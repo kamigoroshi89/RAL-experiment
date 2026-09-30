@@ -3,7 +3,7 @@ id: WS01-T04
 title: Normalised robustness and lexicographic alert ranking
 workstream: WS01-formalization
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS01-T02"]
 critical_path: true
 non_negotiable: true
@@ -96,3 +96,31 @@ grep -c 'hand_calculation:' "$g"                             # prints 16
 for w in AGM "weighted STL" NEWS2 CP5 monoton; do grep -qi "$w" "$f" || echo "missing: $w"; done   # prints nothing
 ! grep -nE 'T[O]DO|T[B]D|[?][?][?]|lore[m]' "$f" "$g"        # exit 0
 ```
+
+## Notes
+
+Completion note of the worker run (status left at `in_progress` on purpose; the orchestrator sets `done` after review). Branch `ws01-t04-normalisation-ranking`, cut from `master` (the repository has no `main`).
+
+**Done when, run as written (real output).**
+
+| Command | Exit | Output |
+|---|---|---|
+| `test -f "$f" && test -f "$g"` | 0 | (nothing) |
+| headings loop over the ten `## n ...` headings | 0 | prints nothing (no "missing heading") |
+| `grep -c '^- id: N-' "$g"` | 0 | `10` |
+| `grep -c '^- id: RK-' "$g"` | 0 | `6` |
+| `grep -c 'hand_calculation:' "$g"` | 0 | `16` |
+| loop over `AGM`, `weighted STL`, `NEWS2`, `CP5`, `monoton` | 0 | prints nothing (no "missing:") |
+| `! grep -nE 'T[O]DO\|T[B]D\|[?][?][?]\|lore[m]' "$f" "$g"` | 0 | prints nothing |
+
+Against the empty state (before the artefacts existed) the same script printed `missing heading` for all ten headings, empty counts and `missing: AGM` (exit 1 on the first `test -f`), so the checks fail when the artefacts are absent.
+
+**Test section (items 1 to 13).** Verified by an independent script that is not committed (`/tmp/t04/verify.py`; final run: 196 checks PASS, 0 FAIL, exit 0). It covers: (1) exactly ten H2 headings, in order; (2) and (3) the definition, infinities, lemmas, the Hypothesis property list, error behaviour (keywords in section 2 and the reference implementation); (4) the three illustrative scales and no scale assigned outside the registry seed; (5) section 3 keywords; (6) the order key string, direction, RK-1 to RK-5 evaluated by two independent implementations of the sort; (7) section 5 markers and no year or author in section 5; (8) RK-6 including the reversed order under the forbidden width normalisation; (9) RK-4 A3 null order and exact reverse; (10) section 8 keywords; (11) golden file: 16 cases in the README key order, each with `hand_calculation`; every `normalise` case evaluated with exact rationals (`fractions.Fraction`, compared with the decimal literal) and with the float implementation; every f0 row compared with the F0 table parsed from the WS01 README; (12) section 9 size (60 to 260 word tokens, counting the framing paragraph and LaTeX commands; the excerpt body is about 150 words, roughly 0.15 page); (13) section 10 keywords. Mutation check: three deliberately wrong golden values (N-5, RK-4 A3 order, RK-6 forbidden value) were each reported as FAIL and then restored.
+
+Properties verified with fixed seeds (20260930 to 20260932, 7 and 11): range, sign preservation, monotonicity, scale equivariance (exact rationals over 20000 trials; float with integer-valued arguments exactly equal; general floats within 1e-12), identity zone, saturation, 1/s-Lipschitz, interval enclosure, dependence on the scale (Lemma 7), float monotonicity/saturation/sign away from underflow, the underflow caveat (`-5e-324 / 1e10` is `-0.0`), and, over 3000 random alert sets with ties on every component, permutation, totality, transitivity, no priority inversion, severity order inside a priority, determinism under shuffling, agreement of two independent sort implementations, plus stability, idempotence and the `K1` (VIOLATED first) lemma.
+
+**Full suite.** `pytest -q`: `175 passed in 0.86s`, exit 0. `python3 tools/check_plan.py`: `check_plan: OK (103 tasks, 18 contracts, 31 findings)`, exit 0.
+
+**Deviations from the task text.** (a) `status` is left `in_progress` and no other task status is touched (orchestrator override). (b) The golden file is a top-level YAML list (README format) and carries the F0 rows it uses as a header comment and as a per-case `fixture.f0_rows` mapping, not a `fixture_registry` section as `templates.yaml` does; the F0 table itself stays single-sourced in `templates.yaml`. (c) RK-2 has an extra input/expected pair (`alerts_swapped_times`, `order_swapped_times`): the specified case does not separate `sigma_norm` from `t_ms` (both favour `range@09:05`), so the same two values with the times swapped were added inside the same case; the case count is unchanged. (d) RK-5 and RK-6 use `resp` alerts (F0 fixture-only `priority_resp = 2`, `scale_resp = 20`), because a RANGE instance is decided at its measurement and has nothing pending to predict. (e) N-8 lists three further inputs that must raise (`scale = -20`, NaN, `+inf`); the task specified only `scale = 0`. (f) The task's "Passi" 6 says to set `status: done` and commit `WS01-T04: add normalised robustness and ranking`; not done, per the override; commits are `WS01-T04: add ranking golden file ...` and `WS01-T04: add normalised robustness and ranking document`, plus the one that adds this note.
+
+**Contract gaps and tensions (recorded, contracts untouched; details in section 10 of the document).** OP-1 range of `sigma_norm` (`[-1, 0)` for VIOLATED, `[-1, 1]` for PREDICTED_VIOLATION); OP-2 priority direction (1 = highest); OP-3 VIOLATED before PREDICTED_VIOLATION within a priority extends the `rank_alerts` docstring and needs an ADR proposed by WS01-T08 (until then the literal key is implemented, RK-5 records both); OP-4 severity of a predicted alert is the normalised point forecast (to be confirmed by WS01-T06 and T07); OP-6 the tie-break `(t_ms, instance_key)` is not in the docstring, ADR-024's structural type (priority and sigma_norm only) and the WS05-T03 test "stable on ties" need adjusting, and `Alert` has no patient identifier although `instance_key` is unique only within a care plan; OP-7 the contract names no error types; OP-8 `Alert` carries no raw sigma, so ablation A3 joins the verdict record on `instance_key`, and the null ranking removes priority together with normalisation (`ours-A3-prio` isolates normalisation); OP-9 frozen `sigma_tilde` versus the graded lateness of SCHED (TG-4 of `02-templates.md`); OP-10 with registry 0.1.0 HOLD cannot be normalised, COUNT cannot be ranked, RESP, SYS and INT neither.
