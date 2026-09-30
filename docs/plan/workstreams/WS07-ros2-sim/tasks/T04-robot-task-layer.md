@@ -78,3 +78,9 @@ Write these first. Fixture templates and values are test-only, not clinical; war
 - `grep -rnE "rtamt|run_offline|import Monitor" ros2/ralmon_sim/ralmon_sim/robot_tasks.py ros2/ralmon_sim/ralmon_sim/robot_task_node.py ros2/ralmon_sim/ralmon_sim/witness_stub.py` prints nothing.
 - `grep -c "witness_dispense" ros2/ralmon_sim/ralmon_sim/robot_tasks.py` prints at least 1 and `grep -c "measure_bp" ros2/ralmon_sim/ralmon_sim/robot_tasks.py` prints at least 1.
 - `grep -nE 'TO''DO|TB''D|lo''rem|[?][?][?]' ros2/ralmon_sim/config/robot_tasks.yaml` prints nothing.
+
+## Notes
+
+### Flag from the WS01-T02 review (orchestrator, 2026-09-30)
+
+Test `test_witness_obligation_from_int_instance` assumes a dynamic INT obligation created at each DISPENSE with the forward window [2_000_000, 2_010_000]. WS01-T02 (`docs/formal/02-templates.md` section 5.3, TG-8) makes the INT obligation static from the schedule with the backward window `[a - int_window, a]`. Kept `blocked` until ADR-026 (proposed, `[DA-CONFERMARE]`) is decided; then align this test.

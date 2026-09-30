@@ -77,3 +77,9 @@ Fixture-only: the shared fixture registry F0 of WS01 (copied in `tests/fixtures/
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `grep -cE '^## (Definition|Onset and end conventions|Injection records versus truth|Modes|Non-circularity tests|Residual circularity)$' docs/benchmark/ground-truth.md` prints `6`.
 - `grep -c 'def test_' tests/benchmark/test_ground_truth.py` prints at least 23.
+
+## Notes
+
+### Flag from the WS01-T02 review (orchestrator, 2026-09-30)
+
+Step 3 assumes instances "created at each DISPENSE, RESP and INT" (dynamic INT obligation). WS01-T02 (`docs/formal/02-templates.md` section 5.3, TG-8) makes the INT obligation static from the schedule with the backward window `[a - int_window, a]`, so the `pending_until_ms` rule for INT differs. Kept `blocked` until ADR-026 (proposed, `[DA-CONFERMARE]`) is decided; then align this step.
