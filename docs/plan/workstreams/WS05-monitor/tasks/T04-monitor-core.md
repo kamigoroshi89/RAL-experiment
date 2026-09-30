@@ -111,3 +111,7 @@ From the repository root, inside `.venv`:
 ### Flag from the WS01-T02 review (orchestrator, 2026-09-30)
 
 Test 5 expects an early SATISFIED (`decided_at_ms == 32_700_000`) for G-SCHED-1, while WS01-T01 section 3.7 and WS01-T02 section 1.5 decide at the decision step `k_d` (09:30, 34_200_000); the document nowhere permits early decision. WS01-T05 (three-valued semantics) rules on this ("at the latest at k_d" is the suggested reading). The INT obligation of this task is static and backward per WS01-T02 section 5.3 (ADR-026 proposed). No status change: this task was already `blocked`.
+
+### Flag from the WS01-T04 review (orchestrator, 2026-09-30)
+
+Step 8 defines `predicted_sigma_norm` as the conformal upper bound `sigma_hat + q` of a PREDICTED_VIOLATION, whereas `docs/formal/04-normalisation-ranking.md` section 4.6 and OP-4 propose the normalised point forecast (OP-15; WS01-T05, T06 and T07 decide). Kept `blocked`.

@@ -73,3 +73,9 @@ for w in "specification-level traceability" "cause-based taxonomy" complementary
          CP5 CP13 UNDETERMINED caused_by; do grep -q "$w" "$f" || echo "missing: $w"; done     # prints nothing
 ! grep -nE 'T[O]DO|T[B]D|[?][?][?]|lore[m]' "$f"                                            # exit 0
 ```
+
+## Notes
+
+### Flag from the WS01-T04 review (orchestrator, 2026-09-30)
+
+Line 40 states that for a VIOLATED alert `sigma_norm` is the upper end of the normalised interval at emission "(certified severity, T04)". `docs/formal/04-normalisation-ranking.md` (section 4.7, OP-9 and OP-14) does not state that rule; it offers "-1 with a guard marker, or a graded value". For a VIOLATED SCHED alert the upper-end rule gives -0.0333 (WS01-T08 R3), not -1. Reconcile in this task together with `predicted_sigma_norm` (OP-15) and record the outcome.

@@ -91,3 +91,9 @@ From the repository root, inside `.venv`:
 - `python -c "import ralmon.monitor as m, inspect; assert 'LatentDay' not in inspect.getsource(m)"` exits 0.
 - `! grep -rn "^from ralmon\.\(attribution\|baselines\|eval\|benchmark\)\|^import ralmon\.\(attribution\|baselines\|eval\|benchmark\)" src/ralmon/monitor` succeeds.
 - `python tools/check_plan.py` exits 0.
+
+## Notes
+
+### Flag from the WS01-T04 review (orchestrator, 2026-09-30)
+
+Tests 5 and 15 define `predicted_sigma_norm` as `sigma_hat + q` clipped to [-1, 1] (test 5 expects -0.3333), while `docs/formal/04-normalisation-ranking.md` section 4.6 and OP-4 propose the normalised point forecast and exclude any bound involving `q` (OP-15). WS01-T05, T06 and T07 decide; WS05-T07 test 3 says the rule of WS01-T07 wins. No status change: this task was already `blocked`.
