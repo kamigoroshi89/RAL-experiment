@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ralmon"
+version = "0.0.0"
+description = "Runtime safety monitor for clinical-pathway specifications (ROS-independent core)"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "hypothesis",
+    "ruff",
+    "mypy",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ralmon = ["py.typed"]
+
+[tool.ruff.lint]
+extend-select = ["I", "B"]
+
+[tool.mypy]
+strict = true
+files = ["src/ralmon"]
+
+[[tool.mypy.overrides]]
+# Placeholders are empty by design; the decorator of ralmon._stub supplies the failure.
+module = [
+    "ralmon.signals._stubs",
+    "ralmon.spec._stubs",
+    "ralmon.monitor._stubs",
+    "ralmon.conformal._stubs",
+    "ralmon.attribution._stubs",
+    "ralmon.benchmark._stubs",
+    "ralmon.baselines._stubs",
+    "ralmon.eval._stubs",
+]
+disable_error_code = ["empty-body"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

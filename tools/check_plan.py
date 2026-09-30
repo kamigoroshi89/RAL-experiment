@@ -14,7 +14,7 @@ Exit code 0 when every check passes, 1 otherwise. Checks:
  5. every contract of 02-interfaces.md is used by at least one task, and every cited anchor exists;
  6. B5, A4 and every WS01 task have non_negotiable: true;
  7. no placeholder tokens in the plan documents;
- 8. no file under src/.
+ 8. src/ is empty until WS05-T01 starts; afterwards it holds only the package ralmon.
 
 Additional consistency checks: task frontmatter matches workstreams/INDEX.md; task status is
 consistent with dependency status; file names match task ids; the progress checklist is coherent.
@@ -370,12 +370,26 @@ def check_placeholders() -> None:
                 err(f"{f.relative_to(ROOT)}:{i}: placeholder token")
 
 
-def check_src() -> None:
+def check_src(tasks: dict[str, dict]) -> None:
+    """Rule 8. Before WS05-T01 starts, src/ must be empty (bootstrap). From the moment
+    WS05-T01 is in progress or done, src/ may hold only the package ``ralmon`` (and its
+    ``*.egg-info``)."""
     src = ROOT / "src"
-    if src.exists():
+    if not src.exists():
+        return
+    status = tasks.get("WS05-T01", {}).get("status")
+    if status in ("in_progress", "done"):
+        stray = [
+            p for p in sorted(src.iterdir())
+            if p.name != "ralmon" and not p.name.endswith(".egg-info")
+        ]
+        if stray:
+            err(f"src/ may hold only the package 'ralmon'; found {stray[0].relative_to(ROOT)}")
+    else:
         files = [p for p in src.rglob("*") if p.is_file()]
         if files:
-            err(f"src/ must be empty during bootstrap; found {len(files)} file(s), e.g. {files[0].relative_to(ROOT)}")
+            err(f"src/ must be empty until WS05-T01 starts; found {len(files)} file(s), "
+                f"e.g. {files[0].relative_to(ROOT)}")
 
 
 def parse_index() -> dict[str, dict]:
@@ -453,7 +467,7 @@ def main() -> int:
     check_non_negotiable(tasks)
     check_index(tasks)
     check_placeholders()
-    check_src()
+    check_src(tasks)
     if errors:
         print(f"check_plan: FAILED with {len(errors)} problem(s)")
         for e in errors:

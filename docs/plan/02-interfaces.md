@@ -669,21 +669,23 @@ QoS: liveliness and deadline QoS on `/ralmon/heartbeat` and `/ralmon/samples`; t
 
 ## Package public API
 
-Version 0.1.1 (ADR-021: editorial additions of missing public names). Owner WS05. Consumers: all. Sources: analisi §9 item 5, `01-conventions.md` section 1.
+Version 0.2.0. Owner WS05. Consumers: all. Sources: analisi §9 item 5, `01-conventions.md` section 1. History: 0.1.1 (ADR-021, editorial additions of missing public names); 0.2.0 (ADR-024, API reconciliation: names that the contracts of WS05-T02 to WS05-T08 use; no signature changes).
 
 Consumers import only these names, from the package root.
 
 | Package | Public names |
 |---|---|
-| `ralmon.signals` | `SignalId`, `Sample`, `Event`, `EventKind`, `DerivedSignal`, `hold_last`, `minutes`, `hours`, `TimeMs`, `DurationMs` |
-| `ralmon.spec` | `Template`, `TemplateId`, `TemplateKind`, `TemplateInstance`, `CarePlan`, `RobustnessUnit`, `ParameterRegistry`, `RegistryEntry`, `PhysioBounds`, `normalise`, `rank_alerts`, `load_registry`, `load_templates` |
-| `ralmon.monitor` | `Monitor`, `MonitorConfig`, `VerdictRecord`, `VerdictState`, `RobustnessInterval`, `Rho`, `RhoKind`, `run_offline`, `Forecaster`, `Forecast` |
-| `ralmon.conformal` | `ConformalCalibrator`, `CalibrationEpisode`, `PredictedViolation`, `AlphaAllocation`, `SplitConformal`, `AdaptiveConformal` |
-| `ralmon.attribution` | `EvidenceVector` (and its parts), `AttributionRule`, `Attributor`, `AttributedCause`, `Alert`, `Explanation`, `Detection`, `HierarchicalRule` |
+| `ralmon.signals` | `SignalId`, `Sample`, `Event`, `EventKind`, `DerivedSignal`, `hold_last`, `minutes`, `hours`, `TimeMs`, `DurationMs`, `MS_PER_SECOND`, `MS_PER_MINUTE`, `MS_PER_HOUR`, `ObservedTrace`, `default_derived_signals`, `event_to_sample`, `impulses_on_grid` |
+| `ralmon.spec` | `Template`, `TemplateId`, `TemplateKind`, `TemplateInstance`, `CarePlan`, `RobustnessUnit`, `ParameterRegistry`, `RegistryEntry`, `PhysioBounds`, `normalise`, `rank_alerts`, `load_registry`, `load_templates`, `Rho`, `RhoKind`, `PlanVerifier`, `HmacSha256PlanVerifier`, `PlanIntegrityError`, `verify_plan` |
+| `ralmon.monitor` | `Monitor`, `MonitorConfig`, `VerdictRecord`, `VerdictState`, `RobustnessInterval`, `Rho`, `RhoKind`, `run_offline`, `Forecaster`, `Forecast`, `StreamingMonitor`, `PointEvaluator`, `make_point_evaluator`, `MonitorConfigError`, `PlanVersionError`, `build_calibration_episodes`, `StaleCalibratorError` |
+| `ralmon.conformal` | `ConformalCalibrator`, `CalibrationEpisode`, `PredictedViolation`, `AlphaAllocation`, `SplitConformal`, `AdaptiveConformal`, `BonferroniAllocation` |
+| `ralmon.attribution` | `EvidenceVector` (and its parts), `AttributionRule`, `Attributor`, `AttributedCause`, `Alert`, `Explanation`, `Detection`, `HierarchicalRule`, `RuleAttributor`, `EvidenceExtractor`, `extract_evidence` |
 | `ralmon.benchmark` | `PriorSource`, `LiteraturePriorSource`, `PatientParams`, `AdherenceParams`, `DeviceErrorModel`, `ParamProvenance`, `BenchmarkDay`, `ObservedDay`, `LatentDay`, `GroundTruthEvent`, `InjectedClass`, `generate_benchmark`, `load_benchmark` |
 | `ralmon.baselines` | `Detector`, `B1StaticThresholds`, `B2AnomalyDetection`, `B3PlainSTL`, `B4ConformalOnly`, `B5ConformalSTL` |
 | `ralmon.eval` | `MatchConfig`, `match_events`, `per_class_prf`, `detection_delay_ms`, `false_alarms_per_patient_day`, `empirical_coverage`, `expected_calibration_error`, `attribution_confusion`, `latency_percentiles`, `Matching`, `mean_interval_width`, `recall_vs_false_alarm_curve`, `accuracy_vs_coverage`, `severity_rank_agreement`, `OursDetector`, `ExperimentConfig`, `run_experiment` |
 
-Ownership note: trace-schema dataclasses are defined in `ralmon.benchmark` (owner WS04) but `Sample` and `Event` are re-exported from `ralmon.signals` because the monitor consumes them without depending on the generator. The single definition lives in `ralmon.signals`; `ralmon.benchmark` imports it. This keeps `benchmark` dependent only on `signals`.
+Ownership note: trace-schema dataclasses are defined in `ralmon.benchmark` (owner WS04) but `Sample` and `Event` are re-exported from `ralmon.signals` because the monitor consumes them without depending on the generator. The single definition lives in `ralmon.signals`; `ralmon.benchmark` imports it. ADR-024 widens the allowed dependencies of `benchmark` to `signals`, `spec` and `monitor` (package roots only).
 
 Note (ADR-021): `OursDetector` is the adapter of the proposed method to the Detector contract; it is owned by WS08-T01 and exported from `ralmon.eval`. `Forecaster` and `Forecast` are defined by the Forecaster contract and exported from `ralmon.monitor`.
+
+Note (ADR-024): `Rho` and `RhoKind` are defined once in `ralmon.spec` and re-exported by `ralmon.monitor`, so that `conformal` (which needs `Rho`) and `monitor` (which uses `conformal`) do not form a cycle. Monitor inputs are annotated with the structural `ObservedTrace` Protocol of `ralmon.signals`; `ObservedDay` satisfies it, so no caller signature changes. `rank_alerts` is typed structurally on `priority` and `sigma_norm`. Until its owner task is `done`, a public name is a placeholder that carries `__ralmon_stub_owner__` and fails loudly when used.

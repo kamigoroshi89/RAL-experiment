@@ -3,7 +3,7 @@ id: WS05-T01
 title: "Scaffolding of src/ralmon and toolchain"
 workstream: WS05-monitor
 owner: agent
-status: ready
+status: done
 depends_on: []
 critical_path: true
 non_negotiable: false
@@ -106,3 +106,13 @@ From the repository root, inside `.venv`:
 - `! grep -rn "NotImplementedError" src/ralmon --include=*.py | grep -v "src/ralmon/_stub.py"` succeeds.
 - `python tools/check_plan.py` exits 0 (task status coherence, the edited contract anchors and the adjusted `src/` rule).
 - When step 7 applied: `grep -c "^Version 0.2.0. Owner WS05. Consumers: all." docs/plan/02-interfaces.md` prints 1 and `grep -c "^## ADR-" docs/plan/03-decisions.md` has increased by one.
+
+## Notes
+
+### Post-task review
+
+- Produced: `pyproject.toml`, `src/ralmon/` (eight packages with `_stubs.py` placeholders and the five real time constants), `tests/` (135 tests), the `check_src` rule of `tools/check_plan.py`, ADR-024 (`proposed`, `[DA-CONFERMARE]`) and the Package public API table at version 0.2.0. Orchestrator re-ran every "Done when" command: all exit 0. Independent review: PASS, no BLOCKER.
+- Deviations from the task text: the contract was at 0.1.1 (ADR-021), not 0.1.0; `01-conventions.md` section 1 is not amended (outside "File toccati"), so its wording differs from the layering test until ADR-024 is confirmed; `load_benchmark` had no owner in the WS05 README readiness map and its placeholder is assigned to WS04-T11; `MS_PER_*` added to the `signals` row; the Ownership note in `02-interfaces.md` was reworded to match the ADR; `check_src` allows `src/ralmon` from `in_progress`.
+- Dependents: WS04-T01 (only open dependency was this task, now `ready`; its assumptions on placeholders and layout hold), WS05-T02 and WS06-T01 (still blocked on other tasks). No dependent assumption is broken.
+- Open MINOR: (1) no task owns the amendment of `01-conventions.md` section 1 once ADR-024 is confirmed; (2) stub tests do not enforce "no `pass` body" or "no `Any`", and two stub tests would pass vacuously once no stub remains; (3) `load_benchmark` owner (WS04-T11) is to be confirmed by WS04; no task text mentions it.
+- Risks: any task that adds a public name must edit the table in `02-interfaces.md` first, or `test_dunder_all_equals_contract_names` fails. Resolved versions at completion: Python 3.14.4, numpy 2.5.3, pyyaml 6.0.3, pytest 9.1.1, hypothesis 6.168.3, ruff 0.16.9, mypy 2.3.1.
