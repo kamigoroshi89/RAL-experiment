@@ -3,7 +3,7 @@ id: WS01-T07
 title: Alert tuple definition, traceability wording and FHIR/BPMN mapping sketch
 workstream: WS01-formalization
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS01-T04", "WS01-T06"]
 critical_path: false
 non_negotiable: true
@@ -79,3 +79,7 @@ for w in "specification-level traceability" "cause-based taxonomy" complementary
 ### Flag from the WS01-T04 review (orchestrator, 2026-09-30)
 
 Line 40 states that for a VIOLATED alert `sigma_norm` is the upper end of the normalised interval at emission "(certified severity, T04)". `docs/formal/04-normalisation-ranking.md` (section 4.7, OP-9 and OP-14) does not state that rule; it offers "-1 with a guard marker, or a graded value". For a VIOLATED SCHED alert the upper-end rule gives -0.0333 (WS01-T08 R3), not -1. Reconcile in this task together with `predicted_sigma_norm` (OP-15) and record the outcome.
+
+### Flag from the WS01-T06 review (orchestrator, 2026-10-01)
+
+Line 40 says that for a predicted alert `sigma_norm` is "the normalised forecast sigma-hat, which can be non-negative under the variant possible". `docs/formal/06-rho-proposition1.md` (sections 2.4 and 10 item 5) adopts the conformal bound `clip(sigma_hat + q, -1, 1)`, always negative for an emitted alert, and hands the `Alert.sigma_norm` field for predicted alerts and the display of a low rho on a "possible" alert to this task. Decide here together with OP-14 and OP-15 (see the two earlier flags).
