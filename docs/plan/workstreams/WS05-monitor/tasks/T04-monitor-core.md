@@ -115,3 +115,7 @@ Test 5 expects an early SATISFIED (`decided_at_ms == 32_700_000`) for G-SCHED-1,
 ### Flag from the WS01-T04 review (orchestrator, 2026-09-30)
 
 Step 8 defines `predicted_sigma_norm` as the conformal upper bound `sigma_hat + q` of a PREDICTED_VIOLATION, whereas `docs/formal/04-normalisation-ranking.md` section 4.6 and OP-4 propose the normalised point forecast (OP-15; WS01-T05, T06 and T07 decide). Kept `blocked`.
+
+### Flag from the WS01-T05 review (orchestrator, 2026-10-01)
+
+See OP-T05-16 to OP-T05-21 of `docs/formal/05-three-valued-semantics.md`. Step 1 (emission rule: records per active instance per step, stricter than "activation and state change"), step 4 (lateness decided from the two clocks, `t_rx > t_{k_up(t_dev)} + D`, independent of the `advance` calls; an arrival exactly at the watermark is on time), step 5 (the evaluator is per instance, not a whole-formula evaluator), test 5 (decision at `k_d`, not an early SATISFIED), tests 10 and 11 (the emitted state sequence repeats states and SCHED refinement records change the upper end every step; test 11 conflicts), test 20 (latency 1_890_000 and 10_890_000 match) and the replay of `verdicts.yaml` through a `StreamingMonitor` without forecaster (WS05-T02 defines no `channels_unavailable` input). Kept `blocked` until ADR-029 (proposed) is decided.

@@ -108,3 +108,9 @@ From the repository root, inside `.venv`:
 - `! grep -nEi "intrinsic explainab|orthogonal|ensures|tampering|subsystem" src/ralmon/attribution/render.py` succeeds.
 - `! grep -rn "^from ralmon\.\(baselines\|eval\|benchmark\)\|^import ralmon\.\(baselines\|eval\|benchmark\)" src/ralmon/attribution` succeeds.
 - `python tools/check_plan.py` exits 0.
+
+## Notes
+
+### Flag from the WS01-T05 review (orchestrator, 2026-10-01)
+
+Line 64 says `update` returns only new or changed alerts, but the SCHED refinement records of `docs/formal/05-three-valued-semantics.md` change the upper end of a VIOLATED-pending instance at every step (OP-T05-19). Reconcile with WS01-T07 (alert severity) after ADR-029 (proposed). Kept `blocked`.

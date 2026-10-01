@@ -97,3 +97,7 @@ From the repository root, inside `.venv`:
 ### Flag from the WS01-T04 review (orchestrator, 2026-09-30)
 
 Tests 5 and 15 define `predicted_sigma_norm` as `sigma_hat + q` clipped to [-1, 1] (test 5 expects -0.3333), while `docs/formal/04-normalisation-ranking.md` section 4.6 and OP-4 propose the normalised point forecast and exclude any bound involving `q` (OP-15). WS01-T05, T06 and T07 decide; WS05-T07 test 3 says the rule of WS01-T07 wins. No status change: this task was already `blocked`.
+
+### Flag from the WS01-T05 review (orchestrator, 2026-10-01)
+
+Lines 17, 46 and 77 and WS05 README D6 fix the prediction "once, at activation", whereas `docs/formal/05-three-valued-semantics.md` emits per-step records with designated prediction instants and puts the warning at 09:10 in V-PRED-1 (OP-T05-16). Kept `blocked` until ADR-029 (proposed) is decided.
