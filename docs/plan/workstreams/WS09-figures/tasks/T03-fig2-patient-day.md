@@ -84,3 +84,9 @@ Rendering and provenance:
 - `pytest tests/figures/test_fig2_patient_day.py -q` exits 0 and `ruff check tools/figures tests/figures` exits 0.
 - `python -m tools.figures fig2` exits 0; `test -f paper/figures/fig2_patient_day.pdf && test -f paper/figures/fig2_patient_day.data.json && test -f outputs/fig2/$(ls outputs/fig2 | head -1)/day_trace.json`.
 - `python -m tools.figures fig2 --check` exits 0.
+
+## Notes
+
+### Flag from the WS01-T05 review (orchestrator, 2026-10-01)
+
+Line 42 has a RESP fixture VIOLATED before the deadline, which Lemma 12 of `docs/formal/05-three-valued-semantics.md` allows only at the anchor step `k_a` (OP-T05-20). Kept `blocked`; check the fixture against the golden cases V-RESP-*.

@@ -83,3 +83,7 @@ Fixture-only: the shared fixture registry F0 of WS01 (copied in `tests/fixtures/
 ### Flag from the WS01-T02 review (orchestrator, 2026-09-30)
 
 Step 3 assumes instances "created at each DISPENSE, RESP and INT" (dynamic INT obligation). WS01-T02 (`docs/formal/02-templates.md` section 5.3, TG-8) makes the INT obligation static from the schedule with the backward window `[a - int_window, a]`, so the `pending_until_ms` rule for INT differs. Kept `blocked` until ADR-026 (proposed, `[DA-CONFERMARE]`) is decided; then align this step.
+
+### Flag from the WS01-T05 review (orchestrator, 2026-10-01)
+
+Line 44 expects "records without `pending_until_ms`" for RANGE, HOLD and COUNT-limit, whereas `docs/formal/05-three-valued-semantics.md` section 3.1 sets it on every record (OP-T05-17). Kept `blocked` until ADR-029 (proposed) is decided.
