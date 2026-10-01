@@ -1,0 +1,632 @@
+# Golden examples of the three-valued online semantics (WS01-T05).
+# 24 hand-computed verdict cases: V-SCHED-1 to V-SCHED-5b (6), V-PRED-1 to V-PRED-3 (3), V-RESP-1 to V-RESP-6 (6),
+# V-COUNT-1 to V-COUNT-4 (4), V-INT-1 to V-INT-3 (3), V-LATE-1 and V-LATE-2 (2).
+# Normative description: docs/formal/05-three-valued-semantics.md (section 9 says how WS05 loads this file).
+#
+# Every parameter below is a row of the fixture registry F0 (test-only, WS01 README; NOT the clinical registry,
+# never to be copied into configs/registry/hypertension.yaml). The rows used, copied from the F0 table
+# (name | value | unit | origin):
+#   sched_window                  | 1800000   | ms     | FIXTURE-ONLY
+#   scale_sched                   | 1800000   | ms     | analisi §4.2 example, 30 min
+#   delta1                        | 3600000   | ms     | analisi §4.6 window [08:00, 10:00] of a 07:00 dispense (illustrative, unverified)
+#   delta2                        | 10800000  | ms     | same source
+#   delta_resp                    | 10        | mmHg   | FIXTURE-ONLY
+#   bound_bp_lower, bound_bp_upper | 50, 250  | mmHg   | analisi §4.7 example (illustrative, unverified)
+#   scale_resp                    | 20        | mmHg   | FIXTURE-ONLY (same as scale_range)
+#   dose_max_24h                  | 2         | dose   | analisi §4.1 (illustrative, unverified)
+#   dose_min_day_end              | 2         | dose   | analisi §4.1 (illustrative, unverified)
+#   scale_count                   | 1         | dose   | analisi §4.2 example
+#   int_window                    | 300000    | ms     | analisi §4.1, 5 min (illustrative, unverified)
+#   scale_int                     | 300000    | ms     | FIXTURE-ONLY
+#   cuff_error_sd                 | 6         | mmHg   | FIXTURE-ONLY (Gaussian error model of rho, T06)
+#   step_ms (T_s)                 | 60000     | ms     | FIXTURE-ONLY monitor configuration
+#   reorder_delay_ms (D)          | 0; 30000 in the reorder examples | ms | FIXTURE-ONLY monitor configuration
+# FIXTURE-ONLY means: chosen for hand arithmetic, no clinical meaning, no claim about any device or guideline.
+# Values that look like clinical numbers are illustrative and unverified (analisi §4.1, §4.6, §4.7, ADR-020).
+#
+# Times are integer milliseconds since the start of the patient-day trace; the hh:mm label is in a comment
+# (t_ms = (60 * hh + mm) * 60000). Infinite values are written -.inf and .inf. The grid is t_k = k * 60000,
+# k = 0..1440; an event or sample with device time t is visible at step ceil(t / 60000) (ceiling rule, T01).
+#
+# Convention of this file. A case describes the record rec(i, k) of ONE template instance at ONE finalised step k:
+#   eval_at_ms     is the monitor time handed to advance(t); the finalised step is k = floor((t - D) / T_s)
+#                  (D = reorder_delay_ms), so expected.t_eval_ms = k * T_s (equal to eval_at_ms when D = 0);
+#   inputs         lists everything the monitor received (README format) and nothing from the latent trace;
+#                  inputs.instance names the instance under test (template and anchor);
+#   expected       has the fields of VerdictRecord that this task defines: state, sigma_interval,
+#                  sigma_norm_interval, rho (null or kind and value), decided_at_ms, pending_until_ms, and t_eval_ms.
+#                  Raw intervals are in the native unit (expected.unit); normalised intervals use the F0 scale of the
+#                  template, clip(x / s, -1, 1), with +-inf mapped to +-1 (WS01-T04).
+# Keys added by this file (not in the README format):
+#   fixture.f0_rows               the F0 rows the case uses (name: value);
+#   inputs.instance               {template, anchor_ms}; templates: sched, resp, count_limit, count_end, int;
+#   inputs.channels_unavailable   list of {signal, from_ms, to_ms} (both ends included): steps at which the channel
+#                                 of the robot is unavailable (T01 section 3.5); an unlisted robot channel is available;
+#   inputs.forecast, inputs.calibrator   (V-PRED-1) the forecast path and the calibrator fixture;
+#   inputs.previous_records       (V-PRED-2, V-PRED-3) the case whose run must precede this one (a replay);
+#   expected.unit                 the unit of the raw interval;
+#   expected.guard_failed         the marker of the margin and guard rule (T02 section 2.1), set when the value at the
+#                                 decision step is -inf;
+#   expected.marker               the auxiliary marker of an undecidable record (section 3.5 of the document);
+#   expected.tie_rule             true when the state follows from the tie rule of section 3.4 of the document;
+#   expected.previous_state, expected.false_predictive_alarm, expected.emitted_at_monitor_ms,
+#   expected.late_inputs          annotations of the V-PRED and V-LATE cases;
+#   expected.alternative_not_adopted   (V-LATE-2 only) the value that the task text gave and the document does not adopt.
+# State names are the values of VerdictState (pending, predicted_violation, violated, satisfied); rho kinds are the
+# values of RhoKind. The guarantee and assumptions strings of Rho belong to WS01-T06 and are not given here.
+
+- id: V-SCHED-1
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture (analisi §4.7 step 2: unknown future replaced by a bound); tick of G-SCHED-1"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+  eval_at_ms: 33000000   # 09:10, step 550
+  expected:
+    t_eval_ms: 33000000
+    state: pending
+    unit: ms
+    sigma_interval: [-.inf, 1140000.0]
+    sigma_norm_interval: [-1.0, 0.6333333333333333]
+    rho: null
+    decided_at_ms: null
+    pending_until_ms: 34200000   # 09:30
+  hand_calculation: "Tick 32400000 (09:00): k_a = 32400000 / 60000 = 540; w = sched_window / step_ms = 1800000 / 60000 = 30 steps; k_d = 540 + 30 = 570, t_d = 34200000 (09:30) = pending_until_ms. Evaluation step k = 550 (33000000, 09:10); steps <= 550 are known and carry no measurement, so lo = -inf (no measurement may ever come before the horizon). The earliest measurement that can still be accepted is visible at step 551 (09:11), one step after the evaluation step; its slack is t_570 - t_551 = 19 * 60000 = 1140000 ms, so hi = (a + W) - (t + T_s) = 09:30 - 09:11 = 19 min = 1140000 ms. Normalised: lo = -inf maps to -1; hi = 1140000 / 1800000 = 19 / 30 = 0.6333333333333333. hi >= 0 and lo <= 0, so the state is PENDING; decided_at_ms is None."
+
+- id: V-SCHED-2
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; measurement of G-SCHED-1 (early satisfaction before the deadline)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+      - {kind: measurement, t_device_ms: 32700000, t_rx_ms: 32700000, source: cuff, payload: {}, seq: null}   # 09:05 measurement event
+  eval_at_ms: 32700000   # 09:05, step 545
+  expected:
+    t_eval_ms: 32700000
+    state: satisfied
+    unit: ms
+    sigma_interval: [1500000.0, 1500000.0]
+    sigma_norm_interval: [0.8333333333333334, 0.8333333333333334]
+    rho: null
+    decided_at_ms: 32700000   # 09:05
+    pending_until_ms: 34200000   # 09:30
+  hand_calculation: "k_a = 540, k_d = 570, t_d = 34200000 as in V-SCHED-1. The measurement has device time 32700000, visible at step 32700000 / 60000 = 545 (09:05). At the evaluation step 545 it is known: its slack is t_570 - t_545 = 25 * 60000 = 1500000 ms, so lo = 1500000. Any measurement accepted later is visible at a step >= 546 and has slack <= 24 * 60000 = 1440000 < 1500000, so the maximum cannot grow: hi = max(1500000, 1440000) = 1500000. The interval is the point [1500000, 1500000] (25 min). lo > 0: SATISFIED (contract rule 1) at the step 545, 25 min before the deadline; decided_at_ms = 32700000. Normalised 1500000 / 1800000 = 5 / 6 = 0.8333333333333334 for both ends. Same value as G-SCHED-1 of templates.yaml, which evaluates at k_d."
+
+- id: V-SCHED-3
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture (deadline reached with no measurement; analisi §4.7 step 2)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+  eval_at_ms: 34200000   # 09:30, step 570 = k_d
+  expected:
+    t_eval_ms: 34200000
+    state: violated
+    unit: ms
+    sigma_interval: [-.inf, -60000.0]
+    sigma_norm_interval: [-1.0, -0.03333333333333333]
+    rho: {kind: deterministic, value: 1.0}
+    decided_at_ms: 34200000   # 09:30
+    pending_until_ms: 34200000
+    guard_failed: no_measurement_after_tick
+  hand_calculation: "k_a = 540, k_d = 570 (34200000, 09:30). At the evaluation step k = 570 all steps of the decision window [540, 570] are known and carry no measurement: lo = -inf. A measurement can still be accepted at step 571 (09:31) or later; its slack is t_570 - t_571 = -60000 ms, so hi = (a + W) - (t + T_s) = 09:30 - 09:31 = -60000 ms (negative: a late measurement). hi < 0: VIOLATED (contract rule 1) at k = 570, decided_at_ms = 34200000. The value at the decision step is -inf (guard no_measurement_after_tick, T02 section 2.1); the finite hi grades the lateness that a later measurement can still have. Normalised: -inf maps to -1; -60000 / 1800000 = -0.03333333333333333. Rho is DETERMINISTIC 1.0: the violation is the absence of an event in the log (analisi §4.4, third row)."
+
+- id: V-SCHED-4
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; tie at the deadline (CP3, G-SCHED-2 of templates.yaml)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+      - {kind: measurement, t_device_ms: 34200000, t_rx_ms: 34200000, source: cuff, payload: {}, seq: null}   # 09:30 measurement event, exactly on the deadline
+  eval_at_ms: 34200000   # 09:30, step 570 = k_d
+  expected:
+    t_eval_ms: 34200000
+    state: satisfied
+    unit: ms
+    sigma_interval: [0.0, 0.0]
+    sigma_norm_interval: [0.0, 0.0]
+    rho: null
+    decided_at_ms: 34200000   # 09:30
+    pending_until_ms: 34200000
+    tie_rule: true
+  hand_calculation: "k_a = 540, k_d = 570. The measurement has device time 34200000, visible at step 34200000 / 60000 = 570 = k_d (an event exactly on a grid time is visible at that step). Its slack is t_570 - t_570 = 0 ms, so lo = 0. A measurement accepted later is visible at a step >= 571 and has slack <= -60000, so hi = max(0, -60000) = 0. The interval is the point [0, 0]. Contract rule 1 gives neither VIOLATED (hi < 0 is false) nor SATISFIED (lo > 0 is false), so the rule alone leaves PENDING although no unknown can change the value. The instance is closed (k = k_d: no unknown step remains in the decision window) and the interval is the point 0, so the tie rule of the document (section 3.4) applies: the atoms are non-strict, equality satisfies, the Boolean value is satisfied. SATISFIED at 34200000. Normalised 0 / 1800000 = 0."
+
+- id: V-SCHED-5a
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; the same instance as V-SCHED-3, ten minutes after the deadline"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+  eval_at_ms: 34800000   # 09:40, step 580
+  expected:
+    t_eval_ms: 34800000
+    state: violated
+    unit: ms
+    sigma_interval: [-.inf, -660000.0]
+    sigma_norm_interval: [-1.0, -0.36666666666666664]
+    rho: {kind: deterministic, value: 1.0}
+    decided_at_ms: 34200000   # 09:30
+    pending_until_ms: 34200000
+    guard_failed: no_measurement_after_tick
+  hand_calculation: "As V-SCHED-3, evaluated at k = 580 (09:40). Steps <= 580 are known and carry no measurement: lo = -inf. The earliest measurement that can still be accepted is visible at step 581 (09:41): slack t_570 - t_581 = -11 * 60000 = -660000 ms, so hi = -660000 (the bound on the lateness has grown by ten steps; the interval is contained in that of V-SCHED-3, stability). hi < 0: VIOLATED. decided_at_ms stays 34200000, the first step with hi < 0 (the state of an absorbing verdict does not move). Normalised: -1 and -660000 / 1800000 = -0.36666666666666664."
+
+- id: V-SCHED-5b
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; G-SCHED-3 of templates.yaml (graded lateness, 21 min late)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+      - {kind: measurement, t_device_ms: 35460000, t_rx_ms: 35460000, source: cuff, payload: {}, seq: null}   # 09:51 measurement event, 21 min after the deadline
+  eval_at_ms: 35460000   # 09:51, step 591
+  expected:
+    t_eval_ms: 35460000
+    state: violated
+    unit: ms
+    sigma_interval: [-1260000.0, -1260000.0]
+    sigma_norm_interval: [-0.7, -0.7]
+    rho: {kind: deterministic, value: 1.0}
+    decided_at_ms: 34200000   # 09:30
+    pending_until_ms: 34200000
+    guard_failed: no_measurement_after_tick
+  hand_calculation: "k_a = 540, k_d = 570. The measurement has device time 35460000, visible at step 591 (09:51). At k = 591 it is known: slack t_570 - t_591 = -21 * 60000 = -1260000 ms, so lo = -1260000. A later measurement has a smaller slack, so hi = max(-1260000, slack of step 592) = -1260000: the point [-1260000, -1260000], contained in the interval of V-SCHED-5a. hi < 0: VIOLATED; decided_at_ms = 34200000 because the verdict was already definitive at step 570 (the value at the decision step is -inf: guard no_measurement_after_tick); the late measurement only refines the raw value (graded lateness, T02 section 2.3). Normalised -1260000 / 1800000 = -0.7."
+
+- id: V-PRED-1
+  contract: ["02-interfaces.md#verdict", "02-interfaces.md#conformal-calibrator"]
+  source: "plan fixture; V-SCHED-1 with a forecast of the robot arrival (analisi §4.3: care-delivery deadline); calibrator fixture C-1 and C-2 of the WS01-T06 task text"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+    forecast:
+      made_at_ms: 33000000   # 09:10, the designated prediction instant
+      target: "measurement of the instance sched@32400000"
+      predicted_t_device_ms: 34800000   # 09:40: forecast arrival of the robot
+      predicted_sigma_raw_ms: -600000.0   # slack t_570 - t_580
+      scale_ms: 1800000
+      sigma_hat: -0.3333333333333333
+    calibrator:
+      source: "fixture C-1 of the WS01-T06 task text (the document 06 does not exist yet)"
+      scores: [-0.30, -0.22, -0.18, -0.12, -0.05, 0.00, 0.04, 0.09, 0.15]
+      n: 9
+      alpha: 0.2
+      variant: likely
+      q: 0.09   # ceil((n + 1)(1 - alpha)) = 8th smallest score
+  eval_at_ms: 33000000   # 09:10, step 550
+  expected:
+    t_eval_ms: 33000000
+    state: predicted_violation
+    unit: ms
+    sigma_interval: [-.inf, 1140000.0]
+    sigma_norm_interval: [-1.0, 0.6333333333333333]
+    rho: {kind: predicted, value: 0.9, alpha: 0.2, alpha_star: 0.1}
+    decided_at_ms: null
+    pending_until_ms: 34200000   # 09:30
+  hand_calculation: "The measured prefix is that of V-SCHED-1: interval [-inf, 1140000] ms, normalised (-1, 0.6333), state PENDING; the forecast does not change a single field of the interval. Forecast: the robot is expected to measure at 09:40, a device time on the grid, step 580, whose slack is t_570 - t_580 = -10 * 60000 = -600000 ms; sigma_hat = -600000 / 1800000 = -0.3333333333333333 (normalised units). Variant likely, alpha = 0.2, n = 9: the upper quantile is the ceil((9 + 1)(1 - 0.2)) = 8th smallest score = 0.09. sigma_hat + q = -0.3333 + 0.09 = -0.2433 < 0, so PREDICTED_VIOLATION is emitted (only while PENDING, contract rule 2). alpha* = inf{alpha : sigma_hat + q_{1-alpha} < 0}: q < 1/3 holds for every rank r <= 9 (all nine scores are below 1/3), so m = #{R_i < -sigma_hat} = 9 and alpha* = (n + 1 - m) / (n + 1) = (9 + 1 - 9) / 10 = 0.1, rho = 1 - alpha* = 0.9 (kind PREDICTED, Rho.alpha = the configured level 0.2). decided_at_ms is None; pending_until_ms is the deadline 34200000."
+
+- id: V-PRED-2
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; continuation of V-PRED-1 (false predictive alarm)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+      - {kind: measurement, t_device_ms: 33900000, t_rx_ms: 33900000, source: cuff, payload: {}, seq: null}   # 09:25 measurement event (the forecast said 09:40)
+    previous_records: ["V-PRED-1"]
+  eval_at_ms: 33900000   # 09:25, step 565
+  expected:
+    t_eval_ms: 33900000
+    state: satisfied
+    unit: ms
+    sigma_interval: [300000.0, 300000.0]
+    sigma_norm_interval: [0.16666666666666666, 0.16666666666666666]
+    rho: null
+    decided_at_ms: 33900000   # 09:25
+    pending_until_ms: 34200000
+    previous_state: predicted_violation
+    false_predictive_alarm: true
+  hand_calculation: "The record of V-PRED-1 (PREDICTED_VIOLATION at 09:10) is sticky until a definitive verdict. A measurement arrives with device time 33900000 (09:25), visible at step 565: slack t_570 - t_565 = 5 * 60000 = 300000 ms; later measurements have a smaller slack, so the interval is the point [300000, 300000]. lo > 0: SATISFIED at step 565 (transition PREDICTED_VIOLATION -> SATISFIED of the contract); the earlier warning is counted as a false predictive alarm. rho is None for a SATISFIED record. Normalised 300000 / 1800000 = 1/6 = 0.16666666666666666."
+
+- id: V-PRED-3
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; continuation of V-PRED-1 (the warning is confirmed by the measured prefix)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+    previous_records: ["V-PRED-1"]
+  eval_at_ms: 34200000   # 09:30, step 570 = k_d
+  expected:
+    t_eval_ms: 34200000
+    state: violated
+    unit: ms
+    sigma_interval: [-.inf, -60000.0]
+    sigma_norm_interval: [-1.0, -0.03333333333333333]
+    rho: {kind: deterministic, value: 1.0}
+    decided_at_ms: 34200000   # 09:30
+    pending_until_ms: 34200000
+    previous_state: predicted_violation
+    guard_failed: no_measurement_after_tick
+  hand_calculation: "As V-SCHED-3: at step 570 no measurement is known and hi = -60000 < 0, so the record moves from PREDICTED_VIOLATION to VIOLATED (contract transition). The record is the same as that of V-SCHED-3: the definitive verdict comes from the measured prefix only; the earlier prediction leaves no trace in state, interval, rho or decided_at_ms (the predicted rho of V-PRED-1 is replaced by the DETERMINISTIC one of the definitive record). Normalised -1 and -0.03333333333333333."
+
+- id: V-RESP-1
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; analisi §4.6 window [08:00, 10:00] of a 07:00 dispense; pre-dose measurement of G-RESP-1"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {delta1: 3600000, delta2: 10800000, delta_resp: 10, bound_bp_lower: 50, bound_bp_upper: 250, scale_resp: 20}}
+  inputs:
+    instance: {template: resp, anchor_ms: 25200000}
+    samples:
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 150.0, seq: null, quality: null}   # 06:55 bp 150 (pre-dose)
+    events:
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+  eval_at_ms: 27000000   # 07:30, step 450
+  expected:
+    t_eval_ms: 27000000
+    state: pending
+    unit: mmHg
+    sigma_interval: [-.inf, 90.0]
+    sigma_norm_interval: [-1.0, 1.0]
+    rho: null
+    decided_at_ms: null
+    pending_until_ms: 36000000   # 10:00
+  hand_calculation: "Dispense 25200000 (07:00): k_a = 420. The latest bp sample with device time <= 25200000 is that of 06:55, so pre_i = 150 (captured once). k_d = 420 + delta2 / 60000 = 420 + 180 = 600 (36000000, 10:00) = pending_until_ms. The window of the body is [k_d - (delta2 - delta1) / 60000, k_d] = [600 - 120, 600] = [480, 600] = [08:00, 10:00]. Evaluation step 450 (07:30): every step of the window is unknown. lo = -inf: the unknown steps may carry no measurement, and a guard (a measurement in the window) then fails. hi: a measurement in the window may carry any pressure in [bound_bp_lower, bound_bp_upper] = [50, 250]; the largest drop is pre_i - 50 = 100 and the margin is 100 - delta_resp = 90 mmHg, so hi = 150 - 50 - 10 = 90. Normalised: lo = -inf maps to -1; 90 / 20 = 4.5 clipped to 1. hi >= 0 and lo <= 0: PENDING (the response is not decidable before the window opens unless pre_i < 50 + 10)."
+
+- id: V-RESP-2
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; measurement of G-RESP-2 (drop 5)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {delta1: 3600000, delta2: 10800000, delta_resp: 10, bound_bp_lower: 50, bound_bp_upper: 250, scale_resp: 20}}
+  inputs:
+    instance: {template: resp, anchor_ms: 25200000}
+    samples:
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 150.0, seq: null, quality: null}   # 06:55 bp 150 (pre-dose)
+      - {signal: bp, t_device_ms: 30600000, t_rx_ms: 30600000, value: 145.0, seq: null, quality: null}   # 08:30 bp 145
+    events:
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: measurement, t_device_ms: 30600000, t_rx_ms: 30600000, source: cuff, payload: {}, seq: null}   # 08:30 measurement event
+  eval_at_ms: 30600000   # 08:30, step 510
+  expected:
+    t_eval_ms: 30600000
+    state: pending
+    unit: mmHg
+    sigma_interval: [-5.0, 90.0]
+    sigma_norm_interval: [-0.25, 1.0]
+    rho: null
+    decided_at_ms: null
+    pending_until_ms: 36000000   # 10:00
+  hand_calculation: "pre_i = 150, window [480, 600], k_d = 600 as in V-RESP-1. The measurement at 30600000 is visible at step 510 (08:30), inside the window; bp_510 = 145, drop r = 150 - 145 = 5, margin 5 - 10 = -5 mmHg, so lo = -5 (the maximum over the known measurements; unknown steps may carry none). Steps 511..600 are still unknown; one of them may carry a measurement of 50 mmHg: margin 150 - 50 - 10 = 90, so hi = max(-5, 90) = 90. Normalised: -5 / 20 = -0.25; 90 / 20 = 4.5 clipped to 1. lo <= 0 <= hi: PENDING."
+
+- id: V-RESP-3
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; G-RESP-1 of templates.yaml (early satisfaction before the window closes)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {delta1: 3600000, delta2: 10800000, delta_resp: 10, bound_bp_lower: 50, bound_bp_upper: 250, scale_resp: 20}}
+  inputs:
+    instance: {template: resp, anchor_ms: 25200000}
+    samples:
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 150.0, seq: null, quality: null}   # 06:55 bp 150 (pre-dose)
+      - {signal: bp, t_device_ms: 30600000, t_rx_ms: 30600000, value: 132.0, seq: null, quality: null}   # 08:30 bp 132
+    events:
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: measurement, t_device_ms: 30600000, t_rx_ms: 30600000, source: cuff, payload: {}, seq: null}   # 08:30 measurement event
+  eval_at_ms: 30600000   # 08:30, step 510
+  expected:
+    t_eval_ms: 30600000
+    state: satisfied
+    unit: mmHg
+    sigma_interval: [8.0, 90.0]
+    sigma_norm_interval: [0.4, 1.0]
+    rho: null
+    decided_at_ms: 30600000   # 08:30
+    pending_until_ms: 36000000   # 10:00
+  hand_calculation: "pre_i = 150, window [480, 600], k_d = 600. Measurement at step 510 (08:30), bp_510 = 132: drop 18, margin 18 - 10 = 8 mmHg, so lo = 8 (G-RESP-1 of templates.yaml). Unknown steps 511..600 may carry a measurement of 50 mmHg: hi = max(8, 150 - 50 - 10) = 90. lo > 0: SATISFIED (contract rule 1) at step 510, 90 min before the window closes; decided_at_ms = 30600000. Every completion of the unknown steps has a value in [8, 90] (soundness lemma of the document), so no future measurement can make the verdict false. Normalised: 8 / 20 = 0.4; 90 / 20 = 4.5 clipped to 1."
+
+- id: V-RESP-4
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; G-RESP-2 of templates.yaml; rho from analisi §4.4 (measured violation, Gaussian device error)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {delta1: 3600000, delta2: 10800000, delta_resp: 10, bound_bp_lower: 50, bound_bp_upper: 250, scale_resp: 20, cuff_error_sd: 6}}
+  inputs:
+    instance: {template: resp, anchor_ms: 25200000}
+    samples:
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 150.0, seq: null, quality: null}   # 06:55 bp 150 (pre-dose)
+      - {signal: bp, t_device_ms: 30600000, t_rx_ms: 30600000, value: 145.0, seq: null, quality: null}   # 08:30 bp 145
+    events:
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: measurement, t_device_ms: 30600000, t_rx_ms: 30600000, source: cuff, payload: {}, seq: null}   # 08:30 measurement event
+  eval_at_ms: 36000000   # 10:00, step 600 = k_d
+  expected:
+    t_eval_ms: 36000000
+    state: violated
+    unit: mmHg
+    sigma_interval: [-5.0, -5.0]
+    sigma_norm_interval: [-0.25, -0.25]
+    rho: {kind: measured, value: 0.7221551048586027}   # Phi(5 / (6 sqrt 2)), 0.7222 at four decimals
+    decided_at_ms: 36000000   # 10:00
+    pending_until_ms: 36000000
+  hand_calculation: "pre_i = 150, k_d = 600 (10:00). The only measurement in the window [480, 600] is that of step 510 (bp 145): margin 150 - 145 - 10 = -5 mmHg. At the evaluation step 600 no unknown step remains in the window (the window is closed), so lo = hi = -5: the point [-5, -5]; hi < 0: VIOLATED at step 600, decided_at_ms = 36000000. (At every step from 510 to 599 the interval was [-5, 90]: PENDING.) Normalised -5 / 20 = -0.25. Rho: a violation decided by a margin on a measured pressure is MEASURED (analisi §4.4, first row). The drop is the difference of two measurements (pre-dose and response), each with independent Gaussian error of standard deviation cuff_error_sd = 6 mmHg, so the standard deviation of the difference is 6 * sqrt 2 = 8.485...; the measured margin is -5 mmHg, so rho = P(sigma_true < 0 | measurements) = Phi(5 / (6 * sqrt 2)) = Phi(0.5892556...) = 0.7221551... = 0.7222 at four decimals (derivation in WS01-T06, golden case C-6 of its task text)."
+
+- id: V-RESP-5
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; G-RESP-4 of templates.yaml (guard obligation_unmet)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {delta1: 3600000, delta2: 10800000, delta_resp: 10, bound_bp_lower: 50, bound_bp_upper: 250, scale_resp: 20}}
+  inputs:
+    instance: {template: resp, anchor_ms: 25200000}
+    samples:
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 150.0, seq: null, quality: null}   # 06:55 bp 150 (pre-dose)
+    events:
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+  eval_at_ms: 36000000   # 10:00, step 600 = k_d
+  expected:
+    t_eval_ms: 36000000
+    state: violated
+    unit: mmHg
+    sigma_interval: [-.inf, -.inf]
+    sigma_norm_interval: [-1.0, -1.0]
+    rho: {kind: deterministic, value: 1.0}
+    decided_at_ms: 36000000   # 10:00
+    pending_until_ms: 36000000
+    guard_failed: obligation_unmet
+  hand_calculation: "pre_i = 150, window [480, 600] = [08:00, 10:00]; the only measurement of the trace (06:55) lies before the dispense and outside the window. At the evaluation step 600 the window is closed and contains no measurement: the guard (a measurement in the window) is false, the value is -inf for every completion, so lo = hi = -inf; hi < 0: VIOLATED at step 600 (guard obligation_unmet, T02 section 2.1), decided_at_ms = 36000000. (Until step 599 hi was 90: PENDING; the verdict could not be given earlier.) Normalised -inf maps to -1. Rho is DETERMINISTIC 1.0: the violation is the absence of an event in the window."
+
+- id: V-RESP-6
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; tie on the response margin (CP3)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {delta1: 3600000, delta2: 10800000, delta_resp: 10, bound_bp_lower: 50, bound_bp_upper: 250, scale_resp: 20}}
+  inputs:
+    instance: {template: resp, anchor_ms: 25200000}
+    samples:
+      - {signal: bp, t_device_ms: 24900000, t_rx_ms: 24900000, value: 150.0, seq: null, quality: null}   # 06:55 bp 150 (pre-dose)
+      - {signal: bp, t_device_ms: 36000000, t_rx_ms: 36000000, value: 140.0, seq: null, quality: null}   # 10:00 bp 140
+    events:
+      - {kind: measurement, t_device_ms: 24900000, t_rx_ms: 24900000, source: cuff, payload: {}, seq: null}   # 06:55 measurement event
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: measurement, t_device_ms: 36000000, t_rx_ms: 36000000, source: cuff, payload: {}, seq: null}   # 10:00 measurement event, on the last step of the window
+  eval_at_ms: 36000000   # 10:00, step 600 = k_d
+  expected:
+    t_eval_ms: 36000000
+    state: satisfied
+    unit: mmHg
+    sigma_interval: [0.0, 0.0]
+    sigma_norm_interval: [0.0, 0.0]
+    rho: null
+    decided_at_ms: 36000000   # 10:00
+    pending_until_ms: 36000000
+    tie_rule: true
+  hand_calculation: "pre_i = 150, window [480, 600], k_d = 600. The measurement at 36000000 is visible at step 600, the last step of the window; bp_600 = 140: drop 10, margin 10 - delta_resp = 0 mmHg. The window is closed at k = 600, so lo = hi = 0: the point [0, 0]. Contract rule 1 alone gives PENDING (hi < 0 and lo > 0 both false); the tie rule of the document (section 3.4: closed instance, point 0, non-strict atoms) gives SATISFIED at 36000000. Normalised 0 / 20 = 0."
+
+- id: V-COUNT-1
+  contract: ["02-interfaces.md#verdict"]
+  source: "analisi §4.6 row 21:02 (the counter is 3 over 2: -1 dose, not -8); G-COUNT-1 of templates.yaml"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {dose_max_24h: 2, scale_count: 1}}
+  inputs:
+    instance: {template: count_limit, anchor_ms: 75720000}
+    samples: []
+    events:
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # 21:00 dispense
+      - {kind: dispense, t_device_ms: 75720000, t_rx_ms: 75720000, source: dispenser, payload: {}, seq: null}   # 21:02 unscheduled dispense
+  eval_at_ms: 75720000   # 21:02, step 1262
+  expected:
+    t_eval_ms: 75720000
+    state: violated
+    unit: dose
+    sigma_interval: [-1.0, -1.0]
+    sigma_norm_interval: [-1.0, -1.0]
+    rho: {kind: deterministic, value: 1.0}
+    decided_at_ms: 75720000   # 21:02
+    pending_until_ms: 75720000
+  hand_calculation: "The instance of the 21:02 dispense: k_a = 75720000 / 60000 = 1262, B = 0, so k_d = 1262 and pending_until_ms = 75720000. dose_count at step 1262 counts the accepted dispenses with device time in (t_1262 - 24 h, t_1262] = (-10680000, 75720000]: 25200000, 75600000, 75720000, so c_d = 3. Everything is known at the anchor step (the counter is computed from the event stream, the past cannot change), so lo = hi = dose_max_24h - c_d = 2 - 3 = -1 dose: the point [-1, -1]; hi < 0: VIOLATED at 75720000 (not -8 as in the workshop Table I). Normalised -1 / 1 = -1. Rho is DETERMINISTIC 1.0 (event-log predicate, analisi §4.4; the authenticity of the event is attribution, not rho)."
+
+- id: V-COUNT-2
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; tie on the counter (CP3, G-COUNT-2 of templates.yaml)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {dose_max_24h: 2, scale_count: 1}}
+  inputs:
+    instance: {template: count_limit, anchor_ms: 75600000}
+    samples: []
+    events:
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+      - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # 21:00 dispense
+  eval_at_ms: 75600000   # 21:00, step 1260
+  expected:
+    t_eval_ms: 75600000
+    state: satisfied
+    unit: dose
+    sigma_interval: [0.0, 0.0]
+    sigma_norm_interval: [0.0, 0.0]
+    rho: null
+    decided_at_ms: 75600000   # 21:00
+    pending_until_ms: 75600000
+    tie_rule: true
+  hand_calculation: "The instance of the 21:00 dispense: k_a = 1260, B = 0, k_d = 1260. dose_count at step 1260: dispenses in (75600000 - 86400000, 75600000] = (-10800000, 75600000]: 25200000 and 75600000, c_d = 2. All known: lo = hi = dose_max_24h - c_d = 2 - 2 = 0 dose: the point [0, 0]. Contract rule 1 alone gives PENDING for ever (nothing is unknown, the instance is born closed); the tie rule (section 3.4) gives SATISFIED: c_d <= dose_max_24h is a non-strict predicate and equality satisfies it. Normalised 0 / 1 = 0."
+
+- id: V-COUNT-3
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; day-end obligation (analisi §4.1 phi_count second conjunct, T02 section 4.4)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {dose_min_day_end: 2, scale_count: 1}}
+  inputs:
+    instance: {template: count_end, anchor_ms: 86400000}
+    samples: []
+    events:
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+  eval_at_ms: 77400000   # 21:30, step 1290
+  expected:
+    t_eval_ms: 77400000
+    state: pending
+    unit: dose
+    sigma_interval: [-1.0, .inf]
+    sigma_norm_interval: [-1.0, 1.0]
+    rho: null
+    decided_at_ms: null
+    pending_until_ms: 86400000   # 24:00, the closing step K = 1440
+  hand_calculation: "The day-end instance is anchored at the closing step K = 86400000 / 60000 = 1440 (24:00), B = 0, so k_d = 1440 and pending_until_ms = 86400000; its value is dose_count(K) - dose_min_day_end, with dose_count(K) counting the dispenses in (0, 86400000]. Evaluation step 1290 (21:30): the known dispenses in that window are 1 (07:00), so lo = 1 - 2 = -1 dose (no further dispense). Steps 1291..1440 may carry any number of dispenses; no bound on the count is registered or needed (T03 declares none adopted), so the number of future dispenses is unbounded and hi = +inf. The interval is [-1, +inf]: lo <= 0 <= hi, PENDING. Normalised: -1 / 1 = -1; +inf maps to +1."
+
+- id: V-COUNT-4
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; V-COUNT-3 at the closing step"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {dose_min_day_end: 2, scale_count: 1}}
+  inputs:
+    instance: {template: count_end, anchor_ms: 86400000}
+    samples: []
+    events:
+      - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # 07:00 dispense
+  eval_at_ms: 86400000   # 24:00, step 1440 = K
+  expected:
+    t_eval_ms: 86400000
+    state: violated
+    unit: dose
+    sigma_interval: [-1.0, -1.0]
+    sigma_norm_interval: [-1.0, -1.0]
+    rho: {kind: deterministic, value: 1.0}
+    decided_at_ms: 86400000   # 24:00
+    pending_until_ms: 86400000
+  hand_calculation: "As V-COUNT-3 at the closing step 1440: no unknown step remains, dose_count(K) = 1, value = 1 - 2 = -1 dose, so lo = hi = -1: the point [-1, -1]; hi < 0: VIOLATED at 86400000 (the first step at which hi < 0; before it hi was +inf). Normalised -1. Rho is DETERMINISTIC 1.0 (counter of an event log)."
+
+- id: V-INT-1
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; analisi §4.1 phi_INT with the witness channel unavailable (CP6, T01 section 2.4)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {int_window: 300000, scale_int: 300000}}
+  inputs:
+    instance: {template: int, anchor_ms: 75600000}
+    samples: []
+    events:
+      - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # 21:00 dispense
+    channels_unavailable:
+      - {signal: presence, from_ms: 75300000, to_ms: 75600000}   # 20:55 to 21:00 inclusive: the robot channel presence is unavailable; intake is available (no event) and auth is a device channel (no event)
+  eval_at_ms: 75600000   # 21:00, step 1260 = k_d
+  expected:
+    t_eval_ms: 75600000
+    state: pending
+    unit: ms
+    sigma_interval: [-.inf, 300000.0]
+    sigma_norm_interval: [-1.0, 1.0]
+    rho: null
+    decided_at_ms: null
+    pending_until_ms: 75600000   # 21:00, already elapsed at the evaluation step
+    marker: "undecidable: channel_unavailable:presence"
+  hand_calculation: "Dispense 75600000 (21:00): k_a = 1260, B = 0, k_d = 1260, pending_until_ms = 75600000, which is the evaluation step: the deadline has elapsed. The body is the maximum over steps j <= 1260 of min(witness_j, int_window - age_j) with witness_j = presence or intake or auth, age_j = (1260 - j) * 60000 (T02 section 4.7). intake and auth are known at every step (no event: 0). presence is unavailable at the steps 1255..1260 and undefined (no sample) before: unknown at all of them, never to be resolved. lo: every unknown witness may be absent, so lo = -inf. hi: the unknown witness at j = 1260 (age 0) may be present: min(+inf, 300000 - 0) = 300000; at an earlier unknown step the margin is smaller (300000 - age), so hi = 300000. Normalised: -1 and 300000 / 300000 = 1. lo <= 0 <= hi although no future step remains: the record stays PENDING for ever, with the marker undecidable: channel_unavailable:presence (the signal that carries unknown positions inside the decision window [1255, 1260]); it is not VIOLATED, because an unavailable channel is not an absent witness (T01 section 2.4)."
+
+- id: V-INT-2
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; G-INT-3 of templates.yaml (an authenticated dispense decides while the robot channel is unavailable)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {int_window: 300000, scale_int: 300000}}
+  inputs:
+    instance: {template: int, anchor_ms: 75600000}
+    samples:
+      - {signal: auth, t_device_ms: 75600000, t_rx_ms: 75600000, value: 1.0, seq: null, quality: null}   # 21:00 authenticated dispense
+    events:
+      - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # 21:00 dispense
+    channels_unavailable:
+      - {signal: presence, from_ms: 75300000, to_ms: 75600000}   # 20:55 to 21:00 inclusive
+  eval_at_ms: 75600000   # 21:00, step 1260 = k_d
+  expected:
+    t_eval_ms: 75600000
+    state: satisfied
+    unit: ms
+    sigma_interval: [300000.0, 300000.0]
+    sigma_norm_interval: [1.0, 1.0]
+    rho: null
+    decided_at_ms: 75600000   # 21:00
+    pending_until_ms: 75600000
+  hand_calculation: "k_a = k_d = 1260. auth is 1 at step 1260 (device time 75600000), so the witness at j = 1260 is +inf whatever presence is: the term is min(+inf, 300000 - 0) = 300000, so lo = 300000. No term can exceed it (the margin 300000 - age is largest at age 0), so hi = 300000: the point [300000, 300000], although presence is unavailable. lo > 0: SATISFIED at 75600000. Normalised 300000 / 300000 = 1."
+
+- id: V-INT-3
+  contract: ["02-interfaces.md#verdict"]
+  source: "plan fixture; analisi §4.1 phi_INT with the robot co-located and no witness (guard no_witness)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {int_window: 300000, scale_int: 300000}}
+  inputs:
+    instance: {template: int, anchor_ms: 75600000}
+    samples:
+      - {signal: presence, t_device_ms: 0, t_rx_ms: 0, value: 0.0, seq: null, quality: null}   # 00:00 presence level 0, held (the robot is co-located and observing, channels available all day)
+    events:
+      - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # 21:00 dispense
+    channels_unavailable: []
+  eval_at_ms: 75600000   # 21:00, step 1260 = k_d
+  expected:
+    t_eval_ms: 75600000
+    state: violated
+    unit: ms
+    sigma_interval: [-.inf, -.inf]
+    sigma_norm_interval: [-1.0, -1.0]
+    rho: {kind: deterministic, value: 1.0}
+    decided_at_ms: 75600000   # 21:00
+    pending_until_ms: 75600000
+    guard_failed: no_witness
+  hand_calculation: "k_a = k_d = 1260. presence is the held level 0 (sample at device time 0) at every step 0..1260, in particular over [20:55, 21:00]; intake and auth are available with no event: 0. The witness is false at every step, so every term is min(-inf, .) = -inf and the maximum over the steps is -inf: lo = hi = -inf (no unknown remains). hi < 0: VIOLATED at 75600000, guard no_witness (T02 section 2.1). Normalised -1. Rho is DETERMINISTIC 1.0 (the absence of a witness in the log; authenticity of the dispense is attribution). The sample at device time 0 is a fixture choice: if the first presence sample were at 20:55 instead (value 0.0), the steps before it would be undefined, hence unknown, and the most recent of them (step 1254, age 6 min) would give hi = 300000 - 6 * 60000 = -60000 instead of -inf (still VIOLATED, hi < 0)."
+
+- id: V-LATE-1
+  contract: ["02-interfaces.md#verdict", "02-interfaces.md#monitor"]
+  source: "WS01-T01 W5 (reorder buffer, late sample) applied to the SCHED instance of V-SCHED-3"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 30000, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+      - {kind: measurement, t_device_ms: 34190000, t_rx_ms: 34240000, source: cuff, payload: {}, seq: null}   # device time 09:29:50, received 09:30:40: after the watermark 09:30:30
+  eval_at_ms: 34230000   # monitor time 09:30:30 = t_570 + D
+  expected:
+    t_eval_ms: 34200000   # grid time of the finalised step 570
+    state: violated
+    unit: ms
+    sigma_interval: [-.inf, -60000.0]
+    sigma_norm_interval: [-1.0, -0.03333333333333333]
+    rho: {kind: deterministic, value: 1.0}
+    decided_at_ms: 34200000   # 09:30:00, device time of the step
+    pending_until_ms: 34200000
+    guard_failed: no_measurement_after_tick
+    emitted_at_monitor_ms: 34230000
+    late_inputs: 1
+  hand_calculation: "D = 30000. The measurement has device time 34190000, visible at step ceil(34190000 / 60000) = ceil(569.83) = 570; its watermark is t_570 + D = 34200000 + 30000 = 34230000 (09:30:30). It is received at 34240000 > 34230000: late (T01 section 4.3): not used, counted (late_inputs 1), evidence for timestamp_implausible. The monitor time 34230000 finalises the step k = floor((34230000 - 30000) / 60000) = 570 (inputs with device time <= 34200000 are used). The accepted prefix has no measurement: lo = -inf; hi = slack of step 571 = (570 - 571) * 60000 = -60000; hi < 0: VIOLATED at step 570 with decided_at_ms = 34200000 (device time) and emitted at monitor time 34230000 (processing latency D). The late sample never retracts the verdict. Normalised -1 and -0.03333333333333333."
+
+- id: V-LATE-2
+  contract: ["02-interfaces.md#verdict", "02-interfaces.md#monitor"]
+  source: "WS01-T01 W5 (reorder buffer, on-time sample) applied to the SCHED instance of V-SCHED-4"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 30000, f0_rows: {sched_window: 1800000, scale_sched: 1800000}}
+  inputs:
+    instance: {template: sched, anchor_ms: 32400000}
+    samples: []
+    events:
+      - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {}, seq: null}   # 09:00 schedule tick
+      - {kind: measurement, t_device_ms: 34190000, t_rx_ms: 34210000, source: cuff, payload: {}, seq: null}   # device time 09:29:50, received 09:30:10: before the watermark 09:30:30
+  eval_at_ms: 34230000   # monitor time 09:30:30 = t_570 + D
+  expected:
+    t_eval_ms: 34200000   # grid time of the finalised step 570
+    state: satisfied
+    unit: ms
+    sigma_interval: [0.0, 0.0]
+    sigma_norm_interval: [0.0, 0.0]
+    rho: null
+    decided_at_ms: 34200000   # 09:30:00, device time of the step
+    pending_until_ms: 34200000
+    tie_rule: true
+    emitted_at_monitor_ms: 34230000
+    late_inputs: 0
+    alternative_not_adopted: {sigma_interval_ms: [10000.0, 10000.0], sigma_norm_interval: [0.005555555555555556, 0.005555555555555556], reason: "slack in device time (09:30:00 - 09:29:50); inconsistent with the grid slack of T02 section 2.3 and with hi = 19 min of V-SCHED-1 (soundness, Lemma 3 of the document)"}
+  hand_calculation: "D = 30000. Device time 34190000 is visible at step 570 (ceiling rule); the sample is received at 34210000 <= 34230000 = t_570 + D: on time, accepted. At the monitor time 34230000 the step 570 = k_d is finalised and the measurement is in the prefix. Its slack is measured on the grid, as in T02 section 2.3: t_570 - t_570 = 0 ms (the continuous-time slack 09:30:00 - 09:29:50 = 10000 ms is not used: the grid verdict cannot distinguish the instants inside one bin, and with a continuous slack the hi of V-SCHED-1 would not be an upper bound, Lemma 3 of the document). lo = 0; a later measurement has a slack <= -60000, so hi = 0: the point [0, 0], closed (k = k_d): the tie rule (section 3.4) gives SATISFIED, decided_at_ms = 34200000, emitted at monitor time 34230000. Normalised 0. NOTE: the task text gave [10000, 10000] and (0.0056, 0.0056) for this case; the value is replaced by [0, 0] for the reason above and the deviation is recorded in the document (section 9) and in the task Notes."

@@ -3,7 +3,7 @@ id: WS01-T05
 title: Three-valued online semantics with robustness intervals and latency bounds
 workstream: WS01-formalization
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS01-T02"]
 critical_path: true
 non_negotiable: true
