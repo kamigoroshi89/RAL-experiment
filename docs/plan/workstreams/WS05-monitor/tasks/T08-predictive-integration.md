@@ -101,3 +101,7 @@ Tests 5 and 15 define `predicted_sigma_norm` as `sigma_hat + q` clipped to [-1, 
 ### Flag from the WS01-T05 review (orchestrator, 2026-10-01)
 
 Lines 17, 46 and 77 and WS05 README D6 fix the prediction "once, at activation", whereas `docs/formal/05-three-valued-semantics.md` emits per-step records with designated prediction instants and puts the warning at 09:10 in V-PRED-1 (OP-T05-16). Kept `blocked` until ADR-029 (proposed) is decided.
+
+### Flag from the WS01-T06 review (orchestrator, 2026-10-01)
+
+Test 7 quotes the symmetric reading of the "possible" variant ("under the literal reading `0.3 - 0.4 < 0` it is emitted"); `docs/formal/06-rho-proposition1.md` adopts the lower quantile (Proposition 1b, CP4, ADR-030 proposed): on the fixture the lower-quantile form `0.3 - 0.1 = 0.2` does not emit. Tests 5 and 15 expect `predicted_sigma_norm` as the conformal bound `clip(sigma_hat + q, -1, 1)` (test 5: -0.3333 for sigma_hat = -0.7333, q = 0.4), which the document adopts (section 2.4; always negative for an emitted alert). Kept `blocked`.

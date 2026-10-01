@@ -94,3 +94,9 @@ From the repository root, inside `.venv`:
 - `python -c "import ralmon.conformal as c; d = c.SplitConformal.__doc__ or ''; assert 'marginal' in d and 'patient episode' in d"` exits 0.
 - `! grep -rn "^from ralmon\.\(attribution\|monitor\)\|^import ralmon\.\(attribution\|monitor\)" src/ralmon/conformal` succeeds (`conformal` imports only `signals` and `spec`).
 - `python tools/check_plan.py` exits 0.
+
+## Notes
+
+### Flag from the WS01-T06 review (orchestrator, 2026-10-01)
+
+See `docs/formal/06-rho-proposition1.md` (sections 4, 5, 8 and 10) and ADR-030 (proposed, `[DA-CONFERMARE]`). Test 2 says `10 * (1 - 0.3)` is a float-boundary case with k = 7: it evaluates to exactly 7.0; the boundary level is 0.7 (`(n+1)*(1-alpha)` = 3.0000000000000004, rank 4 instead of 3), so `quantile(0.7)` on this fixture must be 0.0, not 0.1. Test 8 uses the symmetric reading of the "possible" variant: on the fixture `sigma_hat = 0.3` is not emitted by the lower-quantile form (0.3 - 0.1 = 0.2). Step 3 (`ceil(round((n+1)*(1-alpha), 9))`) gave 0 wrong ranks on the two-decimal grid but was not tested on allocated levels `alpha_total / n_tests`: compute ranks with integer or `Fraction` arithmetic on the decimal literal and pass allocated levels as fractions. Golden C-3 gives no `rho` object for the emitted possible-variant row (a MINOR of the review). Kept `blocked` until ADR-030 is decided.
