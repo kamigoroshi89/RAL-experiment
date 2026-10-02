@@ -72,3 +72,9 @@ Fixture-only values: previous-day cuff readings 128, 135, 120 at 08:00, 12:00, 1
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `python -m ralmon.benchmark.priors --check-table` exits 0.
 - `grep -c 'expected_undetectable' src/ralmon/benchmark/inject_c3.py` prints at least 1.
+
+## Notes
+
+### Flag from the WS02-T02 review (orchestrator, 2026-10-02)
+
+See `docs/models/threat-model.md` open points TM-OP-1, TM-OP-2, TM-OP-3, TM-OP-7 and TM-OP-8. The document agrees with the vocabulary, the four knowledge flags (`fresh_metadata`, `coherent_pulse`, `plausible_values`, `spoofs_witness`), `auth_deployed` and `expected_undetectable`, and with tests 4, 5 and 10 under the gateway policy "flag" (which this task does not state). Disclosed mismatches: test 2 against test 4 (a stale-stamped replay is late and not accepted), knowledge items without a flag, a single `auth_deployed` against per-device authentication, and the `expected_undetectable` tag. Not covered by the injector: a forged `auth` Sample written by a keyless injector (H-GW) can make INT SATISFIED even in an unauthenticated deployment (a MINOR of the review; TM-OP to be added). Kept `blocked`.
