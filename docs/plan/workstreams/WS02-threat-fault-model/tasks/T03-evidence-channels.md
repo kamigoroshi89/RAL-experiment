@@ -72,3 +72,9 @@ All of the following, from the repository root:
 - `grep -c '^## ADR-' docs/plan/03-decisions.md` prints at least 21 (the ADR proposals were appended), and `grep -c '^Version 0.1.0. Owner WS02' docs/plan/02-interfaces.md` prints 2 (the contract is unchanged at the time this task closes).
 - The evidence-path check of Test item 11 prints nothing.
 - `grep -nE 'T[O]DO|T[B]D|[?]{3}|lore[m]' docs/models/evidence-channels.md` prints nothing.
+
+## Notes
+
+### Flag from the WS02-T01 review (orchestrator, 2026-10-02)
+
+Passi step 4 derives `timestamp_implausible` also from "non-monotonic device time"; `docs/models/fault-model.md` says `out_of_order` within the reorder bound raises no evidence (OP-14), and that `seq` is non-monotone in arrival order so `crypto_temporal.seq_gap_or_replay` needs the same decision (a MINOR of the review). Decide here. Kept `blocked`.

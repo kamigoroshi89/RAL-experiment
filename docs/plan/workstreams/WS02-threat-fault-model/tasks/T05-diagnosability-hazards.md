@@ -106,3 +106,9 @@ EOF
 - `grep -o 'ISO 13482\|ISO 14971\|IEC 62304' docs/models/diagnosability-hazards.md | sort -u | wc -l` prints 3, and `grep -ci 'infection' docs/models/diagnosability-hazards.md`, `grep -ci 'privacy'` and `grep -ci 'identity'` each print at least 1.
 - The evidence-path check of README acceptance criterion 2 prints nothing for `docs/models/diagnosability-hazards.md`.
 - `grep -nE 'T[O]DO|T[B]D|[?]{3}|lore[m]' configs/diagnosability.yaml docs/models/diagnosability-hazards.md` prints nothing.
+
+## Notes
+
+### Flag from the WS02-T01 review (orchestrator, 2026-10-02)
+
+Step 3 (DX-03) lists "cuff detached, C2, `cuff_detached`, `sys`" and "the inflation duration is the phi_SYS predicate itself"; `docs/models/fault-model.md` (device notes) says `sys` is not violated in the injected form of `cuff_detached` (no `sys` instance is opened; G-SYS-3 is the variant) and records the hazard CAS-5 (a lost or late `presence` sample can make INT VIOLATED from a link fault) and OP-12 (a device fault can reach an INTEGRITY violation, which provenance alone cannot attribute to C3: WS02-T04 line 40). Kept `blocked`.
