@@ -3,7 +3,7 @@ id: WS02-T03
 title: Evidence channels and EvidenceVector semantics, availability per placement
 workstream: WS02-threat-fault-model
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS02-T01", "WS02-T02"]
 critical_path: true
 non_negotiable: false

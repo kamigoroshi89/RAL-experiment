@@ -112,3 +112,7 @@ EOF
 ### Flag from the WS02-T01 review (orchestrator, 2026-10-02)
 
 Step 3 (DX-03) lists "cuff detached, C2, `cuff_detached`, `sys`" and "the inflation duration is the phi_SYS predicate itself"; `docs/models/fault-model.md` (device notes) says `sys` is not violated in the injected form of `cuff_detached` (no `sys` instance is opened; G-SYS-3 is the variant) and records the hazard CAS-5 (a lost or late `presence` sample can make INT VIOLATED from a link fault) and OP-12 (a device fault can reach an INTEGRITY violation, which provenance alone cannot attribute to C3: WS02-T04 line 40). Kept `blocked`.
+
+### Flag from the WS02-T02 review (orchestrator, 2026-10-02)
+
+Two mismatches of `docs/models/threat-model.md` are NOT disclosed there: DX-08 is planned as "conditional (yes with authentication)" but the threat model finds the authenticated column for a verbatim naive replay "partial" (a verbatim copy has a valid tag, and one Boolean mixes a replayed and a lost `seq`: TM-GAP-SEQ), while analisi §4.5 row 8 reads "yes with authentication; partial without"; DX-09 `violated_templates` "resp and int" differs from the four templates of the threat model (`count`, `int`, `hold`, `resp` for `dispense_forgery`). Starting content of this task is "to be checked", so decide here. Kept `blocked`.
