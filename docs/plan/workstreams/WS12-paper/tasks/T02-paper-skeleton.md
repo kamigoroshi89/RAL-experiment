@@ -87,3 +87,9 @@ make -C paper pdf FINAL=1                           # exit non-zero (placeholder
 ```
 
 `paper/PAGE_BUDGET.md` exists with the six headings listed in Part B check 4, and, if WS03-T01 is done, `python3 tools/check_bib.py` runs (it may report no citation yet).
+
+## Notes
+
+### Blocking note (orchestrator, 2026-10-02)
+
+Selected by the loop on 2026-10-02 and SKIPPED (the status stays `ready` because `tools/check_plan.py` rejects `blocked` when every dependency is `done`; the loop skips tasks that carry an unresolved blocking note). The task reads `docs/plan/workstreams/WS00-admin/outputs/WS00-T01.md` (CFP record: page limit, format, review mode), which was marked `done` by the human but does not exist in the repository. The page budget and the template cannot be guessed (CLAUDE.md, working rules). Set the status back to `ready` once the artefact exists.

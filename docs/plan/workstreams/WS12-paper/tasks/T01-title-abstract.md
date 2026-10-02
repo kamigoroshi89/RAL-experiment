@@ -77,3 +77,9 @@ wc -w paper/front/abstract-commitment.txt                         # not above th
 ```
 
 All commands exit 0 (the third prints only the allowed output). If `tools/check_paper.py` already exists (WS12-T02 done), `python tools/check_paper.py tokens terms claims paper/front` also exits 0.
+
+## Notes
+
+### Blocking note (orchestrator, 2026-10-02)
+
+Selected by the loop on 2026-10-02 and SKIPPED (the status stays `ready` because `tools/check_plan.py` rejects `blocked` when every dependency is `done`; the loop skips tasks that carry an unresolved blocking note). The task takes its facts from `docs/plan/workstreams/WS00-admin/outputs/WS00-T01.md` (sections `## Commitment letter content` with the abstract length limit, `## Author and title changes`, `## Prior publication policy`) and `WS00-T02.md` (`## ADR-001 scope` with the exact pre-clinical sentence, `## ADR-002 C3 integrity`, `## ADR-003 distributed architecture`). WS00-T01 and WS00-T02 were marked `done` by the human, but neither artefact exists in the repository (`docs/plan/workstreams/WS00-admin/outputs/` is absent), and the decision record of this task must state the title-change policy and the length limit taken from them. Inventing them is not allowed (CLAUDE.md, working rules). Set the status back to `ready` once both artefacts exist.

@@ -91,3 +91,9 @@ From the repository root, in the environment described by the record:
 - `bash ros2/ralmon_sim/scripts/check_sim_env.sh` exits 0.
 - `grep -cE '^## (Host|Verdict|Component table|Reproduction|Hospital world decision|Robot variant decision|Onboard computer|Open items for a human|Proposed ADR)$' ros2/ralmon_sim/doc/availability.md` prints `9`.
 - `grep -rnE '^(import|from) ralmon' ros2/ralmon_sim` prints nothing, and `grep -nE 'TO''DO|TB''D|lo''rem|[?][?][?]' ros2/ralmon_sim/doc/availability.md ros2/ralmon_sim/config/package_availability.yaml` prints nothing.
+
+## Notes
+
+### Blocking note (orchestrator, 2026-10-02)
+
+Selected by the loop on 2026-10-02 and SKIPPED (the status stays `ready` because `tools/check_plan.py` rejects `blocked` when every dependency is `done`; the loop skips tasks that carry an unresolved blocking note). The task reads `docs/plan/workstreams/WS00-admin/outputs/WS00-T05.md` (TIAGo availability, ROS 2 distribution and Gazebo compatibility, ADR-011 decision), marked `done` by the human but absent from the repository, and needs ROS 2, `rclpy` and Gazebo, which are not installed on this machine (no sudo, no system packages). Set the status back to `ready` once the artefact exists and ROS 2 is installed.
