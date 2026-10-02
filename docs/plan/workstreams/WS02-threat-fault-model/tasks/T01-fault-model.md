@@ -3,7 +3,7 @@ id: WS02-T01
 title: Fault model for C2 (device, link, robot)
 workstream: WS02-threat-fault-model
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS01-T01"]
 critical_path: true
 non_negotiable: false
