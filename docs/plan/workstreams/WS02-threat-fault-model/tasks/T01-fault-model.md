@@ -66,3 +66,182 @@ All of the following, from the repository root:
 - The evidence-path check of Test item 4 prints nothing.
 - `grep -nE 'T[O]DO|T[B]D|[?]{3}|lore[m]' docs/models/fault-model.md` prints nothing.
 - `grep -nE '[0-9]+ ?(mmHg|ms|min|bpm)' docs/models/fault-model.md | grep -v 'illustrative, unverified'` prints nothing.
+
+## Notes
+
+Written by the worker agent of WS02-T01. Status is left `in_progress` on purpose (the orchestrator sets `done` after review). The work is committed on branch `ws02-t01-fault-model`; nothing is merged and no other task file was changed.
+
+### Verification (real commands, run from the repository root with `.venv` active)
+
+Scripts for the checks are in `/tmp/ws02t01/` (not committed): `check_doc.py` (all ten checks of the task `## Test`, plus programmatic cross-checks against `docs/plan/02-interfaces.md` and the golden files), `sem.py` (a small reference implementation of the instance semantics of T02 section 1.5 and T05), `test_golden.py` (the evaluator reproduces 30 golden or worked cases of the merged documents before it is used on any fixture), `test_fx.py` (the 14 worked checks FX-1 to FX-14 of the document). Before the document existed, `check_doc.py` failed (`FAIL doc exists`, exit 1); after an empty file it failed 49 checks.
+
+Done-when commands (output of the run, exit codes as shown):
+
+```
+== Done-when 1: test -f
+exit=0
+== Done-when 2: grep -c '^## '
+10
+exit=0
+16:## Scope and fault hypothesis
+48:## Subtype vocabulary
+94:## Device faults
+113:## Link and time faults
+143:## Robot faults
+164:## Fault effects on templates and cascade seeds
+374:## Fault-to-evidence table
+400:## Injection parameter sheet
+426:## Non-faults and boundaries
+459:## Traceability
+== Done-when 3: sed vocabulary count
+17
+exit(pipe last)=0
+== Done-when 4 / Test 4: evidence-path check
+grep-v exit=1 (1 = printed nothing)
+== Done-when 5: forbidden tokens
+grep exit=1 (1 = printed nothing)
+== Done-when 6 / Test 8: numbers
+grep-v exit=1 (1 = printed nothing)
+== glossary sweep (WS02 README 7)
+grep exit=1 (1 = printed nothing)
+```
+
+`python3 /tmp/ws02t01/check_doc.py`: SUMMARY: 104 passed, 0 failed (exit 0). It covers: headings in order (Test 1); vocabulary identifiers, one `- <id>` per line, 17 of them (Test 2); catalogue columns, rows, basis `source` or `inferred`, `TemplateId` values and matrix row numbers in the three family tables (Test 3); every `group.field` path is one of the 20 fields parsed from the contract, and every one of the 20 is mentioned (Test 4); the five sentences of the fault hypothesis (Test 5); the timing table with `t_device_ms`, `t_rx_ms`, `seq` for the five link faults and the absorbable and non-absorbable statement (Test 6); non-faults (Test 7); no invented numbers and no citation from memory (Test 8); a sheet row per fault with a named consumer, the three `DeviceErrorModel` field names and the arrival-jitter source (Test 9); catalogue template sets equal the template sets of the effect rows (own check); the evidence paths of the catalogue equal those of the fault-to-evidence table (own check); every golden id quoted exists in `docs/formal/golden/*.yaml`; every capitalised backtick token is an `EventKind`, verdict state or template kind name of the contract.
+
+`python3 /tmp/ws02t01/test_golden.py` (exit 0), the evaluator reproduces the cases the document quotes, before FX use:
+
+```
+PASS G-RANGE-2 
+PASS G-RANGE-1 
+PASS G-SCHED-1 
+PASS G-SCHED-2/V-SCHED-4 
+PASS V-SCHED-3 
+PASS G-SCHED-4 
+PASS V-SCHED-5b state at kd (09:51 after deadline) 
+PASS V-LATE-1 
+PASS V-LATE-2 
+PASS G-HOLD-4 
+PASS G-HOLD-3 
+PASS G-RESP-1 
+PASS G-RESP-2/V-RESP-4 
+PASS G-RESP-3 
+PASS G-RESP-4 
+PASS V-RESP-5 
+PASS V-RESP-6 tie 
+PASS G-COUNT-1/V-COUNT-1 
+PASS G-COUNT-2/V-COUNT-2 
+PASS G-COUNT-3 
+PASS G-SYS-3 
+PASS G-SYS-2 
+PASS V-INT-1 
+PASS V-INT-2/G-INT-3 
+PASS V-INT-3 
+PASS G-INT-1 
+PASS G-INT-2 
+PASS Lemma 3 example [-110, 90] 
+PASS W6 carry-over count 3 
+PASS W6 truncated count 1 
+golden/evaluator self-check: 30 passed
+```
+
+`python3 /tmp/ws02t01/test_fx.py` (exit 0), the worked checks of the document (values are those hand-computed in the document; the evaluator was independent of the hand arithmetic, and the golden file is the common reference):
+
+```
+PASS FX-1a sched nominal
+PASS FX-1a sched removed
+PASS FX-1b resp nominal +8
+PASS FX-1b resp removed violated obligation_unmet at 10:00
+PASS FX-1b2 resp pre removed too still violated
+PASS FX-1c hold nominal +20
+PASS FX-1c hold removed guard
+PASS FX-1d range/sys no instance without meas event
+PASS FX-2a nominal 09:05 slack 1500000
+PASS FX-2a delayed 09:51 violated at 09:30 (-inf, guard)
+PASS FX-2a graded value at 09:51 = -1260000  -1260000
+PASS FX-2a interval hi at kd = (kd-(kd+1))*TS = -60000
+PASS FX-2b resp nominal 09:30 drop 12 -> +2
+PASS FX-2b resp delayed 10:30 violated obligation_unmet
+PASS FX-2c tick1 violated, tick2 satisfied by the delayed measurement (1200000)
+PASS FX-3 watermark 09:30:30  34230000
+PASS FX-3 max absorbed total delay = D + phase = 40000  40000
+PASS FX-3 arrival 09:30:30 accepted -> sched satisfied tie
+PASS FX-3 arrival 09:30:31 late -> sched violated, counted late
+PASS FX-3 delay equal to D is always on time (phase sweep)
+PASS FX-3 delay equal to D + T_s is always late (phase sweep)
+PASS FX-3 late meas event: no accepted measurement event (no RANGE instance)
+PASS FX-4a skew within skew_max: accepted, stamped step 571 outside [540,570] -> violated, no counted future stamp
+PASS FX-4b skew beyond skew_max: future stamp, counted, not used -> violated
+PASS FX-4c device behind: late (watermark 09:27:30 < rx 09:29:00) -> violated, counted late
+PASS FX-4d device behind within D: accepted at step 567, slack 180000 (true slack would be 60000)
+PASS FX-4 fault-free: slack 60000 satisfied
+PASS FX-4 fault-free step 569 -> slack (570-569)*60000 = 60000
+PASS FX-5 fault-free HOLD +20
+PASS FX-5 cuff ahead by 3 min (accepted): HOLD violated no_recent_measurement
+PASS FX-6a steps: real 1260, bounce 1261
+PASS FX-6a real dispense instance count 2 tie satisfied (0)
+PASS FX-6a bounce instance count 3 -> -1 violated
+PASS FX-6b next-day real dispense: trailing count 3 -> margin -1  3
+PASS FX-6b without carry-over the next-day count is 1
+PASS FX-6c day-end: omission -1 violated; with bounce 0 tie satisfied
+PASS FX-6d hold: both the real and the bounce instance violated (guard)
+PASS FX-7a stuck: drop 0 each, margin -10, violated at 10:00
+PASS FX-7b frozen 152 -> -12 each measurement (G-RANGE-2)
+PASS FX-7b frozen 125 -> +15 (G-RANGE-1) while latent 152 would give -12
+PASS FX-7c frozen 94 at dispense -> -6 (G-HOLD-2)
+PASS FX-8a latent 125 + 27 = 152 -> -12 violated (false)
+PASS FX-8a latent 152 - 27 = 125 -> +15 satisfied (masks latent -12)
+PASS FX-8b hold latent 119 -25 = 94 -> -6 violated
+PASS FX-8b hold latent 94 +25 = 119 -> +19 masks
+PASS FX-8c resp bias on both pre and window cancels (+8 both)
+PASS FX-8d resp bias onset between pre-dose and window: (150-159)-10 = -19 violated
+PASS FX-9a robot out (presence unavailable in window): PENDING marker channel_unavailable:presence, [-inf, 300000]
+PASS FX-9a2 robot out (presence and intake unavailable): same interval, marker names both
+PASS FX-9b auth present, robot out: SATISFIED 300000
+PASS FX-9c latent: presence seen at 20:58 -> +300000 satisfied
+PASS FX-9c presence=1 sample lost, earlier 0 held: VIOLATED no_witness
+PASS FX-9d no presence sample at or before the dispense, channel available: PENDING value_undefined:presence
+PASS FX-10a sample dropped, event kept, no earlier sample: [-110, 90] PENDING value_undefined:bp
+PASS FX-10b earlier sample 125 read: +15 satisfied (stale)
+PASS FX-11 day-end count nominal 0 tie satisfied; 21:00 dispense lost -> -1 violated
+PASS FX-12 reordered within D: both accepted, held values identical at every step
+PASS FX-12 held at step 552 is 152 and at 551 is 125
+PASS FX-13 outage: SCHED(09:00) violated decided 09:30, RESP(07:00) violated decided 10:00
+PASS FX-13 fault-free: SCHED +1500000, RESP +8
+PASS FX-14 INT undecided with marker naming presence and intake
+PASS FX-14 SCHED(21:30) violated decided 22:00; RESP(21:00) violated decided 24:00
+FAILS 0
+```
+
+Full suite: `pytest -q`: 175 passed (exit 0). `python3 tools/check_plan.py`: `check_plan: OK (103 tasks, 18 contracts, 31 findings)` (exit 0). Only `docs/models/fault-model.md` and this task file were changed.
+
+### Deviations from the task text (kept minimal)
+
+1. The sheet's unit types are `ms`, `dimensionless`, `mmHg`, `m` and `rad`, not only `ms` or `dimensionless`: the parameters of WS07-T05 (`sigma_xy_m`, `sigma_yaw_rad`) and the bias (`bias_mmhg`) have physical units that are not times. Unit types carry no value.
+2. Open points and contract gaps are two H3 subsections inside `## Traceability`, so that the document has exactly the ten required H2 headings in the required order.
+3. `## Subtype vocabulary` holds the bullet list of the 17 identifiers (nothing else begins with `- `), then a table of family, basis and injectors; the table is after the list so that the Done-when `sed` count and a line parser see only identifiers.
+4. The effects section carries the mechanism classes M-REM, M-LATE, M-VAL, M-DUP, M-DLOSS, M-ROBOT-OUT, M-PRES, M-STALE, M-SKEW, the signal-footprint table, the table of effects (fault, template, effect, mechanism, check) and the worked checks FX-1 to FX-14 and the cascades CAS-1 to CAS-5; the task asked for a table of faults, templates and cascade seeds, and the rigour rule (every claim with a mechanism and a check) required the rest.
+5. The task text says `uncommanded_lifecycle_transition` is `inferred` (its qualifier "uncommanded" is made explicit from analisi §4.6, although §5.2 mentions lifecycle transitions); the catalogue follows the task.
+
+### Contract gaps found (not changed; recorded in the document, section Traceability)
+
+CG-5 of T01 (no `EventKind` for `auth`, `presence`, `day_end`, `cuff_health`); CG-10 of T01 and ADR-021 (one Boolean `crypto_temporal.timestamp_implausible`, no clock-health field); G-SEQ (ADR-021, `crypto_temporal.seq_gap_or_replay` mixes loss and replay); G-DISP (ADR-021, no field for dispenser content or dispense interval); G-FLAT (no field for a run of identical values); G-NODE (no payload keys fixed for `NODE_STATE`, `DEVICE_ERROR`, `ROBOT_TASK`, `DISPENSE`); G-LIVE (scalar system fields do not say which node; per-device liveliness and deadline QoS assumed). Open points OP-1 to OP-9 (witness perception false negative not catalogued; failed-visit encoding on the witness channel; commanded marker; diagnostics source and device battery; publication of an inactive node; injectors for the modelled-only faults; separate or joint drops of `Sample` and `Event`; propagation rules; ward node failure).
+
+### Modelling choices
+
+- A fault is a cause, not a violation or an alert (hypothesis 5); a C2 true event is the injected event (analisi §5.1).
+- Effects on templates are derived only through the signal footprint of each template (T02 section 3.1), and every claim carries a mechanism class and a check (a golden case or an FX). "No row" means no derived mechanism, not "cannot", except where the footprint excludes it.
+- The measurement of SCHED and RESP is assumed to go through the robot visit (hypothesis 7), as T02 section 5.1 and the plan of WS04-T07 do; this makes robot faults reach `sched`, `resp`, `hold` and `range`.
+- A robot outage leaves INT undecided, never VIOLATED (T05 section 3.5); the one path from a C2 cause to a violated INT found is a lost or late `presence` Sample with the channel available (CAS-5), recorded as a hazard for the integrity-first rule.
+- `cuff_detached` in the injected form opens no SYS instance (a `MEASUREMENT_MISSED` Event is not a `meas` impulse); the SYS-violating variant is named but not injected.
+- Cascade seeds are fan-outs from one emptied position or chains through the derived counter; the root-cause rules are WS02-T04's and are not defined.
+- Time faults: absorbed iff the total delay is at most `D` plus the phase term of the step (derived from T01 section 4.2, checked by a phase sweep in FX-3); `clock_skew` is a constant offset (drift is not modelled); `out_of_order` is the observable consequence of unequal delays.
+- Names of injection parameters follow WS07-T05 (`delay_ms`, `probability`, `sigma_xy_m`, `sigma_yaw_rad`, `period_ms`) and WS04-T07 (`gap_ms`, `bias_mmhg`, `noise_level`); `offset_ms` and the common `onset_ms`, `duration_ms`, `seed`, `target` are new names with no conflict.
+
+### What a reviewer should check hardest
+
+1. The twenty field names and the meaning attached to each use (the Fault-to-evidence table and its coverage paragraph), especially the conditional fields (QoS and liveliness per device stream, G-LIVE) and the fields made `None` by robot faults.
+2. Each row of the effects table: the mechanism class, the signal, the stale-open position or marker, the verdict state and the check. Hardest: `cuff_detached` and SYS (none), `stuck_at` on RESP (zero drop needs onset at or before the dose and a window covering the response), M-PRES (the held 0 must cover the whole decision window, otherwise PENDING with `value_undefined:presence`), `clock_skew` rows (FX-4, FX-5), the bounce downstream row (needs carry-over, CP7).
+3. The C1, C2 and C3 boundary and the undetectable cases (rows 4 and 10 of the analisi matrix, rows 6 and 7 without content sensing) in `## Non-faults and boundaries`.
+4. The cascades CAS-1 to CAS-5: order of events, why each is a fan-out or a chain, and the separating evidence; CAS-5 is a new hazard (a link fault that reaches a violated INT).
+5. The injection parameter sheet: every name has a consumer in WS04-T07 or WS07-T05, or is explicitly "none in v1"; `delay_ms`, `offset_ms`, `probability` versus `dispenser_bounce_prob` are the names to compare with the plans of the two consumers.
+6. The assumptions that are not in a source and are flagged as open: inactive nodes do not publish (OP-5), samples and events can be dropped independently (OP-7), per-device liveliness and deadline QoS (G-LIVE).
