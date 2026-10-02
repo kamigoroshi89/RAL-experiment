@@ -70,3 +70,9 @@ Write these first. Fixture values are test-only. Parameter names follow the `Inj
 - `for k in uncommanded_lifecycle_transition commanded_lifecycle_transition process_kill message_drop localisation_noise impossible_goal nav_delay; do test -f ros2/ralmon_sim/config/fault_schedules/$k.yaml || echo "missing $k"; done` prints nothing.
 - `bash ros2/ralmon_sim/scripts/netem.sh status lo` exits 0 and changes nothing.
 - `grep -nE 'TO''DO|TB''D|lo''rem|[?][?][?]' ros2/ralmon_sim/ralmon_sim/fault_injection.py ros2/ralmon_sim/scripts/netem.sh` prints nothing.
+
+## Notes
+
+### Flag from the WS02-T01 review (orchestrator, 2026-10-02)
+
+See `docs/models/fault-model.md` OP-13 to OP-16: the schedule format here uses a `magnitude.<key>` mapping with `seed`, while WS04-T07 `InjectionSpec` has a scalar `magnitude` and `params`; time faults, `battery_depleted` and the simulated `manipulation_failure` have no injector here (OP-6); `process_kill` and `uncommanded_lifecycle_transition` can also violate `count` when the dispenser node is the target (FX-15). Kept `blocked`.

@@ -75,3 +75,9 @@ Hand-written fixture stream, fixture-only values: cuff measurements at 08:00, 10
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `python -m ralmon.benchmark.priors --check-table` exits 0.
 - `grep -c 'cuff_silent_bias' configs/benchmark/injections.yaml` prints at least 1.
+
+## Notes
+
+### Flag from the WS02-T01 review (orchestrator, 2026-10-02)
+
+See `docs/models/fault-model.md` open points OP-13, OP-15 and OP-16. `InjectionSpec` here has `onset_ms`, `duration_ms`, a scalar `magnitude`, `magnitude_unit` and `params` and none of `seed`, `target`, `gap_ms`, `bias_mmhg`, `noise_level` or `delay_ms`, whereas the fault model parameter sheet and WS07-T05 use a `magnitude.<key>` mapping; `nav_delay` is injected per tick here (test 10, per-tick faults have `end_ms` None, test 13) while the sheet gives it a `duration_ms`; test 5 for `cuff_detached` lists `MEASUREMENT_MISSED`, `DEVICE_ERROR`, `cuff_health` 0.0 and `inflation_ms` but not the `NODE_STATE` event of the fault model; the fault `dispenser_bounce` also affects `resp` and `int` (mechanism M-DUPWIN, FX-16), not only `count` and `hold`. Kept `blocked`; reconcile when this task is taken.
