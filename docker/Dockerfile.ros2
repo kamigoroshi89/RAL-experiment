@@ -1,0 +1,31 @@
+# ROS 2 + Gazebo base image for WS07 and WS10 (simulation and robot-side nodes).
+# Distribution and simulator follow CLAUDE.md ("Jazzy and Gazebo Harmonic unless ADR-011 is
+# superseded"); ADR-011 is still [DA-CONFERMARE]. This image contains no TIAGo packages: the
+# robot description, controllers and worlds belong to WS07-T01 and depend on WS00-T05.
+FROM ros:jazzy-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/work/src \
+    HOME=/tmp
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      python3-pip python3-yaml python3-numpy git make \
+      ros-jazzy-ros-gz-sim ros-jazzy-ros-gz-bridge \
+      ros-jazzy-rmw-cyclonedds-cpp \
+ && rm -rf /var/lib/apt/lists/* \
+ && git config --system --add safe.directory /work
+
+# Python development tools for the ROS-independent core, installed next to the system ROS Python.
+RUN python3 -m pip install pytest hypothesis ruff mypy types-PyYAML
+
+COPY docker/ros-entrypoint.sh /ros-entrypoint.sh
+RUN chmod +x /ros-entrypoint.sh
+
+WORKDIR /work
+ENTRYPOINT ["/ros-entrypoint.sh"]
+CMD ["bash"]
