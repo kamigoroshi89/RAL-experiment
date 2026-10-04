@@ -439,7 +439,7 @@ Run parameters of the device profile, declared per source and not clinical (D-8)
 
 **Chosen.** (a) now, (b) offered at M1 (ADR-033).
 
-**Reason.** A global reading (c) lets a fault on an unrelated node turn a clinical violation into C2 (the relevance question of WS02-T04). Per-node mappings would also let the A4 mask be applied after the fact by removing the robot key, but they change four field types. The scope table is derived from sources (T02 section 3.1, section 5.3) and from H-VISIT; a deployment that violates H-VISIT edits the table.
+**Reason.** A global reading (c) lets a fault on an unrelated node make C2 the attributed cause of a violation of φ_CP (the relevance question of WS02-T04). Per-node mappings would also let the A4 mask be applied after the fact by removing the robot key, but they change four field types. The scope table is derived from sources (T02 section 3.1, section 5.3) and from H-VISIT; a deployment that violates H-VISIT edits the table.
 
 ### D-11 Channel split by subject node
 
