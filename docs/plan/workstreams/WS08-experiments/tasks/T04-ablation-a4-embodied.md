@@ -78,3 +78,9 @@ Write these first. Values are fixtures, not results.
 - `python -m ralmon.eval.analysis --check outputs/A4` exits 0.
 - `for k in delta_vs_full embodied_temporal_coverage availability_sweep rows_without_gain a4_row_check verdicts_unchanged claim_action; do grep -q "\"$k\"" outputs/A4/0/metrics.json || echo "missing $k"; done` prints nothing.
 - `grep -c 'ours-A4-avail' outputs/A4/0/metrics.json` prints at least 3.
+
+## Notes
+
+### Flag from the WS02-T03 review (orchestrator, 2026-10-04)
+
+See `docs/models/evidence-channels.md` section "Ablation A4 mask" and EC-OP-5: the mask has 6 fields forced to `None` (the three `witness` fields, `nav_task_failed`, `manip_task_failed`, `battery_low`), 4 to recompute without the robot component (`node_lifecycle`, `diagnostics_ok`, `liveliness_ok`, `qos_deadline_missed`) and 10 unchanged; a pure path mask is only a partial A4 (a robot crash stays visible through `liveliness_ok`; `mask_evidence` as a path set cannot do the recompute class). Decide here. Kept `blocked`.
