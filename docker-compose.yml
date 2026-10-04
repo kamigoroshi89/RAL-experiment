@@ -1,0 +1,52 @@
+# Containerised development environment. All services mount the repository at /work and run
+# as the host user, so files created in the container are not owned by root.
+# Run from the repository root:  docker compose run --rm test
+x-dev: &dev
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.dev
+  image: ralmon-dev:latest
+  user: "${UID:-1000}:${GID:-1000}"
+  working_dir: /work
+  volumes:
+    - .:/work
+
+services:
+  dev:
+    <<: *dev
+    command: bash
+    stdin_open: true
+    tty: true
+
+  test:
+    <<: *dev
+    command: pytest -q
+
+  lint:
+    <<: *dev
+    command: bash -c "ruff check src tests && ruff format --check src tests && mypy src/ralmon"
+
+  plan:
+    <<: *dev
+    command: python3 tools/check_plan.py
+
+  bib:
+    <<: *dev
+    command: python3 tools/check_bib.py --schema
+
+  ros2:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ros2
+    image: ralmon-ros2:jazzy
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /work
+    volumes:
+      - .:/work
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    command: bash
+    stdin_open: true
+    tty: true
+    profiles: ["ros2"]

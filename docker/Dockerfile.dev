@@ -1,0 +1,28 @@
+# Development and test image for the ralmon core (ROS-independent).
+# Usage: see docker/README.md. The repository is mounted at /work, never copied in.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/work/src \
+    HOME=/tmp \
+    MPLBACKEND=Agg
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git make \
+ && rm -rf /var/lib/apt/lists/* \
+ && git config --system --add safe.directory /work
+
+# Dependencies come from pyproject.toml (ADR-016: no version pins there); the resolved
+# versions of the image are printed by `docker compose run --rm dev pip freeze`.
+COPY pyproject.toml /tmp/pyproject.toml
+RUN python - <<'EOF'
+import subprocess, sys, tomllib
+cfg = tomllib.load(open("/tmp/pyproject.toml", "rb"))["project"]
+reqs = cfg["dependencies"] + cfg["optional-dependencies"]["dev"] + ["types-PyYAML"]
+subprocess.check_call([sys.executable, "-m", "pip", "install", *reqs])
+EOF
+
+WORKDIR /work
+CMD ["bash"]
