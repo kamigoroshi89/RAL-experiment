@@ -84,3 +84,7 @@ Write these first. Fixture templates and values are test-only, not clinical; war
 ### Flag from the WS01-T02 review (orchestrator, 2026-09-30)
 
 Test `test_witness_obligation_from_int_instance` assumes a dynamic INT obligation created at each DISPENSE with the forward window [2_000_000, 2_010_000]. WS01-T02 (`docs/formal/02-templates.md` section 5.3, TG-8) makes the INT obligation static from the schedule with the backward window `[a - int_window, a]`. Kept `blocked` until ADR-026 (proposed, `[DA-CONFERMARE]`) is decided; then align this test.
+
+### Flag from the WS02-T03 review (orchestrator, 2026-10-04)
+
+See `docs/models/evidence-channels.md` EC-OP-1 and EC-OP-14: the stub publishes `manip_task_failed` false with no manipulation outcome and per-tick `intake_observed` False and identity values as fields instead of `ROBOT_TASK` witness events; the test "exactly one outcome per task" conflicts with an overrun report (`late`, stamped with the deadline) followed by a completion event (hypothesis H-OVERRUN). Kept `blocked`.
