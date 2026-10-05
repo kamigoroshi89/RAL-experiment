@@ -39,6 +39,7 @@ from ralmon.benchmark.priors import (
     PriorConfigError,
     PriorError,
     UnfilledParameterError,
+    collect_parameter_files,
     load_prior_file,
     main,
     parse_distribution,
@@ -1314,9 +1315,11 @@ def test_committed_prior_carries_the_standing_notes() -> None:
 def test_committed_table_counts_match_the_prior() -> None:
     text = COMMITTED_TABLE.read_text(encoding="utf-8")
     assert len(table_lines(text)) >= 18
-    parsed = load_prior_file(COMMITTED_PRIOR)
-    filled = sum(1 for r in parsed.rows if r.status == "filled")
-    assert f"filled: {filled}" in text
+    # the table counts the rows of the prior file and of every sibling config (the design
+    # file too), so a human filling a design row must not break this test
+    rows = [r for f in collect_parameter_files(ROOT) for r in f.rows]
+    filled = sum(1 for r in rows if r.status == "filled")
+    assert f"filled: {filled}, awaiting_human_value: {len(rows) - filled}" in text
     assert "Fixture-only rows: 0" in text
 
 

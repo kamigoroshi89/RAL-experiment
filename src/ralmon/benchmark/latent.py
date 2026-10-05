@@ -205,7 +205,8 @@ def circadian(
 
     ``amplitude_mmhg`` is half the peak-to-trough difference (module docstring). The phase is
     reduced with integer arithmetic, so the result is exactly periodic with period ``T_day``
-    and defined for any integer time (a negative time is read as clock time modulo a day).
+    and exact for every int64 time, including the ends of the axis (a negative time is read as
+    clock time modulo a day).
     """
     amplitude = _non_negative("circadian_amplitude_mmhg", amplitude_mmhg)
     peak = _peak_clock(peak_clock_ms)
@@ -214,7 +215,9 @@ def circadian(
         raise LatentModelError(
             f"t_ms must be an array of integers (int64 range), got dtype {times.dtype}"
         )
-    phase = (times.astype(np.int64) - peak) % T_DAY_MS
+    # (t - peak) mod T == ((t mod T) - peak) mod T. Reducing t first keeps every operand in
+    # (-T, T): no int64 wrap-around at the ends of the axis (t - peak can leave the range).
+    phase = ((times.astype(np.int64) % T_DAY_MS) - peak) % T_DAY_MS
     angle = phase.astype(np.float64) * (math.tau / T_DAY_MS)
     return np.asarray(amplitude * np.cos(angle), dtype=np.float64)
 

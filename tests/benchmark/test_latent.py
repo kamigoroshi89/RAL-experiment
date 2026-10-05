@@ -36,7 +36,11 @@ from ralmon.benchmark.latent import (
     rescale_ar1_phi,
     simulate_baseline_sbp,
 )
-from ralmon.benchmark.priors import UnfilledParameterError, load_design_file
+from ralmon.benchmark.priors import (
+    UnfilledParameterError,
+    load_design_file,
+    load_prior_file,
+)
 from ralmon.benchmark.rng import (
     StreamKeyError,
     StreamPurpose,
@@ -49,6 +53,7 @@ from .conftest import make_fixture_prior
 ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_SRC = ROOT / "src" / "ralmon" / "benchmark"
 DESIGN_FILE = ROOT / "configs" / "benchmark" / "generator_design.yaml"
+PRIOR_FILE = ROOT / "configs" / "priors" / "literature_hypertension.yaml"
 TABLE = ROOT / "docs" / "benchmark" / "parameter-provenance.md"
 
 HOUR = 3_600_000
@@ -411,6 +416,57 @@ def test_circadian_times_must_be_integers() -> None:
         circadian(np.array([0.0, 1.0]), AMP, 0)
 
 
+INT64_MIN, INT64_MAX = -(2**63), 2**63 - 1
+
+
+def exact_circadian(t: int, peak: int) -> float:
+    """Reference with Python integers (no overflow): the phase is reduced exactly."""
+    phase = (t - peak) % DAY
+    return AMP * math.cos(float(phase) * (math.tau / DAY))
+
+
+@pytest.mark.parametrize("peak", [0, 1, 12 * HOUR, DAY - 1])
+def test_circadian_is_exact_at_the_extremes_of_the_int64_axis(peak: int) -> None:
+    times = [
+        INT64_MIN,
+        INT64_MIN + 1,
+        INT64_MIN + DAY,
+        -(2**62),
+        INT64_MAX - 1,
+        INT64_MAX,
+    ]
+    got = circadian(np.array(times, dtype=np.int64), AMP, peak)
+    expected = [exact_circadian(t, peak) for t in times]
+    assert got.tolist() == pytest.approx(expected, abs=1e-9)
+    # periodic across the whole axis, bit for bit
+    assert got[0] == circadian(np.array([INT64_MIN + DAY]), AMP, peak)[0]
+
+
+def test_circadian_at_int64_min_with_the_reviewer_case() -> None:
+    value = circadian(np.array([INT64_MIN]), AMP, DAY - 1)[0]
+    assert float(value) == pytest.approx(
+        -3.1287420628651925, abs=1e-9
+    )  # exact integers
+
+
+def test_circadian_for_ordinary_times_is_bit_identical_to_the_direct_formula() -> None:
+    t = np.concatenate(
+        [np.arange(-3 * DAY, 3 * DAY, 123_457, dtype=np.int64), np.array([0, DAY - 1])]
+    )
+    for peak in (0, 7 * HOUR + 11, DAY - 1):
+        phase = (t - peak) % DAY  # the pre-fix formula, safe for ordinary times
+        old = AMP * np.cos(phase.astype(np.float64) * (math.tau / DAY))
+        assert np.array_equal(circadian(t, AMP, peak), old)
+
+
+def test_circadian_accepts_every_safe_integer_dtype() -> None:
+    for dtype in (np.int8, np.int16, np.int32, np.int64, np.uint8, np.uint32):
+        t = np.array([0, 1, 100], dtype=dtype)
+        assert np.array_equal(
+            circadian(t, AMP, 5), circadian(t.astype(np.int64), AMP, 5)
+        )
+
+
 # ---------------------------------------------------------------------------
 # Closed forms
 # ---------------------------------------------------------------------------
@@ -696,6 +752,39 @@ def test_the_grid_size_guard_cannot_be_dodged_with_many_days() -> None:
         simulate(step=900_000, n_days=10**9)  # 9.6e10 points
 
 
+LAST_SAFE_DAY = INT64_MAX // DAY - 1  # the last start_day whose whole day fits in int64
+
+
+@pytest.mark.parametrize("start_day", [10**12, INT64_MAX // DAY, 10**30])
+def test_a_time_axis_beyond_int64_is_a_model_error_not_an_overflow(
+    start_day: int,
+) -> None:
+    with pytest.raises(LatentModelError, match="int64"):
+        simulate(start_day=start_day)
+    with pytest.raises(LatentModelError, match="int64"):
+        simulate(step=DAY, start_day=start_day)
+
+
+def test_a_long_horizon_that_leaves_int64_is_refused_with_a_valid_step() -> None:
+    # a valid step and a grid inside MAX_GRID_POINTS, but the axis leaves the int64 range
+    with pytest.raises(LatentModelError, match="int64"):
+        simulate(step=DAY, n_days=2, start_day=LAST_SAFE_DAY)
+    with pytest.raises(LatentModelError, match="int64"):
+        simulate(step=DAY, n_days=MAX_GRID_POINTS, start_day=INT64_MAX // DAY - 5)
+    # the whole horizon fits: allowed, and the last instant is exact
+    ok = simulate(step=DAY, n_days=1, start_day=LAST_SAFE_DAY)
+    assert int(ok.t_ms[-1]) == LAST_SAFE_DAY * DAY
+
+
+def test_the_last_reachable_times_have_the_exact_circadian_phase() -> None:
+    quiet = make_params(ar_noise_sd_mmhg=0.0)
+    result = simulate(quiet, step=900_000, start_day=LAST_SAFE_DAY)
+    assert int(result.t_ms[-1]) <= INT64_MAX
+    expected = [exact_circadian(int(t), PEAK_NOON) for t in result.t_ms]
+    assert result.circadian_mmhg.tolist() == pytest.approx(expected, abs=1e-9)
+    assert np.array_equal(result.sbp_mmhg, simulate(quiet, step=900_000).sbp_mmhg)
+
+
 # -- invalid parameters --------------------------------------------------------
 
 
@@ -936,22 +1025,114 @@ def test_unfilled_reference_step_is_refused_by_the_prior(tmp_path: Path) -> None
         prior.reference_step_ms("ar_noise_phi")
 
 
-def test_design_file_holds_the_circadian_peak_row_awaiting_a_human() -> None:
-    rows = {r.parameter: r for r in load_design_file(DESIGN_FILE).rows}
-    row = rows["circadian_peak_clock_ms"]
-    assert row.value is None and row.distribution is None
-    assert row.status == "awaiting_human_value"
-    assert row.verified_by is None and row.source_ref is None
-    assert row.source_type == "published_literature"
+PEAK_ROW = "circadian_peak_clock_ms"
+# FIXTURE-ONLY arithmetic, not a clinical value: 14:00 as (60 * 14 + 0) * 60 000 ms. It exists
+# only to build a filled copy of the design row in a tmp_path; it is never committed.
+FIXTURE_PEAK_MS = 50_400_000
+
+
+def design_copy(tmp_path: Path, **row_updates: object) -> Path:
+    """A tmp copy of the committed design file with the circadian peak row updated."""
+    document = yaml.safe_load(DESIGN_FILE.read_text(encoding="utf-8"))
+    (row,) = [r for r in document["parameters"] if r["parameter"] == PEAK_ROW]
+    row.update(row_updates)
+    path = tmp_path / "generator_design.yaml"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    return path
+
+
+UNFILLED_STATE = {
+    "value": None,
+    "dist": None,
+    "status": "awaiting_human_value",
+    "source_ref": None,
+    "rationale": None,
+    "verified_by": None,
+}
+FILLED_STATE = {
+    "value": FIXTURE_PEAK_MS,
+    "status": "filled",
+    "source_ref": "FIXTURE-ONLY arithmetic of the test, not a source",
+    "rationale": "FIXTURE-ONLY: exercises the filled state of the row",
+    "verified_by": "test fixture",
+}
+
+
+def test_committed_design_file_invariants_hold_whether_or_not_it_is_filled() -> None:
+    """Only invariants of the committed file that hold in both states (see WS04-T02 tests)."""
+    parsed = load_design_file(
+        DESIGN_FILE
+    )  # the loader enforces provenance of any value
+    rows = {r.parameter: r for r in parsed.rows}
+    row = rows[PEAK_ROW]
     assert row.unit == "ms"
     assert row.consumer_task == "WS04-T03"
+    assert row.source_type == "published_literature"
     note = " ".join(row.note.split()).lower()
     # The amplitude convention is stated in the row a human transcribes a source into.
     assert "half" in note and "peak-to-trough" in note
     assert "cos" in note and "circadian_amplitude_mmhg" in note
-    # No agent chose a number: nothing but null values in this file.
-    document = yaml.safe_load(DESIGN_FILE.read_text(encoding="utf-8"))
-    assert all(r["value"] is None and r["dist"] is None for r in document["parameters"])
+    for r in rows.values():
+        assert r.source_type != "fixture_only"
+        if r.filled or r.value is not None or r.distribution is not None:
+            assert r.source_ref and r.source_ref.strip()
+            assert r.rationale and r.rationale.strip()
+        else:
+            assert r.status == "awaiting_human_value"
+            assert r.value is None and r.distribution is None
+            assert r.verified_by is None
+    if row.filled:
+        assert isinstance(row.value, int) and 0 <= row.value < T_DAY_MS
+    else:
+        assert row.value is None
+
+
+def test_design_peak_row_unfilled_state_on_a_copy(tmp_path: Path) -> None:
+    path = design_copy(tmp_path, **UNFILLED_STATE)
+    row = {r.parameter: r for r in load_design_file(path).rows}[PEAK_ROW]
+    assert row.value is None and row.distribution is None and not row.filled
+    assert row.verified_by is None and row.source_ref is None
+    assert row.unit == "ms" and row.consumer_task == "WS04-T03"
+    with pytest.raises(LatentModelError, match="circadian_peak_clock_ms"):
+        circadian(np.array([0]), AMP, row.value)  # no peak chosen: nothing is simulated
+
+
+def test_design_peak_row_filled_state_on_a_copy(tmp_path: Path) -> None:
+    path = design_copy(tmp_path, **FILLED_STATE)
+    row = {r.parameter: r for r in load_design_file(path).rows}[PEAK_ROW]
+    assert row.filled and row.value == FIXTURE_PEAK_MS
+    assert row.source_ref and row.rationale and row.verified_by == "test fixture"
+    # the filled value feeds the model: the maximum is A at that clock time, -A 12 h later
+    at = np.array([FIXTURE_PEAK_MS, FIXTURE_PEAK_MS + DAY // 2, DAY + FIXTURE_PEAK_MS])
+    values = circadian(at, AMP, row.value)
+    assert values[0] == pytest.approx(AMP, abs=1e-9)
+    assert values[1] == pytest.approx(-AMP, abs=1e-9)
+    assert values[2] == values[0]
+    # a filled value without provenance is refused by the loader, not by this task
+    broken = design_copy(tmp_path, **{**FILLED_STATE, "source_ref": None})
+    with pytest.raises(Exception, match="source_ref"):
+        load_design_file(broken)
+
+
+def test_amplitude_row_note_states_the_half_peak_to_trough_convention() -> None:
+    rows = {r.parameter: r for r in load_prior_file(PRIOR_FILE).rows}
+    note = " ".join(rows["circadian_amplitude_mmhg"].note.split()).lower()
+    assert "half" in note and "peak-to-trough" in note
+    assert "d / 2" in note  # a source that reports the dip D is entered as D / 2
+    assert "baseline - a" in note and "baseline + a" in note
+
+
+def test_phi_row_note_records_the_rescaling_assumption_and_the_negative_phi_rule() -> (
+    None
+):
+    rows = {r.parameter: r for r in load_prior_file(PRIOR_FILE).rows}
+    note = " ".join(rows["ar_noise_phi"].note.split()).lower()
+    assert "phi ** (step / reference_step_ms)" in note
+    assert "exponentially decaying" in note and "autocorrelation" in note
+    assert "negative" in note and "integer multiple" in note
+    assert (
+        "build time" in note
+    )  # refused when the grid is built, not when the prior loads
 
 
 def test_provenance_table_lists_the_circadian_peak_row() -> None:

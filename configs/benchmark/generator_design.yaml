@@ -4,9 +4,11 @@
 # Rendered into docs/benchmark/parameter-provenance.md by
 #   python -m ralmon.benchmark.priors --write-table
 #
-# Status: NO VALUE IN THIS FILE HAS BEEN CHOSEN BY AN AGENT (ADR-020, parameter policy of the WS04
-# README). A physiological parameter stays `value: null` / `awaiting_human_value` until a human
-# supplies the value with its source_ref and verified_by.
+# Status when WS04-T03 created the file: no value had been chosen by an agent (ADR-020, parameter
+# policy of the WS04 README). A physiological parameter stays `value: null` / `awaiting_human_value`
+# until a human supplies the value with its source_ref and verified_by; a design_choice row may
+# carry an agent-proposed value with its rationale (policy class 2). The `status` and `value` of
+# each row are authoritative, not this comment.
 schema_version: "0.1.0"
 parameters:
   - parameter: circadian_peak_clock_ms

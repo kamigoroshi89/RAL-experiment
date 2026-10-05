@@ -171,7 +171,9 @@ class ParamProvenance:
 class PatientParams:
     patient_id: str
     baseline_sbp_mmhg: float
-    circadian_amplitude_mmhg: float
+    circadian_amplitude_mmhg: (
+        float  # HALF the peak-to-trough difference (baseline +- A)
+    )
     ar_noise_sd_mmhg: float
     ar_noise_phi: float
     emax_mmhg: float  # maximal drug effect (Emax model)
