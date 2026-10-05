@@ -3,7 +3,7 @@ id: WS04-T04
 title: PK/PD response model and onset window derivation; evaluate Pulse Physiology Engine
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS04-T03"]
 critical_path: true
 non_negotiable: false
@@ -74,3 +74,7 @@ Fixture-only arithmetic values: `ka = 2 per h`, `ke = 1 per h`, `Emax = 20 mmHg`
 ### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
 
 ADR-038 (proposed, `[DA-CONFERMARE]`) gap G6: the contract gives `ec50` no unit and `emax_mmhg` only the comment "maximal drug effect"; WS04-T02 enforces `ec50` as dimensionless ("1") and accepts any real `emax_mmhg`, while this task validates `Emax < 0` as an error and composes `baseline - effect`: this task fixes the sign convention in practice; record it when the ADR is confirmed.
+
+### Hand-over from the WS04-T03 review (orchestrator, 2026-10-05)
+
+From `ralmon.benchmark.latent` (WS04-T03): `simulate_baseline_sbp` returns a `LatentPressure` (`t_ms`, `sbp_mmhg`, and the components `circadian_mmhg`, `ar_noise_mmhg`; arrays are read-only), the day has `K` points (the closing step is not emitted: hold the last value or take step 0 of the next day), and `start_day` and `ar_state_mmhg` carry the AR state across days. Streams come from `ralmon.benchmark.rng` with `StreamPurpose` members (not exported from the package root). Compose the drug effect with `baseline - effect` as this task already states; keep every test grid short (no per-millisecond arrays for a day: `MAX_GRID_POINTS` refuses them).

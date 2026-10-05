@@ -85,3 +85,7 @@ Reconciliation (ADR-023): the open datasets are downloaded by a human in `WS00-T
 ### Hand-over from the WS05-T02 review (orchestrator, 2026-10-05)
 
 The `day_end` impulse must be emitted at exactly `T_day` of each day (choice M7 of `ralmon.signals`: `meas_count` day `d` covers `(d*T_day, (d+1)*T_day]`, so the closing step belongs to the day it closes; docs/formal/01-signals-sampling.md section 3.1 puts an event at exactly 24:00 on a continuing axis in the next day). Impulses are emitted only as events and mapped by `event_to_sample` (WS05-T02).
+
+### Hand-over from the WS04-T03 review (orchestrator, 2026-10-05)
+
+The latent day of `ralmon.benchmark.latent` has `K` points and does not emit the closing step: hold the last value or take step 0 of the next day when the measurement process needs the value at 24:00. `StreamPurpose.MEASUREMENT` takes the measurement index as `sub_index`; `JITTER` and `SEGMENTS` are separate purposes.
