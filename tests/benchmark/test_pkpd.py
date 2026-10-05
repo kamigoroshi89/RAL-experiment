@@ -448,6 +448,91 @@ def test_module_hygiene() -> None:
         assert name not in root.__all__ and not hasattr(root, name)
 
 
+def _scan_window(params: PkpdParams, delta: float, best: int) -> tuple[int, int]:
+    """Oracle: the contiguous integer-ms run around ``best`` with effect >= delta, by scan."""
+    lo = hi = best
+    while lo > 1 and effect_at(params, lo - 1) >= delta:
+        lo -= 1
+    while effect_at(params, hi + 1) >= delta:
+        hi += 1
+    return lo, hi
+
+
+def _best_integer_peak() -> int:
+    around = range(T_MAX_MS - 3, T_MAX_MS + 4)
+    return max(around, key=lambda t: (effect_at(PARAMS, t), -t))
+
+
+@pytest.mark.parametrize("step", [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048])
+def test_window_end_at_delta_equal_to_the_effect_at_an_exponential_probe(
+    step: int,
+) -> None:
+    # The falling side probes best + 1, + 2, + 4, ...: a delta exactly equal to the effect at
+    # one of those instants must keep that instant inside the window (>=, not >).
+    best = _best_integer_peak()
+    assert (
+        1 <= best - (T_MAX_MS - 3) + 1 <= 7
+    )  # the oracle really looked around the peak
+    delta = effect_at(PARAMS, best + step)
+    window = derive_onset_window(PARAMS, delta)
+    assert window is not None
+    lo, hi = _scan_window(PARAMS, delta, best)
+    assert hi >= best + step  # the probe instant itself attains delta
+    assert window == (lo, hi)
+
+
+@pytest.mark.parametrize("k", range(1, 16))
+def test_window_start_at_delta_equal_to_the_effect_at_a_bisection_instant(
+    k: int,
+) -> None:
+    # The rising side bisects [0, best]: its middles are dyadic fractions of best. A delta
+    # equal to the effect at such an instant (or a neighbour) keeps that instant inside.
+    best = _best_integer_peak()
+    for t0 in ((best * k) // 16 - 1, (best * k) // 16, (best * k) // 16 + 1):
+        delta = effect_at(PARAMS, t0)
+        window = derive_onset_window(PARAMS, delta)
+        assert window is not None
+        # on the rising side the effect is strictly increasing here: the window starts at t0
+        assert effect_at(PARAMS, t0 - 1) < delta
+        assert window[0] == t0
+        assert effect_at(PARAMS, window[1]) >= delta > effect_at(PARAMS, window[1] + 1)
+
+
+@pytest.mark.parametrize("offset", [1, 2, 3, 5, 100, 1_000, 3_000, 70_001])
+def test_window_end_at_delta_equal_to_the_effect_at_a_falling_instant(
+    offset: int,
+) -> None:
+    # the falling-side bisection: the end of the window is the instant whose effect is delta
+    best = _best_integer_peak()
+    t1 = best + offset
+    delta = effect_at(PARAMS, t1)
+    window = derive_onset_window(PARAMS, delta)
+    assert window is not None
+    assert effect_at(PARAMS, t1 + 1) < delta  # strictly decreasing there
+    assert window[1] == t1
+    if offset <= 100:  # a scan of the whole run is affordable for the near instants
+        assert window == _scan_window(PARAMS, delta, best)
+
+
+def test_a_peak_at_the_int64_boundary_is_a_defined_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No float hours value gives peak_ms == 2**63 exactly (hours * 3 600 000 skips it), so
+    # the two float neighbours of the boundary are used: 2**63 - 1024 is below the int64
+    # maximum (effect 0 there, no window); 2**63 + 2048 is above it and must be a
+    # PkpdModelError, never a raw OverflowError from the int64 conversion of the probe grid.
+    boundary = float(2**63)
+    below_hours = boundary / pkpd_module.MS_PER_HOUR  # peak_ms is 2**63 - 1024
+    above_hours = math.nextafter(below_hours, INF)  # peak_ms is 2**63 + 2048
+    assert below_hours * pkpd_module.MS_PER_HOUR < boundary
+    assert above_hours * pkpd_module.MS_PER_HOUR > boundary
+    monkeypatch.setattr(pkpd_module, "_t_max", lambda ka, ke: below_hours)
+    assert derive_onset_window(PARAMS, 1.0) is None
+    monkeypatch.setattr(pkpd_module, "_t_max", lambda ka, ke: above_hours)
+    with pytest.raises(PkpdModelError):
+        derive_onset_window(PARAMS, 1.0)
+
+
 # ---------------------------------------------------------------------------
 # Only true intakes drive the model
 # ---------------------------------------------------------------------------
@@ -475,6 +560,23 @@ def test_only_intake_events_drive_the_model() -> None:
             intake_times_from_events(bad)  # type: ignore[arg-type]
     with pytest.raises(PkpdModelError):
         intake_times_from_events([_event(EventKind.INTAKE, -1)])
+
+
+def test_intake_times_use_the_device_clock_not_the_reception_clock() -> None:
+    # t_rx_ms differs from t_device_ms (a late, or an early, reception): the latent intake
+    # time is the device time of the event
+    events = [
+        Event(EventKind.INTAKE, 1_000, 5_000, "x", {}, None),
+        Event(EventKind.INTAKE, 9_000, 2_000, "x", {}, None),
+        Event(EventKind.DISPENSE, 3_000, 4_000, "x", {}, None),
+    ]
+    assert intake_times_from_events(events) == (1_000, 9_000)
+    # a negative reception time does not matter either; a negative device time does
+    assert intake_times_from_events(
+        [Event(EventKind.INTAKE, 7, -3, "x", {}, None)]
+    ) == (7,)
+    with pytest.raises(PkpdModelError):
+        intake_times_from_events([Event(EventKind.INTAKE, -1, 5, "x", {}, None)])
 
 
 # ---------------------------------------------------------------------------
@@ -604,6 +706,9 @@ def test_t_max_numerics() -> None:
     assert t_max_hours(1.7e308, 5e-324) > 0.0  # no overflow of ka / ke
     assert t_max_hours(5e-324, 1.7e308) > 0.0
     assert math.isfinite(t_max_hours(1e-300, 1e300))
+    # two denormal rates: the peak time (about 2e323 h) is not representable
+    with pytest.raises(PkpdModelError):
+        t_max_hours(5e-324, 5e-324)
 
 
 # ---------------------------------------------------------------------------
@@ -987,6 +1092,26 @@ def test_compose_rejects_bad_baseline(bad_baseline: Any) -> None:
 def test_compose_rejects_bad_effect(bad_effect: Any) -> None:
     with pytest.raises(PkpdModelError):
         compose_latent_sbp([130.0], bad_effect)
+
+
+@pytest.mark.parametrize("empty", [[], (), range(0), np.array([])])
+def test_compose_rejects_two_empty_vectors(empty: Any) -> None:
+    # both empty: the size check must fire, not a raw reduction error on an empty array
+    with pytest.raises(PkpdModelError):
+        compose_latent_sbp(empty, empty)
+    with pytest.raises(PkpdModelError):
+        compose_latent_sbp([], [])
+
+
+def test_effect_rejects_an_empty_grid_with_no_intakes() -> None:
+    # no intake and no grid point: the (valid) empty intake list does not excuse the grid
+    for empty_grid in ([], (), range(0), np.array([], dtype=np.int64)):
+        with pytest.raises(PkpdModelError):
+            MODEL.effect_mmhg(PARAMS, [], empty_grid)
+        with pytest.raises(PkpdModelError):
+            effect_concentration(PARAMS, [], empty_grid)
+        with pytest.raises(PkpdModelError):
+            MODEL.effect_mmhg(PARAMS, (), empty_grid, intake_scales=[])
 
 
 def test_compose_arithmetic_and_read_only_result() -> None:

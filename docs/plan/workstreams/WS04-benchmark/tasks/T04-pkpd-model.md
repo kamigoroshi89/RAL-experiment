@@ -99,3 +99,21 @@ Status left `in_progress`: the orchestrator reviews, sets `done` and merges. Art
 - Pulse: `not evaluated: no local installation or documentation`; decision `custom PK/PD retained`; three questions for a human are in `docs/benchmark/pulse-evaluation.md`. ADR-039 is `proposed [DA-CONFERMARE]`.
 - Mutation self-check on a copy (deleted): 52 mutants run, 48 killed (one of them by a timeout on a hang), 4 survivors, all equivalent: the limit branch condition reduced to `gap == 0` or the tolerance reduced to `1e-15` (the `expm1` form is exact just outside the branch), a `delta >= 0` instead of `delta > 0` check (the same input fails later with a defined `PkpdModelError` from the int64 range guard), and a scale index clamp that cannot differ when the lengths are equal.
 - State independence: tests use only fixture values and a `tmp_path` fixture prior; no committed config file is read. A filled-state proof (a copy of the committed tree with the 17 prior rows and the 3 design rows filled with proof-only values, table regenerated) ran the whole suite: 1181 passed.
+
+### Fix round 1 (worker)
+
+Review verdict was PASS with no blocker; this round closes minor test gaps with tests only. `src/ralmon/benchmark/pkpd.py` is unchanged: no test revealed a defect.
+
+Tests added in `tests/benchmark/test_pkpd.py` (317 to 359 tests). Each was checked on a `/tmp` copy of the repo: the pre-fix test file passes 317/317 against the mutant, the new file fails it (copy deleted):
+
+1. Window probes: delta exactly equal to the effect at `best + 1, 2, 4, ..., 2048` (falling-side exponential probes) with an integer-ms scan as the oracle; also the rising-side bisection instants and falling-side bisection instants. Mutant `effect_at(probe) <= delta` was a survivor; now killed by `test_window_end_at_delta_equal_to_the_effect_at_an_exponential_probe[1]`. The rise and fall bisection `>` mutants were already killed by `test_onset_window_at_delta_equal_to_an_attained_effect`.
+2. `compose_latent_sbp([], [])` (and `()`, `range(0)`, empty array) and an empty grid with no intakes for `effect_mmhg` / `effect_concentration`: expect `PkpdModelError`. Mutant (empty-size check removed) was a survivor; now killed.
+3. `intake_times_from_events` with `t_rx_ms != t_device_ms`: the device time is used. Mutant `t_rx_ms` was a survivor; now killed.
+4. `t_max_hours(5e-324, 5e-324)` raises `PkpdModelError`. Mutant (finiteness guard removed) was a survivor; now killed by `test_t_max_numerics`.
+5. Int64 boundary: no float hours value gives `peak_ms == 2**63` exactly (`hours * 3_600_000` skips that float), so the test uses the two float neighbours (`2**63 - 1024`: no window, `None`; `2**63 + 2048`: `PkpdModelError`, never a raw `OverflowError`), by patching the private `_t_max`. Mutant (guard removed) was a survivor; now killed.
+
+Notes for dependents and the paper:
+
+- (a) Windows are evaluated by the model's own float64 code path. At single-ms edges a window can differ from a high-precision reference when delta is within about 1e-16 relative of the effect at that ms (reviewer: 31 of 420 comparisons, all within 1.1e-16 relative). One sentence added to `## Decision` of `docs/benchmark/pulse-evaluation.md`.
+- (b) `configs/registry/hypertension.yaml` has `delta1` and `delta2` but NO `delta_resp` (delta) entry yet. The earlier hand-over wording "delta_resp in the working names" is not true of the registry. WS04-T12 must handle it. `window_overlap` rejects a `None` window, so callers must handle `None` from `derive_onset_window` first.
+- (c) A `Sequence` whose `__getitem__` raises propagates the user's own exception (accepted, not wrapped).

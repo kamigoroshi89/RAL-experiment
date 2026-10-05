@@ -34,7 +34,7 @@ The run time per patient and the integration work (an adapter implementing `Resp
 
 custom PK/PD retained.
 
-The custom one-compartment oral absorption plus Emax model with linear superposition over the true intakes stays the default of the benchmark generator. It is implemented behind the `ResponseModel` protocol (`effect_mmhg(params, intake_times_ms, t_grid_ms, intake_scales=None)`), so that a Pulse-backed adapter can be added later as a new implementation without changing any caller (proposed ADR-039 in `docs/plan/03-decisions.md`). The decision is reversible and conditional: it is revisited only if a human answers the three questions below in favour of Pulse.
+The custom one-compartment oral absorption plus Emax model with linear superposition over the true intakes stays the default of the benchmark generator. It is implemented behind the `ResponseModel` protocol (`effect_mmhg(params, intake_times_ms, t_grid_ms, intake_scales=None)`), so that a Pulse-backed adapter can be added later as a new implementation without changing any caller (proposed ADR-039 in `docs/plan/03-decisions.md`). Onset windows of the custom model are evaluated by its own float64 code path, so at a single-millisecond edge a window can differ from a high-precision reference when delta lies within about 1e-16 relative of the effect at that millisecond. The decision is reversible and conditional: it is revisited only if a human answers the three questions below in favour of Pulse.
 
 ## Open items for a human
 
