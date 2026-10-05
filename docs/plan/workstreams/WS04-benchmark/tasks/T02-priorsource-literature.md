@@ -3,7 +3,7 @@ id: WS04-T02
 title: PriorSource protocol and LiteraturePriorSource with mandatory provenance
 workstream: WS04-benchmark
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS04-T01", "WS01-T03"]
 critical_path: true
 non_negotiable: false
