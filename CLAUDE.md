@@ -63,6 +63,7 @@ Workstreams: WS00 admin (humans), WS01 formalization, WS02 threat-fault-model, W
 - **Data.** Never commit `data/raw/` or `outputs/`. PhysioNet data is under a data use agreement: no redistribution.
 - **Git.** One task per branch, commit messages `<TASK-ID>: <summary>`, merge locally after "Done when" passes. Never push or add remotes without explicit human approval (WS13 governs publishing).
 - **Done means verified.** Run the "Done when" commands, read their output, then (`superpowers:verification-before-completion`) set `status: done` in the task file, set newly unblocked dependents from `blocked` to `ready`, add a note to `docs/plan/PROGRESS.md` if a milestone (M0-M5) closes, and run `python3 tools/check_plan.py`.
+- **The paper is the human's (ADR-037).** Never write, edit or compile text under `paper/` (WS12 is `owner: human`). Where a task asks for a "Paper excerpt" section, keep the heading and write one line: "Not written: paper text is outside the agent's scope (ADR-037)". Technical artefacts (formal documents, golden files, code, outputs, WS13) stay in scope.
 - **Task too big or wrong?** Do not silently change scope. Record the problem in the task file under a "Notes" heading and, if a decision is needed, add a proposed ADR to `03-decisions.md`.
 - Docs and code in English. Talk to the user in the language they use.
 

@@ -2,7 +2,7 @@
 id: WS12-T08
 title: Final compile, page fit, index terms, anonymisation check
 workstream: WS12-paper
-owner: agent
+owner: human
 status: blocked
 depends_on: ["WS12-T07", "WS13-T03"]
 critical_path: true
@@ -80,3 +80,7 @@ pdfinfo paper/build/main.pdf | grep -E '^Author'                               #
 ```
 
 When ANON=1, `python tools/check_anonymity.py outputs/anonymity/paper-text --terms outputs/anonymity/terms.txt --allowlist tools/anonymise_allowlist.txt` and the same command on `outputs/anonymity/paper-src` (sources without `authors.tex`) exit 0. `paper/FINAL-CHECK.md` records the Index Terms verified against a named controlled list.
+
+### Scope change (2026-10-05)
+
+The human removed paper writing from the agent's scope (ADR-037): this task is now `owner: human`. The agent does not write, edit or compile any text under `paper/`. Existing blocking notes of this file are moot.

@@ -2,7 +2,7 @@
 id: WS12-T05
 title: Section V experiments and results
 workstream: WS12-paper
-owner: agent
+owner: human
 status: blocked
 depends_on: ["WS09-T05", "WS08-T07", "WS07-T07", "WS10-T06"]
 critical_path: true
@@ -100,3 +100,7 @@ make -C paper pdf                                                               
 ```
 
 `paper/PAGE_BUDGET.md` shows Section V measured within its budgets by 0.10 page per subsection, and records the Fig. 3 or Table III decision.
+
+### Scope change (2026-10-05)
+
+The human removed paper writing from the agent's scope (ADR-037): this task is now `owner: human`. The agent does not write, edit or compile any text under `paper/`. Existing blocking notes of this file are moot.

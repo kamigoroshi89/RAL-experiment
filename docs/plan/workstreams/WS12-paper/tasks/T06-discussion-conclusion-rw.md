@@ -2,7 +2,7 @@
 id: WS12-T06
 title: Discussion, limitations, conclusion, related work insertion and terminology sweep
 workstream: WS12-paper
-owner: agent
+owner: human
 status: blocked
 depends_on: ["WS12-T05", "WS03-T06", "WS12-T03", "WS12-T04"]
 critical_path: true
@@ -90,3 +90,7 @@ grep -rho 'delivered safely' paper/sections | wc -l     # prints 0 or 1
 ```
 
 `paper/PAGE_BUDGET.md` records the measured whole-paper page count and any excess over the page limit.
+
+### Scope change (2026-10-05)
+
+The human removed paper writing from the agent's scope (ADR-037): this task is now `owner: human`. The agent does not write, edit or compile any text under `paper/`. Existing blocking notes of this file are moot.

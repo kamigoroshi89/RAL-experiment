@@ -2,7 +2,7 @@
 id: WS12-T04
 title: Sections III and IV (formulation and methods)
 workstream: WS12-paper
-owner: agent
+owner: human
 status: blocked
 depends_on: ["WS01-T08", "WS02-T05", "WS12-T02", "WS00-T07"]
 critical_path: true
@@ -76,3 +76,7 @@ make -C paper pdf                                                               
 ```
 
 `paper/PAGE_BUDGET.md` shows Sections III and IV-A to IV-E measured within their budgets by 0.10 page, and lists every remaining `\ph` of these files (for example `\ph{forecaster-model}`) with the task that resolves it.
+
+### Scope change (2026-10-05)
+
+The human removed paper writing from the agent's scope (ADR-037): this task is now `owner: human`. The agent does not write, edit or compile any text under `paper/`. Existing blocking notes of this file are moot.

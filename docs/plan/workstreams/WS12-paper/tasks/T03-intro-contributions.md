@@ -2,7 +2,7 @@
 id: WS12-T03
 title: Introduction and contributions rewrite
 workstream: WS12-paper
-owner: agent
+owner: human
 status: blocked
 depends_on: ["WS01-T08", "WS12-T02", "WS00-T07"]
 critical_path: false
@@ -72,3 +72,7 @@ make -C paper pdf                                                               
 ```
 
 `paper/PAGE_BUDGET.md` shows Section I measured within `0.60 +/- 0.10` page and every macro used in Section I listed in the ledger.
+
+### Scope change (2026-10-05)
+
+The human removed paper writing from the agent's scope (ADR-037): this task is now `owner: human`. The agent does not write, edit or compile any text under `paper/`. Existing blocking notes of this file are moot.

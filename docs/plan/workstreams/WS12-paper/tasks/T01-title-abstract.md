@@ -2,7 +2,7 @@
 id: WS12-T01
 title: Title selection and abstract without numbers (commitment letter)
 workstream: WS12-paper
-owner: agent
+owner: human
 status: ready
 depends_on: ["WS00-T02"]
 critical_path: true
@@ -83,3 +83,7 @@ All commands exit 0 (the third prints only the allowed output). If `tools/check_
 ### Blocking note (orchestrator, 2026-10-02)
 
 Selected by the loop on 2026-10-02 and SKIPPED (the status stays `ready` because `tools/check_plan.py` rejects `blocked` when every dependency is `done`; the loop skips tasks that carry an unresolved blocking note). The task takes its facts from `docs/plan/workstreams/WS00-admin/outputs/WS00-T01.md` (sections `## Commitment letter content` with the abstract length limit, `## Author and title changes`, `## Prior publication policy`) and `WS00-T02.md` (`## ADR-001 scope` with the exact pre-clinical sentence, `## ADR-002 C3 integrity`, `## ADR-003 distributed architecture`). WS00-T01 and WS00-T02 were marked `done` by the human, but neither artefact exists in the repository (`docs/plan/workstreams/WS00-admin/outputs/` is absent), and the decision record of this task must state the title-change policy and the length limit taken from them. Inventing them is not allowed (CLAUDE.md, working rules). Set the status back to `ready` once both artefacts exist.
+
+### Scope change (2026-10-05)
+
+The human removed paper writing from the agent's scope (ADR-037): this task is now `owner: human`. The agent does not write, edit or compile any text under `paper/`. Existing blocking notes of this file are moot.

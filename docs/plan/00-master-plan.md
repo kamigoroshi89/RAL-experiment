@@ -2,6 +2,8 @@
 
 Everything here derives from `docs/source/analisi.md` (cited as "analisi §x"). Effort is in person-weeks (pw) unless stated. Numbers not present in the analysis are not given.
 
+> **Scope change 2026-10-05 (ADR-037).** The paper (WS12) is written by the human, not by the agent; WS12-T01 to WS12-T08 are `owner: human`. M5 (submission) is a human milestone for its paper part. WS09 (figures and tables) is to be settled when WS08 produces results. Sections 2 to 7 below are otherwise unchanged.
+
 ## 1. Goal
 
 Turn the IJCAI-ECAI 2026 workshop paper into a submission-ready IEEE RA-L paper (6 pages, references possibly included: analisi §7) with:

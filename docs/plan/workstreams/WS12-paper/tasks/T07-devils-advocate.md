@@ -2,7 +2,7 @@
 id: WS12-T07
 title: Internal devil's-advocate review and claim audit
 workstream: WS12-paper
-owner: agent
+owner: human
 status: blocked
 depends_on: ["WS12-T06"]
 critical_path: true
@@ -76,3 +76,7 @@ make -C paper pdf FINAL=1                                                       
 ```
 
 `paper/REVIEW-CHECKLIST.md` has the nine headings of step 2, no empty status cell, and every `open` row has an owner and an action.
+
+### Scope change (2026-10-05)
+
+The human removed paper writing from the agent's scope (ADR-037): this task is now `owner: human`. The agent does not write, edit or compile any text under `paper/`. Existing blocking notes of this file are moot.

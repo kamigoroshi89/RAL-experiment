@@ -183,14 +183,14 @@ Total estimate: 13.5 person-days.
 
 | id | slug | title | owner | depends_on | crit | nonneg | pd | sources | interfaces | review_items |
 |---|---|---|---|---|---|---|---|---|---|---|
-| WS12-T01 | title-abstract | Title selection and abstract without numbers (commitment letter) | agent | WS00-T02 | yes | no | 0.5 | analisi §8.3, §8.4, §9 (0.4, 0.5) | - | - |
-| WS12-T02 | paper-skeleton | Paper skeleton with page budget | agent | WS00-T01 | no | no | 1 | analisi §7 | - | - |
-| WS12-T03 | intro-contributions | Introduction and contributions rewrite | agent | WS01-T08, WS12-T02, WS00-T07 | no | no | 1.5 | analisi §6, §7, §10 (3) | - | R3-W3 |
-| WS12-T04 | methods-sections | Sections III and IV (formulation and methods) | agent | WS01-T08, WS02-T05, WS12-T02, WS00-T07 | yes | no | 3 | analisi §4, §7, §8.1 | #template #alert | R2-W8 R2-W9 AE-5 |
-| WS12-T05 | experiments-section | Section V experiments and results | agent | WS09-T05, WS08-T07, WS07-T07, WS10-T06 | yes | no | 2.5 | analisi §5, §7 | #metrics | - |
-| WS12-T06 | discussion-conclusion-rw | Discussion, limitations, conclusion, related work insertion and terminology sweep | agent | WS12-T05, WS03-T06, WS12-T03, WS12-T04 | yes | no | 1.5 | analisi §7, §8.1, §10 | - | R3-W7 |
-| WS12-T07 | devils-advocate | Internal devil's-advocate review and claim audit | agent | WS12-T06 | yes | no | 2 | analisi §2, §4.8, §10 | - | - |
-| WS12-T08 | final-compile | Final compile, page fit, index terms, anonymisation check | agent | WS12-T07, WS13-T03 | yes | no | 1 | analisi §7, §8.2 | - | - |
+| WS12-T01 | title-abstract | Title selection and abstract without numbers (commitment letter) | human | WS00-T02 | yes | no | 0.5 | analisi §8.3, §8.4, §9 (0.4, 0.5) | - | - |
+| WS12-T02 | paper-skeleton | Paper skeleton with page budget | human | WS00-T01 | no | no | 1 | analisi §7 | - | - |
+| WS12-T03 | intro-contributions | Introduction and contributions rewrite | human | WS01-T08, WS12-T02, WS00-T07 | no | no | 1.5 | analisi §6, §7, §10 (3) | - | R3-W3 |
+| WS12-T04 | methods-sections | Sections III and IV (formulation and methods) | human | WS01-T08, WS02-T05, WS12-T02, WS00-T07 | yes | no | 3 | analisi §4, §7, §8.1 | #template #alert | R2-W8 R2-W9 AE-5 |
+| WS12-T05 | experiments-section | Section V experiments and results | human | WS09-T05, WS08-T07, WS07-T07, WS10-T06 | yes | no | 2.5 | analisi §5, §7 | #metrics | - |
+| WS12-T06 | discussion-conclusion-rw | Discussion, limitations, conclusion, related work insertion and terminology sweep | human | WS12-T05, WS03-T06, WS12-T03, WS12-T04 | yes | no | 1.5 | analisi §7, §8.1, §10 | - | R3-W7 |
+| WS12-T07 | devils-advocate | Internal devil's-advocate review and claim audit | human | WS12-T06 | yes | no | 2 | analisi §2, §4.8, §10 | - | - |
+| WS12-T08 | final-compile | Final compile, page fit, index terms, anonymisation check | human | WS12-T07, WS13-T03 | yes | no | 1 | analisi §7, §8.2 | - | - |
 
 Total estimate: 13.0 person-days.
 

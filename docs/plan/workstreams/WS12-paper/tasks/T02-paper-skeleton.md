@@ -2,7 +2,7 @@
 id: WS12-T02
 title: Paper skeleton with page budget
 workstream: WS12-paper
-owner: agent
+owner: human
 status: ready
 depends_on: ["WS00-T01"]
 critical_path: false
@@ -93,3 +93,7 @@ make -C paper pdf FINAL=1                           # exit non-zero (placeholder
 ### Blocking note (orchestrator, 2026-10-02)
 
 Selected by the loop on 2026-10-02 and SKIPPED (the status stays `ready` because `tools/check_plan.py` rejects `blocked` when every dependency is `done`; the loop skips tasks that carry an unresolved blocking note). The task reads `docs/plan/workstreams/WS00-admin/outputs/WS00-T01.md` (CFP record: page limit, format, review mode), which was marked `done` by the human but does not exist in the repository. The page budget and the template cannot be guessed (CLAUDE.md, working rules). Set the status back to `ready` once the artefact exists.
+
+### Scope change (2026-10-05)
+
+The human removed paper writing from the agent's scope (ADR-037): this task is now `owner: human`. The agent does not write, edit or compile any text under `paper/`. Existing blocking notes of this file are moot.

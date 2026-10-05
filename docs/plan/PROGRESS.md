@@ -19,3 +19,8 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 - Discrepanze prompt/fonti registrate in `03-decisions.md`: ADR-012 (docs/source/review.md è un estratto di analisi §2), ADR-014 (collocazione dei punti §9 0.4/0.5 in WS12), ADR-015 (run-plan.sh fa cd in prompt/).
 - Scelte autonome in attesa di conferma umana (tag [DA-CONFERMARE]): ADR-011, 012, 013, 014, 015, 016, 017, 021, 022, 023.
 - Prossimo passo operativo: task `ready` con owner agent e percorso critico: WS05-T01 (scaffolding); task umani subito eseguibili: WS00-T01, T04, T05, T08, T09.
+
+## Scope change 2026-10-05 (ADR-037)
+
+- Per esplicita istruzione dell'utente, l'agente non scrive nulla del paper: WS12-T01..T08 passano a `owner: human` (file task e INDEX), `CLAUDE.md` ha la regola corrispondente. WS09 (figure e tabelle) resta da decidere quando WS08 produce risultati.
+- Stato al cambio: 23 task su 103 completati (WS00 6, WS01 6, WS02 3, WS03 5, WS04 1, WS05 2); task umani aperti: WS00-T03, T06, T07, T10, WS03-T06, WS10, WS11, e (ora) WS12.
