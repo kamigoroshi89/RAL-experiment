@@ -3,7 +3,7 @@ id: WS04-T04
 title: PK/PD response model and onset window derivation; evaluate Pulse Physiology Engine
 workstream: WS04-benchmark
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS04-T03"]
 critical_path: true
 non_negotiable: false
