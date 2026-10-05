@@ -47,10 +47,10 @@ A benchmark is `provisional` while any row is `awaiting_human_value`, and every 
 ## Generated table
 
 <!-- BEGIN GENERATED -->
-- Source files: `configs/priors/literature_hypertension.yaml`
-- Parameter rows: 17
-- Rows by status: filled: 0, awaiting_human_value: 17
-- Rows verified by a human (verified_by set): 0 of 17
+- Source files: `configs/priors/literature_hypertension.yaml`, `configs/benchmark/generator_design.yaml`
+- Parameter rows: 18
+- Rows by status: filled: 0, awaiting_human_value: 18
+- Rows verified by a human (verified_by set): 0 of 18
 - Filled rows still without verified_by (unfilled rows are not counted): 0
 - Fixture-only rows: 0
 
@@ -73,4 +73,5 @@ A benchmark is `provisional` while any row is `awaiting_human_value`, and every 
 | cuff_bias_mmhg | DeviceErrorModel.cuff_bias_mmhg | mmHg | - | ISO 81060-2 (edition and clause to be confirmed by the human); named in analisi §5.1 | standard | - | awaiting_human_value | WS04-T06 | Systematic cuff error (bias). ISO 81060-2 gives acceptance limits for a device under validation, not the error of one particular device: the human must declare whether the benchmark uses the limits as a conservative device model or a typical performance from a validation study, and states the choice in rationale. The edition and the clause are to be confirmed by the human. |
 | dispenser_bounce_prob | DeviceErrorModel.dispenser_bounce_prob | 1 | - | - | - | - | awaiting_human_value | WS04-T07 | Probability that a dispenser sensor bounce produces a spurious DISPENSE event (C2 fault, analisi §5.1 item 3). The human supplies the value and its source_ref. |
 | ble_dropout_rate_per_h | DeviceErrorModel.ble_dropout_rate_per_h | 1/h | - | - | - | - | awaiting_human_value | WS04-T07 | Rate per hour of BLE link dropouts (C2 fault, analisi §5.1 item 3). The human supplies the value and its source_ref. |
+| circadian_peak_clock_ms | - | ms | - | - | published_literature | - | awaiting_human_value | WS04-T03 | Clock time of day (integer ms in [0, 86 400 000); a label hh:mm converts as (60 * hh + mm) * 60 000) at which the circadian component of the latent systolic pressure is at its maximum. Model of WS04-T03: sbp(t) = baseline_sbp_mmhg + A * cos(2 * pi * (t - circadian_peak_clock_ms) / 24 h) + AR(1) noise, with A = circadian_amplitude_mmhg. AMPLITUDE CONVENTION: A is HALF the peak-to-trough difference (the curve runs from baseline - A to baseline + A, so a source that reports a peak-to-trough nocturnal dip D must be entered as A = D / 2). The minimum (the nocturnal dip) falls 12 h after this time. A single harmonic is a declared simplification: dipper and non-dipper patterns need further parameters. The human supplies the value, its source and the check that the minimum falls at night. No value has been chosen by an agent. |
 <!-- END GENERATED -->

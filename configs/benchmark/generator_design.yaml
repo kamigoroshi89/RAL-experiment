@@ -1,0 +1,22 @@
+# Parameters of the benchmark generator that the PriorSource contract has no field for
+# (WS04-T03 creates the file; later tasks append their rows; ADR-038 proposes moving them into the
+# contract). Same row schema as configs/priors/literature_hypertension.yaml, every key explicit.
+# Rendered into docs/benchmark/parameter-provenance.md by
+#   python -m ralmon.benchmark.priors --write-table
+#
+# Status: NO VALUE IN THIS FILE HAS BEEN CHOSEN BY AN AGENT (ADR-020, parameter policy of the WS04
+# README). A physiological parameter stays `value: null` / `awaiting_human_value` until a human
+# supplies the value with its source_ref and verified_by.
+schema_version: "0.1.0"
+parameters:
+  - parameter: circadian_peak_clock_ms
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: published_literature
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T03
+    rationale: null
+    note: "Clock time of day (integer ms in [0, 86 400 000); a label hh:mm converts as (60 * hh + mm) * 60 000) at which the circadian component of the latent systolic pressure is at its maximum. Model of WS04-T03: sbp(t) = baseline_sbp_mmhg + A * cos(2 * pi * (t - circadian_peak_clock_ms) / 24 h) + AR(1) noise, with A = circadian_amplitude_mmhg. AMPLITUDE CONVENTION: A is HALF the peak-to-trough difference (the curve runs from baseline - A to baseline + A, so a source that reports a peak-to-trough nocturnal dip D must be entered as A = D / 2). The minimum (the nocturnal dip) falls 12 h after this time. A single harmonic is a declared simplification: dipper and non-dipper patterns need further parameters. The human supplies the value, its source and the check that the minimum falls at night. No value has been chosen by an agent."

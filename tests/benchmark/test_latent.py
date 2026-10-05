@@ -23,6 +23,9 @@ import pytest
 import yaml
 from hypothesis import given, settings
 from hypothesis import strategies as st
+
+from ralmon.benchmark import LiteraturePriorSource, PatientParams
+from ralmon.benchmark import latent as latent_module
 from ralmon.benchmark.latent import (
     MAX_GRID_POINTS,
     T_DAY_MS,
@@ -33,16 +36,13 @@ from ralmon.benchmark.latent import (
     rescale_ar1_phi,
     simulate_baseline_sbp,
 )
+from ralmon.benchmark.priors import UnfilledParameterError, load_design_file
 from ralmon.benchmark.rng import (
     StreamKeyError,
     StreamPurpose,
     stream,
     stream_seed_sequence,
 )
-
-from ralmon.benchmark import LiteraturePriorSource, PatientParams
-from ralmon.benchmark import latent as latent_module
-from ralmon.benchmark.priors import UnfilledParameterError, load_design_file
 
 from .conftest import make_fixture_prior
 
@@ -945,7 +945,7 @@ def test_design_file_holds_the_circadian_peak_row_awaiting_a_human() -> None:
     assert row.source_type == "published_literature"
     assert row.unit == "ms"
     assert row.consumer_task == "WS04-T03"
-    note = " ".join(row.note.split())
+    note = " ".join(row.note.split()).lower()
     # The amplitude convention is stated in the row a human transcribes a source into.
     assert "half" in note and "peak-to-trough" in note
     assert "cos" in note and "circadian_amplitude_mmhg" in note
@@ -1075,3 +1075,29 @@ def test_no_unseeded_randomness_in_benchmark_package() -> None:
 
 def test_t_day_is_24_hours_in_ms() -> None:
     assert T_DAY_MS == DAY == 24 * HOUR
+
+
+def test_rescale_that_rounds_to_one_is_refused() -> None:
+    # (1 - 2^-53) ** (1 / 10^9) is 1.0 in floating point: not a stationary coefficient.
+    with pytest.raises(LatentModelError):
+        rescale_ar1_phi(1.0 - 2.0**-53, 10**9, 1)
+
+
+def test_ar_state_property_continues_a_run() -> None:
+    first = simulate(seed=8)
+    assert first.ar_state_mmhg == float(first.ar_noise_mmhg[-1])
+    rng = stream(8, 0, None, StreamPurpose.LATENT_AR)
+    a = simulate_baseline_sbp(make_params(), 900_000, 1, PEAK_NOON, 900_000, rng)
+    b = simulate_baseline_sbp(
+        make_params(),
+        900_000,
+        1,
+        PEAK_NOON,
+        900_000,
+        rng,
+        start_day=1,
+        ar_state_mmhg=a.ar_state_mmhg,
+    )
+    assert np.array_equal(
+        np.concatenate([a.sbp_mmhg, b.sbp_mmhg]), simulate(seed=8, n_days=2).sbp_mmhg
+    )
