@@ -184,7 +184,7 @@ parameters:
     status: awaiting_human_value
     consumer_task: WS04-T06
     rationale: null
-    note: "Standard deviation of the cuff error. ISO 81060-2 gives acceptance limits for a device under validation, not the error of one particular device: the human must declare whether the benchmark uses the limits as a conservative device model or a typical performance from a validation study, and states the choice in rationale. The edition and the clause are to be confirmed by the human (analisi §5.1: the values are to be verified). The registry has the same quantity as cuff_error_sd (unset): keep one source of truth."
+    note: "Standard deviation of the cuff error. ISO 81060-2 gives acceptance limits for a device under validation, not the error of one particular device: the human must declare whether the benchmark uses the limits as a conservative device model or a typical performance from a validation study, and states the choice in rationale. The edition and the clause are to be confirmed by the human (analisi §5.1: the values are to be verified). The registry has the same quantity as cuff_error_sd (unset): keep one source of truth. For the monitor: its rho computation reads its own copy of the device error, the registry entry cuff_error_sd (WS01); in the matched case the same source value feeds both that copy and this row, and WS08 may hand the monitor a perturbed copy as a mismatch stress."
   - parameter: cuff_bias_mmhg
     unit: "mmHg"
     value: null
@@ -195,7 +195,7 @@ parameters:
     status: awaiting_human_value
     consumer_task: WS04-T06
     rationale: null
-    note: "Systematic cuff error (bias). ISO 81060-2 gives acceptance limits for a device under validation, not the error of one particular device: the human must declare whether the benchmark uses the limits as a conservative device model or a typical performance from a validation study, and states the choice in rationale. The edition and the clause are to be confirmed by the human."
+    note: "Systematic cuff error (bias). ISO 81060-2 gives acceptance limits for a device under validation, not the error of one particular device: the human must declare whether the benchmark uses the limits as a conservative device model or a typical performance from a validation study, and states the choice in rationale. The edition and the clause are to be confirmed by the human. For the monitor: its rho computation reads its own copy of the device error, the registry entry cuff_error_sd (WS01); in the matched case the same source value feeds both that copy and this row, and WS08 may hand the monitor a perturbed copy as a mismatch stress."
   - parameter: dispenser_bounce_prob
     unit: "1"
     value: null

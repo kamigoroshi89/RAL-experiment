@@ -33,6 +33,10 @@ from typing import Any
 import numpy as np
 import pytest
 import yaml
+
+import ralmon.benchmark as benchmark_pkg
+from ralmon.benchmark import vocab
+from ralmon.benchmark.latent import MAX_GRID_POINTS, T_DAY_MS
 from ralmon.benchmark.measurement import (
     MAX_JITTER_DELAYS,
     MAX_JITTER_FILE_BYTES,
@@ -52,6 +56,15 @@ from ralmon.benchmark.measurement import (
     jitter_descriptor,
     load_measurement_design,
 )
+from ralmon.benchmark.priors import (
+    SOURCE_TYPES,
+    DeviceErrorModel,
+    PriorConfigError,
+    UnfilledParameterError,
+    load_design_file,
+)
+from ralmon.benchmark.rng import StreamPurpose, stream
+from ralmon.benchmark.schedule import Schedule
 from ralmon.benchmark.segments import (
     MAX_DRAW_SAMPLES,
     MAX_INDEX_BYTES,
@@ -66,19 +79,6 @@ from ralmon.benchmark.segments import (
     SegmentLibrary,
     SegmentUnavailableError,
 )
-
-import ralmon.benchmark as benchmark_pkg
-from ralmon.benchmark import vocab
-from ralmon.benchmark.latent import MAX_GRID_POINTS, T_DAY_MS
-from ralmon.benchmark.priors import (
-    SOURCE_TYPES,
-    DeviceErrorModel,
-    PriorConfigError,
-    UnfilledParameterError,
-    load_design_file,
-)
-from ralmon.benchmark.rng import StreamPurpose, stream
-from ralmon.benchmark.schedule import Schedule
 from ralmon.benchmark.trace import LatentDay
 from ralmon.signals import Event, EventKind, Sample
 
@@ -186,27 +186,30 @@ def latent_day(
     return LatentDay(patient_id, day_index, 0, samples, tuple(events))
 
 
+_UNSET: Any = object()
+
+
 def build(
-    latent: LatentDay | None = None,
+    latent: Any = _UNSET,
     schedule: Schedule = SCHED,
     *,
     errors: DeviceErrorModel = ZERO_ERRORS,
     design: MeasurementDesign = DESIGN,
-    jitter: Any = None,
-    library: SegmentLibrary | None = None,
+    jitter: Any = _UNSET,
+    library: Any = _UNSET,
     seed: int = 0,
     patient_index: int = 0,
     care_plan_id: str = "plan-1",
     **kwargs: Any,
 ) -> ObservedStream:
     return build_observed_base(
-        latent if latent is not None else latent_day(),
+        latent_day() if latent is _UNSET else latent,
         schedule,
         care_plan_id,
         errors,
         design,
-        NoJitter() if jitter is None else jitter,
-        library if library is not None else LIB,
+        NoJitter() if jitter is _UNSET else jitter,
+        LIB if library is _UNSET else library,
         seed,
         patient_index,
         **kwargs,
@@ -1147,10 +1150,25 @@ def test_draw_prefers_long_enough_segments_and_counts_joins() -> None:
             ),
         ]
     )
+    starts = set()
     for seed in range(20):
         draw = library.draw("hr_clean", 4, rng(seed))
         assert draw.segment_ids == ("long",) and draw.join_count == 0
-        assert draw.values == (10.0, 11.0, 12.0, 13.0)
+        assert draw.values in ((10.0, 11.0, 12.0, 13.0), (11.0, 12.0, 13.0, 14.0))
+        starts.add(draw.values[0])
+    assert starts == {10.0, 11.0}  # the offset is drawn
+    # the segment choice and the offset come from independent draws
+    pair = SegmentLibrary.from_memory(
+        [
+            InlineSegment("a", "hr_clean", [1.0, 2.0, 3.0, 4.0, 5.0], MIN, "bpm"),
+            InlineSegment("b", "hr_clean", [6.0, 7.0, 8.0, 9.0, 10.0], MIN, "bpm"),
+        ]
+    )
+    combos = {
+        (d.segment_ids, d.values[0])
+        for d in (pair.draw("hr_clean", 4, rng(seed)) for seed in range(60))
+    }
+    assert len(combos) == 4
     for seed in range(20):
         joined = library.draw("hr_clean", 8, rng(seed))
         assert (
@@ -1604,6 +1622,7 @@ BAD_ROW_VALUES: list[tuple[str, Any]] = [
     ("robot_dwell_ms", 0.5),
     ("vitals_period_ms", 0),
     ("vitals_period_ms", 7),  # does not divide the day
+    ("vitals_period_ms", 7 * MIN),  # few samples, does not divide the day
     ("vitals_period_ms", 1),  # more samples than MAX_VITALS_SAMPLES
     ("vitals_period_ms", True),
 ]
@@ -1616,7 +1635,8 @@ def test_measurement_design_refuses_bad_filled_values(
     updates = {n: filled(v) for n, v in FILLED_ROWS.items()}
     updates[name] = filled(value)
     path = edited_copy(tmp_path, updates)
-    with pytest.raises(MeasurementConfigError):
+    # a value the row parser refuses (a bool, a string) is a PriorConfigError of the loader
+    with pytest.raises((MeasurementConfigError, PriorConfigError)):
         load_measurement_design(path, inflation_min_ms=30 * SEC)
 
 
@@ -1772,13 +1792,13 @@ def test_reading_after_the_last_grid_point_holds_the_last_value() -> None:
         latent, Schedule(dose_ticks_ms=(), measurement_ticks_ms=(23 * HOUR + 30 * MIN,))
     )
     assert out.measurements[0].latent_sbp_mmhg == 130.0 + 23
-    assert out.settings["n_measurements_held_past_last_latent_point"] == 0
+    assert out.settings["n_measurements_after_day_end"] == 0
     past = build(
         latent, Schedule(dose_ticks_ms=(), measurement_ticks_ms=(DAY - 10 * SEC,))
     )
     assert past.measurements[0].t_ms == DAY + 20 * SEC
     assert past.measurements[0].latent_sbp_mmhg == 130.0 + 23
-    assert past.settings["n_measurements_held_past_last_latent_point"] == 1
+    assert past.settings["n_measurements_after_day_end"] == 1
 
 
 def test_measurement_crossing_midnight_stays_with_its_day() -> None:
@@ -1806,10 +1826,12 @@ def test_arrival_jitter_can_push_a_visit_into_the_next_day() -> None:
     sched = Schedule(
         dose_ticks_ms=(23 * HOUR,), measurement_ticks_ms=(23 * HOUR + 30 * MIN,)
     )
-    latent = latent_day(intakes=[DAY + 30 * MIN])  # the intake falls after midnight
+    latent = latent_day(intakes=[DAY + HOUR + 5 * MIN])  # after midnight, in the visit
     out = build(latent, sched, jitter=Late())
     assert all(v.arrival_ms >= DAY for v in out.visits)
-    assert [e.t_device_ms for e in events_of(out, EventKind.INTAKE)] == [DAY + 30 * MIN]
+    assert [e.t_device_ms for e in events_of(out, EventKind.INTAKE)] == [
+        DAY + HOUR + 5 * MIN
+    ]
     assert samples_of(out, "day_end")[0].t_device_ms == DAY
     assert out.day_index == 0 and all(v.tick_ms < DAY for v in out.visits)
     assert all(a.t_rx_ms <= b.t_rx_ms for a, b in pairwise(out.samples))
@@ -2170,6 +2192,7 @@ DESIGN_BAD: list[dict[str, Any]] = [
     {"vitals_period_ms": 0},
     {"vitals_period_ms": -60_000},
     {"vitals_period_ms": 7},
+    {"vitals_period_ms": 7 * MIN},  # few samples but it does not divide the day
     {"vitals_period_ms": DAY * 2},
     {"vitals_period_ms": 432},  # divides the day but gives 200 000 samples
     {"vitals_period_ms": True},
@@ -2372,3 +2395,190 @@ def test_json_stability_of_settings() -> None:
     assert json.loads(encoded) == json.loads(json.dumps(json.loads(encoded)))
     assert out.settings["cuff_error_family"] == "gaussian"
     assert out.settings["n_measurements"] == 2 and out.settings["n_visits"] == 4
+
+
+# ---------------------------------------------------------------------------
+# Pins of formulas and stream layout (what the documentation promises)
+# ---------------------------------------------------------------------------
+
+
+def test_pulse_reading_is_the_clean_rate_plus_the_third_normal() -> None:
+    design = dataclasses.replace(DESIGN, pulse_error_sd_bpm=2.0)
+    schedule = Schedule(
+        dose_ticks_ms=(), measurement_ticks_ms=(8 * HOUR, 9 * HOUR + 7 * MIN)
+    )
+    out = build(schedule=schedule, design=design, seed=12, patient_index=3)
+    for m in out.measurements:
+        z = stream(12, 3, 0, StreamPurpose.MEASUREMENT, m.index).standard_normal(3)
+        level = hr_values()[(m.t_ms - 0) // MIN]
+        assert m.pulse_bpm == pytest.approx(level + 2.0 * z[2], rel=1e-12)
+    assert [s.value for s in samples_of(out, "hr_pulse")] == [
+        m.pulse_bpm for m in out.measurements
+    ]
+
+
+def test_reading_uses_the_latent_pressure_at_the_reading_instant() -> None:
+    design = dataclasses.replace(
+        DESIGN, inflation_ms_nominal=90 * SEC, inflation_min_ms=0
+    )
+    latent = latent_day(ramp=0.5)  # 130 + 0.5 k at minute k
+    jitter = DelayOne(0, 3 * MIN + 20 * SEC)  # arrival 08:03:20, reading 08:04:50
+    out = build(latent, SCHED, design=design, jitter=jitter)
+    first = out.measurements[0]
+    assert first.arrival_ms == 8 * HOUR + 3 * MIN + 20 * SEC
+    assert first.t_ms == 8 * HOUR + 4 * MIN + 50 * SEC
+    assert first.latent_sbp_mmhg == 130.0 + 0.5 * (8 * 60 + 4)
+    assert first.value_mmhg == first.latent_sbp_mmhg  # zero error
+    second = out.measurements[1]
+    assert second.latent_sbp_mmhg == 130.0 + 0.5 * (20 * 60 + 1)  # 20:01:30
+
+
+def test_event_and_sample_times_follow_tick_arrival_and_reading() -> None:
+    out = build(
+        latent_day(), SCHED_BOTH, jitter=DelayOne(0, 2 * MIN)
+    )  # first measurement visit (09:00) arrives at 09:02
+    ticks = {e.t_device_ms for e in events_of(out, EventKind.SCHEDULE_TICK)}
+    assert ticks == {8 * HOUR, 9 * HOUR, 20 * HOUR, 21 * HOUR}
+    tasks = {e.t_device_ms for e in events_of(out, EventKind.ROBOT_TASK)}
+    assert tasks == {8 * HOUR, 9 * HOUR + 2 * MIN, 20 * HOUR, 21 * HOUR}
+    presence = {s.t_device_ms for s in samples_of(out, "presence")}
+    assert presence == tasks
+    meas = [e.t_device_ms for e in events_of(out, EventKind.MEASUREMENT)]
+    assert meas == [9 * HOUR + 2 * MIN + 30 * SEC, 21 * HOUR + 30 * SEC]
+    assert [s.t_device_ms for s in samples_of(out, "bp")] == meas
+    visit = next(v for v in out.visits if v.kind == vocab.KIND_MEASUREMENT)
+    assert (visit.tick_ms, visit.arrival_ms, visit.delay_ms) == (
+        9 * HOUR,
+        9 * HOUR + 2 * MIN,
+        2 * MIN,
+    )
+    assert visit.departure_ms == visit.arrival_ms + 10 * MIN
+
+
+def test_jitter_delay_is_pinned_to_its_named_stream(tmp_path: Path) -> None:
+    delays = [0, 1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000]
+    jitter = EmpiricalJitter(write_jitter(tmp_path, delays))
+    schedule = Schedule(
+        dose_ticks_ms=(7 * HOUR, 12 * HOUR),
+        measurement_ticks_ms=(8 * HOUR, 9 * HOUR, 10 * HOUR),
+    )
+    out = build(schedule=schedule, jitter=jitter, seed=21, patient_index=4)
+    for visit in out.visits:
+        sub = 2 * visit.index + (0 if visit.kind == vocab.KIND_MEASUREMENT else 1)
+        expected = delays[
+            int(stream(21, 4, 0, StreamPurpose.JITTER, sub).integers(0, 8))
+        ]
+        assert visit.delay_ms == expected, (visit.kind, visit.index)
+    # a dose visit and a measurement visit of the same position draw independently
+    sub_keys = {(v.kind, v.index) for v in out.visits}
+    assert (vocab.KIND_DOSE, 0) in sub_keys and (vocab.KIND_MEASUREMENT, 0) in sub_keys
+
+
+def test_segment_draw_is_pinned_to_its_named_stream() -> None:
+    many = SegmentLibrary.from_memory(
+        [
+            InlineSegment(f"{k}{i}", k, list(range(1_500 + i)), MIN, "u")
+            for k in ("hr_clean", "spo2_clean")
+            for i in range(6)
+        ]
+    )
+    vitals = draw_clean_vitals(many, DESIGN, 8, 5, 2)
+    for kind, sub in (("hr_clean", 0), ("spo2_clean", 1)):
+        direct = many.draw(
+            kind, DAY // MIN, stream(8, 5, 2, StreamPurpose.SEGMENTS, sub)
+        )
+        assert vitals.segment_ids[kind] == direct.segment_ids
+        grid = vitals.hr_bpm if kind == "hr_clean" else vitals.spo2_pct
+        assert grid == direct.values
+    out = build(
+        library=many,
+        seed=8,
+        patient_index=5,
+        latent=latent_day(day_index=2),
+    )
+    assert out.settings["segment_ids"] == {
+        k: list(v) for k, v in vitals.segment_ids.items()
+    }
+
+
+def test_public_sources_document_has_its_headings_and_marks_facts_unverified() -> None:
+    text = (ROOT / "docs" / "benchmark" / "public-sources.md").read_text("utf-8")
+    headings = [line for line in text.splitlines() if line.startswith("## ")]
+    assert headings == [
+        "## Purpose",
+        "## Sources",
+        "## Extraction procedure",
+        "## Segment file format",
+        "## Verification status",
+    ]
+    assert text.count("unverified") >= 5
+    sources = text[text.index("## Sources") : text.index("## Extraction procedure")]
+    for name in (
+        "VitalDB",
+        "BIDMC PPG and Respiration",
+        "MIT-BIH Arrhythmia Database",
+        "MIT-BIH Noise Stress Test Database",
+        "PhysioNet/CinC Challenge 2015",
+    ):
+        row = next(
+            line for line in sources.splitlines() if line.startswith(f"| {name} ")
+        )
+        assert row.count("unverified") >= 5, name
+    assert "WS00-T04" in sources
+
+
+# ---------------------------------------------------------------------------
+# Counters that continue across days, defaults of the stream record
+# ---------------------------------------------------------------------------
+
+
+def test_device_counters_chain_across_days() -> None:
+    schedule = Schedule(
+        dose_ticks_ms=(8 * HOUR,), measurement_ticks_ms=(9 * HOUR, 12 * HOUR)
+    )
+    day0 = assign_device_seq(
+        build(latent_day(day_index=0, dispenses=[8 * HOUR]), schedule)
+    )
+    assert day0.settings["next_cuff_seq"] == 3
+    assert day0.settings["next_dispenser_seq"] == 2
+    day1 = assign_device_seq(
+        build(latent_day(day_index=1, dispenses=[DAY + 8 * HOUR]), schedule),
+        cuff_start=int(day0.settings["next_cuff_seq"]),  # type: ignore[call-overload]
+        dispenser_start=int(day0.settings["next_dispenser_seq"]),  # type: ignore[call-overload]
+    )
+    assert [s.seq for s in samples_of(day1, "bp")] == [3, 4]
+    assert [e.seq for e in events_of(day1, EventKind.MEASUREMENT)] == [3, 4]
+    assert [e.seq for e in events_of(day1, EventKind.DISPENSE)] == [2]
+    assert day1.settings["next_cuff_seq"] == 5
+    assert day1.settings["next_dispenser_seq"] == 3
+    assert assign_device_seq(day1, cuff_start=3, dispenser_start=2) == day1
+    # a day with nothing from a device leaves the next numbers where they were
+    empty = assign_device_seq(
+        build(schedule=Schedule(dose_ticks_ms=(), measurement_ticks_ms=())),
+        cuff_start=7,
+        dispenser_start=9,
+    )
+    assert empty.settings["next_cuff_seq"] == 7
+    assert empty.settings["next_dispenser_seq"] == 9
+
+
+@pytest.mark.parametrize(
+    "value", [0, -1, True, 1.5, "1", None, 10**400, 2**63, float("nan")]
+)
+def test_assign_device_seq_validates_the_start_numbers(value: Any) -> None:
+    out = build()
+    with pytest.raises(MeasurementConfigError):
+        assign_device_seq(out, cuff_start=value)
+    with pytest.raises(MeasurementConfigError):
+        assign_device_seq(out, dispenser_start=value)
+
+
+def test_observed_stream_defaults_allow_a_hand_written_fixture() -> None:
+    bare = ObservedStream("p0000", 0, 0, "plan-1", (), ())
+    assert bare.visits == () and bare.measurements == () and dict(bare.settings) == {}
+    assert assign_device_seq(bare).settings == {
+        "next_cuff_seq": 1,
+        "next_dispenser_seq": 1,
+    }
+    other = ObservedStream("p0000", 0, 0, "plan-1", (), ())
+    assert other.settings is not bare.settings  # no shared mutable default
