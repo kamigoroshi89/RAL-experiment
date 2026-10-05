@@ -44,3 +44,58 @@ parameters:
     consumer_task: WS04-T05
     rationale: null
     note: "Time between the two DISPENSE events of a double take, integer ms, at least 1. The only qualitative constraint (analisi §4.5 rows 6 and 7): a double take must be clearly separated from a sub-second sensor bounce of the dispenser, so the gap must be well above one second. It must also be shorter than every slot of the schedule (the interval from a dose tick to the next dose tick, or to the day end), which the model checks against the schedule, and longer than intake_lag_ms. The human supplies the value and its rationale, expressed against the bounce interval. No value has been chosen by an agent."
+  - parameter: inflation_ms_nominal
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "device documentation or validation study of the cuff, to be named by the human (ADR-038 gap G5); no value chosen by an agent"
+    source_type: published_literature
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T06
+    rationale: null
+    note: "Nominal duration of one cuff inflation, integer ms in [0, 86 400 000]. The reading of a robot visit is stamped arrival + inflation. The registry holds only the minimum cuff_inflation_min: a fault-free draw is raised to that minimum and every raise is counted, so that a fault-free day cannot violate the system template by construction of the generator. The human supplies the value, its source and checks it against the registry minimum. No value has been chosen by an agent."
+  - parameter: inflation_ms_sd
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "device documentation or validation study of the cuff, to be named by the human (ADR-038 gap G5); no value chosen by an agent"
+    source_type: published_literature
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T06
+    rationale: null
+    note: "Standard deviation of the cuff inflation duration, ms, at least 0 (0 makes every fault-free inflation equal to the nominal one). The draw is Gaussian, rounded to integer ms and raised to the registry minimum cuff_inflation_min (the Gaussian family is a declared simplification). The human supplies the value and its source. No value has been chosen by an agent."
+  - parameter: pulse_error_sd_bpm
+    unit: "bpm"
+    value: null
+    dist: null
+    source_ref: "device documentation or validation study of the cuff pulse rate, to be named by the human (ADR-038 gap G4); no value chosen by an agent"
+    source_type: published_literature
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T06
+    rationale: null
+    note: "Standard deviation of the error of the pulse rate reported by the cuff against the clean ECG heart rate of the same instant, bpm, at least 0 (Gaussian, declared simplification). The cross-device check that compares the two rates reads this difference, so the value matters for the C3 evidence. The human supplies the value and its source. No value has been chosen by an agent."
+  - parameter: robot_dwell_ms
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T06; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T06
+    rationale: null
+    note: "How long the robot stays in the room after it arrives, integer ms in [0, 86 400 000]; the visit is the closed interval [arrival, arrival + dwell]. A true intake inside a visit is witnessed (an INTAKE event of the robot), one outside is not, so the value sets how many intakes the embodied channel can see. The model does not enforce it, but the dwell should exceed the cuff inflation (the reading completes during the visit) and the intake lag; when the human fills it, it is expressed relative to a registry quantity (for example the schedule window sched_window) with the rationale. No value has been chosen by an agent."
+  - parameter: vitals_period_ms
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T06; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T06
+    rationale: null
+    note: "Period of the hr_ecg and spo2 samples of the observed trace, integer ms; it must divide 86 400 000 and give at most 100 000 samples a day. A segment of another sample period is held to this grid (grid point j takes segment sample (j * period) // segment period). The human chooses it together with the monitor step T_s and the sample period of the extracted segments, with the rationale. No value has been chosen by an agent."
