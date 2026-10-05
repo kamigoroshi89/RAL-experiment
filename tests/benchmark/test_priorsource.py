@@ -22,17 +22,6 @@ import pytest
 import yaml
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from ralmon.benchmark.priors import (
-    DIST_FAMILIES,
-    FixtureOnlyPriorError,
-    MissingProvenanceError,
-    PriorConfigError,
-    PriorError,
-    UnfilledParameterError,
-    load_prior_file,
-    main,
-    render_provenance_table,
-)
 
 from ralmon import benchmark
 from ralmon.benchmark import (
@@ -42,6 +31,18 @@ from ralmon.benchmark import (
     ParamProvenance,
     PatientParams,
     PriorSource,
+)
+from ralmon.benchmark.priors import (
+    DIST_FAMILIES,
+    FixtureOnlyPriorError,
+    MissingProvenanceError,
+    PriorConfigError,
+    PriorError,
+    UnfilledParameterError,
+    load_prior_file,
+    main,
+    parse_distribution,
+    render_provenance_table,
 )
 
 from .conftest import (
@@ -300,7 +301,9 @@ def test_zero_is_a_value_not_a_missing_value(tmp_path: Path) -> None:
 
 
 def test_unverified_names_reported(tmp_path: Path) -> None:
-    verified = {name: {"verified_by": "H. Reviewer"} for name in FIXTURE_PARAMETERS}
+    verified: dict[str, dict[str, Any]] = {
+        name: {"verified_by": "H. Reviewer"} for name in FIXTURE_PARAMETERS
+    }
     for name in ("p_omission", "baseline_sbp_mmhg"):
         verified[name] = {"verified_by": None}
     source = prior(tmp_path, row_updates=verified)
@@ -491,6 +494,27 @@ def test_truncation_holds_for_random_bounds(
         rng = np.random.default_rng(seed)
         for i in range(40):
             assert lo <= source.sample_patient(rng, i).baseline_sbp_mmhg <= hi
+
+
+_EDGE_UNIFORMS = st.one_of(
+    st.just(0.0),
+    st.just(math.nextafter(1.0, 0.0)),
+    st.floats(min_value=0.0, max_value=1.0, exclude_max=True),
+)
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    family=st.sampled_from(sorted(_TRUNCATED_FAMILIES)),
+    lo=st.floats(min_value=1.0, max_value=300.0),
+    width=st.floats(min_value=0.01, max_value=100.0),
+    u=_EDGE_UNIFORMS,
+)
+def test_quantile_stays_inside_the_truncation_at_the_edges(
+    family: str, lo: float, width: float, u: float
+) -> None:
+    dist = parse_distribution("x", _TRUNCATED_FAMILIES[family](lo, lo + width))
+    assert lo <= dist.ppf(u) <= lo + width
 
 
 @pytest.mark.parametrize(
@@ -843,6 +867,7 @@ def test_adherence_probabilities_may_sum_to_exactly_one_but_not_more(
     sub = fresh(tmp_path, "partial")
     # one row unfilled: the filled ones already exceed 1, so the file is still refused
     partial = updates(0.75, 0.5, 0.0)
+    del partial["p_double_take"]  # that row stays unfilled (no value, no source)
     assert_config_error(
         sub, match="p_delay", unfilled=["p_double_take"], row_updates=partial
     )
@@ -1252,7 +1277,8 @@ def test_committed_prior_carries_the_standing_notes() -> None:
         assert "edition" in row.note and "clause" in row.note
     for name in CONTRACT_ADHERENCE_FIELDS:
         assert rows[name].source_type == "declared_assumption"
-        assert rows[name].source_ref is not None and "analisi" in rows[name].source_ref
+        ref = rows[name].source_ref
+        assert ref is not None and "analisi" in ref
     for name in (
         "emax_mmhg",
         "ec50",
@@ -1313,15 +1339,16 @@ def parameter_literals(source: str) -> list[tuple[int, int | float]]:
     found = []
     for node in ast.walk(tree):
         value = None if id(node) in operands else _literal_value(node)
-        if value is None:
+        if value is None or not hasattr(node, "lineno"):
             continue
+        lineno: int = node.lineno
         if isinstance(value, float):
             allowed = value in ALLOWED_FLOATS or value == 0.0  # 0.0 and -0.0
         else:
             allowed = value in ALLOWED_INTS
-        if allowed or ALGORITHMIC.search(lines[node.lineno - 1]):
+        if allowed or ALGORITHMIC.search(lines[lineno - 1]):
             continue
-        found.append((node.lineno, value))
+        found.append((lineno, value))
     return found
 
 
@@ -1335,7 +1362,7 @@ def test_literal_scanner_flags_and_allows_the_right_numbers() -> None:
     assert [v for _, v in parameter_literals("x = 0.5  # algorithmic\n")] == [0.5]
     assert [
         v for _, v in parameter_literals("x = 0.5  # fine: algorithmic: why\ny = 0.5\n")
-    ] == [0.5]
+    ] == [0.5, 0.5]
     assert [
         v for _, v in parameter_literals("x = True\ny = 'a'\nz = f'{1:04d}'\n")
     ] == []
@@ -1399,7 +1426,7 @@ def _numeric_constants(path: Path) -> list[tuple[int, float]]:
     out = []
     for node in ast.walk(tree):
         value = _literal_value(node)
-        if value is not None and not isinstance(node, ast.UnaryOp):
+        if value is not None and isinstance(node, ast.Constant):
             out.append((node.lineno, float(value)))
     return out
 
@@ -1462,3 +1489,81 @@ def test_protocol_swappable(tmp_path: Path) -> None:
     assert _describe(_StubPrior()) == ("stub-prior", "p")
     literature = prior(tmp_path)
     assert _describe(literature) == (literature.name, "p0000")
+
+
+MYPY_SNIPPET = """\
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+import numpy as np
+
+from ralmon.benchmark import (
+    AdherenceParams,
+    DeviceErrorModel,
+    LiteraturePriorSource,
+    ParamProvenance,
+    PatientParams,
+    PriorSource,
+)
+
+
+class Stub:
+    name = "stub"
+
+    def sample_patient(
+        self, rng: np.random.Generator, patient_index: int
+    ) -> PatientParams:
+        raise ValueError(patient_index)
+
+    def adherence(self) -> AdherenceParams:
+        raise ValueError("unused")
+
+    def device_errors(self) -> DeviceErrorModel:
+        raise ValueError("unused")
+
+    def provenance(self) -> Sequence[ParamProvenance]:
+        return ()
+
+
+def use(source: PriorSource) -> str:
+    return source.name
+
+
+def build(path: str) -> str:
+    return use(Stub()) + use(LiteraturePriorSource(path))
+"""
+
+MYPY_BROKEN_SNIPPET = MYPY_SNIPPET.replace("def provenance", "def provenance_of")
+
+
+def _run_mypy(tmp_path: Path, text: str) -> subprocess.CompletedProcess[str]:
+    target = tmp_path / "snippet.py"
+    target.write_text(text, encoding="utf-8")
+    env = dict(os.environ)
+    env["MYPYPATH"] = str(SRC)
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mypy",
+            "--strict",
+            f"--cache-dir={tmp_path / 'cache'}",
+            str(target),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_protocol_is_satisfied_for_mypy(tmp_path: Path) -> None:
+    pytest.importorskip("mypy")
+    ok = _run_mypy(tmp_path, MYPY_SNIPPET)
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    broken = _run_mypy(
+        tmp_path, MYPY_BROKEN_SNIPPET
+    )  # a stub missing a member is rejected
+    assert broken.returncode != 0 and "provenance" in broken.stdout

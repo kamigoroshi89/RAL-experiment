@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-from ralmon.benchmark._stubs import (
-    AdherenceParams,
-    DeviceErrorModel,
-    LiteraturePriorSource,
-    ParamProvenance,
-    PatientParams,
-    PriorSource,
-    generate_benchmark,
-    load_benchmark,
-)
+import importlib
+from typing import TYPE_CHECKING, Any
+
+from ralmon.benchmark._stubs import generate_benchmark, load_benchmark
 from ralmon.benchmark.trace import (
     BenchmarkDay,
     GroundTruthEvent,
@@ -19,6 +13,38 @@ from ralmon.benchmark.trace import (
     LatentDay,
     ObservedDay,
 )
+
+if TYPE_CHECKING:
+    from ralmon.benchmark.priors import (
+        AdherenceParams,
+        DeviceErrorModel,
+        LiteraturePriorSource,
+        ParamProvenance,
+        PatientParams,
+        PriorSource,
+    )
+
+# The names of ralmon.benchmark.priors load on first use, so that running
+# ``python -m ralmon.benchmark.priors`` does not import that module twice (runpy warns).
+_PRIORS_NAMES = frozenset(
+    {
+        "AdherenceParams",
+        "DeviceErrorModel",
+        "LiteraturePriorSource",
+        "ParamProvenance",
+        "PatientParams",
+        "PriorSource",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _PRIORS_NAMES:
+        value = getattr(importlib.import_module("ralmon.benchmark.priors"), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "AdherenceParams",

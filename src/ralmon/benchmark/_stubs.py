@@ -8,31 +8,7 @@ from __future__ import annotations
 
 from typing import NoReturn
 
-from ralmon._stub import stub_class, stub_function
-
-
-@stub_class("WS04-T02")
-class PriorSource: ...
-
-
-@stub_class("WS04-T02")
-class LiteraturePriorSource: ...
-
-
-@stub_class("WS04-T02")
-class PatientParams: ...
-
-
-@stub_class("WS04-T02")
-class AdherenceParams: ...
-
-
-@stub_class("WS04-T02")
-class DeviceErrorModel: ...
-
-
-@stub_class("WS04-T02")
-class ParamProvenance: ...
+from ralmon._stub import stub_function
 
 
 @stub_function("WS04-T11")
