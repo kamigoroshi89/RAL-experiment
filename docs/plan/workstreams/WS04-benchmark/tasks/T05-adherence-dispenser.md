@@ -3,7 +3,7 @@ id: WS04-T05
 title: Adherence Markov model with DISPENSE and INTAKE events
 workstream: WS04-benchmark
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS04-T02"]
 critical_path: true
 non_negotiable: false
