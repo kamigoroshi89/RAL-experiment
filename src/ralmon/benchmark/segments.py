@@ -187,9 +187,20 @@ def _reject_constant(token: str) -> Any:
     raise SegmentIndexError(f"JSON constant {token} is not allowed")
 
 
+def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    keys = [key for key, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise SegmentIndexError("a JSON object has a duplicate key")
+    return dict(pairs)
+
+
 def _parse_json(data: bytes, what: str) -> Any:
     try:
-        return json.loads(data.decode("utf-8"), parse_constant=_reject_constant)
+        return json.loads(
+            data.decode("utf-8"),
+            parse_constant=_reject_constant,
+            object_pairs_hook=_reject_duplicates,
+        )
     except SegmentIndexError:
         raise
     except (
@@ -225,7 +236,10 @@ def _read_bounded(path: Path, limit: int, what: str) -> bytes:
 def _as_path(name: str, value: object) -> Path:
     if not isinstance(value, (str, os.PathLike)) or isinstance(value, bytes):
         raise SegmentIndexError(f"{name} must be a path, got {type(value).__name__}")
-    text = os.fspath(value)
+    try:
+        text = os.fspath(value)
+    except (TypeError, ValueError, OSError) as exc:  # a misbehaving __fspath__
+        raise SegmentIndexError(f"{name} is not a valid path") from exc
     if not isinstance(text, str) or "\0" in text or not text:
         raise SegmentIndexError(f"{name} is not a valid path")
     return Path(text)
@@ -401,6 +415,23 @@ def _file_bytes(values: Sequence[float], quality: Sequence[float] | None) -> byt
     return json.dumps(body, sort_keys=True).encode("utf-8")
 
 
+def _inline_numbers(name: str, raw: object, limit: int) -> tuple[float, ...]:
+    """Finite numbers of an inline sequence or one-dimensional array of at most ``limit`` items.
+
+    A mapping, an iterator, a string and a zero- or multi-dimensional array are refused (the
+    length is checked before anything is read, so a huge sequence is never walked).
+    """
+    if isinstance(raw, np.ndarray):
+        sized = raw.ndim == 1
+    else:
+        sized = isinstance(raw, Sequence) and not isinstance(raw, (str, bytes))
+    if not sized:
+        raise SegmentIndexError(f"inline {name} must be a sequence of numbers")
+    if len(raw) > limit:  # type: ignore[arg-type]
+        raise SegmentIndexError(f"inline {name} has more than {limit} samples")
+    return tuple(_finite(name, v) for v in raw)  # type: ignore[attr-defined]
+
+
 def _numbers(name: str, raw: object, expected: int | None) -> tuple[float, ...]:
     if not isinstance(raw, list):
         raise SegmentIndexError(f"{name} must be a list of numbers")
@@ -498,19 +529,14 @@ class SegmentLibrary:
         for item in segments:
             if not isinstance(item, InlineSegment):
                 raise SegmentIndexError("every segment must be an InlineSegment")
-            n = (
-                len(item.values)
-                if isinstance(item.values, (Sequence, np.ndarray))
-                else 0
-            )
-            if not 1 <= n <= MAX_SEGMENT_SAMPLES:
+            values = _inline_numbers("values", item.values, MAX_SEGMENT_SAMPLES)
+            if not values:
                 raise SegmentIndexError(
                     f"inline segment {item.segment_id!r} has no valid values"
                 )
-            values = tuple(_finite("values", v) for v in item.values)
             quality = None
             if item.quality is not None:
-                quality = tuple(_finite("quality", q) for q in item.quality)
+                quality = _inline_numbers("quality", item.quality, len(values))
                 if len(quality) != len(values) or any(
                     not 0.0 <= q <= 1.0 for q in quality
                 ):

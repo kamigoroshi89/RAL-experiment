@@ -25,6 +25,9 @@ import dataclasses
 import hashlib
 import json
 import math
+import os
+import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from pathlib import Path
@@ -35,6 +38,8 @@ import pytest
 import yaml
 
 import ralmon.benchmark as benchmark_pkg
+import ralmon.benchmark.measurement as measurement_mod
+import ralmon.benchmark.segments as segments_mod
 from ralmon.benchmark import vocab
 from ralmon.benchmark.latent import MAX_GRID_POINTS, T_DAY_MS
 from ralmon.benchmark.measurement import (
@@ -71,15 +76,17 @@ from ralmon.benchmark.segments import (
     MAX_SEGMENT_FILE_BYTES,
     MAX_SEGMENT_SAMPLES,
     MAX_SEGMENTS,
+    MAX_TOTAL_SAMPLES,
     SEGMENT_KINDS,
     InlineSegment,
+    SegmentEntry,
     SegmentError,
     SegmentIndex,
     SegmentIndexError,
     SegmentLibrary,
     SegmentUnavailableError,
 )
-from ralmon.benchmark.trace import LatentDay
+from ralmon.benchmark.trace import LatentDay, ObservedDay
 from ralmon.signals import Event, EventKind, Sample
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -165,6 +172,7 @@ def latent_day(
     intakes: Sequence[int] = (),
     extra_events: Sequence[Event] = (),
     patient_id: str = "p0000",
+    seed: int = 0,
 ) -> LatentDay:
     start = day_index * DAY
     samples = tuple(
@@ -183,7 +191,7 @@ def latent_day(
     ] + [Event(EventKind.INTAKE, t, t, "patient", {}, None) for t in intakes]
     events.extend(extra_events)
     events.sort(key=lambda e: e.t_device_ms)
-    return LatentDay(patient_id, day_index, 0, samples, tuple(events))
+    return LatentDay(patient_id, day_index, seed, samples, tuple(events))
 
 
 _UNSET: Any = object()
@@ -200,10 +208,16 @@ def build(
     seed: int = 0,
     patient_index: int = 0,
     care_plan_id: str = "plan-1",
+    keep_latent_seed: bool = False,
     **kwargs: Any,
 ) -> ObservedStream:
+    # the latent day of a test carries the seed of the build, as the builder's would
+    # (a mismatch is refused: see test_build_refuses_a_seed_that_differs_from_the_latent_day)
+    latent = latent_day(seed=seed) if latent is _UNSET else latent
+    if isinstance(latent, LatentDay) and not keep_latent_seed:
+        latent = dataclasses.replace(latent, seed=seed)
     return build_observed_base(
-        latent_day() if latent is _UNSET else latent,
+        latent,
         schedule,
         care_plan_id,
         errors,
@@ -1902,7 +1916,19 @@ def test_skipped_measurements_keep_later_noise_aligned() -> None:
 
 
 @pytest.mark.parametrize(
-    "skip", [[1], [8 * HOUR + 1], "abc", 5, [True], [1.5], [None], [10**400]]
+    "skip",
+    [
+        [1],
+        [8 * HOUR + 1],
+        "abc",
+        5,
+        [True],
+        [1.5],
+        [None],
+        [10**400],
+        np.array(8 * HOUR),  # an array that is "iterable" by type but has no length
+        {8 * HOUR + 1: 1},
+    ],
 )
 def test_skip_measurement_ticks_are_validated(skip: Any) -> None:
     with pytest.raises(MeasurementConfigError):
@@ -2335,23 +2361,52 @@ def imported_modules(path: Path) -> set[str]:
     return found
 
 
+# Packages and benchmark modules that each new module may import (ADR layering of
+# ``tests/test_layering.py`` allows more to ``benchmark`` as a whole; these three modules
+# are narrower on purpose: they sit below the injectors and the labeller and never touch
+# the monitor, the calibrator, the attribution layer, the baselines or the evaluation).
+FORBIDDEN_PACKAGES = (
+    "ralmon.spec",
+    "ralmon.conformal",
+    "ralmon.monitor",
+    "ralmon.attribution",
+    "ralmon.baselines",
+    "ralmon.eval",
+)
+ALLOWED_RALMON_IMPORTS = {
+    "segments.py": (),
+    "vocab.py": ("ralmon.signals",),
+    "measurement.py": (
+        "ralmon.signals",
+        "ralmon.benchmark.latent",
+        "ralmon.benchmark.priors",
+        "ralmon.benchmark.rng",
+        "ralmon.benchmark.schedule",
+        "ralmon.benchmark.segments",
+        "ralmon.benchmark.trace",
+        "ralmon.benchmark.vocab",
+    ),
+}
+
+
 def test_module_layering_is_one_way() -> None:
     segments = imported_modules(SRC / "segments.py")
     assert not any("measurement" in m or "vocab" in m for m in segments)
     vocab_imports = imported_modules(SRC / "vocab.py")
     assert not any("measurement" in m or "segments" in m for m in vocab_imports)
-    measurement = imported_modules(SRC / "measurement.py")
-    for forbidden in (
-        "ralmon.spec",
-        "ralmon.monitor",
-        "ralmon.baselines",
-        "ralmon.eval",
-    ):
-        assert not any(
-            m == forbidden or m.startswith(forbidden + ".") for m in measurement
-        )
     for path in (SRC / "segments.py", SRC / "vocab.py", SRC / "measurement.py"):
         mods = imported_modules(path)
+        for forbidden in FORBIDDEN_PACKAGES:
+            assert not any(
+                m == forbidden or m.startswith(forbidden + ".") for m in mods
+            ), (path.name, forbidden)
+        allowed = ALLOWED_RALMON_IMPORTS[path.name]
+        for m in mods:
+            if m.startswith("ralmon") and m not in ("ralmon", "ralmon.benchmark"):
+                assert any(m == a or m.startswith(a + ".") for a in allowed), (
+                    path.name,
+                    m,
+                )
         top = {m.split(".")[0] for m in mods if not m.startswith(".")}
         assert top <= {
             "__future__",
@@ -2375,7 +2430,20 @@ def test_module_layering_is_one_way() -> None:
             "ralmon",
             "yaml",
         }, (path.name, top)
-        assert not any(m.startswith("ralmon.benchmark.latent_day") for m in mods)
+        assert not any(m.startswith(".") for m in mods), path.name  # no relative import
+
+
+def referenced_names(path: Path) -> set[str]:
+    """Every identifier, attribute and imported name that the source of a module mentions."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, ast.alias):
+            names.add(node.name.split(".")[-1])
+    return names
 
 
 def test_no_ground_truth_or_latent_day_import_in_the_new_modules() -> None:
@@ -2385,8 +2453,17 @@ def test_no_ground_truth_or_latent_day_import_in_the_new_modules() -> None:
         assert not {"time", "datetime", "random"} & {m.split(".")[0] for m in mods}, (
             name
         )
+        # no mention at all of the ground-truth containers, not only no import of them
+        assert not {"GroundTruthEvent", "BenchmarkDay", "TruthRecord"} & (
+            referenced_names(SRC / name)
+        ), name
     for name in ("segments.py", "vocab.py"):
         assert not any(m.endswith("LatentDay") for m in imported_modules(SRC / name))
+        assert "LatentDay" not in referenced_names(SRC / name), name
+    # (a previous assertion that no import starts with ``ralmon.benchmark.latent_day`` was
+    # vacuous: no such module exists. ``LatentDay`` lives in ``ralmon.benchmark.trace``, and
+    # the import allowlist of ``test_module_layering_is_one_way`` already confines the three
+    # modules to the modules above, so the assertion is dropped, not replaced.)
 
 
 def test_json_stability_of_settings() -> None:
@@ -2501,30 +2578,110 @@ def test_segment_draw_is_pinned_to_its_named_stream() -> None:
     }
 
 
-def test_public_sources_document_has_its_headings_and_marks_facts_unverified() -> None:
-    text = (ROOT / "docs" / "benchmark" / "public-sources.md").read_text("utf-8")
-    headings = [line for line in text.splitlines() if line.startswith("## ")]
-    assert headings == [
-        "## Purpose",
-        "## Sources",
-        "## Extraction procedure",
-        "## Segment file format",
-        "## Verification status",
+SOURCES_DOC = ROOT / "docs" / "benchmark" / "public-sources.md"
+SOURCE_ROWS = (
+    "VitalDB",
+    "BIDMC PPG and Respiration",
+    "MIT-BIH Arrhythmia Database",
+    "MIT-BIH Noise Stress Test Database",
+    "PhysioNet/CinC Challenge 2015",
+)
+DOC_HEADINGS = [
+    "## Purpose",
+    "## Sources",
+    "## Extraction procedure",
+    "## Segment file format",
+    "## Verification status",
+]
+SOURCES_COLUMNS = [
+    "source",
+    "role in the benchmark (from the README table)",
+    "segment kinds intended",
+    "licence and redistribution",
+    "signal names",
+    "sampling rates",
+    "units",
+    "record layout or labels",
+]
+STATUS_COLUMNS = ["item", "status", "verified_by", "verified_on"]
+
+
+def doc_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def doc_section(text: str, heading: str) -> str:
+    start = text.index(heading)
+    following = [
+        text.index(h, start + 1) for h in DOC_HEADINGS if h in text[start + 1 :]
     ]
-    assert text.count("unverified") >= 5
-    sources = text[text.index("## Sources") : text.index("## Extraction procedure")]
-    for name in (
-        "VitalDB",
-        "BIDMC PPG and Respiration",
-        "MIT-BIH Arrhythmia Database",
-        "MIT-BIH Noise Stress Test Database",
-        "PhysioNet/CinC Challenge 2015",
-    ):
-        row = next(
-            line for line in sources.splitlines() if line.startswith(f"| {name} ")
-        )
-        assert row.count("unverified") >= 5, name
+    return text[start : min(following) if following else len(text)]
+
+
+def check_public_sources(text: str) -> None:
+    """Structure of the document, whatever a human has verified so far.
+
+    Facts may be ``unverified`` or carry the ``verified_by:`` marker defined in the section
+    Verification status; a status row may be ``unverified`` or ``verified`` (then it names
+    who and when). No count of ``unverified`` is asserted: the document is edited by a human.
+    """
+    assert [x for x in text.splitlines() if x.startswith("## ")] == DOC_HEADINGS
+    status = doc_section(text, "## Verification status")
+    assert "verified_by:" in status  # the marker convention is defined here
+    sources = doc_section(text, "## Sources")
     assert "WS00-T04" in sources
+    table = [x for x in sources.splitlines() if x.startswith("|")]
+    assert doc_cells(table[0]) == SOURCES_COLUMNS
+    for name in SOURCE_ROWS:
+        (row,) = [x for x in table if x.startswith(f"| {name} ")]
+        cells = doc_cells(row)
+        assert len(cells) == len(SOURCES_COLUMNS), name
+        for column, cell in zip(SOURCES_COLUMNS[3:], cells[3:], strict=True):
+            # a filled fact is either unverified or marked as verified by someone
+            assert cell.startswith("unverified") or "verified_by:" in cell, (
+                name,
+                column,
+                cell,
+            )
+    rows = [x for x in status.splitlines() if x.startswith("|")]
+    assert doc_cells(rows[0]) == STATUS_COLUMNS
+    assert len(rows) > 2
+    for row in rows[2:]:
+        item, state, who, when = doc_cells(row)
+        assert item and state in ("unverified", "verified"), row
+        if state == "verified":
+            assert who and when, row  # a verification names who and when
+
+
+def test_public_sources_document_structure_whatever_a_human_has_verified() -> None:
+    text = SOURCES_DOC.read_text("utf-8")
+    check_public_sources(text)  # the committed document, in any verification state
+
+    def edit_row(document: str, name: str, column: int, value: str) -> str:
+        lines = document.splitlines()
+        at = next(i for i, x in enumerate(lines) if x.startswith(f"| {name} "))
+        cells = doc_cells(lines[at])
+        cells[column] = value
+        lines[at] = "| " + " | ".join(cells) + " |"
+        return "\n".join(lines) + "\n"
+
+    # a human confirms one fact: marker in the Sources row, row filled in the status table
+    confirmed = edit_row(text, "VitalDB", 4, "NAME (verified_by: tester)")
+    confirmed = confirmed.replace(
+        "| unverified | | |", "| verified | tester | 2026-01-01 |", 1
+    )
+    check_public_sources(confirmed)
+    # a fact with neither the word unverified nor the marker is refused
+    with pytest.raises(AssertionError):
+        check_public_sources(edit_row(text, "VitalDB", 5, "500 Hz"))
+    # a verification that names nobody is refused
+    with pytest.raises(AssertionError):
+        check_public_sources(text.replace("| unverified | | |", "| verified | | |", 1))
+    # a missing section or row is refused
+    with pytest.raises(AssertionError):
+        check_public_sources(text.replace("## Purpose", "## Aim", 1))
+    with pytest.raises((AssertionError, ValueError)):
+        check_public_sources(text.replace("| VitalDB ", "| VitalDb ", 1))
 
 
 # ---------------------------------------------------------------------------
@@ -2582,3 +2739,620 @@ def test_observed_stream_defaults_allow_a_hand_written_fixture() -> None:
     }
     other = ObservedStream("p0000", 0, 0, "plan-1", (), ())
     assert other.settings is not bare.settings  # no shared mutable default
+
+
+# ---------------------------------------------------------------------------
+# Review round 1: unvalidated arguments never reach a raw TypeError
+# ---------------------------------------------------------------------------
+
+
+class PathLikeReturning:
+    """A path-like whose ``__fspath__`` misbehaves (a path object is an argument too)."""
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+    def __fspath__(self) -> Any:
+        if isinstance(self.value, Exception):
+            raise self.value
+        return self.value
+
+
+BAD_PATH_LIKES = [
+    PathLikeReturning(5),
+    PathLikeReturning(None),
+    PathLikeReturning(ValueError("embedded")),
+    PathLikeReturning(TypeError("not a path")),
+]
+
+
+@pytest.mark.parametrize("path", BAD_PATH_LIKES)
+def test_path_like_objects_that_misbehave_are_refused_by_name(path: Any) -> None:
+    with pytest.raises(MeasurementConfigError):
+        EmpiricalJitter(path)
+    with pytest.raises(MeasurementConfigError):
+        load_measurement_design(path, inflation_min_ms=0)
+    with pytest.raises(SegmentIndexError):
+        SegmentIndex.from_file(path)
+    with pytest.raises(SegmentIndexError):
+        SegmentLibrary(path, SegmentIndex(()))
+
+
+INLINE_BAD_NUMBERS = [
+    5,
+    1.5,
+    True,
+    object(),
+    {0.5: 1},  # a mapping is not a sequence of numbers (iterating it gives its keys)
+    iter([0.5]),  # nor is an iterator (it would be consumed)
+    np.array(0.5),  # a zero-dimensional array has no length
+    np.zeros((1, 1)),
+    "0.5",
+    b"\x01",
+]
+
+
+@pytest.mark.parametrize("bad", INLINE_BAD_NUMBERS)
+def test_inline_segment_numbers_must_be_a_sequence_of_numbers(bad: Any) -> None:
+    with pytest.raises(SegmentIndexError):
+        SegmentLibrary.from_memory(
+            [InlineSegment("a", "hr_clean", [1.0], MIN, "bpm", quality=bad)]
+        )
+    with pytest.raises(SegmentIndexError):
+        SegmentLibrary.from_memory([InlineSegment("a", "hr_clean", bad, MIN, "bpm")])
+
+
+def test_inline_segment_accepts_sequences_and_one_dimensional_arrays() -> None:
+    library = SegmentLibrary.from_memory(
+        [
+            InlineSegment(
+                "a",
+                "hr_clean",
+                np.array([1.0, 2.0]),
+                MIN,
+                "bpm",
+                quality=np.array([0.5, 1.0]),
+            ),
+            InlineSegment("b", "spo2_clean", (1.0, 2.0), MIN, "%", quality=[0.5, 1.0]),
+        ]
+    )
+    assert library.draw("hr_clean", 2, rng()).quality == (0.5, 1.0)
+    assert library.draw("spo2_clean", 2, rng()).values == (1.0, 2.0)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        (LIB, DESIGN, 0, 0, None),
+        (LIB, DESIGN, 0, 0, 1.5),
+        (LIB, DESIGN, 0, 0, "1"),
+        (LIB, DESIGN, 0, 0, True),
+        (LIB, DESIGN, 0, None, 0),
+        (LIB, DESIGN, None, 0, 0),
+        (LIB, DESIGN, "0", 0, 0),
+        (LIB, DESIGN, 0, 0, 10**400),
+    ],
+)
+def test_draw_clean_vitals_day_index_is_an_integer(args: Any) -> None:
+    with pytest.raises(MeasurementConfigError):
+        draw_clean_vitals(*args)
+
+
+def stream_with(**changes: Any) -> ObservedStream:
+    return dataclasses.replace(build(), **changes)
+
+
+BAD_STREAMS = [
+    stream_with(settings=5),
+    stream_with(settings=None),
+    stream_with(settings="x"),
+    stream_with(settings=[("a", 1)]),  # pairs are not a mapping
+    stream_with(settings={1: "x"}),  # the settings are JSON-native: keys are strings
+    stream_with(samples=5),
+    stream_with(samples=None),
+    stream_with(samples=iter(())),
+    stream_with(samples="abc"),
+    stream_with(events=5),
+    stream_with(events=None),
+    stream_with(events=iter(())),
+    stream_with(samples=(Sample([], 0, 0, 0.0, None, None),)),  # unhashable signal
+    stream_with(samples=(Sample(5, 0, 0, 0.0, None, None),)),
+    stream_with(events=(Event([], 0, 0, "s", {}, None),)),  # unhashable kind
+    stream_with(
+        events=(Event("measurement", 0, 0, "s", {}, None),)
+    ),  # not an EventKind
+]
+
+
+@pytest.mark.parametrize("bad", BAD_STREAMS)
+def test_assign_device_seq_refuses_malformed_stream_members(bad: Any) -> None:
+    with pytest.raises(MeasurementConfigError):
+        assign_device_seq(bad)
+
+
+# ---------------------------------------------------------------------------
+# Review round 1: duplicate JSON keys are refused, not resolved to the last value
+# ---------------------------------------------------------------------------
+
+
+def test_index_with_a_duplicate_key_is_refused(tmp_path: Path) -> None:
+    sha = write_segment(tmp_path, "hr/s1.json", [70.0, 71.0, 72.0])
+    plain = json.dumps({"schema_version": "0.1.0", "segments": [entry(sha)]})
+    path = tmp_path / "index.json"
+    path.write_text(plain, "utf-8")
+    assert len(SegmentIndex.from_file(path).entries) == 1  # the control parses
+    top = plain[:-1] + ', "segments": []}'
+    inner = json.dumps(entry(sha))[:-1] + ', "licence": "other"}'
+    nested = '{"schema_version": "0.1.0", "segments": [' + inner + "]}"
+    for text in (top, nested):
+        path.write_text(text, "utf-8")
+        with pytest.raises(SegmentIndexError, match="duplicate"):
+            SegmentIndex.from_file(path)
+
+
+def test_segment_file_with_a_duplicate_key_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "hr" / "s1.json"
+    path.parent.mkdir()
+    path.write_text('{"values": [70.0, 71.0, 72.0]}', "utf-8")
+    index = SegmentIndex.from_mapping(
+        {"schema_version": "0.1.0", "segments": [entry(sha_of(path))]}
+    )
+    assert SegmentLibrary(tmp_path, index).draw("hr_clean", 3, rng()).values == (
+        70.0,
+        71.0,
+        72.0,
+    )  # the control parses
+    path.write_text(
+        '{"values": [1.0, 2.0, 3.0], "values": [70.0, 71.0, 72.0]}', "utf-8"
+    )
+    index = SegmentIndex.from_mapping(
+        {"schema_version": "0.1.0", "segments": [entry(sha_of(path))]}
+    )
+    with pytest.raises(SegmentIndexError, match="duplicate"):
+        SegmentLibrary(tmp_path, index).draw("hr_clean", 3, rng())
+
+
+def test_jitter_file_with_a_duplicate_key_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "jitter.json"
+    path.write_text('{"delays_ms": [5], "source": "x"}', "utf-8")
+    assert EmpiricalJitter(path).delays_ms == (5,)  # the control parses
+    for text in (
+        '{"delays_ms": [0], "delays_ms": [5], "source": "x"}',
+        '{"delays_ms": [5], "source": "x", "source": "y"}',
+    ):
+        path.write_text(text, "utf-8")
+        with pytest.raises(MeasurementConfigError, match="duplicate"):
+            EmpiricalJitter(path)
+
+
+# ---------------------------------------------------------------------------
+# Review round 1: the seed of the build is the seed of the latent day
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("latent_seed", [1, 2**40, "0", None, 0.0, True])
+def test_build_refuses_a_seed_that_differs_from_the_latent_day(
+    latent_seed: Any,
+) -> None:
+    latent = latent_day(seed=latent_seed)
+    with pytest.raises(MeasurementConfigError, match="seed"):
+        build(latent, keep_latent_seed=True, seed=0)
+    ok = build(latent_day(seed=7), seed=7)
+    assert ok.seed == 7
+    with pytest.raises(MeasurementConfigError, match="seed"):
+        build(latent_day(seed=7), keep_latent_seed=True, seed=8)
+
+
+# ---------------------------------------------------------------------------
+# Review round 1: resource bounds, exactly at the limit and one beyond
+# ---------------------------------------------------------------------------
+
+MIB = 1024 * 1024
+
+
+def test_resource_bounds_have_their_documented_values() -> None:
+    # a change of one of these is a decision, not a refactoring: the monkeypatched tests
+    # below pin how a bound is applied, this one pins what it is
+    assert (
+        MAX_VISITS_PER_DAY,
+        MAX_VITALS_SAMPLES,
+        MAX_LATENT_EVENTS,
+        MAX_JITTER_FILE_BYTES,
+        MAX_JITTER_DELAYS,
+    ) == (10_000, 100_000, 400_000, 4 * MIB, 100_000)
+    assert (
+        MAX_INDEX_BYTES,
+        MAX_SEGMENT_FILE_BYTES,
+        MAX_SEGMENTS,
+        MAX_SEGMENT_SAMPLES,
+        MAX_TOTAL_SAMPLES,
+        MAX_DRAW_SAMPLES,
+        segments_mod.MAX_SAMPLE_PERIOD_MS,
+    ) == (4 * MIB, 8 * MIB, 10_000, 500_000, 10_000_000, 500_000, DAY)
+    assert measurement_mod.MAX_LATENT_SAMPLES == MAX_GRID_POINTS
+
+
+def intake_events(n: int) -> tuple[Event, ...]:
+    return tuple(
+        Event(EventKind.INTAKE, 1_000 + k, 1_000 + k, "patient", {}, None)
+        for k in range(n)
+    )
+
+
+def test_latent_event_bound_is_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(measurement_mod, "MAX_LATENT_EVENTS", 5)
+    samples = latent_day().samples
+    assert build(LatentDay("p0000", 0, 0, samples, intake_events(5)), DOSE_SCHED)
+    with pytest.raises(MeasurementConfigError):
+        build(LatentDay("p0000", 0, 0, samples, intake_events(6)), DOSE_SCHED)
+
+
+def test_latent_event_bound_at_its_real_value_is_exact() -> None:
+    class Lazy(Sequence[Event]):
+        """``n`` copies of one latent INTAKE, built on demand (no 400 000 objects)."""
+
+        def __init__(self, n: int) -> None:
+            self.n, self.one = n, intake_events(1)[0]
+
+        def __len__(self) -> int:
+            return self.n
+
+        def __getitem__(self, index: Any) -> Event:
+            if not 0 <= index < self.n:
+                raise IndexError(index)  # ends the iteration of the Sequence mixin
+            return self.one
+
+    samples = latent_day().samples
+    out = build(LatentDay("p0000", 0, 0, samples, Lazy(MAX_LATENT_EVENTS)))
+    assert (
+        events_of(out, EventKind.INTAKE) == []
+    )  # none is witnessed: no visit near 00:01
+    with pytest.raises(MeasurementConfigError):
+        build(LatentDay("p0000", 0, 0, samples, Lazy(MAX_LATENT_EVENTS + 1)))
+
+
+def test_latent_sample_bound_is_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(measurement_mod, "MAX_LATENT_SAMPLES", 3)
+    points = [Sample("bp", k, k, 130.0, None, None) for k in range(4)]
+    assert LatentSbpHold(points[:3]).last_t_ms == 2
+    with pytest.raises(MeasurementConfigError):
+        LatentSbpHold(points)
+
+
+def test_tick_bound_is_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(measurement_mod, "MAX_VISITS_PER_DAY", 3)
+    three = Schedule(dose_ticks_ms=(HOUR,), measurement_ticks_ms=(2 * HOUR, 3 * HOUR))
+    four = Schedule(
+        dose_ticks_ms=(HOUR, 4 * HOUR), measurement_ticks_ms=(2 * HOUR, 3 * HOUR)
+    )
+    assert len(build(schedule=three).visits) == 3
+    with pytest.raises(MeasurementConfigError):
+        build(schedule=four)
+    # the skipped-tick list is read with the same bound: one more than the ticks is refused
+    ticks = (2 * HOUR, 3 * HOUR, 4 * HOUR)
+    full = Schedule(dose_ticks_ms=(), measurement_ticks_ms=ticks)
+    assert len(build(schedule=full, skip_measurement_ticks_ms=ticks).measurements) == 0
+    assert (
+        len(build(schedule=full, skip_measurement_ticks_ms=[ticks[0]] * 3).measurements)
+        == 2
+    )
+    with pytest.raises(MeasurementConfigError, match="entries"):
+        build(
+            schedule=full, skip_measurement_ticks_ms=[ticks[0]] * 4
+        )  # valid but too many
+
+
+def test_vitals_sample_bound_is_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(measurement_mod, "MAX_VITALS_SAMPLES", DAY // MIN)
+    assert dataclasses.replace(DESIGN, vitals_period_ms=MIN).vitals_points == DAY // MIN
+    monkeypatch.setattr(measurement_mod, "MAX_VITALS_SAMPLES", DAY // MIN - 1)
+    with pytest.raises(MeasurementConfigError):
+        dataclasses.replace(DESIGN, vitals_period_ms=MIN)
+
+
+def test_jitter_delay_count_bound_is_exact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(measurement_mod, "MAX_JITTER_DELAYS", 3)
+    assert len(EmpiricalJitter(write_jitter(tmp_path, [0, 1, 2])).delays_ms) == 3
+    with pytest.raises(MeasurementConfigError):
+        EmpiricalJitter(write_jitter(tmp_path, [0, 1, 2, 3]))
+
+
+def test_jitter_file_size_bound_is_exact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = b'{"delays_ms": [1], "source": "x"}'
+    path = tmp_path / "jitter.json"
+    path.write_bytes(body)
+    monkeypatch.setattr(measurement_mod, "MAX_JITTER_FILE_BYTES", len(body))
+    assert EmpiricalJitter(path).delays_ms == (1,)  # exactly at the limit
+    path.write_bytes(body + b" ")
+    with pytest.raises(MeasurementConfigError):
+        EmpiricalJitter(path)  # one byte beyond
+
+
+def seg_entry(i: int, n: int = 3, kind: str = "hr_clean") -> SegmentEntry:
+    return SegmentEntry(
+        f"s{i}", "d", "r", kind, MIN, n, "bpm", f"p/s{i}.json", "0" * 64, "l"
+    )
+
+
+def test_index_size_bound_is_exact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sha = write_segment(tmp_path, "hr/s1.json", [70.0, 71.0, 72.0])
+    path = write_index(tmp_path, [entry(sha)])
+    size = path.stat().st_size
+    monkeypatch.setattr(segments_mod, "MAX_INDEX_BYTES", size)
+    assert len(SegmentIndex.from_file(path).entries) == 1
+    monkeypatch.setattr(segments_mod, "MAX_INDEX_BYTES", size - 1)
+    with pytest.raises(SegmentIndexError):
+        SegmentIndex.from_file(path)
+
+
+def test_segment_file_size_bound_is_exact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sha = write_segment(tmp_path, "hr/s1.json", [70.0, 71.0, 72.0])
+    index = SegmentIndex.from_mapping(
+        {"schema_version": "0.1.0", "segments": [entry(sha)]}
+    )
+    size = (tmp_path / "hr" / "s1.json").stat().st_size
+    monkeypatch.setattr(segments_mod, "MAX_SEGMENT_FILE_BYTES", size)
+    assert SegmentLibrary(tmp_path, index).draw("hr_clean", 3, rng()).values[0] == 70.0
+    monkeypatch.setattr(segments_mod, "MAX_SEGMENT_FILE_BYTES", size - 1)
+    with pytest.raises(SegmentIndexError):
+        SegmentLibrary(tmp_path, index)
+
+
+def test_segment_count_bound_is_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(segments_mod, "MAX_SEGMENTS", 2)
+    assert len(SegmentIndex(tuple(seg_entry(i) for i in range(2))).entries) == 2
+    with pytest.raises(SegmentIndexError):
+        SegmentIndex(tuple(seg_entry(i) for i in range(3)))
+    raw = [entry("0" * 64, segment_id=f"s{i}", path=f"hr/s{i}.json") for i in range(3)]
+    ok = {"schema_version": "0.1.0", "segments": raw[:2]}
+    assert len(SegmentIndex.from_mapping(ok).entries) == 2
+    with pytest.raises(SegmentIndexError):
+        SegmentIndex.from_mapping({"schema_version": "0.1.0", "segments": raw})
+
+
+def test_total_sample_bound_is_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(segments_mod, "MAX_TOTAL_SAMPLES", 6)
+    assert SegmentIndex((seg_entry(0, 3), seg_entry(1, 3)))
+    with pytest.raises(SegmentIndexError):
+        SegmentIndex((seg_entry(0, 3), seg_entry(1, 4)))
+
+
+def test_samples_per_segment_bound_is_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(segments_mod, "MAX_SEGMENT_SAMPLES", 3)
+    assert seg_entry(0, 3).n_samples == 3
+    with pytest.raises(SegmentIndexError):
+        seg_entry(0, 4)
+    assert (
+        SegmentLibrary.from_memory(
+            [InlineSegment("a", "hr_clean", [1.0, 2.0, 3.0], MIN, "bpm")]
+        )
+        .index.entries[0]
+        .n_samples
+        == 3
+    )
+    with pytest.raises(SegmentIndexError):
+        SegmentLibrary.from_memory(
+            [InlineSegment("a", "hr_clean", [1.0, 2.0, 3.0, 4.0], MIN, "bpm")]
+        )
+
+
+def test_draw_size_and_period_bounds_are_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(segments_mod, "MAX_DRAW_SAMPLES", 3)
+    library = SegmentLibrary.from_memory(
+        [InlineSegment("a", "hr_clean", [1.0, 2.0, 3.0, 4.0], MIN, "bpm")]
+    )
+    assert len(library.draw("hr_clean", 3, rng()).values) == 3
+    with pytest.raises(SegmentUnavailableError):
+        library.draw("hr_clean", 4, rng())
+    monkeypatch.setattr(segments_mod, "MAX_SAMPLE_PERIOD_MS", MIN)
+    assert seg_entry(0).sample_period_ms == MIN
+    with pytest.raises(SegmentIndexError):
+        SegmentEntry(
+            "s", "d", "r", "hr_clean", MIN + 1, 3, "bpm", "p/s.json", "0" * 64, "l"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Review round 1: boundaries, ties and the kind of file that is read
+# ---------------------------------------------------------------------------
+
+
+def test_reading_at_the_closing_instant_is_not_past_the_day_end() -> None:
+    sched = Schedule(dose_ticks_ms=(), measurement_ticks_ms=(DAY - 30 * SEC,))
+    exact = build(
+        schedule=sched
+    )  # inflation 30 s: the reading is stamped at DAY exactly
+    assert exact.measurements[0].t_ms == DAY
+    assert exact.settings["n_measurements_after_day_end"] == 0
+    late = build(
+        schedule=sched,
+        design=dataclasses.replace(DESIGN, inflation_ms_nominal=30 * SEC + 1),
+    )
+    assert late.measurements[0].t_ms == DAY + 1
+    assert late.settings["n_measurements_after_day_end"] == 1
+
+
+def test_segment_source_is_none_when_no_vitals_segment_is_used() -> None:
+    noise_only = SegmentLibrary.from_memory(
+        [InlineSegment("n", "hr_error_ecg_noise", [0.0, 1.0], MIN, "bpm")]
+    )
+    assert noise_only.descriptor != "none"  # the library is not empty
+    out = build(library=noise_only, allow_no_segments=True)
+    assert out.settings["segment_source"] == "none"
+    assert samples_of(out, "hr_ecg") == [] and samples_of(out, "hr_pulse") == []
+    assert build().settings["segment_source"] == LIB.descriptor
+
+
+def test_a_segment_exactly_as_long_as_the_request_is_long_enough() -> None:
+    library = SegmentLibrary.from_memory(
+        [
+            InlineSegment("short1", "hr_clean", [1.0, 2.0], MIN, "bpm"),
+            InlineSegment("short2", "hr_clean", [3.0, 4.0], MIN, "bpm"),
+            InlineSegment("exact", "hr_clean", [5.0, 6.0, 7.0], MIN, "bpm"),
+        ]
+    )
+    for seed in range(40):
+        draw = library.draw("hr_clean", 3, rng(seed))
+        assert draw.segment_ids == ("exact",), seed
+        assert draw.join_count == 0 and draw.values == (5.0, 6.0, 7.0)
+    assert library.draw("hr_clean", 4, rng(0)).join_count >= 1  # one more is a join
+
+
+class DoseAfterMeasurement:
+    """Dose visit arrives at the end of the day, measurement visit 30 s before it."""
+
+    descriptor = "tie"
+
+    def delay_ms(self, rng: np.random.Generator, *, kind: str, index: int) -> int:
+        return HOUR if kind == vocab.KIND_DOSE else 0
+
+
+def test_items_at_the_closing_instant_come_before_day_end() -> None:
+    schedule = Schedule(
+        dose_ticks_ms=(23 * HOUR,), measurement_ticks_ms=(DAY - 30 * SEC,)
+    )
+    out = build(
+        latent_day(dispenses=[DAY], intakes=[DAY]),
+        schedule,
+        jitter=DoseAfterMeasurement(),
+    )
+    # presence (dose visit arrives at DAY), the cuff message (reading at DAY), then day_end
+    assert [s.signal for s in out.samples if s.t_device_ms == DAY] == [
+        "presence",
+        "bp",
+        "inflation_ms",
+        "cuff_health",
+        "hr_pulse",
+        "day_end",
+    ]
+    assert [e.kind for e in out.events if e.t_device_ms == DAY] == [
+        EventKind.ROBOT_TASK,
+        EventKind.MEASUREMENT,
+        EventKind.DISPENSE,
+        EventKind.INTAKE,
+    ]
+    assert out.samples[-1].signal == "day_end"
+
+
+def test_schedule_ticks_at_one_instant_put_the_dose_first() -> None:
+    sched = Schedule(
+        dose_ticks_ms=(8 * HOUR, 12 * HOUR), measurement_ticks_ms=(8 * HOUR, 12 * HOUR)
+    )
+    out = build(latent_day(), sched)
+    ticks = events_of(out, EventKind.SCHEDULE_TICK)
+    assert [(e.t_device_ms, e.payload["kind"]) for e in ticks] == [
+        (8 * HOUR, vocab.KIND_DOSE),
+        (8 * HOUR, vocab.KIND_MEASUREMENT),
+        (12 * HOUR, vocab.KIND_DOSE),
+        (12 * HOUR, vocab.KIND_MEASUREMENT),
+    ]
+    assert [(v.kind, v.index) for v in out.visits] == [
+        (vocab.KIND_DOSE, 0),
+        (vocab.KIND_MEASUREMENT, 0),
+        (vocab.KIND_DOSE, 1),
+        (vocab.KIND_MEASUREMENT, 1),
+    ]
+
+
+def test_special_files_are_refused_without_being_opened(tmp_path: Path) -> None:
+    """A FIFO has size 0 and blocks a reader that opens it: the kind of file is checked first.
+
+    The check runs in a child process with a timeout, so a regression that opens the FIFO
+    fails this test instead of blocking the suite.
+    """
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("no named pipes on this platform")
+    fifo_index = tmp_path / "index.json"
+    fifo_segment = tmp_path / "hr" / "s1.json"
+    fifo_jitter = tmp_path / "jitter.json"
+    fifo_segment.parent.mkdir()
+    for fifo in (fifo_index, fifo_segment, fifo_jitter):
+        os.mkfifo(fifo)
+    code = (
+        "import sys\n"
+        "from ralmon.benchmark.measurement import EmpiricalJitter, MeasurementConfigError\n"
+        "from ralmon.benchmark.segments import SegmentIndex, SegmentIndexError, SegmentLibrary\n"
+        "root, = sys.argv[1:]\n"
+        "def attempt(name, call, error):\n"
+        "    try:\n"
+        "        call()\n"
+        "    except error:\n"
+        "        print(name, 'refused')\n"
+        "attempt('index', lambda: SegmentIndex.from_file(root + '/index.json'), SegmentIndexError)\n"
+        "attempt('jitter', lambda: EmpiricalJitter(root + '/jitter.json'), MeasurementConfigError)\n"
+        "index = SegmentIndex.from_mapping({'schema_version': '0.1.0', 'segments': [{\n"
+        "    'segment_id': 's1', 'dataset': 'd', 'record_id': 'r', 'kind': 'hr_clean',\n"
+        "    'sample_period_ms': 60000, 'n_samples': 3, 'unit': 'bpm', 'path': 'hr/s1.json',\n"
+        "    'sha256': '0' * 64, 'licence': 'l'}]})\n"
+        "attempt('segment', lambda: SegmentLibrary(root, index), SegmentIndexError)\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr[-500:]
+    assert done.stdout.split("\n")[:-1] == [
+        "index refused",
+        "jitter refused",
+        "segment refused",
+    ]
+
+
+def test_observed_stream_carries_latent_values_only_in_generator_side_records() -> None:
+    stream_fields = {f.name for f in dataclasses.fields(ObservedStream)}
+    assert stream_fields == {
+        "patient_id",
+        "day_index",
+        "seed",
+        "care_plan_id",
+        "samples",
+        "events",
+        "visits",
+        "measurements",
+        "settings",
+    }
+    latent_named = {
+        (cls.__name__, f.name)
+        for cls in (
+            ObservedStream,
+            measurement_mod.RobotVisit,
+            measurement_mod.MeasurementRecord,
+            measurement_mod.CleanVitals,
+        )
+        for f in dataclasses.fields(cls)
+        if "latent" in f.name
+    }
+    assert latent_named == {("MeasurementRecord", "latent_sbp_mmhg")}
+    # the monitor-facing record has no place for it, nor for the generator-side members
+    day_fields = {f.name for f in dataclasses.fields(ObservedDay)}
+    assert day_fields == {
+        "patient_id",
+        "day_index",
+        "seed",
+        "samples",
+        "events",
+        "care_plan_id",
+    }
+    assert not any("latent" in name for name in day_fields)
+    assert not day_fields & {"measurements", "visits", "settings"}
+    # nothing observed (samples, events, settings) mentions the latent pressure
+    out = build(
+        latent_day(sbp=131.25), SCHED_BOTH, errors=DeviceErrorModel(0.0, 3.0, 0.0, 0.0)
+    )
+    assert out.measurements and all(
+        m.latent_sbp_mmhg != m.value_mmhg for m in out.measurements
+    )
+    assert "latent" not in repr(out.samples) + repr(out.events) + repr(out.settings)
+    # (there is no ObservedStream -> ObservedDay conversion yet: WS04-T11 builds the monitor-
+    # facing day from ``samples`` and ``events`` only; this test then extends to that call)

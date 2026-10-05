@@ -14,7 +14,9 @@ only ``DISPENSE`` and ``INTAKE`` are read (their times); latent ``SCHEDULE_TICK`
 come from the schedule and the observed readings from the device model. Heart rate and SpO2
 are not read from the latent day: ``draw_clean_vitals`` draws them from the segment library
 with a named stream, and the latent assembly of WS04-T09 must call the same function so that
-the latent and the observed heart rate agree. The latent day is never modified.
+the latent and the observed heart rate agree. The ``seed`` argument must equal ``latent.seed``
+(one root seed per benchmark: a mismatch would draw the observed noise from another seed than the
+latent day was generated with, so it is refused). The latent day is never modified.
 
 Hold. The latent pressure at an instant is the value of the last grid point at or before it
 (piecewise constant, right-continuous, as ``ralmon.signals.hold_last``). An instant before
@@ -265,7 +267,10 @@ def _path(name: str, value: object) -> Path:
         raise MeasurementConfigError(
             f"{name} must be a path, got {type(value).__name__}"
         )
-    text = os.fspath(value)
+    try:
+        text = os.fspath(value)
+    except (TypeError, ValueError, OSError) as exc:  # a misbehaving __fspath__
+        raise MeasurementConfigError(f"{name} is not a valid path") from exc
     if not isinstance(text, str) or not text or "\0" in text:
         raise MeasurementConfigError(f"{name} is not a valid path")
     return Path(text)
@@ -274,7 +279,18 @@ def _path(name: str, value: object) -> Path:
 def _key(
     seed: object, patient_index: object, day_index: object
 ) -> tuple[int, int, int]:
-    """Validate the stream key by building one stream; the key as three ints."""
+    """Validate the stream key by building one stream; the key as three ints.
+
+    ``rng.stream`` accepts ``None`` as a day (a patient-level stream); the three members must be
+    integers here, so each is checked before the stream is built.
+    """
+    for name, value in (
+        ("seed", seed),
+        ("patient_index", patient_index),
+        ("day_index", day_index),
+    ):
+        if not _is_integer(value):
+            raise MeasurementConfigError(f"{name} must be an integer")
     try:
         stream(seed, patient_index, day_index, StreamPurpose.MEASUREMENT, 0)  # type: ignore[arg-type]
     except StreamKeyError as exc:
@@ -410,6 +426,13 @@ def _reject_constant(token: str) -> Any:
     raise MeasurementConfigError(f"JSON constant {token} is not allowed")
 
 
+def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    keys = [key for key, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise MeasurementConfigError("a JSON object has a duplicate key")
+    return dict(pairs)
+
+
 class EmpiricalJitter:
     """Arrival delays resampled from a file exported by the WS07 simulation.
 
@@ -441,7 +464,11 @@ class EmpiricalJitter:
                 f"the jitter file is larger than {MAX_JITTER_FILE_BYTES} bytes"
             )
         try:
-            document = json.loads(data.decode("utf-8"), parse_constant=_reject_constant)
+            document = json.loads(
+                data.decode("utf-8"),
+                parse_constant=_reject_constant,
+                object_pairs_hook=_reject_duplicates,
+            )
         except MeasurementConfigError:
             raise
         except (
@@ -781,7 +808,17 @@ def _skip_indices(skip: object, schedule: Schedule) -> frozenset[int]:
         )
     position = {t: k for k, t in enumerate(schedule.measurement_ticks_ms)}
     chosen: set[int] = set()
-    for value in islice(skip, MAX_VISITS_PER_DAY + 1):
+    try:
+        values = list(islice(skip, MAX_VISITS_PER_DAY + 1))
+    except TypeError as exc:  # e.g. a zero-dimensional array is Iterable by type only
+        raise MeasurementConfigError(
+            "skip_measurement_ticks_ms must be a collection of ticks"
+        ) from exc
+    if len(values) > MAX_VISITS_PER_DAY:
+        raise MeasurementConfigError(
+            f"skip_measurement_ticks_ms has more than {MAX_VISITS_PER_DAY} entries"
+        )
+    for value in values:
         tick = _int("a skipped tick", value, _INT64_MIN, _INT64_MAX)
         if tick not in position:
             raise MeasurementConfigError(
@@ -836,6 +873,10 @@ def build_observed_base(
     if not isinstance(allow_no_segments, bool):
         raise MeasurementConfigError("allow_no_segments must be a bool")
     key = _key(seed, patient_index, day_index)
+    if not _is_integer(latent.seed) or int(latent.seed) != key[0]:
+        raise MeasurementConfigError(
+            "seed must equal the seed of the latent day (one seed per benchmark)"
+        )
     doses, ticks = schedule.dose_ticks_ms, schedule.measurement_ticks_ms
     if len(doses) + len(ticks) > MAX_VISITS_PER_DAY:
         raise MeasurementConfigError(f"a day has at most {MAX_VISITS_PER_DAY} ticks")
@@ -993,6 +1034,16 @@ def assign_device_seq(
         raise MeasurementConfigError("stream_ must be an ObservedStream")
     first_cuff = _int("cuff_start", cuff_start, 1, _MAX_SEQ)
     first_dispense = _int("dispenser_start", dispenser_start, 1, _MAX_SEQ)
+    for what, members in (("samples", stream_.samples), ("events", stream_.events)):
+        if isinstance(members, (str, bytes)) or not isinstance(members, Sequence):
+            raise MeasurementConfigError(f"the {what} of the stream must be a sequence")
+    old_settings = stream_.settings
+    if not isinstance(old_settings, Mapping) or not all(
+        isinstance(key, str) for key in old_settings
+    ):
+        raise MeasurementConfigError(
+            "the settings of the stream must be a mapping with string keys"
+        )
     samples: list[Sample] = []
     message = first_cuff - 1
     started = False
@@ -1000,6 +1051,8 @@ def assign_device_seq(
     for sample in stream_.samples:
         if not isinstance(sample, Sample):
             raise MeasurementConfigError("every sample must be a Sample")
+        if not isinstance(sample.signal, str):
+            raise MeasurementConfigError("every sample needs a signal name")
         if sample.signal in _CUFF_SIGNALS:
             if not started or sample.signal in present:
                 message += 1
@@ -1016,11 +1069,13 @@ def assign_device_seq(
     for event in stream_.events:
         if not isinstance(event, Event):
             raise MeasurementConfigError("every event must be an Event")
+        if not isinstance(event.kind, EventKind):
+            raise MeasurementConfigError("every event needs an EventKind")
         if event.kind in counters:
             counters[event.kind] += 1
             event = replace(event, seq=counters[event.kind])
         events.append(event)
-    settings = dict(stream_.settings)
+    settings = dict(old_settings)
     settings["next_cuff_seq"] = max(message, counters[EventKind.MEASUREMENT]) + 1
     settings["next_dispenser_seq"] = counters[EventKind.DISPENSE] + 1
     return replace(
