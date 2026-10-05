@@ -3,7 +3,7 @@ id: WS04-T06
 title: "Measurement process: schedule, cuff error, HR and SpO2 from public real-noise data"
 workstream: WS04-benchmark
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS04-T04", "WS04-T05", "WS05-T02", "WS00-T09"]
 critical_path: true
 non_negotiable: false
@@ -145,3 +145,10 @@ Open hand-overs (notes only, no code).
 - **T09.** A new `OUTCOMES` member is needed for the declined-task outcome.
 - **T10.** The `day_end` instant is exactly `(d + 1) * T_day` (WS05-T02 M7); T10's wording says only "end of the day".
 - **T11.** Pass the registry `cuff_inflation_min` as `inflation_min_ms`; `load_measurement_design` raises `UnfilledParameterError` while rows are unfilled; items after `(d + 1) * T_day` stay in the day of their tick, and a day-d intake after midnight cannot be witnessed by a day-(d + 1) visit (carry-over rule CP7).
+
+### Post-task review (orchestrator, 2026-10-05)
+
+Produced: `vocab.py`, `segments.py` (segment index and library, fixture-driven), `measurement.py` (observed base stream: schedule ticks, jitter, cuff with device error, dispenser pass-through, witnessed INTAKE, presence, HR and SpO2 from segments), `docs/benchmark/public-sources.md` (all facts `unverified`), five design rows `awaiting_human_value`. Independent review: PASS, no blocker (1400 random fixtures against an independent reference, 0 mismatches; about 10 000 fuzz calls; 114 mutants). One fix round closed raw `TypeError` sites, duplicate JSON keys, a state-pinning doc test, mutant gaps and the seed check. Orchestrator verification on the final branch: `test_measurement.py` 514 passed (101 MB peak), full suite 1737 passed, ruff, format, mypy, `--check-table`, `check_plan` exit 0, public-sources greps 5 and 21, forbidden-words grep empty.
+Deviations: INTAKE has no `witness` key (evidence-channels table prevails); only the `note` text of two prior rows changed (Passo 5 wording); extensions to the task API (`cuff_start`, `dispenser_start`, `skip_measurement_ticks_ms`, `allow_no_segments`, `draw_clean_vitals`).
+Impact on dependents: WS04-T07 and WS04-T08 are now `ready`. Open hand-overs (details in "Fix round 1" above): nobody yet emits the robot `NODE_STATE colocated` report (proposed owner WS04-T11 unless WS04-T07 decides otherwise); `vocab.PAYLOAD_KEYS` needs the T07 keys; T08 must not call `assign_device_seq` after replay injection; T10 and T11 notes on `day_end` and items after midnight. `ObservedStream` carries latent values in `measurements`/`visits` (never to cross to `ObservedDay`).
+Open MINOR: none beyond the hand-overs.

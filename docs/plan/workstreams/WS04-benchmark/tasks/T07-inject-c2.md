@@ -3,7 +3,7 @@ id: WS04-T07
 title: C2 fault injection
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS04-T06", "WS02-T01", "WS02-T03"]
 critical_path: true
 non_negotiable: false
@@ -89,3 +89,7 @@ See `docs/models/evidence-channels.md` EC-OP-14 to EC-OP-21 and decision D-9. In
 ### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
 
 Structured content (level rows, capability sets, time strings) in `injections.yaml` is not read by `load_design_file` of WS04-T02 (top-level `parameters:` list, numeric values only): either keep numbers in that list or extend the loader in this task with a test; the table header claims it lists every number that is not code.
+
+### Hand-over from the WS04-T06 review (orchestrator, 2026-10-05)
+
+Read the "Completion note" and "Fix round 1" in `T06-measurement-process.md` before starting: vocabulary in `vocab.py` (extend `PAYLOAD_KEYS` for your own keys), `assign_device_seq` overwrites every cuff `seq` (do not call it after replay injection), `ObservedStream.visits` and `measurements` carry latent values and must never be written into an `ObservedDay`, and nobody emits the robot `NODE_STATE colocated` report yet (owner open, proposed WS04-T11).

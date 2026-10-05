@@ -3,7 +3,7 @@ id: WS04-T08
 title: C3 integrity attacks at naive and informed attacker levels
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS04-T06", "WS02-T02", "WS02-T03"]
 critical_path: true
 non_negotiable: false
@@ -82,3 +82,7 @@ See `docs/models/threat-model.md` open points TM-OP-1, TM-OP-2, TM-OP-3, TM-OP-7
 ### Flag from the WS02-T03 review (orchestrator, 2026-10-04)
 
 See `docs/models/evidence-channels.md` EC-OP-19: test 4 expects `crypto_temporal.timestamp_implausible` in the replay signature, in a benchmark whose genuine messages have no transport-delay model; the document reads a message that arrives long after its stamp as an asserted fact whatever the capability and lets a device without independent clocks assert but never deny, so test 4 holds and test 5 holds because the field is `None`, not True; the limit that remains: without a transport-delay model the field is True or `None`, never False. Step 4 already says to use the conventions table of `evidence-channels.md` once it exists (EC-OP-8 corrected). Kept `blocked`.
+
+### Hand-over from the WS04-T06 review (orchestrator, 2026-10-05)
+
+Read the "Completion note" and "Fix round 1" in `T06-measurement-process.md` before starting: vocabulary in `vocab.py` (extend `PAYLOAD_KEYS` for your own keys), `assign_device_seq` overwrites every cuff `seq` (do not call it after replay injection), `ObservedStream.visits` and `measurements` carry latent values and must never be written into an `ObservedDay`, and nobody emits the robot `NODE_STATE colocated` report yet (owner open, proposed WS04-T11).
