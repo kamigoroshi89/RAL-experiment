@@ -106,7 +106,9 @@ C2 = InjectedClass.C2
 
 INFLATION = 30 * SEC  # FIXTURE-ONLY
 DWELL = 10 * MIN  # FIXTURE-ONLY
-DEADLINE_OFFSET = 10 * MIN  # FIXTURE-ONLY: the task deadline is the tick plus ten minutes
+DEADLINE_OFFSET = (
+    10 * MIN
+)  # FIXTURE-ONLY: the task deadline is the tick plus ten minutes
 LATENT_SBP = 131.4375  # FIXTURE-ONLY sentinel (binary exact), generator-side only
 PATIENT = "p0000"
 
@@ -155,8 +157,12 @@ def fixture_stream(
     day_index: int = 0,
     seed: int = 0,
     hr_ecg: bool = True,
+    jitter_ms: int = 0,
 ) -> ObservedStream:
-    """A fault-free, unnumbered observed stream with its generator-side records."""
+    """A fault-free, unnumbered observed stream with its generator-side records.
+
+    ``jitter_ms`` delays the arrival of every measurement visit (and its reading) after its tick.
+    """
     base = day_index * DAY
     values = list(bps) if bps is not None else [128.0 + k for k in range(len(ticks))]
     if bps is None and tuple(ticks) == TICKS:
@@ -171,20 +177,24 @@ def fixture_stream(
     )
     for tick, rank, index in plan:
         kind = vocab.KIND_MEASUREMENT if rank == 1 else vocab.KIND_DOSE
-        visits.append(RobotVisit(index, kind, tick, tick, tick + DWELL, 0))
+        arrival = tick + (jitter_ms if rank == 1 else 0)
+        visits.append(
+            RobotVisit(index, kind, tick, arrival, arrival + DWELL, arrival - tick)
+        )
         events.append(E(EventKind.SCHEDULE_TICK, tick, "ward", {"kind": kind}))
-        samples.append(S("presence", tick, 1.0))
+        samples.append(S("presence", arrival, 1.0))
         events.append(
             E(
                 EventKind.ROBOT_TASK,
-                tick,
+                arrival,
                 "robot",
                 {"task": "navigate", "outcome": "success", "patient_id": PATIENT},
             )
         )
     for k, t in enumerate(ticks):
         tick = base + t
-        t_meas = tick + INFLATION
+        arrival = tick + jitter_ms
+        t_meas = arrival + INFLATION
         samples += [
             S("bp", t_meas, values[k]),
             S("inflation_ms", t_meas, float(INFLATION)),
@@ -194,7 +204,7 @@ def fixture_stream(
         events.append(E(EventKind.MEASUREMENT, t_meas, "cuff"))
         records.append(
             MeasurementRecord(
-                k, tick, tick, t_meas, LATENT_SBP, values[k] - LATENT_SBP,
+                k, tick, arrival, t_meas, LATENT_SBP, values[k] - LATENT_SBP,
                 values[k], INFLATION, False, 70.0,
             )
         )  # fmt: skip
@@ -318,16 +328,22 @@ def values_of(out: InjectionResult, signal: str) -> list[float]:
 def item_key(item: Sample | Event, *, with_seq: bool = True) -> Any:
     seq = item.seq if with_seq else None
     if isinstance(item, Sample):
-        return ("S", item.signal, item.t_device_ms, item.t_rx_ms, item.value, seq, item.quality)
+        return (
+            "S",
+            item.signal,
+            item.t_device_ms,
+            item.t_rx_ms,
+            item.value,
+            seq,
+            item.quality,
+        )
     return (
         "E", item.kind.value, item.t_device_ms, item.t_rx_ms, item.source,
         tuple(sorted(item.payload.items())), seq,
     )  # fmt: skip
 
 
-def item_multiset(
-    s: ObservedStream, *, with_seq: bool = True
-) -> dict[Any, int]:
+def item_multiset(s: ObservedStream, *, with_seq: bool = True) -> dict[Any, int]:
     counts: dict[Any, int] = {}
     for item in (*s.samples, *s.events):
         key = item_key(item, with_seq=with_seq)
@@ -341,6 +357,17 @@ def diff_items(
     """Item keys on which two streams differ (symmetric multiset difference)."""
     ca, cb = item_multiset(a, with_seq=with_seq), item_multiset(b, with_seq=with_seq)
     return [k for k in {*ca, *cb} if ca.get(k, 0) != cb.get(k, 0)]
+
+
+def same(a: InjectionResult, b: InjectionResult) -> bool:
+    """Whether two runs hold the same items and generator-side records (settings aside)."""
+    x, y = a.stream, b.stream
+    return (x.samples, x.events, x.visits, x.measurements) == (
+        y.samples,
+        y.events,
+        y.visits,
+        y.measurements,
+    )
 
 
 def latent_with_step(change_at: int, before: float, after: float) -> LatentDay:
@@ -384,7 +411,13 @@ def test_pipeline_order_is_canonical_and_spec_order_irrelevant() -> None:
     # records come in the order of execution: robot, device, link
     stages = [r.spec.subtype for r in reference.records]
     robot = {"nav_delay", "manipulation_failure"}
-    device = {"cuff_detached", "cuff_silent_bias", "stuck_at", "ecg_noise", "dispenser_bounce"}
+    device = {
+        "cuff_detached",
+        "cuff_silent_bias",
+        "stuck_at",
+        "ecg_noise",
+        "dispenser_bounce",
+    }
     ranks = [0 if s in robot else 1 if s in device else 2 for s in stages]
     assert ranks == sorted(ranks)
     assert stages[-1] == "ble_dropout"
@@ -402,7 +435,9 @@ def test_robot_faults_run_before_device_faults() -> None:
     assert not misses.records[1].realised
 
 
-def test_sequence_numbering_runs_after_device_and_robot_faults_and_before_link() -> None:
+def test_sequence_numbering_runs_after_device_and_robot_faults_and_before_link() -> (
+    None
+):
     # robot fault: the removed message leaves no gap
     out = run([manip(10 * HOUR)])
     assert [s.seq for s in samples_of(out, "bp")] == [1, 2, 3]
@@ -438,10 +473,18 @@ def test_ble_dropout_removes_device_data_and_leaves_sequence_gap() -> None:
     ]
     assert all(e.seq is None for e in states)  # the gateway has no device counter
     # nothing is delayed: the lost items never arrive later
-    assert len(out.stream.samples) == len(BASE.samples) - 6  # 2 messages of 4, minus ...
+    assert len(out.stream.samples) == len(BASE.samples) - 8
     (record,) = out.records
-    assert record.realised and record.n_changed == 10  # 8 samples and 2 events removed ... and
     assert record.spec.subtype == "ble_dropout"
+    # 8 samples and 2 events removed, 2 reports of the gateway added
+    assert record.realised and record.n_changed == 12
+    assert record.details == {
+        "target": "cuff",
+        "n_samples_removed": 8,
+        "n_events_removed": 2,
+        "templates": ["sched", "resp", "hold", "count"],
+    }
+    assert record.evidence_paths == EVIDENCE_SIGNATURES["ble_dropout"]
 
 
 def test_ble_dropout_leaves_other_devices_and_the_robot_alone() -> None:
@@ -449,7 +492,11 @@ def test_ble_dropout_leaves_other_devices_and_the_robot_alone() -> None:
     kept = {(s.signal) for s in out.stream.samples}
     assert kept == {"presence", "hr_ecg", "spo2", "day_end"}
     assert {e.source for e in out.stream.events} >= {"robot", "ward", "dispenser"}
-    assert not [e for e in out.stream.events if e.source == "cuff" and e.kind != EventKind.NODE_STATE]
+    assert not [
+        e
+        for e in out.stream.events
+        if e.source == "cuff" and e.kind != EventKind.NODE_STATE
+    ]
     out = run([ble(0, DAY, "dispenser")])
     assert not events_of(out, EventKind.DISPENSE)
     assert events_of(out, EventKind.INTAKE)  # the robot witness is not on the BLE link
@@ -472,25 +519,23 @@ def test_ble_dropout_window_is_half_open() -> None:
 
 
 def test_ble_dropout_node_state_events_are_not_removed_by_a_later_dropout() -> None:
-    out = run([ble(9 * HOUR, HOUR), ble(10 * HOUR, HOUR)])  # touching windows
+    out = run([ble(9 * HOUR, 2 * HOUR), ble(11 * HOUR, 2 * HOUR)])  # touching windows
     states = events_of(out, EventKind.NODE_STATE)
     assert [(e.t_device_ms, e.payload[vocab.KEY_STATE]) for e in states] == [
         (9 * HOUR, "link_down"),
-        (10 * HOUR, "link_down"),
-        (10 * HOUR, "active"),
-        (11 * HOUR, "active"),
-    ] or [
-        (e.t_device_ms, e.payload[vocab.KEY_STATE]) for e in states
-    ] == [
-        (9 * HOUR, "link_down"),
-        (10 * HOUR, "active"),
-        (10 * HOUR, "link_down"),
-        (11 * HOUR, "active"),
+        (
+            11 * HOUR,
+            "active",
+        ),  # the first window's end survives the second window's onset
+        (11 * HOUR, "link_down"),
+        (13 * HOUR, "active"),
     ]
-    assert len(states) == 4
+    assert [r.realised for r in out.records] == [True, True]
 
 
-def test_ble_dropout_removes_the_node_report_of_the_device_itself_inside_the_window() -> None:
+def test_ble_dropout_removes_the_node_report_of_the_device_itself_inside_the_window() -> (
+    None
+):
     out = run([detached(9 * HOUR, 2 * HOUR), ble(8 * HOUR + 30 * MIN, 2 * HOUR)])
     states = [
         (e.t_device_ms, e.payload[vocab.KEY_STATE])
@@ -531,7 +576,9 @@ def test_bias_sign_and_window_edges() -> None:
     out = run([bias(0, DAY, -2.5)])
     assert values_of(out, "bp") == [125.5, 128.5, 124.5, 130.5]
     assert values_of(run([bias(t1, 1, 4.0)]), "bp") == [128.0, 135.0, 127.0, 133.0]
-    assert values_of(run([bias(t1 - 1, 1, 4.0)]), "bp") == list(BPS)  # ends at the reading
+    assert values_of(run([bias(t1 - 1, 1, 4.0)]), "bp") == list(
+        BPS
+    )  # ends at the reading
     assert values_of(run([bias(t1 - 1, 2, 4.0)]), "bp") == [128.0, 135.0, 127.0, 133.0]
     # the other cuff signals and the events are untouched by a bias
     assert values_of(run([bias(0, DAY)]), "hr_pulse") == [70.0] * 4
@@ -540,7 +587,7 @@ def test_bias_sign_and_window_edges() -> None:
 def test_zero_bias_changes_nothing_and_is_not_realised() -> None:
     out = run([bias(0, DAY, 0.0)])
     assert not out.records[0].realised and out.records[0].n_changed == 0
-    assert out.stream == run([]).stream
+    assert same(out, run([]))
 
 
 # ---------------------------------------------------------------------------
@@ -562,22 +609,35 @@ def test_stuck_at_value_is_the_last_reading_before_the_onset_not_the_first() -> 
     out = run([stuck(13 * HOUR, 2 * HOUR)])  # last reading before 13:00 is 12:00:30
     assert values_of(out, "bp") == [128.0, 131.0, 127.0, 127.0]
     out = run([stuck(10 * HOUR + INFLATION, HOUR)])  # onset exactly at a reading
-    assert values_of(out, "bp") == [128.0, 128.0, 127.0, 133.0]  # the reading at the onset is frozen
-    out = run([stuck(10 * HOUR + INFLATION + 1, HOUR)])  # onset just after: the reading is the pre-onset value
+    assert values_of(out, "bp") == [
+        128.0,
+        128.0,
+        127.0,
+        133.0,
+    ]  # the reading at the onset is frozen
+    out = run(
+        [stuck(10 * HOUR + INFLATION + 1, HOUR)]
+    )  # onset just after: the reading is the pre-onset value
     assert values_of(out, "bp") == [128.0, 131.0, 127.0, 133.0]
-    assert not out.records[0].realised  # the frozen value 131 repeats nothing in the window
+    assert not out.records[
+        0
+    ].realised  # the frozen value 131 repeats nothing in the window
 
 
 def test_stuck_at_window_end_is_exclusive() -> None:
     t3 = 14 * HOUR + INFLATION
-    assert values_of(run([stuck(9 * HOUR, t3 - 9 * HOUR)]), "bp") == [128.0] * 3 + [133.0]
+    assert values_of(run([stuck(9 * HOUR, t3 - 9 * HOUR)]), "bp") == [128.0] * 3 + [
+        133.0
+    ]
     assert values_of(run([stuck(9 * HOUR, t3 - 9 * HOUR + 1)]), "bp") == [128.0] * 4
 
 
 def test_stuck_at_without_an_earlier_reading_is_not_realised() -> None:
     out = run([stuck(HOUR, 3 * HOUR)])  # no reading before 01:00 and none in the window
     assert not out.records[0].realised
-    out = run([stuck(7 * HOUR, 3 * HOUR)])  # a reading in the window, none before the onset
+    out = run(
+        [stuck(7 * HOUR, 3 * HOUR)]
+    )  # a reading in the window, none before the onset
     assert values_of(out, "bp") == list(BPS)
     assert not out.records[0].realised
     assert "no earlier" in json.dumps(out.records[0].details)
@@ -585,7 +645,9 @@ def test_stuck_at_without_an_earlier_reading_is_not_realised() -> None:
 
 def test_stuck_at_uses_the_value_after_a_bias_applied_before_the_onset() -> None:
     out = run([bias(7 * HOUR, 2 * HOUR, 5.0), stuck(9 * HOUR, 6 * HOUR)])
-    assert values_of(out, "bp") == [133.0] * 4  # 128 + 5 frozen, devices faults in canonical order
+    assert (
+        values_of(out, "bp") == [133.0] * 4
+    )  # 128 + 5 frozen, devices faults in canonical order
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +681,9 @@ def test_cuff_detached_signature() -> None:
     assert health[8 * HOUR + INFLATION] == 1.0
     inflation = {s.t_device_ms: s.value for s in samples_of(out, "inflation_ms")}
     assert inflation[10 * HOUR + INFLATION] == float(DETACHED_INFLATION_MS)
-    assert DETACHED_INFLATION_MS < INFLATION  # abnormal: shorter than the nominal inflation
+    assert (
+        DETACHED_INFLATION_MS < INFLATION
+    )  # abnormal: shorter than the nominal inflation
     assert inflation[8 * HOUR + INFLATION] == float(INFLATION)
     # the node reports the change of state, uncommanded, at the window start and end
     states = events_of(out, EventKind.NODE_STATE)
@@ -640,24 +704,32 @@ def test_cuff_detached_signature() -> None:
     assert record.realised and record.n_changed > 0
 
 
-def test_cuff_detached_window_is_half_open_and_attempt_free_windows_are_unrealised() -> None:
+def test_cuff_detached_window_is_half_open_and_attempt_free_windows_are_unrealised() -> (
+    None
+):
     t1 = 10 * HOUR + INFLATION
     assert len(events_of(run([detached(t1, 1)]), EventKind.MEASUREMENT_MISSED)) == 1
     assert len(events_of(run([detached(t1 - 1, 1)]), EventKind.MEASUREMENT_MISSED)) == 0
     out = run([detached(9 * HOUR, HOUR)])  # no attempt in 09:00 to 10:00
     assert not out.records[0].realised
-    assert not events_of(out, EventKind.NODE_STATE)  # no report for an injection with no effect
-    assert out.stream == run([]).stream
+    assert not events_of(
+        out, EventKind.NODE_STATE
+    )  # no report for an injection with no effect
+    assert same(out, run([]))
 
 
 def test_cuff_detached_adds_the_health_and_inflation_samples_it_needs() -> None:
     bare = dataclasses.replace(
         BASE,
-        samples=tuple(s for s in BASE.samples if s.signal not in ("cuff_health", "inflation_ms")),
+        samples=tuple(
+            s for s in BASE.samples if s.signal not in ("cuff_health", "inflation_ms")
+        ),
     )
     out = run([detached(9 * HOUR, 2 * HOUR)], stream_=bare)
     assert [s.value for s in samples_of(out, "cuff_health")] == [0.0]
-    assert [s.value for s in samples_of(out, "inflation_ms")] == [float(DETACHED_INFLATION_MS)]
+    assert [s.value for s in samples_of(out, "inflation_ms")] == [
+        float(DETACHED_INFLATION_MS)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +747,9 @@ def test_ecg_noise_adds_paired_error_trace() -> None:
     assert [s.value for s in got] == [75.0, 67.0, 78.0]  # 70 + [+5, -3, +8]
     assert all(s.quality is None for s in got)  # the library carries no quality
     assert [s.value for s in samples_of(out, "hr_ecg") if s not in got] == [70.0] * 23
-    assert values_of(out, "hr_pulse") == [70.0] * 4 and values_of(out, "bp") == list(BPS)
+    assert values_of(out, "hr_pulse") == [70.0] * 4 and values_of(out, "bp") == list(
+        BPS
+    )
     (record,) = out.records
     assert record.evidence_paths == (
         "signal_quality.ecg_sqi",
@@ -697,12 +771,21 @@ def test_ecg_noise_quality_comes_from_the_trace_when_the_library_has_one() -> No
 
 def test_ecg_noise_scale_and_window_edges() -> None:
     out = run([ecg(11 * HOUR, 3 * MIN, 2.0)])
-    assert [s.value for s in hr_ecg_in(out, 11 * HOUR, 12 * HOUR)] == [80.0, 64.0, 86.0, 70.0][:3]
-    # the sample exactly at the window end is not in the window, one at the onset is
-    out = run([ecg(11 * HOUR + MIN, MIN)])
-    assert [s.value for s in hr_ecg_in(out, 11 * HOUR, 11 * HOUR + 3 * MIN)] == [70.0, 75.0, 70.0]
-    out = run([ecg(11 * HOUR + MIN, MIN + 1)])
-    assert [s.value for s in hr_ecg_in(out, 11 * HOUR, 11 * HOUR + 3 * MIN)] == [70.0, 75.0, -3.0 + 70.0]
+    assert [s.value for s in hr_ecg_in(out, 11 * HOUR, 12 * HOUR)] == [80.0, 64.0, 86.0]
+    # the sample exactly at the window end is not in the window; the one at the onset is
+    # (the library has exactly as many noise samples as the window needs, so the draw is fixed)
+    out = run([ecg(11 * HOUR, 2 * MIN)], library=library((5.0, -3.0)))
+    assert [s.value for s in hr_ecg_in(out, 11 * HOUR, 12 * HOUR)] == [75.0, 67.0, 70.0]
+    out = run([ecg(11 * HOUR, 2 * MIN + 1)], library=library((5.0, -3.0, 8.0)))
+    assert [s.value for s in hr_ecg_in(out, 11 * HOUR, 12 * HOUR)] == [75.0, 67.0, 78.0]
+    # a window that starts at the second sample: error index counts from the onset
+    out = run([ecg(11 * HOUR + MIN, 2 * MIN)], library=library((5.0, -3.0)))
+    assert [s.value for s in hr_ecg_in(out, 11 * HOUR, 12 * HOUR)] == [70.0, 75.0, 67.0]
+    out = run([ecg(11 * HOUR + MIN, MIN)], library=library((5.0,)))
+    assert [s.value for s in hr_ecg_in(out, 11 * HOUR, 12 * HOUR)] == [70.0, 75.0, 70.0]
+    # the factor is applied to the error, not to the heart rate
+    out = run([ecg(11 * HOUR, 3 * MIN, 0.5)])
+    assert [s.value for s in hr_ecg_in(out, 11 * HOUR, 12 * HOUR)] == [72.5, 68.5, 74.0]
 
 
 def test_ecg_noise_disabled_when_library_lacks_kind() -> None:
@@ -714,7 +797,7 @@ def test_ecg_noise_disabled_when_library_lacks_kind() -> None:
         assert out.disabled_subtypes == ("ecg_noise",)
         assert not out.records[0].realised and out.records[0].n_changed == 0
         assert "disabled" in json.dumps(out.records[0].details)
-        assert out.stream == run([]).stream
+        assert same(out, run([]))
         assert ground_truth_events(out.records) == []
     # an enabled library records nothing as disabled
     assert run([ecg(11 * HOUR, 3 * MIN)]).disabled_subtypes == ()
@@ -723,11 +806,15 @@ def test_ecg_noise_disabled_when_library_lacks_kind() -> None:
     assert two.disabled_subtypes == ("ecg_noise",)
 
 
-def test_ecg_noise_draw_is_keyed_by_the_named_c2_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ecg_noise_draw_is_keyed_by_the_named_c2_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     lib = library(
         extra=[
             InlineSegment("noise-2", "hr_error_ecg_noise", [1.0, 2.0, 3.0], MIN, "bpm"),
-            InlineSegment("noise-3", "hr_error_ecg_noise", [-4.0, -5.0, -6.0], MIN, "bpm"),
+            InlineSegment(
+                "noise-3", "hr_error_ecg_noise", [-4.0, -5.0, -6.0], MIN, "bpm"
+            ),
         ]
     )
     s = ecg(11 * HOUR, 3 * MIN)
@@ -742,7 +829,11 @@ def test_ecg_noise_draw_is_keyed_by_the_named_c2_stream(monkeypatch: pytest.Monk
     out = run([s], library=lib)
     assert calls and {c[3] for c in calls} == {StreamPurpose.INJECTION_C2}
     assert (0, 0, 0, StreamPurpose.INJECTION_C2, injection_sub_index(s)) in calls
-    expected = lib.draw("hr_error_ecg_noise", 3, stream(0, 0, 0, StreamPurpose.INJECTION_C2, injection_sub_index(s)))
+    expected = lib.draw(
+        "hr_error_ecg_noise",
+        3,
+        stream(0, 0, 0, StreamPurpose.INJECTION_C2, injection_sub_index(s)),
+    )
     got = hr_ecg_in(out, 11 * HOUR, 11 * HOUR + 3 * MIN)
     assert [s_.value for s_ in got] == [70.0 + v for v in expected.values]
     assert out.records[0].details["segment_ids"] == list(expected.segment_ids)
@@ -750,7 +841,12 @@ def test_ecg_noise_draw_is_keyed_by_the_named_c2_stream(monkeypatch: pytest.Monk
     # the same seed repeats, another seed or patient can differ
     assert run([s], library=lib).stream == out.stream
     outs = {
-        tuple(v.value for v in hr_ecg_in(run([s], library=lib, patient_index=p), 11 * HOUR, 12 * HOUR))
+        tuple(
+            v.value
+            for v in hr_ecg_in(
+                run([s], library=lib, patient_index=p), 11 * HOUR, 12 * HOUR
+            )
+        )
         for p in range(8)
     }
     assert len(outs) > 1
@@ -762,7 +858,9 @@ def test_sub_index_depends_on_identity_not_on_magnitude_or_level() -> None:
     assert injection_sub_index(a) != injection_sub_index(ecg(11 * HOUR + 1, 3 * MIN))
     assert injection_sub_index(a) != injection_sub_index(ecg(11 * HOUR, 3 * MIN + 1))
     assert injection_sub_index(a) != injection_sub_index(bias(11 * HOUR, 3 * MIN))
-    assert injection_sub_index(a) == injection_sub_index(dataclasses.replace(a, level="high"))
+    assert injection_sub_index(a) == injection_sub_index(
+        dataclasses.replace(a, level="high")
+    )
     assert 0 <= injection_sub_index(a) < 2**32
 
 
@@ -779,10 +877,18 @@ def test_dispenser_bounce_adds_extra_dispense_within_gap() -> None:
         (DOSE_TICKS[0] + 500, DOSE_TICKS[0] + 500, "dispenser"),
         (DOSE_TICKS[1], DOSE_TICKS[1], "dispenser"),
     ]
-    assert dispenses[1].payload == {vocab.KEY_CONTENT_CHANGE: 0.0}  # no content leaves the dispenser
+    assert dispenses[1].payload == {
+        vocab.KEY_CONTENT_CHANGE: 0.0
+    }  # no content leaves the dispenser
     assert dispenses[0].payload == {}  # the real dispense is not rewritten
-    assert [e.seq for e in dispenses] == [1, 2, 3]  # the bounce has its own sequence number
-    assert len(events_of(out, EventKind.INTAKE)) == len(events_of(BASE, EventKind.INTAKE))
+    assert [e.seq for e in dispenses] == [
+        1,
+        2,
+        3,
+    ]  # the bounce has its own sequence number
+    assert len(events_of(out, EventKind.INTAKE)) == len(
+        events_of(BASE, EventKind.INTAKE)
+    )
     assert not [s for s in out.stream.samples if s.signal == "intake"]
     (record,) = out.records
     assert record.realised and record.n_changed == 1
@@ -810,7 +916,9 @@ def test_dispenser_bounce_gap_bounds_and_integrality() -> None:
     for gap in (0, -1, DAY + 1, 1.5, math.nan, math.inf, True, "5", 10**400):
         with pytest.raises(InjectionSpecError):
             run([spec("dispenser_bounce", DOSE_TICKS[0], None, gap, "ms")])
-    out = run([spec("dispenser_bounce", DOSE_TICKS[0], None, 500.0, "ms")])  # an integral float
+    out = run(
+        [spec("dispenser_bounce", DOSE_TICKS[0], None, 500.0, "ms")]
+    )  # an integral float
     assert events_of(out, EventKind.DISPENSE)[1].t_device_ms == DOSE_TICKS[0] + 500
 
 
@@ -825,25 +933,56 @@ def test_dispenser_bounce_probability_statistics() -> None:
     # a pure function of the key: the same call repeats, adding a dispense shifts no other draw
     again = plan_dispenser_bounces(times, p, 500, seed=7, patient_index=3, day_index=2)
     assert again == specs
-    fewer = plan_dispenser_bounces(times[1:], p, 500, seed=7, patient_index=3, day_index=2)
+    fewer = plan_dispenser_bounces(
+        times[1:], p, 500, seed=7, patient_index=3, day_index=2
+    )
     assert fewer == [s for s in specs if s.onset_ms != times[0]]
-    other_seed = plan_dispenser_bounces(times, p, 500, seed=8, patient_index=3, day_index=2)
+    other_seed = plan_dispenser_bounces(
+        times, p, 500, seed=8, patient_index=3, day_index=2
+    )
     assert other_seed != specs
-    assert plan_dispenser_bounces(times, 0.0, 500, seed=7, patient_index=3, day_index=2) == []
-    assert len(plan_dispenser_bounces(times, 1.0, 500, seed=7, patient_index=3, day_index=2)) == n
+    assert (
+        plan_dispenser_bounces(times, 0.0, 500, seed=7, patient_index=3, day_index=2)
+        == []
+    )
+    assert (
+        len(
+            plan_dispenser_bounces(
+                times, 1.0, 500, seed=7, patient_index=3, day_index=2
+            )
+        )
+        == n
+    )
 
 
 @pytest.mark.parametrize(
     "bad",
     [
-        {"probability": -0.1}, {"probability": 1.1}, {"probability": math.nan},
-        {"probability": True}, {"probability": "0.3"}, {"probability": None},
-        {"gap_ms": 0}, {"gap_ms": -1}, {"gap_ms": 1.5}, {"gap_ms": True}, {"gap_ms": 10**400},
-        {"dispense_times": None}, {"dispense_times": "abc"}, {"dispense_times": [1.5]},
-        {"dispense_times": [-1]}, {"dispense_times": [True]}, {"dispense_times": [2, 1]},
-        {"dispense_times": [1, 1]}, {"dispense_times": [10**400]},
-        {"seed": -1}, {"seed": None}, {"seed": True}, {"patient_index": -1},
-        {"day_index": None}, {"day_index": 2**40},
+        {"probability": -0.1},
+        {"probability": 1.1},
+        {"probability": math.nan},
+        {"probability": True},
+        {"probability": "0.3"},
+        {"probability": None},
+        {"gap_ms": 0},
+        {"gap_ms": -1},
+        {"gap_ms": 1.5},
+        {"gap_ms": True},
+        {"gap_ms": 10**400},
+        {"dispense_times": None},
+        {"dispense_times": "abc"},
+        {"dispense_times": [1.5]},
+        {"dispense_times": [-1]},
+        {"dispense_times": [True]},
+        {"dispense_times": [2, 1]},
+        {"dispense_times": [1, 1]},
+        {"dispense_times": [10**400]},
+        {"seed": -1},
+        {"seed": None},
+        {"seed": True},
+        {"patient_index": -1},
+        {"day_index": None},
+        {"day_index": 2**40},
     ],
 )
 def test_plan_dispenser_bounces_rejects_bad_arguments(bad: dict[str, Any]) -> None:
@@ -861,9 +1000,13 @@ def test_plan_dispenser_bounces_rejects_bad_arguments(bad: dict[str, Any]) -> No
 
 def test_plan_dispenser_bounces_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(c2_mod, "MAX_PLANNED_DISPENSES", 5)
-    plan_dispenser_bounces(list(range(1, 6)), 0.5, 500, seed=1, patient_index=0, day_index=0)
+    plan_dispenser_bounces(
+        list(range(1, 6)), 0.5, 500, seed=1, patient_index=0, day_index=0
+    )
     with pytest.raises(InjectionError):
-        plan_dispenser_bounces(list(range(1, 7)), 0.5, 500, seed=1, patient_index=0, day_index=0)
+        plan_dispenser_bounces(
+            list(range(1, 7)), 0.5, 500, seed=1, patient_index=0, day_index=0
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -874,17 +1017,30 @@ def test_plan_dispenser_bounces_is_bounded(monkeypatch: pytest.MonkeyPatch) -> N
 def test_nav_delay_shifts_measurement_and_marks_task_late() -> None:
     out = run([nav(10 * HOUR, 15 * MIN)])
     t_new = 10 * HOUR + 15 * MIN + INFLATION  # 10:15:30
-    assert [s.t_device_ms for s in samples_of(out, "bp")] == [8 * HOUR + INFLATION, t_new, 12 * HOUR + INFLATION, 14 * HOUR + INFLATION]
+    assert [s.t_device_ms for s in samples_of(out, "bp")] == [
+        8 * HOUR + INFLATION,
+        t_new,
+        12 * HOUR + INFLATION,
+        14 * HOUR + INFLATION,
+    ]
     for name in ("bp", "inflation_ms", "cuff_health", "hr_pulse"):
         moved = [s for s in samples_of(out, name) if s.t_device_ms == t_new]
         assert len(moved) == 1 and moved[0].t_rx_ms == t_new, name
-        assert not [s for s in samples_of(out, name) if s.t_device_ms == 10 * HOUR + INFLATION]
+        assert not [
+            s for s in samples_of(out, name) if s.t_device_ms == 10 * HOUR + INFLATION
+        ]
     assert [e.t_device_ms for e in events_of(out, EventKind.MEASUREMENT)][1] == t_new
-    assert values_of(out, "bp") == list(BPS)  # without a latent day the reading keeps its value
+    assert values_of(out, "bp") == list(
+        BPS
+    )  # without a latent day the reading keeps its value
     # the robot arrives late: presence moves; the task is reported late, stamped with the deadline
     assert [s.t_device_ms for s in samples_of(out, "presence")].count(10 * HOUR) == 0
     assert 10 * HOUR + 15 * MIN in [s.t_device_ms for s in samples_of(out, "presence")]
-    tasks = [e for e in events_of(out, EventKind.ROBOT_TASK) if e.payload.get(vocab.KEY_OUTCOME) == vocab.OUTCOME_LATE]
+    tasks = [
+        e
+        for e in events_of(out, EventKind.ROBOT_TASK)
+        if e.payload.get(vocab.KEY_OUTCOME) == vocab.OUTCOME_LATE
+    ]
     assert [(e.t_device_ms, e.t_rx_ms, e.source) for e in tasks] == [
         (10 * HOUR + DEADLINE_OFFSET, 10 * HOUR + DEADLINE_OFFSET, "robot")
     ]
@@ -894,34 +1050,51 @@ def test_nav_delay_shifts_measurement_and_marks_task_late() -> None:
         vocab.KEY_PATIENT_ID: PATIENT,
     }
     # still exactly one navigation outcome per visit
-    assert len(events_of(out, EventKind.ROBOT_TASK)) == len(events_of(BASE, EventKind.ROBOT_TASK))
+    assert len(events_of(out, EventKind.ROBOT_TASK)) == len(
+        events_of(BASE, EventKind.ROBOT_TASK)
+    )
     (record,) = out.records
     assert record.evidence_paths == ("system.nav_task_failed",)
     assert record.realised and record.realised_end_ms is None
     assert record.realised_onset_ms == 10 * HOUR
     assert record.details["late"] is True
     # the generator-side records follow
-    visit = [v for v in out.stream.visits if v.kind == "measurement" and v.index == 1][0]
+    visit = next(
+        v for v in out.stream.visits if v.kind == "measurement" and v.index == 1
+    )
     assert (visit.arrival_ms, visit.delay_ms) == (10 * HOUR + 15 * MIN, 15 * MIN)
-    meas = [m for m in out.stream.measurements if m.index == 1][0]
+    meas = next(m for m in out.stream.measurements if m.index == 1)
     assert meas.t_ms == t_new and meas.arrival_ms == 10 * HOUR + 15 * MIN
 
 
 def test_nav_delay_inside_the_deadline_moves_the_visit_without_a_late_outcome() -> None:
-    out = run([nav(10 * HOUR, DEADLINE_OFFSET)])  # arrives exactly at the deadline: on time
-    assert all(e.payload.get(vocab.KEY_OUTCOME) != "late" for e in events_of(out, EventKind.ROBOT_TASK))
+    out = run(
+        [nav(10 * HOUR, DEADLINE_OFFSET)]
+    )  # arrives exactly at the deadline: on time
+    assert all(
+        e.payload.get(vocab.KEY_OUTCOME) != "late"
+        for e in events_of(out, EventKind.ROBOT_TASK)
+    )
     assert out.records[0].realised and out.records[0].details["late"] is False
     out = run([nav(10 * HOUR, DEADLINE_OFFSET + 1)])
-    late = [e for e in events_of(out, EventKind.ROBOT_TASK) if e.payload.get(vocab.KEY_OUTCOME) == "late"]
+    late = [
+        e
+        for e in events_of(out, EventKind.ROBOT_TASK)
+        if e.payload.get(vocab.KEY_OUTCOME) == "late"
+    ]
     assert len(late) == 1 and out.records[0].details["late"] is True
 
 
-def test_nav_delay_keeps_the_cuff_noise_draw_and_reads_the_latent_at_the_new_time() -> None:
+def test_nav_delay_keeps_the_cuff_noise_draw_and_reads_the_latent_at_the_new_time() -> (
+    None
+):
     latent = latent_with_step(10 * HOUR + 10 * MIN, 130.0, 140.0)
     out = run([nav(10 * HOUR, 15 * MIN)], latent=latent)
-    new_value = 140.0 + (131.0 - LATENT_SBP)  # latent at the new time plus the same error
+    new_value = 140.0 + (
+        131.0 - LATENT_SBP
+    )  # latent at the new time plus the same error
     assert values_of(out, "bp") == [128.0, new_value, 127.0, 133.0]
-    meas = [m for m in out.stream.measurements if m.index == 1][0]
+    meas = next(m for m in out.stream.measurements if m.index == 1)
     assert meas.error_mmhg == 131.0 - LATENT_SBP  # the noise draw is unchanged
     assert meas.latent_sbp_mmhg == 140.0 and meas.value_mmhg == new_value
     # a delay that stays on the same latent level reads the same latent value again
@@ -939,13 +1112,17 @@ def test_nav_delay_needs_the_deadline_offset_and_a_matching_visit() -> None:
             BASE, [nav(10 * HOUR, 15 * MIN)], InjectionContext(patient_index=0)
         )
     # no deadline needed for other subtypes
-    apply_observation_injections(BASE, [bias(0, DAY)], InjectionContext(patient_index=0))
+    apply_observation_injections(
+        BASE, [bias(0, DAY)], InjectionContext(patient_index=0)
+    )
     out = run([nav(10 * HOUR + 1, 15 * MIN)])  # no visit with that tick
-    assert not out.records[0].realised and out.stream == run([]).stream
+    assert not out.records[0].realised and same(out, run([]))
 
 
 def test_nav_delay_numbering_follows_arrival_order() -> None:
-    out = run([nav(8 * HOUR, 3 * HOUR)])  # the 08:00 reading now arrives after the 10:00 one
+    out = run(
+        [nav(8 * HOUR, 3 * HOUR)]
+    )  # the 08:00 reading now arrives after the 10:00 one
     by_time = sorted(samples_of(out, "bp"), key=lambda s: s.t_device_ms)
     assert [s.value for s in by_time] == [131.0, 128.0, 127.0, 133.0]
     assert [s.seq for s in by_time] == [1, 2, 3, 4]
@@ -955,8 +1132,12 @@ def test_nav_delay_on_a_dose_visit_can_drop_the_witnessed_intake() -> None:
     # dose visit 08:10 with dwell 10 min; the intake at 08:11 is no longer covered after a
     # delay of 15 min (the robot arrives 08:25), and nobody else witnesses it
     out = run([nav(DOSE_TICKS[0], 15 * MIN, kind="dose")])
-    assert [e.t_device_ms for e in events_of(out, EventKind.INTAKE)] == [DOSE_TICKS[1] + INTAKE_AFTER]
-    assert len(events_of(out, EventKind.DISPENSE)) == 2  # the dispenser is not the robot
+    assert [e.t_device_ms for e in events_of(out, EventKind.INTAKE)] == [
+        DOSE_TICKS[1] + INTAKE_AFTER
+    ]
+    assert (
+        len(events_of(out, EventKind.DISPENSE)) == 2
+    )  # the dispenser is not the robot
     assert out.records[0].realised
     # a delay that still covers the intake keeps it: arrival at 08:10:30 covers 08:11
     out = run([nav(DOSE_TICKS[0], 30 * SEC, kind="dose")])
@@ -974,42 +1155,72 @@ def test_manipulation_failure_removes_measurement_and_witness() -> None:
     for name in ("inflation_ms", "cuff_health", "hr_pulse"):
         assert len(samples_of(out, name)) == 3
     assert [e.t_device_ms for e in events_of(out, EventKind.MEASUREMENT)] == [
-        8 * HOUR + INFLATION, 12 * HOUR + INFLATION, 14 * HOUR + INFLATION
+        8 * HOUR + INFLATION,
+        12 * HOUR + INFLATION,
+        14 * HOUR + INFLATION,
     ]
-    failed = [e for e in events_of(out, EventKind.ROBOT_TASK) if e.payload.get(vocab.KEY_OUTCOME) == vocab.OUTCOME_FAILED]
+    failed = [
+        e
+        for e in events_of(out, EventKind.ROBOT_TASK)
+        if e.payload.get(vocab.KEY_OUTCOME) == vocab.OUTCOME_FAILED
+    ]
     assert [(e.t_device_ms, e.source, dict(e.payload)) for e in failed] == [
         (
             10 * HOUR + INFLATION,
             "robot",
-            {vocab.KEY_TASK: vocab.TASK_MANIPULATE, vocab.KEY_OUTCOME: vocab.OUTCOME_FAILED, vocab.KEY_PATIENT_ID: PATIENT},
+            {
+                vocab.KEY_TASK: vocab.TASK_MANIPULATE,
+                vocab.KEY_OUTCOME: vocab.OUTCOME_FAILED,
+                vocab.KEY_PATIENT_ID: PATIENT,
+            },
         )
     ]
     # the robot did arrive: its navigation succeeded and its presence is observed
     assert 10 * HOUR in [s.t_device_ms for s in samples_of(out, "presence")]
-    nav_tasks = [e for e in events_of(out, EventKind.ROBOT_TASK) if e.payload.get(vocab.KEY_TASK) == vocab.TASK_NAVIGATE]
+    nav_tasks = [
+        e
+        for e in events_of(out, EventKind.ROBOT_TASK)
+        if e.payload.get(vocab.KEY_TASK) == vocab.TASK_NAVIGATE
+    ]
     assert len(nav_tasks) == len(events_of(BASE, EventKind.ROBOT_TASK))
     (record,) = out.records
     assert record.evidence_paths == ("system.manip_task_failed",)
     assert record.realised and record.realised_end_ms is None
     assert record.realised_onset_ms == 10 * HOUR
-    assert [m.index for m in out.stream.measurements] == [0, 2, 3]  # the reading was never made
+    assert [m.index for m in out.stream.measurements] == [
+        0,
+        2,
+        3,
+    ]  # the reading was never made
 
 
 def test_manipulation_failure_at_a_dose_tick_removes_the_witnessed_intake() -> None:
     out = run([manip(DOSE_TICKS[0], kind="dose")])
-    assert [e.t_device_ms for e in events_of(out, EventKind.INTAKE)] == [DOSE_TICKS[1] + INTAKE_AFTER]
-    failed = [e for e in events_of(out, EventKind.ROBOT_TASK) if e.payload.get(vocab.KEY_OUTCOME) == "failed"]
+    assert [e.t_device_ms for e in events_of(out, EventKind.INTAKE)] == [
+        DOSE_TICKS[1] + INTAKE_AFTER
+    ]
+    failed = [
+        e
+        for e in events_of(out, EventKind.ROBOT_TASK)
+        if e.payload.get(vocab.KEY_OUTCOME) == "failed"
+    ]
     assert [e.t_device_ms for e in failed] == [DOSE_TICKS[0]]
     assert len(events_of(out, EventKind.DISPENSE)) == 2  # the dispenser still opened
-    assert values_of(out, "bp") == list(BPS)  # no measurement is lost by a dose-visit failure
+    assert values_of(out, "bp") == list(
+        BPS
+    )  # no measurement is lost by a dose-visit failure
     assert 8 * HOUR + 10 * MIN in [s.t_device_ms for s in samples_of(out, "presence")]
 
 
-def test_manipulation_failure_does_not_remove_an_intake_another_visit_witnesses() -> None:
+def test_manipulation_failure_does_not_remove_an_intake_another_visit_witnesses() -> (
+    None
+):
     # a measurement visit at 08:12 covers the intake at 08:11 .. 08:12:00 .. ; its dwell reaches 08:22
     stream_ = fixture_stream((8 * HOUR + 5 * MIN, 10 * HOUR, 12 * HOUR, 14 * HOUR))
     out = run([manip(DOSE_TICKS[0], kind="dose")], stream_=stream_)
-    assert len(events_of(out, EventKind.INTAKE)) == 2  # the 08:05 visit also covers 08:11
+    assert (
+        len(events_of(out, EventKind.INTAKE)) == 2
+    )  # the 08:05 visit also covers 08:11
 
 
 def test_manipulation_and_nav_delay_on_the_same_visit() -> None:
@@ -1021,7 +1232,11 @@ def test_manipulation_and_nav_delay_on_the_same_visit() -> None:
     )
     assert outcomes == [
         (10 * HOUR + DEADLINE_OFFSET, "navigate", "late"),
-        (10 * HOUR + 15 * MIN + INFLATION, "manipulate", "failed"),  # stamped where the reading would be
+        (
+            10 * HOUR + 15 * MIN + INFLATION,
+            "manipulate",
+            "failed",
+        ),  # stamped where the reading would be
     ]
     assert values_of(out, "bp") == [128.0, 127.0, 133.0]
 
@@ -1035,7 +1250,7 @@ def test_injection_without_effect_is_logged_not_ground_truth() -> None:
     out = run([bias(8 * HOUR + 30 * MIN, HOUR)])  # no reading between 08:30 and 09:30
     (record,) = out.records
     assert record.realised is False and record.n_changed == 0
-    assert out.stream == run([]).stream
+    assert same(out, run([]))
     assert record_to_ground_truth(record) is None
     assert ground_truth_events(out.records) == []
     (entry,) = injection_log(out.records)
@@ -1043,7 +1258,7 @@ def test_injection_without_effect_is_logged_not_ground_truth() -> None:
     assert entry["onset_ms"] == 8 * HOUR + 30 * MIN
     json.dumps(entry)  # a sidecar entry is JSON-native
     # a realised injection beside it still yields exactly one event
-    both = run([bias(8 * HOUR + 30 * MIN, HOUR), bias(9 * HOUR, 2 * HOUR)])
+    both = run([bias(8 * HOUR + 30 * MIN, 30 * MIN), bias(9 * HOUR, 2 * HOUR)])
     assert [r.realised for r in both.records] == [False, True]
     assert len(ground_truth_events(both.records)) == 1
 
@@ -1061,7 +1276,9 @@ GROUND_TRUTH_CASES: list[tuple[InjectionSpec, int, int | None]] = [
 
 
 @pytest.mark.parametrize(("s", "onset", "end"), GROUND_TRUTH_CASES)
-def test_ground_truth_mapping_fields(s: InjectionSpec, onset: int, end: int | None) -> None:
+def test_ground_truth_mapping_fields(
+    s: InjectionSpec, onset: int, end: int | None
+) -> None:
     out = run([s])
     (record,) = out.records
     assert record.realised
@@ -1073,7 +1290,9 @@ def test_ground_truth_mapping_fields(s: InjectionSpec, onset: int, end: int | No
 
 
 def test_ground_truth_carries_the_confounder_group_of_the_spec() -> None:
-    s = dataclasses.replace(bounce(DOSE_TICKS[0]), confounder_group="double_take_vs_bounce")
+    s = dataclasses.replace(
+        bounce(DOSE_TICKS[0]), confounder_group="double_take_vs_bounce"
+    )
     (record,) = run([s]).records
     truth = record_to_ground_truth(record)
     assert truth is not None and truth.confounder_group == "double_take_vs_bounce"
@@ -1085,15 +1304,19 @@ def test_ground_truth_events_are_sorted_by_onset_then_subtype() -> None:
     out = run(MIXED)
     events = ground_truth_events(out.records)
     assert len(events) == sum(r.realised for r in out.records)
-    assert [(e.onset_ms, e.subtype) for e in events] == sorted((e.onset_ms, e.subtype) for e in events)
+    assert [(e.onset_ms, e.subtype) for e in events] == sorted(
+        (e.onset_ms, e.subtype) for e in events
+    )
 
 
 def test_record_to_ground_truth_rejects_non_records() -> None:
     for bad in (None, 5, "x", object(), []):
         with pytest.raises(InjectionError):
             record_to_ground_truth(bad)  # type: ignore[arg-type]
+    for bad in (None, 5, "x", object(), b"x", {1}):
         with pytest.raises(InjectionError):
             ground_truth_events(bad)  # type: ignore[arg-type]
+    assert ground_truth_events([]) == [] and ground_truth_events(()) == []
     with pytest.raises(InjectionError):
         ground_truth_events([object()])  # type: ignore[list-item]
 
@@ -1122,9 +1345,19 @@ def deep_state(latent: LatentDay) -> Any:
         latent.patient_id,
         latent.day_index,
         latent.seed,
-        [(s.signal, s.t_device_ms, s.t_rx_ms, s.value, s.seq, s.quality) for s in latent.samples],
         [
-            (e.kind, e.t_device_ms, e.t_rx_ms, e.source, copy.deepcopy(dict(e.payload)), e.seq)
+            (s.signal, s.t_device_ms, s.t_rx_ms, s.value, s.seq, s.quality)
+            for s in latent.samples
+        ],
+        [
+            (
+                e.kind,
+                e.t_device_ms,
+                e.t_rx_ms,
+                e.source,
+                copy.deepcopy(dict(e.payload)),
+                e.seq,
+            )
             for e in latent.events
         ],
     )
@@ -1137,7 +1370,16 @@ def test_c2_injection_never_mutates_latent_day() -> None:
         0,
         0,
         tuple(S("bp", t, 130.0 + (t // HOUR)) for t in range(0, DAY, 10 * MIN)),
-        (Event(EventKind.DISPENSE, DOSE_TICKS[0], DOSE_TICKS[0], "dispenser", payload, None),),
+        (
+            Event(
+                EventKind.DISPENSE,
+                DOSE_TICKS[0],
+                DOSE_TICKS[0],
+                "dispenser",
+                payload,
+                None,
+            ),
+        ),
     )
     before, snapshot = deep_state(latent), copy.deepcopy(latent)
     out = run(MIXED + [stuck(15 * HOUR, 2 * HOUR)], latent=latent)
@@ -1160,7 +1402,9 @@ def test_the_modules_neither_assign_into_nor_call_mutators_on_the_latent_day() -
         tree = ast.parse((SRC / name).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
                 for target in targets:
                     text = ast.unparse(target)
                     assert not re.search(r"\blatent\b[.\[]", text), (name, text)
@@ -1178,8 +1422,15 @@ def test_finalize_observed_drops_every_generator_side_field() -> None:
     assert {f.name for f in dataclasses.fields(day)} == {
         "patient_id", "day_index", "seed", "samples", "events", "care_plan_id",
     }  # fmt: skip
-    assert (day.patient_id, day.day_index, day.seed, day.care_plan_id) == (PATIENT, 0, 0, "plan-1")
-    assert list(day.samples) == list(out.stream.samples) and list(day.events) == list(out.stream.events)
+    assert (day.patient_id, day.day_index, day.seed, day.care_plan_id) == (
+        PATIENT,
+        0,
+        0,
+        "plan-1",
+    )
+    assert list(day.samples) == list(out.stream.samples) and list(day.events) == list(
+        out.stream.events
+    )
     # no latent value anywhere in the observed day, by search of the values
     text = repr(day)
     for needle in (repr(LATENT_SBP), str(LATENT_SBP), "latent", "n_visits"):
@@ -1213,12 +1464,20 @@ def test_finalize_observed_checks_the_day() -> None:
 
 def test_finalize_refuses_a_payload_key_outside_the_vocabulary() -> None:
     odd = dataclasses.replace(
-        BASE, events=(*BASE.events, E(EventKind.DEVICE_ERROR, DAY, "cuff", {"error_code": "x", "extra": 1}))
+        BASE,
+        events=(
+            *BASE.events,
+            E(EventKind.DEVICE_ERROR, DAY, "cuff", {"error_code": "x", "extra": 1}),
+        ),
     )
     with pytest.raises(InjectionError):
         finalize_observed(odd)
     fine = dataclasses.replace(
-        BASE, events=(*BASE.events, E(EventKind.DEVICE_ERROR, DAY, "cuff", {"error_code": "x"}))
+        BASE,
+        events=(
+            *BASE.events,
+            E(EventKind.DEVICE_ERROR, DAY, "cuff", {"error_code": "x"}),
+        ),
     )
     finalize_observed(fine)
 
@@ -1244,21 +1503,30 @@ def touched(subtype: str, key: Any) -> bool:
     """Whether an item key lies in the footprint of the PAIRED injection of ``subtype``."""
     kind, name, t = key[0], key[1], key[2]
     if subtype == "ble_dropout":
-        return (kind == "S" and name == "spo2" and 3 * HOUR + 30 * MIN <= t < 4 * HOUR + 30 * MIN) or (
-            kind == "E" and name == "node_state"
-        )
+        return (
+            kind == "S"
+            and name == "spo2"
+            and 3 * HOUR + 30 * MIN <= t < 4 * HOUR + 30 * MIN
+        ) or (kind == "E" and name == "node_state")
     if subtype == "cuff_detached":
         return t == 9 * HOUR + INFLATION or (kind == "E" and name in ("node_state",))
     if subtype == "cuff_silent_bias":
         return kind == "S" and name == "bp" and t == 11 * HOUR + INFLATION
     if subtype == "stuck_at":
-        return kind == "S" and name == "bp" and t in (14 * HOUR + INFLATION, 15 * HOUR + INFLATION)
+        return (
+            kind == "S"
+            and name == "bp"
+            and t in (14 * HOUR + INFLATION, 15 * HOUR + INFLATION)
+        )
     if subtype == "ecg_noise":
         return kind == "S" and name == "hr_ecg" and 11 * HOUR <= t < 11 * HOUR + 3 * MIN
     if subtype == "nav_delay":
-        return t in (6 * HOUR, 6 * HOUR + INFLATION, 6 * HOUR + 5 * MIN, 6 * HOUR + 5 * MIN + INFLATION) or (
-            kind == "E" and name == "robot_task" and t == 6 * HOUR
-        )
+        return t in (
+            6 * HOUR,
+            6 * HOUR + INFLATION,
+            6 * HOUR + 5 * MIN,
+            6 * HOUR + 5 * MIN + INFLATION,
+        ) or (kind == "E" and name == "robot_task" and t == 6 * HOUR)
     if subtype == "manipulation_failure":
         return t == 16 * HOUR + INFLATION
     if subtype == "dispenser_bounce":
@@ -1275,16 +1543,15 @@ def test_samples_outside_effect_are_bit_identical(subtype: str) -> None:
     with_seq = subtype not in RENUMBERING
     changed = diff_items(without.stream, with_one.stream, with_seq=with_seq)
     assert changed, subtype  # the injection did something
-    assert all(touched(subtype, k) for k in changed), [k for k in changed if not touched(subtype, k)]
+    assert all(touched(subtype, k) for k in changed), [
+        k for k in changed if not touched(subtype, k)
+    ]
     # every record of the others is identical, in value and in its draws
     mine = [r for r in with_one.records if r.spec != PAIRED[subtype]]
     assert mine == list(without.records)
     assert with_one.disabled_subtypes == without.disabled_subtypes
     # removing the injection again restores the stream exactly
-    assert run(others, **kwargs).stream == without.stream
-    # and the sequence numbers of the non-renumbering subtypes did not move either
-    if with_seq:
-        assert [s.seq for s in samples_of(with_one, "bp")] or True
+    assert same(run(others, **kwargs), without)
 
 
 @pytest.mark.parametrize("subtype", sorted(PAIRED))
@@ -1302,9 +1569,9 @@ def test_an_unrealised_injection_shifts_no_draw_of_another(subtype: str) -> None
     }[subtype]
     base = run(others, stream_=HOURLY)
     extra = run([*others, nothing], stream_=HOURLY)
-    assert extra.stream == base.stream
+    assert same(extra, base)
     assert [r for r in extra.records if r.spec != nothing] == list(base.records)
-    assert not [r for r in extra.records if r.spec == nothing][0].realised
+    assert not next(r for r in extra.records if r.spec == nothing).realised
 
 
 # ---------------------------------------------------------------------------
@@ -1338,7 +1605,13 @@ def test_invalid_specs_rejected() -> None:
     # allowed: touching half-open windows, other devices, other subtypes
     run([ble(9 * HOUR, HOUR), ble(10 * HOUR, HOUR)])
     run([ble(9 * HOUR, 2 * HOUR, "cuff"), ble(9 * HOUR, 2 * HOUR, "dispenser")])
-    run([bias(9 * HOUR, 2 * HOUR), stuck(9 * HOUR, 2 * HOUR), detached(9 * HOUR, 2 * HOUR)])
+    run(
+        [
+            bias(9 * HOUR, 2 * HOUR),
+            stuck(9 * HOUR, 2 * HOUR),
+            detached(9 * HOUR, 2 * HOUR),
+        ]
+    )
     with pytest.raises(InjectionSpecError):  # one millisecond of overlap
         run([ble(9 * HOUR, HOUR + 1), ble(10 * HOUR, HOUR)])
     # the window may end exactly at the closing step of the day, not one ms later
@@ -1369,22 +1642,44 @@ def test_duplicate_per_tick_and_point_injections_are_rejected() -> None:
             run([s, s])
     with pytest.raises(InjectionSpecError):
         run([nav(10 * HOUR, MIN), nav(10 * HOUR, 2 * MIN)])
-    run([nav(10 * HOUR, MIN), manip(10 * HOUR)])  # different subtypes on one tick are fine
-    run([nav(10 * HOUR, MIN), nav(10 * HOUR, MIN, kind="dose")])  # different visit kinds
+    run(
+        [nav(10 * HOUR, MIN), manip(10 * HOUR)]
+    )  # different subtypes on one tick are fine
+    run(
+        [nav(10 * HOUR, MIN), nav(10 * HOUR, MIN, kind="dose")]
+    )  # different visit kinds
 
 
 SHAPE_CASES: list[tuple[str, Callable[[], InjectionSpec]]] = [
     ("window without duration", lambda: spec("ble_dropout", HOUR, None, target="cuff")),
-    ("window with magnitude", lambda: spec("ble_dropout", HOUR, HOUR, 5.0, "mmHg", target="cuff")),
+    (
+        "window with magnitude",
+        lambda: spec("ble_dropout", HOUR, HOUR, 5.0, "mmHg", target="cuff"),
+    ),
     ("ble_dropout without target", lambda: spec("ble_dropout", HOUR, HOUR)),
-    ("ble_dropout wrong target", lambda: spec("ble_dropout", HOUR, HOUR, target="robot")),
-    ("ble_dropout non-string target", lambda: spec("ble_dropout", HOUR, HOUR, target=3)),
+    (
+        "ble_dropout wrong target",
+        lambda: spec("ble_dropout", HOUR, HOUR, target="robot"),
+    ),
+    (
+        "ble_dropout non-string target",
+        lambda: spec("ble_dropout", HOUR, HOUR, target=3),
+    ),
     ("bias without magnitude", lambda: spec("cuff_silent_bias", HOUR, HOUR)),
     ("bias wrong unit", lambda: spec("cuff_silent_bias", HOUR, HOUR, 5.0, "bpm")),
     ("bias without unit", lambda: spec("cuff_silent_bias", HOUR, HOUR, 5.0)),
-    ("bias unit without magnitude", lambda: spec("cuff_silent_bias", HOUR, HOUR, None, "mmHg")),
-    ("bias wrong target", lambda: spec("cuff_silent_bias", HOUR, HOUR, 5.0, "mmHg", target="ecg")),
-    ("bias unknown param", lambda: spec("cuff_silent_bias", HOUR, HOUR, 5.0, "mmHg", color="red")),
+    (
+        "bias unit without magnitude",
+        lambda: spec("cuff_silent_bias", HOUR, HOUR, None, "mmHg"),
+    ),
+    (
+        "bias wrong target",
+        lambda: spec("cuff_silent_bias", HOUR, HOUR, 5.0, "mmHg", target="ecg"),
+    ),
+    (
+        "bias unknown param",
+        lambda: spec("cuff_silent_bias", HOUR, HOUR, 5.0, "mmHg", color="red"),
+    ),
     ("stuck with magnitude", lambda: spec("stuck_at", HOUR, HOUR, 5.0, "mmHg")),
     ("stuck_at wrong target", lambda: spec("stuck_at", HOUR, HOUR, target="dispenser")),
     ("detached with duration None", lambda: spec("cuff_detached", HOUR)),
@@ -1403,19 +1698,30 @@ SHAPE_CASES: list[tuple[str, Callable[[], InjectionSpec]]] = [
     ("nav_delay fractional delay", lambda: nav(HOUR, 1.5)),
     ("nav_delay bad kind", lambda: nav(HOUR, MIN, kind="witness")),
     ("nav_delay non-string kind", lambda: nav(HOUR, MIN, kind=3)),
-    ("manipulation with magnitude", lambda: spec("manipulation_failure", HOUR, None, 5.0, "ms")),
+    (
+        "manipulation with magnitude",
+        lambda: spec("manipulation_failure", HOUR, None, 5.0, "ms"),
+    ),
     ("manipulation with duration", lambda: spec("manipulation_failure", HOUR, MIN)),
     ("manipulation bad kind", lambda: manip(HOUR, kind="navigate")),
     ("manipulation wrong target", lambda: manip(HOUR, target="cuff")),
     ("unknown subtype", lambda: spec("process_kill", HOUR, HOUR)),
-    ("vocabulary subtype not injected in v1", lambda: spec("link_delay", HOUR, HOUR, 5.0, "ms")),
+    (
+        "vocabulary subtype not injected in v1",
+        lambda: spec("link_delay", HOUR, HOUR, 5.0, "ms"),
+    ),
     ("C3 subtype under C2", lambda: spec("replay", HOUR, HOUR)),
     ("C1 class", lambda: InjectionSpec(InjectedClass.C1, "stuck_at", HOUR, HOUR)),
-    ("C3 class without an injector", lambda: InjectionSpec(InjectedClass.C3, "ble_dropout", HOUR, HOUR)),
+    (
+        "C3 class without an injector",
+        lambda: InjectionSpec(InjectedClass.C3, "ble_dropout", HOUR, HOUR),
+    ),
 ]
 
 
-@pytest.mark.parametrize(("label", "make"), SHAPE_CASES, ids=[c[0] for c in SHAPE_CASES])
+@pytest.mark.parametrize(
+    ("label", "make"), SHAPE_CASES, ids=[c[0] for c in SHAPE_CASES]
+)
 def test_spec_shape_rules(label: str, make: Callable[[], InjectionSpec]) -> None:
     with pytest.raises(InjectionSpecError):
         run([make()])
@@ -1443,8 +1749,14 @@ SPEC_FIELD_CASES: list[tuple[str, Any]] = [
 ]  # fmt: skip
 
 
-@pytest.mark.parametrize(("field", "value"), SPEC_FIELD_CASES, ids=[f"{f}={str(v)[:20]}" for f, v in SPEC_FIELD_CASES])
-def test_spec_constructor_rejects_bad_fields_with_the_named_error(field: str, value: Any) -> None:
+@pytest.mark.parametrize(
+    ("field", "value"),
+    SPEC_FIELD_CASES,
+    ids=[f"{f}={str(v)[:20]}" for f, v in SPEC_FIELD_CASES],
+)
+def test_spec_constructor_rejects_bad_fields_with_the_named_error(
+    field: str, value: Any
+) -> None:
     arguments: dict[str, Any] = {
         "cls": C2, "subtype": "cuff_silent_bias", "onset_ms": HOUR, "duration_ms": HOUR,
         "magnitude": 5.0, "magnitude_unit": "mmHg", "params": {},
@@ -1463,18 +1775,31 @@ def test_spec_is_frozen_hashable_and_copies_its_params() -> None:
         s.onset_ms = 5  # type: ignore[misc]
     with pytest.raises(TypeError):
         s.params["x"] = 1  # type: ignore[index]
-    assert hash(s) == hash(InjectionSpec(C2, "ble_dropout", HOUR, HOUR, params={"target": "cuff"}))
+    assert hash(s) == hash(
+        InjectionSpec(C2, "ble_dropout", HOUR, HOUR, params={"target": "cuff"})
+    )
     assert s == InjectionSpec(C2, "ble_dropout", HOUR, HOUR, params={"target": "cuff"})
-    assert s != InjectionSpec(C2, "ble_dropout", HOUR, HOUR + 1, params={"target": "cuff"})
+    assert s != InjectionSpec(
+        C2, "ble_dropout", HOUR, HOUR + 1, params={"target": "cuff"}
+    )
     assert InjectionSpec(C2, "stuck_at", HOUR, HOUR).params == {}
     assert InjectionSpec(C2, "stuck_at", HOUR, HOUR, params=None).params == {}
     assert len({s, s}) == 1
     # numpy integers and integral floats of the right kind are accepted as times
-    assert InjectionSpec(C2, "stuck_at", np.int64(HOUR), np.int32(HOUR)).onset_ms == HOUR
+    assert (
+        InjectionSpec(C2, "stuck_at", np.int64(HOUR), np.int32(HOUR)).onset_ms == HOUR
+    )
     assert isinstance(InjectionSpec(C2, "stuck_at", np.int64(HOUR), 5).onset_ms, int)
     assert InjectionSpec(C2, "cuff_silent_bias", HOUR, HOUR, 5, "mmHg").magnitude == 5.0
-    assert isinstance(InjectionSpec(C2, "cuff_silent_bias", HOUR, HOUR, np.float32(5), "mmHg").magnitude, float)
-    assert InjectionSpec(C2, "ble_dropout", HOUR, HOUR, params=MappingProxy({"target": "cuff"})).params == {"target": "cuff"}
+    assert isinstance(
+        InjectionSpec(
+            C2, "cuff_silent_bias", HOUR, HOUR, np.float32(5), "mmHg"
+        ).magnitude,
+        float,
+    )
+    assert InjectionSpec(
+        C2, "ble_dropout", HOUR, HOUR, params=MappingProxy({"target": "cuff"})
+    ).params == {"target": "cuff"}
 
 
 class MappingProxy(Mapping[str, Any]):
@@ -1549,7 +1874,11 @@ CONTEXT_CASES: list[tuple[str, Any]] = [
 ]  # fmt: skip
 
 
-@pytest.mark.parametrize(("field", "value"), CONTEXT_CASES, ids=[f"{f}={str(v)[:12]}" for f, v in CONTEXT_CASES])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    CONTEXT_CASES,
+    ids=[f"{f}={str(v)[:12]}" for f, v in CONTEXT_CASES],
+)
 def test_context_rejects_bad_fields(field: str, value: Any) -> None:
     arguments: dict[str, Any] = {"patient_index": 0}
     arguments[field] = value
@@ -1573,17 +1902,39 @@ def test_stream_validation_table() -> None:
         "events not a sequence": dataclasses.replace(BASE, events=None),
         "a non-sample": dataclasses.replace(BASE, samples=(*BASE.samples, 5)),
         "a non-event": dataclasses.replace(BASE, events=(*BASE.events, "x")),
-        "unsorted samples": dataclasses.replace(BASE, samples=tuple(reversed(BASE.samples))),
-        "unsorted events": dataclasses.replace(BASE, events=tuple(reversed(BASE.events))),
-        "bad kind": dataclasses.replace(BASE, events=(Event("measurement", 1, 1, "cuff", {}, None),)),  # type: ignore[arg-type]
-        "bad time": dataclasses.replace(BASE, samples=(Sample("bp", 1.5, 1, 1.0, None, None),)),  # type: ignore[arg-type]
-        "huge time": dataclasses.replace(BASE, samples=(Sample("bp", 10**400, 10**400, 1.0, None, None),)),
-        "bool time": dataclasses.replace(BASE, samples=(Sample("bp", True, True, 1.0, None, None),)),  # type: ignore[arg-type]
-        "nan value": dataclasses.replace(BASE, samples=(Sample("bp", 1, 1, math.nan, None, None),)),
-        "string value": dataclasses.replace(BASE, samples=(Sample("bp", 1, 1, "x", None, None),)),  # type: ignore[arg-type]
-        "non-string signal": dataclasses.replace(BASE, samples=(Sample(5, 1, 1, 1.0, None, None),)),  # type: ignore[arg-type]
-        "non-string source": dataclasses.replace(BASE, events=(Event(EventKind.DISPENSE, 1, 1, 5, {}, None),)),  # type: ignore[arg-type]
-        "payload not a mapping": dataclasses.replace(BASE, events=(Event(EventKind.DISPENSE, 1, 1, "x", [1], None),)),  # type: ignore[arg-type]
+        "unsorted samples": dataclasses.replace(
+            BASE, samples=tuple(reversed(BASE.samples))
+        ),
+        "unsorted events": dataclasses.replace(
+            BASE, events=tuple(reversed(BASE.events))
+        ),
+        "bad kind": dataclasses.replace(
+            BASE, events=(Event("measurement", 1, 1, "cuff", {}, None),)
+        ),  # type: ignore[arg-type]
+        "bad time": dataclasses.replace(
+            BASE, samples=(Sample("bp", 1.5, 1, 1.0, None, None),)
+        ),  # type: ignore[arg-type]
+        "huge time": dataclasses.replace(
+            BASE, samples=(Sample("bp", 10**400, 10**400, 1.0, None, None),)
+        ),
+        "bool time": dataclasses.replace(
+            BASE, samples=(Sample("bp", True, True, 1.0, None, None),)
+        ),  # type: ignore[arg-type]
+        "nan value": dataclasses.replace(
+            BASE, samples=(Sample("bp", 1, 1, math.nan, None, None),)
+        ),
+        "string value": dataclasses.replace(
+            BASE, samples=(Sample("bp", 1, 1, "x", None, None),)
+        ),  # type: ignore[arg-type]
+        "non-string signal": dataclasses.replace(
+            BASE, samples=(Sample(5, 1, 1, 1.0, None, None),)
+        ),  # type: ignore[arg-type]
+        "non-string source": dataclasses.replace(
+            BASE, events=(Event(EventKind.DISPENSE, 1, 1, 5, {}, None),)
+        ),  # type: ignore[arg-type]
+        "payload not a mapping": dataclasses.replace(
+            BASE, events=(Event(EventKind.DISPENSE, 1, 1, "x", [1], None),)
+        ),  # type: ignore[arg-type]
         "bad day_index": dataclasses.replace(BASE, day_index=-1),
         "huge day_index": dataclasses.replace(BASE, day_index=10**400),
         "bool day_index": dataclasses.replace(BASE, day_index=True),
@@ -1591,7 +1942,9 @@ def test_stream_validation_table() -> None:
         "bad patient": dataclasses.replace(BASE, patient_id=""),
         "visits not a sequence": dataclasses.replace(BASE, visits=5),
         "bad visit": dataclasses.replace(BASE, visits=(*BASE.visits, 5)),
-        "bad measurement record": dataclasses.replace(BASE, measurements=(*BASE.measurements, "x")),
+        "bad measurement record": dataclasses.replace(
+            BASE, measurements=(*BASE.measurements, "x")
+        ),
         "settings not a mapping": dataclasses.replace(BASE, settings=[1]),
         "settings non-string key": dataclasses.replace(BASE, settings={1: 2}),
     }
@@ -1638,12 +1991,26 @@ def test_hostile_streams_raise_the_named_error() -> None:
 
 def test_the_input_stream_is_never_modified() -> None:
     before = copy.deepcopy(BASE)
-    snapshot = (BASE.samples, BASE.events, BASE.visits, BASE.measurements, dict(BASE.settings))
+    snapshot = (
+        BASE.samples,
+        BASE.events,
+        BASE.visits,
+        BASE.measurements,
+        dict(BASE.settings),
+    )
     out = run(MIXED)
     assert BASE == before
-    assert (BASE.samples, BASE.events, BASE.visits, BASE.measurements, dict(BASE.settings)) == snapshot
+    assert (
+        BASE.samples,
+        BASE.events,
+        BASE.visits,
+        BASE.measurements,
+        dict(BASE.settings),
+    ) == snapshot
     assert out.stream is not BASE
-    assert isinstance(out.stream.samples, tuple) and isinstance(out.stream.events, tuple)
+    assert isinstance(out.stream.samples, tuple) and isinstance(
+        out.stream.events, tuple
+    )
     # the result is sorted by t_rx_ms
     for items in (out.stream.samples, out.stream.events):
         assert [i.t_rx_ms for i in items] == sorted(i.t_rx_ms for i in items)
@@ -1663,15 +2030,22 @@ def test_an_added_item_follows_existing_items_with_the_same_arrival_time() -> No
     assert [e.kind for e in at] == [EventKind.INTAKE, EventKind.DISPENSE]
     out = run([detached(10 * HOUR, HOUR)])
     at = [e for e in out.stream.events if e.t_rx_ms == 10 * HOUR + INFLATION]
-    assert [e.kind for e in at] == [EventKind.MEASUREMENT_MISSED, EventKind.DEVICE_ERROR]
+    assert [e.kind for e in at] == [
+        EventKind.MEASUREMENT_MISSED,
+        EventKind.DEVICE_ERROR,
+    ]
 
 
 def test_settings_carry_the_chain_counters_and_the_injection_summary() -> None:
     out = run([ble(9 * HOUR, 4 * HOUR), bounce(DOSE_TICKS[0])])
     settings = out.stream.settings
     assert settings["next_cuff_seq"] == 5 and settings["next_dispenser_seq"] == 4
-    assert settings["n_visits"] == BASE.settings["n_visits"]  # earlier settings are kept
-    assert settings["injection_n_records"] == 2 and settings["injection_n_realised"] == 2
+    assert (
+        settings["n_visits"] == BASE.settings["n_visits"]
+    )  # earlier settings are kept
+    assert (
+        settings["injection_n_records"] == 2 and settings["injection_n_realised"] == 2
+    )
     json.dumps(dict(settings), allow_nan=False)
     chained = run([], cuff_start=5, dispenser_start=3)
     assert [s.seq for s in samples_of(chained, "bp")] == [5, 6, 7, 8]
@@ -1680,19 +2054,13 @@ def test_settings_carry_the_chain_counters_and_the_injection_summary() -> None:
     # the next day continues without a restart, also after a dropout of the last messages
     gone = run([ble(13 * HOUR, 2 * HOUR)])
     assert gone.stream.settings["next_cuff_seq"] == 5
-    assert injection_mod_settings_are_json(out)
-
-
-def injection_mod_settings_are_json(out: InjectionResult) -> bool:
-    json.dumps(dict(out.stream.settings), allow_nan=False)
-    return True
 
 
 def test_numbering_is_applied_once_and_the_base_may_be_numbered_already() -> None:
     numbered = assign_device_seq(BASE)
     out = run([bias(9 * HOUR, 4 * HOUR)], stream_=numbered)
     assert [s.seq for s in samples_of(out, "bp")] == [1, 2, 3, 4]
-    assert run([], stream_=numbered).stream == run([]).stream
+    assert same(run([], stream_=numbered), run([]))
 
 
 # ---------------------------------------------------------------------------
@@ -1711,12 +2079,16 @@ def test_assign_device_seq_numbers_a_failed_attempt_as_its_own_message() -> None
         E(EventKind.MEASUREMENT_MISSED, 200, "cuff"),
         E(EventKind.DEVICE_ERROR, 200, "cuff", {"error_code": "x"}),
         E(EventKind.MEASUREMENT, 300, "cuff"),
-        E(EventKind.DEVICE_ERROR, 400, "cuff", {"error_code": "y"}),  # not part of an attempt
+        E(
+            EventKind.DEVICE_ERROR, 400, "cuff", {"error_code": "y"}
+        ),  # not part of an attempt
         E(EventKind.DEVICE_ERROR, 500, "gateway", {"error_code": "z"}),
     ]
     stream_ = ObservedStream(PATIENT, 0, 0, "p", tuple(samples), tuple(events))
     out = assign_device_seq(stream_)
-    assert [(s.signal, s.t_device_ms, s.seq) for s in out.samples if s.signal == "bp"] == [("bp", 100, 1), ("bp", 300, 3)]
+    assert [
+        (s.signal, s.t_device_ms, s.seq) for s in out.samples if s.signal == "bp"
+    ] == [("bp", 100, 1), ("bp", 300, 3)]
     assert [s.seq for s in out.samples if s.t_device_ms == 200] == [2, 2]
     assert [e.seq for e in out.events] == [1, 2, 2, 3, None, None]
     assert out.settings["next_cuff_seq"] == 4
@@ -1738,14 +2110,32 @@ def test_a_later_day_uses_the_continuing_time_axis() -> None:
     day2 = fixture_stream(day_index=2)
     base = 2 * DAY
     out = run(
-        [bias(base + 9 * HOUR, 4 * HOUR), ble(base + 15 * HOUR, HOUR), nav(base + 10 * HOUR, 15 * MIN)],
+        [
+            bias(base + 9 * HOUR, 4 * HOUR),
+            ble(base + 13 * HOUR, 2 * HOUR),
+            nav(base + 10 * HOUR, 15 * MIN),
+        ],
         stream_=day2,
     )
     assert out.stream.day_index == 2
-    assert [s.value for s in samples_of(out, "bp")] == [128.0, 136.0, 132.0, 133.0] or True
+    bps = sorted(samples_of(out, "bp"), key=lambda s: s.t_device_ms)
+    assert [s.t_device_ms - base for s in bps] == [
+        8 * HOUR + INFLATION,
+        10 * HOUR + 15 * MIN + INFLATION,
+        12 * HOUR + INFLATION,
+    ]
+    assert [s.value for s in bps] == [
+        128.0,
+        136.0,
+        132.0,
+    ]  # the delayed reading is still biased
     assert all(r.realised for r in out.records)
     truth = ground_truth_events(out.records)
-    assert {t.onset_ms for t in truth} == {base + 9 * HOUR, base + 15 * HOUR, base + 10 * HOUR}
+    assert {t.onset_ms for t in truth} == {
+        base + 9 * HOUR,
+        base + 13 * HOUR,
+        base + 10 * HOUR,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1775,7 +2165,9 @@ def test_every_injected_subtype_is_in_fault_model_vocabulary() -> None:
     assert len(vocabulary) == len(set(vocabulary)) and len(vocabulary) >= 17
     injected = set(C2_SUBTYPES)
     assert injected <= set(vocabulary)
-    assert injected == fault_model_injected_in_v1()  # exactly the subtypes the model says v1 injects
+    assert (
+        injected == fault_model_injected_in_v1()
+    )  # exactly the subtypes the model says v1 injects
     assert set(registered_subtypes(C2)) == injected
     # the module injects nothing outside the vocabulary: every registered, signature and
     # canonical-order name is in it, and no spec of another subtype is accepted
@@ -1790,7 +2182,9 @@ def test_every_injected_subtype_is_in_fault_model_vocabulary() -> None:
 
 
 def test_the_ground_truth_subtypes_match_the_workstream_readme_list() -> None:
-    readme = (ROOT / "docs" / "plan" / "workstreams" / "WS04-benchmark" / "README.md").read_text("utf-8")
+    readme = (
+        ROOT / "docs" / "plan" / "workstreams" / "WS04-benchmark" / "README.md"
+    ).read_text("utf-8")
     line = next(x for x in readme.splitlines() if x.startswith("- C2 (injected"))
     listed = set(re.findall(r"`([a-z_]+)`", line.split("Not injected")[0]))
     assert set(C2_SUBTYPES) <= listed
@@ -1822,7 +2216,11 @@ def evidence_fields() -> set[str]:
                 groups.setdefault(current, "")
                 paths.add(f"{current}.{f.group(1)}")
     mapping = {v: k for k, v in top.items()}  # class name -> attribute
-    return {f"{mapping[p.split('.')[0]]}.{p.split('.')[1]}" for p in paths if p.split(".")[0] in mapping}
+    return {
+        f"{mapping[p.split('.')[0]]}.{p.split('.')[1]}"
+        for p in paths
+        if p.split(".")[0] in mapping
+    }
 
 
 def catalogue_signatures() -> dict[str, set[str]]:
@@ -1852,7 +2250,9 @@ def test_signature_paths_are_contract_fields() -> None:
         assert set(paths) <= fields, (subtype, set(paths) - fields)
     assert EVIDENCE_SIGNATURES["cuff_silent_bias"] == ()
     assert EVIDENCE_SIGNATURES["stuck_at"] == ()
-    assert EVIDENCE_SIGNATURES["dispenser_bounce"] == ()  # no field yet for the dispense interval
+    assert (
+        EVIDENCE_SIGNATURES["dispenser_bounce"] == ()
+    )  # no field yet for the dispense interval
 
 
 def test_signatures_equal_the_fault_model_catalogue() -> None:
@@ -1864,7 +2264,9 @@ def test_signatures_equal_the_fault_model_catalogue() -> None:
         assert record.evidence_paths == EVIDENCE_SIGNATURES[record.spec.subtype]
 
 
-def test_declared_diagnosability_limits_are_empty_signatures_in_the_catalogue_too() -> None:
+def test_declared_diagnosability_limits_are_empty_signatures_in_the_catalogue_too() -> (
+    None
+):
     catalogue = catalogue_signatures()
     for subtype in ("cuff_silent_bias", "stuck_at", "dispenser_bounce"):
         assert catalogue[subtype] == set()
@@ -1889,7 +2291,10 @@ def conventions_rows() -> dict[str, set[str]]:
 
 def emitted_payloads() -> list[Event]:
     out = run(MIXED + [bias(HOUR, MIN)], dispenser_content_sensing=True)
-    out2 = run([ble(9 * HOUR, HOUR), manip(DOSE_TICKS[0], kind="dose")], dispenser_content_sensing=True)
+    out2 = run(
+        [ble(9 * HOUR, HOUR), manip(DOSE_TICKS[0], kind="dose")],
+        dispenser_content_sensing=True,
+    )
     return [*out.stream.events, *out2.stream.events]
 
 
@@ -1900,19 +2305,30 @@ def test_payload_keys_are_declared_in_vocab() -> None:
         vocab.check_payload(event.kind, event.payload)
         seen |= set(event.payload)
         kinds.add(event.kind)
-        assert all(isinstance(v, (str, int, float, bool)) for v in event.payload.values())
+        assert all(
+            isinstance(v, (str, int, float, bool)) for v in event.payload.values()
+        )
     assert {
         EventKind.NODE_STATE, EventKind.DEVICE_ERROR, EventKind.ROBOT_TASK, EventKind.MEASUREMENT_MISSED,
     } <= kinds  # fmt: skip
     assert seen <= set(vocab.ALL_PAYLOAD_KEYS)
-    assert {vocab.KEY_STATE, vocab.KEY_COMMANDED, vocab.KEY_ERROR_CODE, vocab.KEY_CONTENT_CHANGE} <= seen
+    assert {
+        vocab.KEY_STATE,
+        vocab.KEY_COMMANDED,
+        vocab.KEY_ERROR_CODE,
+        vocab.KEY_CONTENT_CHANGE,
+    } <= seen
     declared = {
-        getattr(vocab, n) for n in dir(vocab) if n.startswith("KEY_") and isinstance(getattr(vocab, n), str)
+        getattr(vocab, n)
+        for n in dir(vocab)
+        if n.startswith("KEY_") and isinstance(getattr(vocab, n), str)
     }
     assert declared == set(vocab.ALL_PAYLOAD_KEYS)
 
 
-@pytest.mark.skipif(not EVIDENCE_DOC.exists(), reason="docs/models/evidence-channels.md is absent")
+@pytest.mark.skipif(
+    not EVIDENCE_DOC.exists(), reason="docs/models/evidence-channels.md is absent"
+)
 def test_payload_keys_conform_to_evidence_conventions() -> None:
     rows = conventions_rows()
     names = {
@@ -1955,20 +2371,29 @@ VOCAB_NEW_BAD: list[tuple[EventKind, Any]] = [
 
 
 @pytest.mark.parametrize(("kind", "payload"), VOCAB_NEW_BAD)
-def test_vocab_refuses_bad_node_state_and_device_error_payloads(kind: EventKind, payload: Any) -> None:
+def test_vocab_refuses_bad_node_state_and_device_error_payloads(
+    kind: EventKind, payload: Any
+) -> None:
     with pytest.raises(vocab.VocabularyError):
         vocab.check_payload(kind, payload)
 
 
 def test_vocab_accepts_the_new_declared_payloads() -> None:
-    vocab.check_payload(EventKind.NODE_STATE, {"state": "link_down", "commanded": False})
+    vocab.check_payload(
+        EventKind.NODE_STATE, {"state": "link_down", "commanded": False}
+    )
     vocab.check_payload(EventKind.NODE_STATE, {"state": "active"})
     vocab.check_payload(EventKind.DEVICE_ERROR, {"error_code": "E-DETACHED"})
     vocab.check_payload(EventKind.MEASUREMENT_MISSED, {})
     for state in STATES:
         vocab.check_payload(EventKind.NODE_STATE, {"state": state, "commanded": True})
     assert vocab.SOURCE_ECG != vocab.SOURCE_OXIMETER
-    assert {vocab.SOURCE_CUFF, vocab.SOURCE_DISPENSER, vocab.SOURCE_ECG, vocab.SOURCE_OXIMETER} == set(DEVICE_SIGNALS)
+    assert {
+        vocab.SOURCE_CUFF,
+        vocab.SOURCE_DISPENSER,
+        vocab.SOURCE_ECG,
+        vocab.SOURCE_OXIMETER,
+    } == set(DEVICE_SIGNALS)
 
 
 # ---------------------------------------------------------------------------
@@ -2002,7 +2427,9 @@ def check_injection_rows(path: Path) -> None:
     rows = {r.parameter: r for r in load_design_file(path).rows}
     referenced: set[str] = set()
     for subtype, entry in section.items():
-        assert set(entry) >= {"family", "target", "onset", "duration", "magnitude"}, subtype
+        assert set(entry) >= {"family", "target", "onset", "duration", "magnitude"}, (
+            subtype
+        )
         assert entry["family"] in {"device", "link", "robot"}
         assert entry["target"] and all(isinstance(t, str) for t in entry["target"])
         assert isinstance(entry["onset"], str) and entry["onset"].strip()
@@ -2019,13 +2446,20 @@ def check_injection_rows(path: Path) -> None:
             for level, name in levels.items():
                 row = rows[name]
                 referenced.add(name)
-                assert row.source_type in SOURCE_TYPES and row.source_type != "fixture_only", name
+                assert (
+                    row.source_type in SOURCE_TYPES
+                    and row.source_type != "fixture_only"
+                ), name
                 assert row.source_ref and row.source_ref.strip(), name
                 assert row.unit and row.unit.strip(), name
                 assert row.consumer_task == "WS04-T07", name
                 assert level and isinstance(level, str)
                 if row.filled:  # a filled row has a value and a rationale
-                    assert row.value is not None and row.rationale and row.rationale.strip(), name
+                    assert (
+                        row.value is not None
+                        and row.rationale
+                        and row.rationale.strip()
+                    ), name
                 else:
                     assert row.value is None, name
         # the subtype names its parameters: an onset rule, a duration or its absence, a magnitude or its absence
@@ -2047,7 +2481,9 @@ def test_injection_rows_have_provenance_units_and_levels() -> None:
     for name in ("stuck_at", "cuff_detached", "manipulation_failure", "ble_dropout"):
         assert section[name]["magnitude"] is None, name  # no magnitude applies
     for name in ("dispenser_bounce", "nav_delay", "manipulation_failure"):
-        assert section[name]["duration"] is None, name  # point and per-tick faults have no window
+        assert section[name]["duration"] is None, (
+            name
+        )  # point and per-tick faults have no window
     text = INJECTIONS_FILE.read_text(encoding="utf-8")
     assert text.count("cuff_silent_bias") >= 1
 
@@ -2061,7 +2497,9 @@ def test_the_bounce_levels_are_labelled_illustrative_and_stress() -> None:
     assert "illustrative, unverified" in text
     for level in sorted(set(levels) - {"nominal"}):
         row = rows[levels[level]]
-        assert "stress, physical plausibility unverified" in " ".join(row.note.split()), level
+        assert "stress, physical plausibility unverified" in " ".join(
+            row.note.split()
+        ), level
 
 
 def test_rate_sources_are_device_error_model_fields() -> None:
@@ -2074,7 +2512,9 @@ def test_rate_sources_are_device_error_model_fields() -> None:
     assert section["cuff_silent_bias"]["magnitude"]["reference"] in fields
 
 
-def edited_injections(tmp_path: Path, fill: bool, mutate: Callable[[dict[str, Any]], None] | None = None) -> Path:
+def edited_injections(
+    tmp_path: Path, fill: bool, mutate: Callable[[dict[str, Any]], None] | None = None
+) -> Path:
     document = injection_document()
     for row in document["parameters"]:
         if fill:
@@ -2087,7 +2527,11 @@ def edited_injections(tmp_path: Path, fill: bool, mutate: Callable[[dict[str, An
             )
         else:
             row.update(
-                value=None, dist=None, status="awaiting_human_value", rationale=None, verified_by=None
+                value=None,
+                dist=None,
+                status="awaiting_human_value",
+                rationale=None,
+                verified_by=None,
             )
     if mutate is not None:
         mutate(document)
@@ -2162,7 +2606,9 @@ def test_design_loader_rejects_a_broken_structure(tmp_path: Path) -> None:
         document["injections"] = []
 
     def extra_subtype(document: dict[str, Any]) -> None:
-        document["injections"]["c2"]["process_kill"] = copy.deepcopy(document["injections"]["c2"]["stuck_at"])
+        document["injections"]["c2"]["process_kill"] = copy.deepcopy(
+            document["injections"]["c2"]["stuck_at"]
+        )
 
     def no_section(document: dict[str, Any]) -> None:
         del document["injections"]["c2"]
@@ -2177,7 +2623,9 @@ def test_design_loader_rejects_a_broken_structure(tmp_path: Path) -> None:
         path = edited_injections(tmp_path, fill=False, mutate=mutate)
         with pytest.raises((InjectionDesignError, Exception)) as info:
             load_injection_design(path)
-        assert isinstance(info.value, (InjectionDesignError, ValueError)), mutate.__name__
+        assert isinstance(info.value, (InjectionDesignError, ValueError)), (
+            mutate.__name__
+        )
     # a missing file, a directory, a duplicate YAML key and non-YAML are named errors
     with pytest.raises(InjectionDesignError):
         load_injection_design(tmp_path / "absent.yaml")
@@ -2279,16 +2727,30 @@ def test_module_layering_is_one_way_and_below_the_monitor() -> None:
     for name in ("injection.py", "inject_c2.py"):
         mods = imported_modules(SRC / name)
         for forbidden in FORBIDDEN_PACKAGES:
-            assert not any(m == forbidden or m.startswith(forbidden + ".") for m in mods), (name, forbidden)
+            assert not any(
+                m == forbidden or m.startswith(forbidden + ".") for m in mods
+            ), (name, forbidden)
         for m in mods:
             if m.startswith("ralmon") and m not in ("ralmon", "ralmon.benchmark"):
-                assert any(m == a or m.startswith(a + ".") for a in ALLOWED_RALMON_IMPORTS[name]), (name, m)
+                assert any(
+                    m == a or m.startswith(a + ".")
+                    for a in ALLOWED_RALMON_IMPORTS[name]
+                ), (name, m)
         top = {m.split(".")[0] for m in mods if not m.startswith(".")}
         assert top <= ALLOWED_THIRD_PARTY, (name, top - ALLOWED_THIRD_PARTY)
         assert not any(m.startswith(".") for m in mods), name  # no relative import
-        assert not {"time", "datetime", "random"} & top, name  # no wall clock, no global random
+        assert not {"time", "datetime", "random"} & top, (
+            name
+        )  # no wall clock, no global random
     # the lower modules do not know the injectors
-    for name in ("measurement.py", "segments.py", "vocab.py", "priors.py", "rng.py", "trace.py"):
+    for name in (
+        "measurement.py",
+        "segments.py",
+        "vocab.py",
+        "priors.py",
+        "rng.py",
+        "trace.py",
+    ):
         mods = imported_modules(SRC / name)
         assert not any("inject" in m for m in mods), name
     # the C2 module reaches the machinery only through injection.py (one way)
@@ -2301,7 +2763,9 @@ def test_no_ground_truth_containers_in_the_c2_module_and_no_np_random_global() -
     for name in ("injection.py", "inject_c2.py"):
         text = (SRC / name).read_text(encoding="utf-8")
         assert "np.random.seed" not in text and "random.random" not in text
-        assert "np.random.default_rng" not in text  # every generator comes from rng.stream
+        assert (
+            "np.random.default_rng" not in text
+        )  # every generator comes from rng.stream
 
 
 def test_new_modules_export_nothing_from_the_package_root() -> None:
@@ -2328,7 +2792,11 @@ def test_resource_bounds_have_their_documented_values() -> None:
 
 
 def test_injection_composes_with_a_built_base_stream() -> None:
-    from ralmon.benchmark.measurement import MeasurementDesign, NoJitter, build_observed_base
+    from ralmon.benchmark.measurement import (
+        MeasurementDesign,
+        NoJitter,
+        build_observed_base,
+    )
     from ralmon.benchmark.priors import DeviceErrorModel
     from ralmon.benchmark.schedule import Schedule
 
@@ -2337,22 +2805,37 @@ def test_injection_composes_with_a_built_base_stream() -> None:
         [
             InlineSegment("hr-1", "hr_clean", hr, MIN, "bpm"),
             InlineSegment("sp-1", "spo2_clean", [95.0] * (DAY // MIN), MIN, "%"),
-            InlineSegment("n-1", "hr_error_ecg_noise", [1.0, -2.0, 3.0, -4.0], MIN, "bpm"),
+            InlineSegment(
+                "n-1", "hr_error_ecg_noise", [1.0, -2.0, 3.0, -4.0], MIN, "bpm"
+            ),
         ]
     )
     design = MeasurementDesign(INFLATION, 0, 0.0, DWELL, MIN, INFLATION)
     latent = latent_with_step(12 * HOUR, 130.0, 150.0)
-    schedule = Schedule(dose_ticks_ms=(8 * HOUR, 20 * HOUR), measurement_ticks_ms=(9 * HOUR, 13 * HOUR, 21 * HOUR))
+    schedule = Schedule(
+        dose_ticks_ms=(8 * HOUR, 20 * HOUR),
+        measurement_ticks_ms=(9 * HOUR, 13 * HOUR, 21 * HOUR),
+    )
     latent = dataclasses.replace(
         latent,
         events=(
             Event(EventKind.DISPENSE, 8 * HOUR, 8 * HOUR, "dispenser", {}, None),
-            Event(EventKind.INTAKE, 8 * HOUR + SEC, 8 * HOUR + SEC, "patient", {}, None),
+            Event(
+                EventKind.INTAKE, 8 * HOUR + SEC, 8 * HOUR + SEC, "patient", {}, None
+            ),
             Event(EventKind.DISPENSE, 20 * HOUR, 20 * HOUR, "dispenser", {}, None),
         ),
     )
     base = build_observed_base(
-        latent, schedule, "plan-1", DeviceErrorModel(0.0, 0.0, 0.0, 0.0), design, NoJitter(), lib, 0, 0
+        latent,
+        schedule,
+        "plan-1",
+        DeviceErrorModel(0.0, 0.0, 0.0, 0.0),
+        design,
+        NoJitter(),
+        lib,
+        0,
+        0,
     )
     before = copy.deepcopy(latent)
     out = apply_observation_injections(
@@ -2365,24 +2848,38 @@ def test_injection_composes_with_a_built_base_stream() -> None:
             ecg(10 * HOUR, 3 * MIN),
             bias(20 * HOUR, 2 * HOUR, 6.0),
         ],
-        InjectionContext(0, library=lib, latent=latent, task_deadline_offset_ms=DEADLINE_OFFSET),
+        InjectionContext(
+            0, library=lib, latent=latent, task_deadline_offset_ms=DEADLINE_OFFSET
+        ),
     )
     assert latent == before
     assert all(r.realised for r in out.records)
     day = finalize_observed(out.stream)
     assert isinstance(day, ObservedDay)
     # the delayed 13:00 reading re-reads the latent day (150 after 12:00) with the same noise
-    delayed = [s for s in day.samples if s.signal == "bp" and s.t_device_ms == 13 * HOUR + 20 * MIN + INFLATION]
+    delayed = [
+        s
+        for s in day.samples
+        if s.signal == "bp" and s.t_device_ms == 13 * HOUR + 20 * MIN + INFLATION
+    ]
     assert [s.value for s in delayed] == [150.0]
-    assert not [s for s in day.samples if s.signal == "bp" and s.t_device_ms == 9 * HOUR + INFLATION]
+    assert not [
+        s
+        for s in day.samples
+        if s.signal == "bp" and s.t_device_ms == 9 * HOUR + INFLATION
+    ]
     from ralmon.benchmark.trace import validate_day
 
     validate_day(day)
 
 
 def test_the_error_hierarchy() -> None:
-    assert issubclass(InjectionSpecError, InjectionError) and issubclass(InjectionContextError, InjectionError)
-    assert issubclass(InjectionDesignError, InjectionError) and issubclass(InjectionError, ValueError)
+    assert issubclass(InjectionSpecError, InjectionError) and issubclass(
+        InjectionContextError, InjectionError
+    )
+    assert issubclass(InjectionDesignError, InjectionError) and issubclass(
+        InjectionError, ValueError
+    )
     for item in (InjectionSpecError, InjectionContextError, InjectionDesignError):
         assert item.__name__.startswith("Injection")
     assert isinstance(DETACHED_ERROR_CODE, str)
@@ -2400,3 +2897,1128 @@ def test_records_are_frozen_and_hold_json_native_details() -> None:
         assert isinstance(r.evidence_paths, tuple)
         assert isinstance(r.n_changed, int) and not isinstance(r.n_changed, bool)
         assert r.realised == (r.n_changed > 0)
+
+
+# ---------------------------------------------------------------------------
+# Extreme inputs: every public function and constructor raises the named error
+# ---------------------------------------------------------------------------
+
+
+def _junk() -> list[Any]:
+    class Boom:
+        def __getattr__(self, name: str) -> Any:
+            raise RuntimeError("boom")
+
+    return [
+        None, True, False, 0, -1, 5, 2**70, 10**400, -(10**400), 1.5, math.nan,
+        math.inf, -math.inf, "", " ", "x", "x" * 5000, b"x", [], [1], (1,), {},
+        {"a": 1}, {1, 2}, object(), (lambda: 0), np.int64(3), np.float32(2.5),
+        np.array([1, 2]), np.array(5), iter([1]), MappingProxy({"target": "cuff"}),
+        Hostile(), Boom(), BASE, finalize_observed(BASE), ctx(), bias(HOUR, HOUR),
+        EventKind.DISPENSE, InjectedClass.C2, float("1e308"), -0.0,
+    ]  # fmt: skip
+
+
+def fuzz(
+    fn: Callable[..., Any], args: Sequence[Any], kwargs: Mapping[str, Any] | None = None
+) -> int:
+    """Call ``fn`` with each argument replaced by each junk value; only the named error may escape."""
+    kwargs = dict(kwargs or {})
+    calls = 0
+    for position in range(len(args)):
+        for junk in _junk():
+            trial = list(args)
+            trial[position] = junk
+            calls += 1
+            try:
+                fn(*trial, **kwargs)
+            except InjectionError:
+                pass
+    for key in kwargs:
+        for junk in _junk():
+            trial_kwargs = dict(kwargs)
+            trial_kwargs[key] = junk
+            calls += 1
+            try:
+                fn(*args, **trial_kwargs)
+            except InjectionError:
+                pass
+    return calls
+
+
+GOOD_SPEC = bias(9 * HOUR, 4 * HOUR)
+GOOD_RECORD = run([GOOD_SPEC]).records[0]
+
+
+def fresh_work() -> injection_mod.InjectionWork:
+    return injection_mod.InjectionWork(BASE, ctx())
+
+
+def test_every_public_function_raises_only_the_named_error_for_junk() -> None:
+    level = load_injection_design(INJECTIONS_FILE)["cuff_silent_bias"].magnitude.levels[
+        0
+    ]  # type: ignore[union-attr]
+    total = 0
+    total += fuzz(
+        InjectionSpec,
+        [C2, "cuff_silent_bias", HOUR, HOUR, 5.0, "mmHg", {}, "low", "group"],
+    )
+    total += fuzz(
+        InjectionRecord,
+        [GOOD_SPEC, HOUR, 2 * HOUR, True, 3, (), None, None, {}],
+    )
+    total += fuzz(
+        InjectionContext,
+        [0],
+        {
+            "library": None,
+            "latent": None,
+            "task_deadline_offset_ms": DEADLINE_OFFSET,
+            "dispenser_content_sensing": False,
+            "cuff_start": 1,
+            "dispenser_start": 1,
+        },
+    )
+    total += fuzz(apply_observation_injections, [BASE, [GOOD_SPEC], ctx()])
+    total += fuzz(canonical_order, [[GOOD_SPEC]])
+    total += fuzz(finalize_observed, [BASE])
+    total += fuzz(record_to_ground_truth, [GOOD_RECORD])
+    total += fuzz(ground_truth_events, [[GOOD_RECORD]])
+    total += fuzz(injection_log, [[GOOD_RECORD]])
+    total += fuzz(injection_sub_index, [GOOD_SPEC])
+    total += fuzz(injection_mod.injection_rng, [fresh_work(), ctx(), GOOD_SPEC])
+    total += fuzz(injection_mod.stable_index, ["domain", 1, "a", None])
+    total += fuzz(registered_subtypes, [C2])
+    total += fuzz(injection_mod.register_injector, [None])
+    total += fuzz(injection_mod.InjectionWork, [BASE, ctx()])
+    total += fuzz(
+        injection_mod.check_call, [fresh_work(), [GOOD_SPEC], ctx(), "cuff_silent_bias"]
+    )
+    total += fuzz(resolve_magnitude, [level, 4.0])
+    total += fuzz(load_injection_design, [INJECTIONS_FILE], {"section": "c2"})
+    total += fuzz(
+        plan_dispenser_bounces,
+        [[1000, 2000], 0.5, 500],
+        {"seed": 1, "patient_index": 0, "day_index": 0},
+    )
+    for name in C2_SUBTYPES:
+        fn = getattr(c2_mod, name)
+        s = {
+            "ble_dropout": ble(9 * HOUR, HOUR),
+            "stuck_at": stuck(9 * HOUR, HOUR),
+            "cuff_silent_bias": bias(9 * HOUR, HOUR),
+            "cuff_detached": detached(9 * HOUR, HOUR),
+            "ecg_noise": ecg(11 * HOUR, MIN),
+            "dispenser_bounce": bounce(DOSE_TICKS[0]),
+            "nav_delay": nav(10 * HOUR, MIN),
+            "manipulation_failure": manip(10 * HOUR),
+        }[name]
+        total += fuzz(fn, [fresh_work(), [s], ctx(library=library())])
+    assert total > 2_000
+
+
+def test_injector_constructor_rejects_junk() -> None:
+    def good_apply(work: Any, specs: Any, context: Any) -> Any:
+        return ()
+
+    total = fuzz(
+        injection_mod.Injector,
+        [
+            C2,
+            "x_fault",
+            "device",
+            0,
+            "window",
+            "none",
+            None,
+            ("cuff",),
+            False,
+            {},
+            (),
+            good_apply,
+        ],
+        {"magnitude_optional": False},
+    )
+    assert total > 100
+    bad_fields: list[dict[str, Any]] = [
+        {"stage": "sequence"}, {"stage": "x"}, {"shape": "line"}, {"magnitude": "huge"},
+        {"rank": -1}, {"targets": ("",)}, {"targets": [1]}, {"choices": {"k": ["a"]}},
+        {"choices": {"k": ()}}, {"signature": ("a", 1)},
+        {"magnitude": "real", "magnitude_unit": None}, {"magnitude_unit": "ms"},
+    ]  # fmt: skip
+    for bad in bad_fields:
+        kwargs: dict[str, Any] = {
+            "cls": C2, "subtype": "x_fault", "stage": "device", "rank": 0, "shape": "window",
+            "magnitude": "none", "magnitude_unit": None, "targets": ("cuff",),
+            "target_required": False, "choices": {}, "signature": (), "apply": good_apply,
+        }  # fmt: skip
+        kwargs.update(bad)
+        with pytest.raises(InjectionError):
+            injection_mod.Injector(**kwargs)
+
+
+def test_register_injector_refuses_a_second_registration_of_a_subtype() -> None:
+    existing = injection_mod._REGISTRY[(C2, "stuck_at")]
+    injection_mod.register_injector(existing)  # the same object again is harmless
+    twin = dataclasses.replace(existing)
+    with pytest.raises(InjectionError):
+        injection_mod.register_injector(twin)
+    for bad in (None, 5, "x", object()):
+        with pytest.raises(InjectionError):
+            injection_mod.register_injector(bad)  # type: ignore[arg-type]
+
+
+def test_injector_functions_work_directly_and_check_their_arguments() -> None:
+    work = fresh_work()
+    (record,) = c2_mod.cuff_silent_bias(work, [bias(9 * HOUR, 4 * HOUR)], ctx())
+    assert (
+        record.realised
+        and [s.value for s in work.samples if s.signal == "bp"][1] == 136.0
+    )
+    for bad_specs in (
+        [ble(9 * HOUR, HOUR)],
+        [spec("stuck_at", HOUR)],
+        [bias(9 * HOUR, HOUR), bias(9 * HOUR, HOUR)],
+        [bias(DAY, 2)],
+    ):
+        with pytest.raises(InjectionSpecError):
+            c2_mod.cuff_silent_bias(fresh_work(), bad_specs, ctx())
+    with pytest.raises(InjectionContextError):
+        c2_mod.cuff_silent_bias(object(), [bias(9 * HOUR, HOUR)], ctx())  # type: ignore[arg-type]
+    with pytest.raises(InjectionContextError):
+        c2_mod.nav_delay(fresh_work(), [nav(10 * HOUR, MIN)], InjectionContext(0))
+
+
+def test_a_hostile_visit_or_measurement_record_is_refused() -> None:
+    bad_visit = dataclasses.replace(BASE, visits=(RobotVisit(0, "other", 0, 0, 0, 0),))
+    bad_time = dataclasses.replace(
+        BASE, visits=(RobotVisit(0, "dose", 0, 2**62, 2**62, 0),)
+    )
+    bad_value = dataclasses.replace(
+        BASE,
+        measurements=(
+            MeasurementRecord(0, 0, 0, 0, math.nan, 0.0, 0.0, 0, False, None),
+        ),
+    )
+    bad_flag = dataclasses.replace(
+        BASE,
+        measurements=(MeasurementRecord(0, 0, 0, 0, 1.0, 0.0, 0.0, 0, 5, None),),  # type: ignore[arg-type]
+    )
+    for bad in (bad_visit, bad_time, bad_value, bad_flag):
+        with pytest.raises(InjectionContextError):
+            run([], stream_=bad)
+
+
+def test_times_near_the_integer_limit_cannot_overflow_a_shift() -> None:
+    near = dataclasses.replace(
+        BASE, samples=(*BASE.samples[:-1], S("day_end", 2**62, 1.0))
+    )
+    with pytest.raises(InjectionContextError):
+        run([], stream_=near)
+    for onset in (2**62, 2**63, 10**400):
+        with pytest.raises(InjectionSpecError):
+            InjectionSpec(C2, "stuck_at", onset, 1)
+
+
+def test_junk_in_every_field_of_the_stream_and_its_items_raises_only_the_named_error() -> (
+    None
+):
+    specs = [bias(9 * HOUR, 4 * HOUR), nav(10 * HOUR, 15 * MIN), ble(15 * HOUR, HOUR)]
+    calls = 0
+    for field_ in dataclasses.fields(ObservedStream):
+        for junk in _junk():
+            calls += 1
+            try:
+                apply_observation_injections(
+                    dataclasses.replace(BASE, **{field_.name: junk}), specs, ctx()
+                )
+            except InjectionError:
+                pass
+            try:
+                finalize_observed(dataclasses.replace(BASE, **{field_.name: junk}))
+            except InjectionError:
+                pass
+    sample = BASE.samples[3]
+    event = BASE.events[3]
+    visit = BASE.visits[0]
+    record = BASE.measurements[0]
+    for item, index, name in (
+        (sample, 3, "samples"), (event, 3, "events"), (visit, 0, "visits"), (record, 0, "measurements"),
+    ):  # fmt: skip
+        for field_ in dataclasses.fields(item):
+            for junk in _junk():
+                calls += 1
+                bad = dataclasses.replace(item, **{field_.name: junk})
+                items = list(getattr(BASE, name))
+                items[index] = bad
+                try:
+                    apply_observation_injections(
+                        dataclasses.replace(BASE, **{name: tuple(items)}), specs, ctx()
+                    )
+                except InjectionError:
+                    pass
+    assert calls > 1_000
+
+
+def test_junk_in_every_field_of_the_context_and_latent_day_raises_only_the_named_error() -> (
+    None
+):
+    latent = latent_with_step(10 * HOUR, 130.0, 140.0)
+    for field_ in dataclasses.fields(LatentDay):
+        for junk in _junk():
+            try:
+                apply_observation_injections(
+                    BASE,
+                    [nav(10 * HOUR, 15 * MIN)],
+                    ctx(latent=dataclasses.replace(latent, **{field_.name: junk})),
+                )
+            except InjectionError:
+                pass
+    # a latent day without a usable pressure series is a context error, not a crash
+    for bad_samples in (
+        (),
+        (S("hr_ecg", 0, 70.0),),
+        (S("bp", 10 * HOUR + HOUR, 130.0),),
+    ):
+        with pytest.raises(InjectionContextError):
+            run(
+                [nav(10 * HOUR, 15 * MIN)],
+                latent=dataclasses.replace(latent, samples=bad_samples),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Randomised invariants (seeded): any valid set of injections keeps the stream well formed
+# ---------------------------------------------------------------------------
+
+
+def random_specs(rng: np.random.Generator) -> list[InjectionSpec]:
+    kinds = list(C2_SUBTYPES)
+    chosen = [kinds[i] for i in rng.permutation(len(kinds))[: int(rng.integers(1, 6))]]
+    specs: list[InjectionSpec] = []
+    for name in chosen:
+        onset = int(rng.integers(5, 22)) * HOUR + int(rng.integers(0, 4)) * MIN
+        duration = int(rng.integers(1, 90)) * MIN
+        if name == "ble_dropout":
+            specs.append(
+                ble(onset, duration, str(rng.choice(["cuff", "ecg", "oximeter"])))
+            )
+        elif name == "stuck_at":
+            specs.append(stuck(onset, duration))
+        elif name == "cuff_silent_bias":
+            specs.append(bias(onset, duration, float(rng.integers(-9, 10))))
+        elif name == "cuff_detached":
+            specs.append(detached(onset, duration))
+        elif name == "ecg_noise":
+            specs.append(ecg(onset, duration, float(rng.integers(1, 4))))
+        elif name == "dispenser_bounce":
+            specs.append(
+                bounce(DOSE_TICKS[int(rng.integers(0, 2))], int(rng.integers(1, 900)))
+            )
+        elif name == "nav_delay":
+            tick = HOURLY_TICKS[int(rng.integers(0, len(HOURLY_TICKS)))]
+            specs.append(nav(tick, int(rng.integers(1, 120)) * MIN))
+        else:
+            tick = HOURLY_TICKS[int(rng.integers(0, len(HOURLY_TICKS)))]
+            specs.append(manip(tick))
+    return specs
+
+
+def test_random_injection_sets_keep_the_stream_well_formed_and_order_free() -> None:
+    rng = np.random.default_rng(12345)  # FIXTURE-ONLY seed of the test
+    lib = library(
+        (1.0, -2.0, 3.0, -4.0, 5.0, -6.0),
+        extra=[InlineSegment("noise-2", "hr_error_ecg_noise", [0.5] * 6, MIN, "bpm")],
+    )
+    valid = 0
+    for _ in range(120):
+        specs = random_specs(rng)
+        try:
+            out = run(specs, stream_=HOURLY, library=lib)
+        except InjectionSpecError:
+            continue  # an overlap of two random windows of one subtype
+        valid += 1
+        shuffled = [specs[i] for i in rng.permutation(len(specs))]
+        assert result_key(run(shuffled, stream_=HOURLY, library=lib)) == result_key(out)
+        day = finalize_observed(out.stream)
+        assert [s.t_rx_ms for s in day.samples] == sorted(
+            s.t_rx_ms for s in day.samples
+        )
+        assert len(out.records) == len(specs) and all(
+            r.realised == (r.n_changed > 0) for r in out.records
+        )
+        # a cuff message (one sequence number) holds items of one instant, and numbers increase with time
+        by_seq: dict[int, set[int]] = {}
+        for s in day.samples:
+            if (
+                s.signal in ("bp", "inflation_ms", "cuff_health", "hr_pulse")
+                and s.seq is not None
+            ):
+                by_seq.setdefault(s.seq, set()).add(s.t_device_ms)
+        assert all(len(times) == 1 for times in by_seq.values())
+        ordered = [next(iter(by_seq[k])) for k in sorted(by_seq)]
+        assert ordered == sorted(ordered)
+        dispenses = [e.seq for e in day.events if e.kind is EventKind.DISPENSE]
+        assert len(set(dispenses)) == len(dispenses) and all(
+            d is not None for d in dispenses
+        )
+        # no event is outside the declared payload vocabulary
+        for e in day.events:
+            vocab.check_payload(e.kind, e.payload)
+        # the truth events are exactly the realised records
+        assert len(ground_truth_events(out.records)) == sum(
+            r.realised for r in out.records
+        )
+    assert valid >= 60
+
+
+# ---------------------------------------------------------------------------
+# Tests added after the mutation self-check (each kills a mutant that survived the first round)
+# ---------------------------------------------------------------------------
+
+
+def test_settings_count_the_realised_injections() -> None:
+    out = run([bias(8 * HOUR + 30 * MIN, 30 * MIN), bias(9 * HOUR, 2 * HOUR)])
+    assert out.stream.settings["injection_n_records"] == 2
+    assert out.stream.settings["injection_n_realised"] == 1
+    assert out.stream.settings["injection_disabled_subtypes"] == []
+    off = run([ecg(11 * HOUR, MIN)], library=None)
+    assert off.stream.settings["injection_disabled_subtypes"] == ["ecg_noise"]
+
+
+def test_point_and_tick_faults_may_lie_in_the_day_and_the_day_after_it() -> None:
+    run([bounce(0)])  # exactly at the start of the day
+    run([nav(0, MIN)])
+    run([bounce(2 * DAY - 1)])  # the last ms of the following day
+    with pytest.raises(InjectionSpecError):
+        run([bounce(2 * DAY)])
+    with pytest.raises(InjectionSpecError):
+        run([nav(2 * DAY, MIN)])
+    day1 = fixture_stream(day_index=1)
+    run([bounce(DAY)], stream_=day1)
+    with pytest.raises(InjectionSpecError):
+        run([bounce(DAY - 1)], stream_=day1)
+
+
+def test_ecg_unit_without_a_magnitude_is_refused_and_the_default_scale_is_one() -> None:
+    with pytest.raises(InjectionSpecError):
+        run([spec("ecg_noise", 11 * HOUR, 3 * MIN, None, "1")])
+    plain = run([spec("ecg_noise", 11 * HOUR, 3 * MIN)])
+    explicit = run([ecg(11 * HOUR, 3 * MIN, 1.0)])
+    assert same(plain, explicit)
+    assert plain.records[0].details["scale"] == 1.0
+
+
+def test_sub_index_separates_units_and_is_pinned() -> None:
+    a, b = ble(9 * HOUR, HOUR, "cuff"), ble(9 * HOUR, HOUR, "dispenser")
+    assert injection_sub_index(a) != injection_sub_index(b)
+    assert (
+        len({injection_sub_index(ble(9 * HOUR, HOUR, t)) for t in DEVICE_SIGNALS}) == 4
+    )
+    # pinned: a change of the derivation would change every benchmark (like StreamPurpose ids)
+    assert injection_sub_index(ecg(11 * HOUR, 3 * MIN)) == 101811575
+    assert injection_sub_index(a) == 3598622535
+    assert injection_mod.stable_index("bounce_plan", 1000) == 1463015463
+    assert injection_mod.stable_index(
+        "bounce_plan", 1000
+    ) != injection_mod.stable_index("injection", 1000)
+    assert injection_mod.stable_index("d", None) != injection_mod.stable_index(
+        "d", "None"
+    )
+    assert injection_mod.stable_index("d", 1) != injection_mod.stable_index("d", "1")
+
+
+def test_params_bound_is_exact_and_times_follow_the_schema() -> None:
+    InjectionSpec(
+        C2, "stuck_at", HOUR, HOUR, params={f"k{i}": i for i in range(MAX_PARAMS)}
+    )
+    with pytest.raises(InjectionSpecError):
+        InjectionSpec(
+            C2,
+            "stuck_at",
+            HOUR,
+            HOUR,
+            params={f"k{i}": i for i in range(MAX_PARAMS + 1)},
+        )
+    # a replayed sample may carry a negative device time, never a negative arrival time
+    stale = dataclasses.replace(
+        BASE, samples=(Sample("bp", -5, 0, 1.0, None, None), *BASE.samples)
+    )
+    run([], stream_=stale)
+    early = dataclasses.replace(
+        BASE, samples=(Sample("bp", -5, -5, 1.0, None, None), *BASE.samples)
+    )
+    with pytest.raises(InjectionContextError):
+        run([], stream_=early)
+
+
+def test_a_record_cannot_contradict_itself() -> None:
+    s = bias(HOUR, HOUR)
+    InjectionRecord(s, HOUR, 2 * HOUR, True, 1, ())
+    InjectionRecord(s, HOUR, 2 * HOUR, False, 0, ())
+    for realised, n in ((True, 0), (False, 1)):
+        with pytest.raises(InjectionSpecError):
+            InjectionRecord(s, HOUR, 2 * HOUR, realised, n, ())
+    with pytest.raises(InjectionSpecError):
+        InjectionRecord(s, HOUR, 2 * HOUR, True, -1, ())
+
+
+def test_the_log_carries_params_level_and_the_group() -> None:
+    s = InjectionSpec(
+        C2, "ble_dropout", 9 * HOUR, 4 * HOUR, params={"target": "cuff"},
+        level="long", confounder_group="g",
+    )  # fmt: skip
+    (record,) = run([s]).records
+    assert record.level == "long" and record.confounder_group == "g"
+    (entry,) = injection_log([record])
+    assert entry["params"] == {"target": "cuff"}
+    assert entry["level"] == "long" and entry["confounder_group"] == "g"
+    assert entry["duration_ms"] == 4 * HOUR and entry["end_ms"] == 13 * HOUR
+    assert entry["magnitude"] is None and entry["magnitude_unit"] is None
+    assert entry["details"]["target"] == "cuff"
+
+
+def test_ble_dropout_edges_apply_to_events_as_well_as_samples() -> None:
+    t0 = 8 * HOUR + INFLATION
+    for onset, duration, kept in [
+        (t0, 1, 3),
+        (t0 + 1, DAY - t0 - 1, 1),
+        (t0 - 1, 1, 4),
+        (t0 - 1, 2, 3),
+    ]:
+        out = run([ble(onset, duration)])
+        assert len(events_of(out, EventKind.MEASUREMENT)) == kept, (onset, duration)
+
+
+def test_stuck_at_that_repeats_what_the_cuff_already_reports_is_not_realised() -> None:
+    flat = fixture_stream(TICKS, (128.0, 128.0, 128.0, 128.0))
+    out = run([stuck(9 * HOUR, 6 * HOUR)], stream_=flat)
+    assert not out.records[0].realised and out.records[0].n_changed == 0
+    assert out.records[0].details["frozen_value"] == 128.0
+
+
+def test_stuck_at_takes_the_last_of_two_readings_at_the_same_instant() -> None:
+    twice = dataclasses.replace(
+        BASE, samples=tuple(by_rx([*BASE.samples, S("bp", 8 * HOUR + INFLATION, 99.0)]))
+    )
+    out = run([stuck(9 * HOUR, 6 * HOUR)], stream_=twice)
+    assert out.records[0].details["frozen_value"] == 99.0
+
+
+def test_the_detached_attempt_reports_no_inflation() -> None:
+    assert (
+        DETACHED_INFLATION_MS == 0
+    )  # no inflation: below any positive registry minimum
+    assert DETACHED_HEALTH == 0.0 and DETACHED_ERROR_CODE == "cuff_detached"
+
+
+def test_ecg_quality_is_dropped_when_the_library_carries_none() -> None:
+    graded = dataclasses.replace(
+        BASE,
+        samples=tuple(
+            dataclasses.replace(s, quality=0.9)
+            if s.signal == "hr_ecg" and s.t_device_ms == 11 * HOUR
+            else s
+            for s in BASE.samples
+        ),
+    )
+    out = run([ecg(11 * HOUR, 3 * MIN)], stream_=graded)
+    assert [s.quality for s in hr_ecg_in(out, 11 * HOUR, 11 * HOUR + 3 * MIN)] == [
+        None
+    ] * 3
+
+
+def test_the_bounce_planner_draws_from_the_c2_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+    real = c2_mod.stream
+
+    def spy(*args: Any) -> Any:
+        calls.append(args)
+        return real(*args)
+
+    monkeypatch.setattr(c2_mod, "stream", spy)
+    plan_dispenser_bounces(
+        [1000, 2000, 3000], 0.5, 500, seed=7, patient_index=3, day_index=2
+    )
+    assert len(calls) == 3
+    assert {c[3] for c in calls} == {StreamPurpose.INJECTION_C2}
+    assert [c[:3] for c in calls] == [(7, 3, 2)] * 3
+    assert [c[4] for c in calls] == [
+        injection_mod.stable_index("bounce_plan", t) for t in (1000, 2000, 3000)
+    ]
+    monkeypatch.undo()
+    # pinned: the planned dispenses of a fixed key do not change between versions
+    got = plan_dispenser_bounces(
+        [t * 1000 for t in range(1, 41)], 0.3, 500, seed=7, patient_index=3, day_index=2
+    )
+    assert [s.onset_ms // 1000 for s in got] == [
+        2,
+        3,
+        12,
+        20,
+        22,
+        23,
+        30,
+        32,
+        33,
+        35,
+        36,
+        40,
+    ]
+
+
+def test_the_task_deadline_is_counted_from_the_tick_not_from_the_arrival() -> None:
+    jittered = fixture_stream(
+        jitter_ms=5 * MIN
+    )  # the robot arrives five minutes after each tick
+    late = run(
+        [nav(10 * HOUR, 6 * MIN)], stream_=jittered
+    )  # arrives 10:11, deadline 10:10
+    assert late.records[0].details["late"] is True
+    assert late.records[0].details["deadline_ms"] == 10 * HOUR + DEADLINE_OFFSET
+    on_time = run([nav(10 * HOUR, 5 * MIN)], stream_=jittered)  # arrives 10:10 exactly
+    assert on_time.records[0].details["late"] is False
+
+
+def test_an_on_time_delayed_visit_moves_its_task_presence_and_records() -> None:
+    out = run([nav(10 * HOUR, 4 * MIN)])
+    tasks = [
+        e
+        for e in events_of(out, EventKind.ROBOT_TASK)
+        if e.payload["task"] == "navigate"
+    ]
+    assert sorted(e.t_device_ms for e in tasks).count(10 * HOUR + 4 * MIN) == 1
+    assert 10 * HOUR not in [e.t_device_ms for e in tasks]
+    assert all(e.payload["outcome"] == "success" for e in tasks)
+    visit = next(
+        v for v in out.stream.visits if v.kind == "measurement" and v.index == 1
+    )
+    assert (visit.arrival_ms, visit.departure_ms, visit.delay_ms) == (
+        10 * HOUR + 4 * MIN, 10 * HOUR + 4 * MIN + DWELL, 4 * MIN,
+    )  # fmt: skip
+    assert visit.tick_ms == 10 * HOUR
+    record = next(m for m in out.stream.measurements if m.index == 1)
+    assert (record.arrival_ms, record.t_ms) == (
+        10 * HOUR + 4 * MIN,
+        10 * HOUR + 4 * MIN + INFLATION,
+    )
+    assert record.tick_ms == 10 * HOUR
+    # the delay is cumulative on a jittered visit
+    jittered = fixture_stream(jitter_ms=MIN)
+    out = run([nav(10 * HOUR, 2 * MIN)], stream_=jittered)
+    visit = next(
+        v for v in out.stream.visits if v.kind == "measurement" and v.index == 1
+    )
+    assert visit.delay_ms == 3 * MIN and visit.arrival_ms == 10 * HOUR + 3 * MIN
+
+
+def stream_with_intakes(
+    times: Sequence[int], extra_visits: Sequence[RobotVisit] = ()
+) -> ObservedStream:
+    base = fixture_stream(dose_ticks=(8 * HOUR + 10 * MIN,))
+    events = [e for e in base.events if e.kind is not EventKind.INTAKE]
+    events += [E(EventKind.INTAKE, t, "robot") for t in times]
+    return dataclasses.replace(
+        base, events=tuple(by_rx(events)), visits=(*base.visits, *extra_visits)
+    )
+
+
+def intake_times(out: InjectionResult) -> list[int]:
+    return [e.t_device_ms for e in events_of(out, EventKind.INTAKE)]
+
+
+def test_witness_coverage_is_a_closed_interval_on_both_ends() -> None:
+    dose = 8 * HOUR + 10 * MIN
+    dose_end = dose + DWELL
+    # the 08:00 measurement visit ends at 08:10:00: an intake exactly then is still covered by it
+    out = run([manip(dose, kind="dose")], stream_=stream_with_intakes([dose]))
+    assert intake_times(out) == [dose]
+    # a visit that arrives exactly at the intake covers it
+    arriving = RobotVisit(7, "measurement", dose_end, dose_end, dose_end + DWELL, 0)
+    out = run(
+        [manip(dose, kind="dose")], stream_=stream_with_intakes([dose_end], [arriving])
+    )
+    assert intake_times(out) == [dose_end]
+    # nobody else covers an intake at the very end of the failed visit: it is removed
+    out = run([manip(dose, kind="dose")], stream_=stream_with_intakes([dose_end]))
+    assert intake_times(out) == []
+    # one ms after the end of the failed visit it is not this visit's witness at all
+    out = run([manip(dose, kind="dose")], stream_=stream_with_intakes([dose_end + 1]))
+    assert intake_times(out) == [dose_end + 1]
+
+
+def test_a_failed_visit_does_not_cover_an_intake_for_another_failure() -> None:
+    # two dose visits in the same room window: after both fail nobody witnesses the intake
+    base = stream_with_intakes([8 * HOUR + 12 * MIN])
+    other = RobotVisit(
+        5, "dose", 8 * HOUR + 11 * MIN, 8 * HOUR + 11 * MIN, 8 * HOUR + 21 * MIN, 0
+    )
+    stream_ = dataclasses.replace(base, visits=(*base.visits, other))
+    one = run([manip(DOSE_TICKS[0], kind="dose")], stream_=stream_)
+    assert intake_times(one) == [
+        8 * HOUR + 12 * MIN
+    ]  # the second visit still witnesses it
+    both = run(
+        [manip(DOSE_TICKS[0], kind="dose"), manip(8 * HOUR + 11 * MIN, kind="dose")],
+        stream_=stream_,
+    )
+    assert intake_times(both) == []
+
+
+def test_manipulation_failure_at_a_measurement_visit_keeps_the_witnessed_intake() -> (
+    None
+):
+    stream_ = stream_with_intakes(
+        [10 * HOUR + 5 * MIN]
+    )  # inside the dwell of the 10:00 visit
+    out = run([manip(10 * HOUR)], stream_=stream_)
+    assert intake_times(out) == [10 * HOUR + 5 * MIN]
+
+
+def test_detached_runs_before_bias_so_a_bias_has_no_reading_left_to_shift() -> None:
+    out = run([bias(10 * HOUR, HOUR), detached(10 * HOUR, HOUR)])
+    by_subtype = {r.spec.subtype: r.realised for r in out.records}
+    assert by_subtype == {"cuff_detached": True, "cuff_silent_bias": False}
+    assert [r.spec.subtype for r in out.records] == [
+        "cuff_detached",
+        "cuff_silent_bias",
+    ]
+    # bias before stuck: the cuff freezes the (biased) value it last reported
+    out = run([stuck(9 * HOUR, 6 * HOUR), bias(8 * HOUR, 2 * HOUR, 5.0)])
+    assert values_of(out, "bp") == [133.0, 133.0, 133.0, 133.0]
+
+
+def test_assign_device_seq_counts_event_only_attempts() -> None:
+    only = ObservedStream(
+        PATIENT,
+        0,
+        0,
+        "p",
+        (),
+        (
+            E(EventKind.MEASUREMENT_MISSED, 100, "cuff"),
+            E(EventKind.MEASUREMENT_MISSED, 200, "cuff"),
+        ),
+    )
+    out = assign_device_seq(only)
+    assert [e.seq for e in out.events] == [1, 2] and out.settings["next_cuff_seq"] == 3
+    assert assign_device_seq(only, cuff_start=7).settings["next_cuff_seq"] == 9
+
+
+def test_a_second_failure_with_the_same_samples_in_one_message_keeps_numbers_consecutive() -> (
+    None
+):
+    out = run([detached(9 * HOUR, 6 * HOUR)])  # three failed attempts in a row
+    assert [s.seq for s in samples_of(out, "inflation_ms")] == [1, 2, 3, 4]
+    assert [e.seq for e in events_of(out, EventKind.MEASUREMENT_MISSED)] == [2, 3, 4]
+    assert [e.seq for e in events_of(out, EventKind.MEASUREMENT)] == [1]
+
+
+def test_design_loader_rejects_these_structures_too(tmp_path: Path) -> None:
+    def extra_number(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["nav_delay"]["extra"] = 3
+
+    def magnitude_unit(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["nav_delay"]["magnitude"]["unit"] = "s"
+
+    def duration_unit(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["stuck_at"]["duration"]["unit"] = "s"
+
+    def duration_missing(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["stuck_at"]["duration"] = None
+
+    def magnitude_missing(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["nav_delay"]["magnitude"] = None
+
+    def spurious_magnitude(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["stuck_at"]["magnitude"] = copy.deepcopy(
+            document["injections"]["c2"]["nav_delay"]["magnitude"]
+        )
+
+    def row_without_source_ref(document: dict[str, Any]) -> None:
+        for row in document["parameters"]:
+            if row["parameter"] == "nav_delay_magnitude_low":
+                row["source_ref"] = None
+
+    def fixture_source(document: dict[str, Any]) -> None:
+        document["parameters"][0]["source_type"] = "fixture_only"
+
+    def targets(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["ble_dropout"]["target"] = ["cuff"]
+
+    def no_onset(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["nav_delay"]["onset"] = ""
+
+    def rate_shape(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["ble_dropout"]["rate"] = {
+            "source": "x",
+            "extra": "y",
+        }
+
+    def extra_quantity_key(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["nav_delay"]["magnitude"]["colour"] = "red"
+
+    for mutate in (
+        extra_number, magnitude_unit, duration_unit, duration_missing, magnitude_missing,
+        spurious_magnitude, row_without_source_ref, fixture_source, targets, no_onset,
+        rate_shape, extra_quantity_key,
+    ):  # fmt: skip
+        path = edited_injections(tmp_path, fill=False, mutate=mutate)
+        with pytest.raises(InjectionDesignError):
+            load_injection_design(path)
+
+
+def test_registered_subtypes_are_listed_in_canonical_order() -> None:
+    assert registered_subtypes(C2) == (
+        "nav_delay", "manipulation_failure", "cuff_detached", "cuff_silent_bias",
+        "stuck_at", "ecg_noise", "dispenser_bounce", "ble_dropout",
+    )  # fmt: skip
+    assert registered_subtypes(InjectedClass.C1) == ()
+    assert set(C2_SUBTYPES) == set(registered_subtypes(C2))
+
+
+def test_params_are_normalised_and_keep_their_types() -> None:
+    a = InjectionSpec(
+        C2, "stuck_at", HOUR, HOUR, params={"b": 1, "a": True, "c": 1.5, "d": "x"}
+    )
+    b = InjectionSpec(
+        C2, "stuck_at", HOUR, HOUR, params={"d": "x", "c": 1.5, "a": True, "b": 1}
+    )
+    assert a == b and hash(a) == hash(b)
+    assert list(a.params) == ["a", "b", "c", "d"]
+    assert (
+        a.params["a"] is True
+        and type(a.params["b"]) is int
+        and type(a.params["c"]) is float
+    )
+    assert (
+        type(
+            InjectionSpec(C2, "stuck_at", HOUR, HOUR, params={"n": np.int64(3)}).params[
+                "n"
+            ]
+        )
+        is int
+    )
+    assert (
+        InjectionSpec(
+            C2, "stuck_at", HOUR, HOUR, params={"flag": np.bool_(True)}
+        ).params["flag"]
+        is True
+    )
+
+
+def test_exact_limits_of_a_spec_are_accepted_and_one_beyond_is_not() -> None:
+    from ralmon.benchmark.injection import MAX_ABS_MAGNITUDE, MAX_TIME_MS
+
+    InjectionSpec(C2, "stuck_at", MAX_TIME_MS, MAX_TIME_MS)
+    for onset, duration in (
+        (MAX_TIME_MS + 1, 1),
+        (0, MAX_TIME_MS + 1),
+        (-1, 1),
+        (0, 0),
+    ):
+        with pytest.raises(InjectionSpecError):
+            InjectionSpec(C2, "stuck_at", onset, duration)
+    assert (
+        InjectionSpec(C2, "cuff_silent_bias", 0, 1, MAX_ABS_MAGNITUDE, "mmHg").magnitude
+        == MAX_ABS_MAGNITUDE
+    )
+    assert (
+        InjectionSpec(
+            C2, "cuff_silent_bias", 0, 1, -MAX_ABS_MAGNITUDE, "mmHg"
+        ).magnitude
+        == -MAX_ABS_MAGNITUDE
+    )
+    for bad in (
+        math.nextafter(MAX_ABS_MAGNITUDE, math.inf),
+        -math.nextafter(MAX_ABS_MAGNITUDE, math.inf),
+    ):
+        with pytest.raises(InjectionSpecError):
+            InjectionSpec(C2, "cuff_silent_bias", 0, 1, bad, "mmHg")
+    InjectionSpec(C2, "x" * 256, 0, 1)  # the longest identifier
+    with pytest.raises(InjectionSpecError):
+        InjectionSpec(C2, "x" * 257, 0, 1)
+    InjectionSpec(C2, "stuck_at", 0, 1, params={"k": "v" * 256})
+    with pytest.raises(InjectionSpecError):
+        InjectionSpec(C2, "stuck_at", 0, 1, params={"k": "v" * 257})
+
+
+def test_windows_of_one_subtype_on_different_units_are_independent() -> None:
+    out = run([ble(9 * HOUR, 2 * HOUR, "cuff"), ble(10 * HOUR, 2 * HOUR, "dispenser")])
+    assert [r.spec.params["target"] for r in out.records] == ["cuff", "dispenser"]
+    with pytest.raises(InjectionSpecError):
+        run([ble(9 * HOUR, 2 * HOUR, "cuff"), ble(10 * HOUR, 2 * HOUR, "cuff")])
+    assert tuple(s.params["target"] for s in canonical_order([ble(9 * HOUR, HOUR, "oximeter"), ble(9 * HOUR, HOUR, "cuff")])) == (
+        "cuff", "oximeter",
+    )  # fmt: skip
+
+
+def test_the_result_keeps_the_numbering_counters_and_the_day_of_the_stream() -> None:
+    day = fixture_stream(day_index=3)
+    out = run([bias(3 * DAY + 9 * HOUR, HOUR)], stream_=day)
+    assert out.stream.settings["next_cuff_seq"] == 5
+    finalized = finalize_observed(out.stream)
+    assert (
+        finalized.day_index,
+        finalized.patient_id,
+        finalized.care_plan_id,
+        finalized.seed,
+    ) == (3, PATIENT, "plan-1", 0)
+    seeded = fixture_stream(seed=17)
+    assert finalize_observed(run([], stream_=seeded).stream).seed == 17
+
+
+def test_the_attack_stage_runs_after_numbering_and_the_link_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WS04-T08 registers its injectors in the stage after the link: a stand-in proves the order."""
+
+    def forge(
+        work: injection_mod.InjectionWork,
+        specs: Sequence[InjectionSpec],
+        context: InjectionContext,
+    ) -> Sequence[InjectionRecord]:
+        records = []
+        for s in specs:
+            work.events.append(
+                Event(EventKind.DISPENSE, s.onset_ms, s.onset_ms, "dispenser", {}, 99)
+            )
+            records.append(InjectionRecord(s, s.onset_ms, None, True, 1, ()))
+        return records
+
+    fake = injection_mod.Injector(
+        cls=InjectedClass.C3, subtype="fake_attack", stage="attack", rank=0, shape="point",
+        magnitude="none", magnitude_unit=None, targets=("dispenser",), target_required=False,
+        choices={}, signature=(), apply=forge,
+    )  # fmt: skip
+    monkeypatch.setitem(
+        injection_mod._REGISTRY, (InjectedClass.C3, "fake_attack"), fake
+    )
+    attack = InjectionSpec(InjectedClass.C3, "fake_attack", DOSE_TICKS[1] + 7)
+    out = run([ble(19 * HOUR, 2 * HOUR, "dispenser"), bounce(DOSE_TICKS[0]), attack])
+    kinds = [r.spec.subtype for r in out.records]
+    assert kinds == [
+        "dispenser_bounce",
+        "ble_dropout",
+        "fake_attack",
+    ]  # the attack stage is last
+    forged = [
+        e
+        for e in out.stream.events
+        if e.kind is EventKind.DISPENSE and e.t_device_ms == DOSE_TICKS[1] + 7
+    ]
+    assert [e.seq for e in forged] == [
+        99
+    ]  # not renumbered, and the dropout of the real 20:00 dispense kept it
+    real = [e for e in out.stream.events if e.kind is EventKind.DISPENSE]
+    assert [e.t_device_ms for e in real] == [
+        DOSE_TICKS[0],
+        DOSE_TICKS[0] + 500,
+        DOSE_TICKS[1] + 7,
+    ]
+    assert (
+        injection_mod.STAGE_ATTACK == "attack"
+        and injection_mod.PIPELINE_STAGES[-1] == "attack"
+    )
+    assert registered_subtypes(InjectedClass.C3) == ("fake_attack",)
+    monkeypatch.undo()
+    assert registered_subtypes(InjectedClass.C3) == ()
+
+
+def test_the_c1_stream_purpose_is_available_to_the_c1_injectors() -> None:
+    work = fresh_work()
+    spec_c1 = InjectionSpec(InjectedClass.C1, "hypertensive_spike", HOUR, HOUR)
+    expected = stream(0, 0, 0, StreamPurpose.INJECTION_C1, injection_sub_index(spec_c1))
+    got = injection_mod.injection_rng(work, ctx(), spec_c1)
+    assert float(got.random()) == float(expected.random())
+
+
+def catalogue_templates() -> dict[str, set[str]]:
+    """The column "templates that may become violated" of the device, link and robot tables."""
+    text = FAULT_MODEL.read_text(encoding="utf-8")
+    ids = {"range", "sched", "hold", "count", "resp", "sys", "int"}
+    rows: dict[str, set[str]] = {}
+    for part in (
+        text[
+            text.index("## Device faults") : text.index("### Effect on the two clocks")
+        ],
+        text[
+            text.index("## Robot faults") : text.index("## Fault effects on templates")
+        ],
+    ):
+        for line in part.splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if line.startswith("| `") and len(cells) >= 9:
+                cell = re.split(r"not `", cells[5])[
+                    0
+                ]  # "not `sys` in this form" is a negation
+                rows[cells[0].strip("`")] = set(re.findall(r"`([a-z]+)`", cell)) & ids
+    return rows
+
+
+def test_templates_affected_equal_the_fault_model_catalogue_and_reach_the_records() -> (
+    None
+):
+    catalogue = catalogue_templates()
+    for subtype in C2_SUBTYPES:
+        assert set(c2_mod.TEMPLATES_AFFECTED[subtype]) == catalogue[subtype], subtype
+    assert set(c2_mod.TEMPLATES_AFFECTED) == set(C2_SUBTYPES)
+    for record in run(MIXED, dispenser_content_sensing=True).records:
+        assert record.details["templates"] == list(
+            c2_mod.TEMPLATES_AFFECTED[record.spec.subtype]
+        )
+    assert set(c2_mod.TEMPLATES_AFFECTED["dispenser_bounce"]) == {
+        "count",
+        "hold",
+        "resp",
+        "int",
+    }
+    assert c2_mod.TEMPLATES_AFFECTED["ecg_noise"] == ()
+
+
+def test_required_payload_keys_are_alternatives_of_declared_keys() -> None:
+    for kind, alternatives in vocab.REQUIRED_ALTERNATIVES.items():
+        assert alternatives and all(
+            a and a <= vocab.PAYLOAD_KEYS[kind] for a in alternatives
+        )
+    with pytest.raises(vocab.VocabularyError):
+        vocab.check_payload(EventKind.NODE_STATE, {"commanded": True})
+
+
+def test_the_design_loader_keeps_the_rate_sources() -> None:
+    design = load_injection_design(INJECTIONS_FILE)
+    assert (
+        design["ble_dropout"].rate_source == "DeviceErrorModel.ble_dropout_rate_per_h"
+    )
+    assert (
+        design["dispenser_bounce"].rate_source
+        == "DeviceErrorModel.dispenser_bounce_prob"
+    )
+    assert design["stuck_at"].rate_source is None
+    assert (
+        design["nav_delay"].magnitude is not None
+        and design["nav_delay"].magnitude.reference == "sched_window"
+    )
+    assert design["cuff_detached"].targets == ("cuff",) and design[
+        "ble_dropout"
+    ].targets == tuple(DEVICE_SIGNALS)
+
+
+def test_the_spec_time_limit_is_pinned() -> None:
+    assert injection_mod.MAX_TIME_MS == (2**63 - 1) // 4
+
+
+def test_payload_values_of_the_stream_are_checked() -> None:
+    for payload in ({"a": None}, {"a": [1]}, {1: "x"}, {"a": {}}, {"a": object()}):
+        bad = dataclasses.replace(
+            BASE,
+            events=(*BASE.events, E(EventKind.NODE_STATE, DAY, "cuff", payload)),  # type: ignore[arg-type]
+        )
+        with pytest.raises(InjectionContextError):
+            run([], stream_=bad)
+
+
+def test_detached_clears_a_quality_it_finds_on_an_unchanged_sample() -> None:
+    graded = dataclasses.replace(
+        BASE,
+        samples=tuple(
+            dataclasses.replace(s, value=0.0, quality=0.5)
+            if s.signal == "cuff_health" and s.t_device_ms == 10 * HOUR + INFLATION
+            else s
+            for s in BASE.samples
+        ),
+    )
+    out = run([detached(10 * HOUR, HOUR)], stream_=graded)
+    health = [
+        s
+        for s in samples_of(out, "cuff_health")
+        if s.t_device_ms == 10 * HOUR + INFLATION
+    ]
+    assert [(s.value, s.quality) for s in health] == [(0.0, None)]
+
+
+def test_detached_and_bias_records_describe_what_they_did() -> None:
+    (record,) = run([detached(9 * HOUR, 4 * HOUR)]).records
+    assert (
+        record.details["n_attempts"] == 2
+        and record.details["error_code"] == DETACHED_ERROR_CODE
+    )
+    (record,) = run([bias(9 * HOUR, 4 * HOUR, 5.0)]).records
+    assert record.details["bias_mmhg"] == 5.0 and record.details["target"] == "cuff"
+
+
+def test_a_dispense_of_another_source_is_not_a_real_dispense_to_bounce() -> None:
+    odd = dataclasses.replace(
+        BASE,
+        events=tuple(by_rx([*BASE.events, E(EventKind.DISPENSE, 12 * HOUR, "cuff")])),
+    )
+    out = run([bounce(12 * HOUR)], stream_=odd)
+    assert not out.records[0].realised
+    assert len([e for e in out.stream.events if e.kind is EventKind.DISPENSE]) == 3
+
+
+def test_nav_delay_moves_only_the_items_of_its_visit() -> None:
+    # no presence sample at the 10:00 arrival: the later presence samples must not be taken instead
+    no_presence = dataclasses.replace(
+        BASE,
+        samples=tuple(
+            s
+            for s in BASE.samples
+            if not (s.signal == "presence" and s.t_device_ms == 10 * HOUR)
+        ),
+    )
+    out = run([nav(10 * HOUR, 15 * MIN)], stream_=no_presence)
+    presence = sorted(s.t_device_ms for s in samples_of(out, "presence"))
+    assert presence == sorted(
+        s.t_device_ms for s in samples_of(no_presence, "presence")
+    )
+    # a task event of another source at the same instant is not the robot's navigation outcome
+    decoy = E(
+        EventKind.ROBOT_TASK,
+        10 * HOUR,
+        "ward",
+        {"task": "navigate", "outcome": "success", "patient_id": PATIENT},
+    )
+    with_decoy = dataclasses.replace(BASE, events=tuple(by_rx([decoy, *BASE.events])))
+    out = run([nav(10 * HOUR, 15 * MIN)], stream_=with_decoy)
+    wards = [
+        e
+        for e in out.stream.events
+        if e.source == "ward" and e.kind is EventKind.ROBOT_TASK
+    ]
+    assert [(e.t_device_ms, e.payload["outcome"]) for e in wards] == [
+        (10 * HOUR, "success")
+    ]
+    robots = [
+        e
+        for e in out.stream.events
+        if e.source == "robot"
+        and e.kind is EventKind.ROBOT_TASK
+        and e.payload["outcome"] == "late"
+    ]
+    assert len(robots) == 1
+    # the dose kind is recorded as such
+    (record,) = run([nav(DOSE_TICKS[0], MIN, kind="dose")]).records
+    assert record.details["kind"] == "dose" and record.details["delay_ms"] == MIN
+    (record,) = run([manip(DOSE_TICKS[0], kind="dose")]).records
+    assert record.details["kind"] == "dose"
+
+
+def test_a_required_alternative_needs_all_of_its_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        vocab,
+        "REQUIRED_ALTERNATIVES",
+        {
+            EventKind.NODE_STATE: (
+                frozenset({"state", "commanded"}),
+                frozenset({"state", "other"}),
+            )
+        },
+    )
+    with pytest.raises(vocab.VocabularyError):
+        vocab.check_payload(EventKind.NODE_STATE, {"state": "active"})
+    vocab.check_payload(EventKind.NODE_STATE, {"state": "active", "commanded": True})

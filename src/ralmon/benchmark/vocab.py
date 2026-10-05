@@ -13,9 +13,14 @@ by construction (source ``robot``). The optional ``content_change`` of ``DISPENS
 in the vocabulary but the fault-free base does not emit it (a dispenser with content
 sensing is a capability of the confounder variants of WS04-T09).
 
-Later tasks add the keys they emit (``NODE_STATE``, ``DEVICE_ERROR``, the declined-task
-outcome): they extend ``PAYLOAD_KEYS`` here, so a key can only enter a trace by being
-declared. ``check_payload`` is the one conformity check.
+WS04-T07 adds the keys of the C2 injectors, all taken from the same table: ``NODE_STATE``
+(``state``, ``commanded``), ``DEVICE_ERROR`` (``error_code``) and the empty payload of
+``MEASUREMENT_MISSED``; ``ROBOT_TASK`` already has ``task``, ``outcome`` and ``patient_id`` and
+the injectors use the outcomes ``late`` and ``failed``. A ``NODE_STATE`` event needs its
+``state`` and a ``DEVICE_ERROR`` its ``error_code`` (the table: "required in every report",
+"non-empty"). Later tasks add the keys they emit (the declined-task outcome, the gateway
+verification outcome): they extend ``PAYLOAD_KEYS`` here, so a key can only enter a trace by
+being declared. ``check_payload`` is the one conformity check.
 """
 
 from __future__ import annotations
@@ -30,10 +35,13 @@ from ralmon.signals import EventKind
 
 __all__ = [
     "ALL_PAYLOAD_KEYS",
+    "KEY_COMMANDED",
     "KEY_CONTENT_CHANGE",
+    "KEY_ERROR_CODE",
     "KEY_KIND",
     "KEY_OUTCOME",
     "KEY_PATIENT_ID",
+    "KEY_STATE",
     "KEY_TASK",
     "KINDS",
     "KIND_DOSE",
@@ -44,10 +52,20 @@ __all__ = [
     "OUTCOME_SUCCESS",
     "OUTCOME_TIMEOUT",
     "PAYLOAD_KEYS",
+    "REQUIRED_ALTERNATIVES",
     "SOURCE_CUFF",
     "SOURCE_DISPENSER",
+    "SOURCE_ECG",
+    "SOURCE_OXIMETER",
     "SOURCE_ROBOT",
     "SOURCE_WARD",
+    "STATES",
+    "STATE_ACTIVE",
+    "STATE_FINALIZED",
+    "STATE_INACTIVE",
+    "STATE_LINK_DOWN",
+    "STATE_UNCONFIGURED",
+    "STATE_UNREACHABLE",
     "TASKS",
     "TASK_MANIPULATE",
     "TASK_NAVIGATE",
@@ -61,6 +79,8 @@ SOURCE_CUFF: Final = "cuff"
 SOURCE_DISPENSER: Final = "dispenser"
 SOURCE_ROBOT: Final = "robot"
 SOURCE_WARD: Final = "ward"  # the ward node that issues the care-plan ticks
+SOURCE_ECG: Final = "ecg"  # the ECG device (heart rate); a BLE device
+SOURCE_OXIMETER: Final = "oximeter"  # the pulse oximeter (SpO2); a BLE device
 
 # SCHEDULE_TICK: which care-plan step is due (owned by this module).
 KEY_KIND: Final = "kind"
@@ -85,6 +105,28 @@ KEY_PATIENT_ID: Final = "patient_id"
 # DISPENSE (evidence-channels.md, proposed by EC-GAP-1): after minus before, float.
 KEY_CONTENT_CHANGE: Final = "content_change"
 
+# NODE_STATE (evidence-channels.md, Trace evidence conventions and D-4).
+KEY_STATE: Final = "state"
+STATE_UNCONFIGURED: Final = "unconfigured"
+STATE_INACTIVE: Final = "inactive"
+STATE_ACTIVE: Final = "active"
+STATE_FINALIZED: Final = "finalized"
+STATE_LINK_DOWN: Final = "link_down"  # the gateway lost the BLE connection of a device
+STATE_UNREACHABLE: Final = "unreachable"  # a liveliness lease lapsed
+STATES: Final = (
+    STATE_UNCONFIGURED,
+    STATE_INACTIVE,
+    STATE_ACTIVE,
+    STATE_FINALIZED,
+    STATE_LINK_DOWN,
+    STATE_UNREACHABLE,
+)
+KEY_COMMANDED: Final = "commanded"  # bool: the transition was announced as deliberate
+
+# DEVICE_ERROR: a device-defined label, never a clinical value.
+KEY_ERROR_CODE: Final = "error_code"
+_MAX_ERROR_CODE: Final = 256  # algorithmic: longest error label
+
 PAYLOAD_KEYS: Final[Mapping[EventKind, frozenset[str]]] = MappingProxyType(
     {
         EventKind.SCHEDULE_TICK: frozenset({KEY_KIND}),
@@ -92,12 +134,27 @@ PAYLOAD_KEYS: Final[Mapping[EventKind, frozenset[str]]] = MappingProxyType(
         EventKind.DISPENSE: frozenset({KEY_CONTENT_CHANGE}),
         EventKind.INTAKE: frozenset(),
         EventKind.ROBOT_TASK: frozenset({KEY_TASK, KEY_OUTCOME, KEY_PATIENT_ID}),
+        EventKind.NODE_STATE: frozenset({KEY_STATE, KEY_COMMANDED}),
+        EventKind.DEVICE_ERROR: frozenset({KEY_ERROR_CODE}),
+        EventKind.MEASUREMENT_MISSED: frozenset(),
     }
+)
+# What a payload of the kind must carry, only where the conventions table says so: a tuple of
+# alternatives, and a payload needs every key of at least one of them (a later task that adds
+# another way to report, for example the failed verification of the gateway, adds an
+# alternative instead of loosening this).
+REQUIRED_ALTERNATIVES: Final[Mapping[EventKind, tuple[frozenset[str], ...]]] = (
+    MappingProxyType(
+        {
+            EventKind.NODE_STATE: (frozenset({KEY_STATE}),),
+            EventKind.DEVICE_ERROR: (frozenset({KEY_ERROR_CODE}),),
+        }
+    )
 )
 ALL_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset().union(*PAYLOAD_KEYS.values())
 
 _ENUMERATED: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
-    {KEY_KIND: KINDS, KEY_TASK: TASKS, KEY_OUTCOME: OUTCOMES}
+    {KEY_KIND: KINDS, KEY_TASK: TASKS, KEY_OUTCOME: OUTCOMES, KEY_STATE: STATES}
 )
 
 
@@ -115,6 +172,19 @@ def _check_value(key: str, value: object) -> None:
         if not isinstance(value, str) or not value.strip():
             raise VocabularyError(
                 f"payload {key!r} must be a non-empty string, got {value!r}"
+            )
+    elif key == KEY_COMMANDED:
+        if not isinstance(value, bool):
+            raise VocabularyError(f"payload {key!r} must be a bool, got {value!r}")
+    elif key == KEY_ERROR_CODE:
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value) > _MAX_ERROR_CODE
+        ):
+            raise VocabularyError(
+                f"payload {key!r} must be a non-empty string of at most "
+                f"{_MAX_ERROR_CODE} characters, got {value!r}"
             )
     elif key == KEY_CONTENT_CHANGE:
         if isinstance(value, (bool, str)) or not isinstance(value, numbers.Real):
@@ -145,3 +215,11 @@ def check_payload(kind: object, payload: object) -> None:
                 f"(declared: {sorted(allowed)})"
             )
         _check_value(key, value)
+    alternatives = REQUIRED_ALTERNATIVES.get(kind)
+    if alternatives is not None and not any(
+        alternative <= set(payload) for alternative in alternatives
+    ):
+        raise VocabularyError(
+            f"payload of a {kind.value} event needs "
+            + " or ".join(str(sorted(a)) for a in alternatives)
+        )
