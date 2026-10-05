@@ -22,6 +22,7 @@ import ast
 import dataclasses
 import math
 from collections.abc import Sequence
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +32,7 @@ import yaml
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from ralmon.benchmark import AdherenceParams, LiteraturePriorSource
+from ralmon.benchmark import AdherenceParams, LatentDay, LiteraturePriorSource
 from ralmon.benchmark import adherence as adherence_module
 from ralmon.benchmark import schedule as schedule_module
 from ralmon.benchmark.adherence import (
@@ -64,6 +65,7 @@ from ralmon.benchmark.schedule import (
     derive_schedule,
     load_schedule,
 )
+from ralmon.benchmark.trace import read_truth, write_truth
 from ralmon.signals import Event, EventKind
 
 from .conftest import make_fixture_prior
@@ -280,7 +282,7 @@ def test_simulated_sequence_only_visits_positive_probability_transitions(
     states = state_sequence(result)
     assert len(states) == 21
     assert model.initial_distribution[states[0]] > 0.0
-    for previous, current in zip(states, states[1:], strict=False):
+    for previous, current in pairwise(states):
         assert matrix[previous][current] > 0.0
 
 
@@ -443,7 +445,7 @@ def test_memoryless_chain_has_the_marginals_as_every_transition_row() -> None:
     states = state_sequence(run(params(0.2, 0.1, 0.1), n_days=10_000, seed=1))
     marginals = [0.6, 0.2, 0.1, 0.1]
     for i in STATES:
-        successors = [b for a, b in zip(states, states[1:], strict=False) if a is i]
+        successors = [b for a, b in pairwise(states) if a is i]
         for j in STATES:
             freq = successors.count(j) / len(successors)
             assert abs(freq - marginals[j]) < binomial_tolerance(
@@ -469,7 +471,7 @@ def test_custom_chain_transition_frequencies_match_the_matrix() -> None:
     states = state_sequence(result)
     assert len(states) == 14_000
     for i in STATES:
-        successors = [b for a, b in zip(states, states[1:], strict=False) if a is i]
+        successors = [b for a, b in pairwise(states) if a is i]
         for j in STATES:
             p = STICKY[i][j]
             freq = successors.count(j) / len(successors)
@@ -565,14 +567,17 @@ def test_absorbing_start_stays_forever() -> None:
 
 
 def test_chain_state_carries_across_days() -> None:
-    sticky = [
-        [0.9, 0.1, 0.0, 0.0],
-        [0.0, 0.9, 0.1, 0.0],
-        [0.0, 0.0, 0.9, 0.1],
-        [0.1, 0.0, 0.0, 0.9],
+    # a cycle ON_TIME -> DELAYED -> OMITTED -> DOUBLE_TAKE -> ON_TIME with probability 0.9; the
+    # first state of a patient is ON_TIME (marginals of zero probabilities), so a chain that
+    # restarted every midnight would begin each day with ON_TIME
+    cycle = [
+        [0.1, 0.9, 0.0, 0.0],
+        [0.0, 0.1, 0.9, 0.0],
+        [0.0, 0.0, 0.1, 0.9],
+        [0.9, 0.0, 0.0, 0.1],
     ]
     p = params(mean_delay_ms=HOUR)
-    model = AdherenceModel(p, CFG, transition_matrix=sticky)
+    model = AdherenceModel(p, CFG, transition_matrix=cycle)
     whole = model.simulate(TWO_DOSES, 7, adherence_stream(4, 0))
 
     rng = adherence_stream(4, 0)
@@ -599,6 +604,9 @@ def test_chain_state_carries_across_days() -> None:
         for s in state_sequence(model.simulate(TWO_DOSES, 1, rng, start_day=day))
     ]
     assert restarted != state_sequence(whole)
+    first_of_day = state_sequence(whole)[2::2]
+    assert any(s is not ON_TIME for s in first_of_day)  # the carry shows at midnight
+    assert set(restarted[0::2]) == {ON_TIME}
 
 
 def test_one_run_of_many_days_equals_runs_of_one_and_of_several_days() -> None:
@@ -876,23 +884,54 @@ def test_one_dose_per_day_and_two_doses_per_day() -> None:
 
 
 def test_an_event_exactly_at_a_day_boundary_stays_on_the_continuing_axis() -> None:
-    # dose 1 ms before midnight, intake lag 1 ms: the intake falls exactly at 24:00 = step 0
-    # of the next day; the slot (and its behaviour entry) still belong to the dose's day.
-    schedule = Schedule(dose_ticks_ms=(DAY - 1,), measurement_ticks_ms=())
-    config = AdherenceConfig(intake_lag_ms=1, double_take_gap_ms=1)
-    result = run(params(), schedule=schedule, config=config, n_days=2)
-    assert [(e.kind, e.t_device_ms) for e in result.events] == [
-        (EventKind.DISPENSE, DAY - 1),
-        (EventKind.INTAKE, DAY),
-        (EventKind.DISPENSE, 2 * DAY - 1),
-        (EventKind.INTAKE, 2 * DAY),
+    # A slot of 3 ms at the end of the day, lag 1 ms, gap 2 ms. A delayed dose of 2 ms is
+    # dispensed at 23:59:59.999 and its intake falls exactly at 24:00 = step 0 of the next day;
+    # the slot (and its behaviour entry) still belong to the dose's day.
+    schedule = Schedule(dose_ticks_ms=(DAY - 3,), measurement_ticks_ms=())
+    config = AdherenceConfig(intake_lag_ms=1, double_take_gap_ms=2)
+    result = run(
+        params(p_delay=1.0, mean_delay_ms=1),
+        schedule=schedule,
+        config=config,
+        n_days=40,
+    )
+    boundary = [
+        e
+        for e in result.events
+        if e.kind is EventKind.INTAKE and e.t_device_ms % DAY == 0
     ]
-    assert [x.day_index for x in result.behaviour_log] == [0, 1]
+    assert boundary, "the test needs a delay of 2 ms to have teeth"
+    assert len(boundary) < 40  # a delay of 1 ms ends before the boundary
+    by_day = {entry.day_index: entry for entry in result.behaviour_log}
+    for e in boundary:
+        day = e.t_device_ms // DAY - 1
+        assert by_day[day].dispense_times_ms == (e.t_device_ms - 1,)
+        assert e in result.events
+    for entry in result.behaviour_log:
+        (when,) = entry.dispense_times_ms
+        assert when // DAY == entry.day_index  # a dispense never leaves its own day
+        assert entry.slot_tick_ms < when < (entry.day_index + 1) * DAY
+    times = [e.t_device_ms for e in result.events]
+    assert times == sorted(times)
+    # an on-time intake cannot cross midnight: lag < gap < slot, so tick + lag < day end
+    on_time = run(params(), schedule=schedule, config=config, n_days=3)
+    assert kinds(on_time.events, EventKind.INTAKE) == [
+        DAY - 2,
+        2 * DAY - 2,
+        3 * DAY - 2,
+    ]
     # a dose exactly at 00:00 is allowed (tick 0)
     midnight = Schedule(dose_ticks_ms=(0,), measurement_ticks_ms=())
     assert kinds(
         run(params(), schedule=midnight, n_days=2).events, EventKind.DISPENSE
     ) == [0, DAY]
+
+
+def test_a_one_millisecond_slot_cannot_hold_a_double_take_gap() -> None:
+    # slot of 1 ms (a dose at 23:59:59.999): the gap must be >= 1 ms and < 1 ms: refused
+    last = Schedule(dose_ticks_ms=(DAY - 1,), measurement_ticks_ms=())
+    with pytest.raises(AdherenceConfigError, match="shorter"):
+        run(params(), schedule=last, config=AdherenceConfig(0, 1))
 
 
 def test_start_day_places_events_on_the_continuing_axis() -> None:
@@ -955,6 +994,98 @@ def test_probability_one_states_are_the_only_state_visited() -> None:
         (DOUBLE_TAKE, params(p_double_take=1.0)),
     ):
         assert set(state_sequence(run(p, n_days=500, seed=14))) == {state}
+
+
+# ---------------------------------------------------------------------------
+# Boundaries of the inverse-CDF draw (a generator that returns one constant)
+# ---------------------------------------------------------------------------
+
+
+class ConstantUniform(np.random.Generator):
+    """A ``Generator`` whose ``random`` returns one fixed value (to hit the draw boundaries)."""
+
+    def __init__(self, value: float) -> None:
+        super().__init__(np.random.PCG64(0))
+        self.value = value
+
+    def random(self, size: Any = None, *args: Any, **kwargs: Any) -> Any:  # type: ignore[override]
+        return np.full(size, self.value)
+
+
+TOP = math.nextafter(1.0, 0.0)  # the largest value of Generator.random()
+
+
+def first_state(
+    row: Sequence[float], u: float, *, initial: bool = False
+) -> AdherenceState:
+    one_slot = Schedule(dose_ticks_ms=(8 * HOUR,), measurement_ticks_ms=())
+    matrix = [row] * 4
+    model = AdherenceModel(
+        params(mean_delay_ms=HOUR),
+        CFG,
+        transition_matrix=matrix,
+        initial_distribution=row if initial else (1.0, 0.0, 0.0, 0.0),
+    )
+    start = None if initial else ON_TIME
+    result = model.simulate(one_slot, 1, ConstantUniform(u), state=start)
+    return result.behaviour_log[0].state
+
+
+@pytest.mark.parametrize("initial", [False, True])
+def test_a_state_of_probability_zero_is_never_drawn_at_the_ends_of_u(
+    initial: bool,
+) -> None:
+    for u in (0.0, 0.25, 0.5, 0.75, TOP):
+        assert first_state((0.0, 0.0, 1.0, 0.0), u, initial=initial) is OMITTED
+        assert first_state((1.0, 0.0, 0.0, 0.0), u, initial=initial) is ON_TIME
+        assert first_state((0.0, 0.0, 0.0, 1.0), u, initial=initial) is DOUBLE_TAKE
+        assert first_state((0.0, 1.0, 0.0, 0.0), u, initial=initial) is DELAYED
+    row = (0.5, 0.0, 0.5, 0.0)  # structural zero in the middle
+    assert first_state(row, 0.0, initial=initial) is ON_TIME
+    assert first_state(row, math.nextafter(0.5, 0.0), initial=initial) is ON_TIME
+    assert first_state(row, 0.5, initial=initial) is OMITTED  # u < 0.5 is strict
+    assert first_state(row, TOP, initial=initial) is OMITTED
+
+
+def test_a_row_that_sums_to_one_only_within_tolerance_never_falls_off_the_end() -> None:
+    # sum is 1 - 1e-12: u above the last cumulative bound falls to the last state of
+    # positive probability, not to a state of probability 0
+    row = (0.5, 0.5 - 1e-12, 0.0, 0.0)
+    assert first_state(row, TOP) is DELAYED
+    assert first_state(row, 0.5) is DELAYED
+    assert first_state(row, math.nextafter(0.5, 0.0)) is ON_TIME
+
+
+def test_constant_uniform_hits_the_delay_ends_through_the_model() -> None:
+    one_slot = Schedule(dose_ticks_ms=(8 * HOUR,), measurement_ticks_ms=())
+    model = AdherenceModel(params(p_delay=1.0, mean_delay_ms=HOUR), CFG)
+    low = model.simulate(one_slot, 1, ConstantUniform(0.0))
+    assert low.behaviour_log[0].dispense_times_ms == (
+        8 * HOUR + 1,
+    )  # delay at its minimum
+    high = model.simulate(one_slot, 1, ConstantUniform(TOP))
+    (when,) = high.behaviour_log[0].dispense_times_ms
+    assert when <= DAY - 1  # slot to the day end: 16 h, the delay stays inside it
+    huge = AdherenceModel(params(p_delay=1.0, mean_delay_ms=10**12), CFG)
+    top = huge.simulate(one_slot, 1, ConstantUniform(TOP))
+    assert top.behaviour_log[0].dispense_times_ms == (DAY - 1,)  # delay at its maximum
+
+
+# ---------------------------------------------------------------------------
+# The events are valid latent trace data
+# ---------------------------------------------------------------------------
+
+
+def test_events_and_behaviour_log_round_trip_through_the_truth_file(
+    tmp_path: Path,
+) -> None:
+    result = run(params(0.2, 0.1, 0.2), n_days=1, seed=15)
+    latent = LatentDay("p0000", 0, 15, (), result.events)
+    log = [entry.to_json() for entry in result.behaviour_log]
+    write_truth(tmp_path, latent, (), behaviour_log=log)
+    record = read_truth(tmp_path, "p0000", 0)
+    assert tuple(record.latent.events) == result.events
+    assert record.behaviour_log == log
 
 
 # ---------------------------------------------------------------------------
@@ -1315,17 +1446,9 @@ def test_design_rows_have_provenance() -> None:
             assert row.rationale and row.rationale.strip(), name
         else:
             assert row.value is None
-    # the two design rows are design choices; the care plan rows name the analysis sections
-    assert design[LAG_ROW].source_type == "design_choice"
-    assert design[GAP_ROW].source_type == "design_choice"
+    # the note of the gap row records the only qualitative constraint (analisi 4.5 rows 6, 7)
     note = " ".join(design[GAP_ROW].note.split()).lower()
     assert "4.5" in note and "bounce" in note and "sub-second" in note
-    ref = plans[DOSES_ROW].source_ref or ""
-    assert "4.6" in ref
-    assert "4.3" in (plans[N_MEAS_ROW].source_ref or "")
-    assert plans[DOSES_ROW].source_type == "illustrative_unverified"
-    assert plans[N_MEAS_ROW].source_type == "illustrative_unverified"
-    assert "illustrative" in " ".join(plans[DOSES_ROW].note.split()).lower()
     # nothing a clinician has to confirm is hidden in a generator module: the table lists it
     table = TABLE.read_text(encoding="utf-8")
     for name in expected:

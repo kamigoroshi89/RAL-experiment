@@ -1,0 +1,33 @@
+# Illustrative care-plan schedule of the benchmark generator (WS04-T05). Same row schema as
+# configs/priors/literature_hypertension.yaml; read by ralmon.benchmark.schedule.load_schedule.
+# Rendered into docs/benchmark/parameter-provenance.md by
+#   python -m ralmon.benchmark.priors --write-table
+#
+# Every value below is an example taken from the analysis document, labelled illustrative and
+# unverified (analisi §4.6 and §4.3); none has been checked by a clinician and none is a clinical
+# recommendation. The measurement ticks themselves are not stored: they are derived from the
+# registry windows (hold_lookback, delta1, delta2, sched_window) by derive_schedule.
+schema_version: "0.1.0"
+parameters:
+  - parameter: dose_times_clock_ms
+    unit: "ms"
+    value: [25200000, 75600000]
+    dist: null
+    source_ref: "analisi §4.6: the two doses of the running example (07:00 and 21:00); illustrative, unverified"
+    source_type: illustrative_unverified
+    verified_by: null
+    status: filled
+    consumer_task: WS04-T05
+    rationale: "The running example of the analysis has two doses a day; the example times are kept so that the generated care plan matches the example the paper discusses."
+    note: "Clock times of the scheduled doses, integer ms since the start of the day, strictly increasing and inside [0, 86 400 000); a label hh:mm converts as (60 * hh + mm) * 60 000 (07:00 is 25 200 000 and 21:00 is 75 600 000). Not clinically verified: a clinician replaces them with the plan of the pathway template."
+  - parameter: n_measurements_per_day
+    unit: "1"
+    value: 5
+    dist: null
+    source_ref: "analisi §4.3: the running example takes five pressure measurements a day; illustrative, unverified"
+    source_type: illustrative_unverified
+    verified_by: null
+    status: filled
+    consumer_task: WS04-T05
+    rationale: "The running example of the analysis uses five measurements a day; at least two per dose are needed (one before and one after each dose), the remaining ones are placed in the largest gaps."
+    note: "Number of measurement ticks per day. derive_schedule places one tick before and one after each dose from the registry windows and the others in the largest gaps. Not clinically verified."

@@ -22,3 +22,25 @@ parameters:
     consumer_task: WS04-T03
     rationale: null
     note: "Clock time of day (integer ms in [0, 86 400 000); a label hh:mm converts as (60 * hh + mm) * 60 000) at which the circadian component of the latent systolic pressure is at its maximum. Model of WS04-T03: sbp(t) = baseline_sbp_mmhg + A * cos(2 * pi * (t - circadian_peak_clock_ms) / 24 h) + AR(1) noise, with A = circadian_amplitude_mmhg. AMPLITUDE CONVENTION: A is HALF the peak-to-trough difference (the curve runs from baseline - A to baseline + A, so a source that reports a peak-to-trough nocturnal dip D must be entered as A = D / 2). The minimum (the nocturnal dip) falls 12 h after this time. A single harmonic is a declared simplification: dipper and non-dipper patterns need further parameters. The human supplies the value, its source and the check that the minimum falls at night. No value has been chosen by an agent."
+  - parameter: intake_lag_ms
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T05; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T05
+    rationale: null
+    note: "Time from a DISPENSE to the true INTAKE of the same pill in the LATENT day, integer ms, at least 0 and strictly shorter than double_take_gap_ms (the first pill is taken before the dispenser is opened again). The adherence model has no dispensed-but-not-taken case (declared simplification), so every DISPENSE is followed by one INTAKE this long after. This is the patient's act, not what the monitor sees: the observed trace holds an INTAKE only if the robot witnessed it (WS04-T06). Not a physiological measurement; the human supplies the value and its rationale. No value has been chosen by an agent."
+  - parameter: double_take_gap_ms
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T05; qualitative constraint from analisi §4.5 rows 6 and 7; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T05
+    rationale: null
+    note: "Time between the two DISPENSE events of a double take, integer ms, at least 1. The only qualitative constraint (analisi §4.5 rows 6 and 7): a double take must be clearly separated from a sub-second sensor bounce of the dispenser, so the gap must be well above one second. It must also be shorter than every slot of the schedule (the interval from a dose tick to the next dose tick, or to the day end), which the model checks against the schedule, and longer than intake_lag_ms. The human supplies the value and its rationale, expressed against the bounce interval. No value has been chosen by an agent."
