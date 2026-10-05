@@ -77,3 +77,9 @@ Builds use a fixture-only prior, a fixture registry and a small scale (for examp
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `pytest tests/benchmark/test_builder.py::test_build_small_benchmark_end_to_end -q` exits 0 (it runs the CLI `build` and `verify` on a fixture-only prior and shows their output).
 - `python -c "from ralmon.benchmark import generate_benchmark, open_benchmark"` exits 0.
+
+## Notes
+
+### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
+
+The accessors `fixture_only`, `n_unfilled` and `n_unverified` exist only on `LiteraturePriorSource` (`fixture_only`, `unfilled_names()`, `unverified_names()`), not on the `PriorSource` Protocol (ADR-038 G10): use `getattr` and record it in the completion note. `LiteraturePriorSource` has no default path: pass the YAML path (`configs/priors/literature_hypertension.yaml`).

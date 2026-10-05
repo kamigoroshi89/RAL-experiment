@@ -85,3 +85,7 @@ See `docs/models/fault-model.md` open points OP-13, OP-15 and OP-16. `InjectionS
 ### Flag from the WS02-T03 review (orchestrator, 2026-10-04)
 
 See `docs/models/evidence-channels.md` EC-OP-14 to EC-OP-21 and decision D-9. In-bound reordering raises neither `timestamp_implausible` nor `seq_gap_or_replay`; the `late` outcome of test 10 is visible to `system.nav_task_failed` only if the robot stamps it with the deadline (hypothesis H-OVERRUN), and any outcome (`failed`, `timeout`) stamped after the first VIOLATED record is invisible to that instance, which also applies to the fault-model rows `impossible_goal`, `manipulation_failure` and `localisation_noise` (test 11 does not state the stamp); there is no lease parameter to produce `unreachable` (EC-OP-18); the uncommanded flag and window-start `NODE_STATE` events differ from the document (`link_down` at the start, `unreachable` at lease lapse, a positive `commanded` key). Kept `blocked`.
+
+### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
+
+Structured content (level rows, capability sets, time strings) in `injections.yaml` is not read by `load_design_file` of WS04-T02 (top-level `parameters:` list, numeric values only): either keep numbers in that list or extend the loader in this task with a test; the table header claims it lists every number that is not code.
