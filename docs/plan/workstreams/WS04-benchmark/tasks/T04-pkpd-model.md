@@ -3,7 +3,7 @@ id: WS04-T04
 title: PK/PD response model and onset window derivation; evaluate Pulse Physiology Engine
 workstream: WS04-benchmark
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS04-T03"]
 critical_path: true
 non_negotiable: false
@@ -117,3 +117,10 @@ Notes for dependents and the paper:
 - (a) Windows are evaluated by the model's own float64 code path. At single-ms edges a window can differ from a high-precision reference when delta is within about 1e-16 relative of the effect at that ms (reviewer: 31 of 420 comparisons, all within 1.1e-16 relative). One sentence added to `## Decision` of `docs/benchmark/pulse-evaluation.md`.
 - (b) `configs/registry/hypertension.yaml` has `delta1` and `delta2` but NO `delta_resp` (delta) entry yet. The earlier hand-over wording "delta_resp in the working names" is not true of the registry. WS04-T12 must handle it. `window_overlap` rejects a `None` window, so callers must handle `None` from `derive_onset_window` first.
 - (c) A `Sequence` whose `__getitem__` raises propagates the user's own exception (accepted, not wrapped).
+
+### Post-task review (orchestrator, 2026-10-05)
+
+Produced: `pkpd.py` (Bateman concentration, Emax effect with per-intake scales, superposition, `compose_latent_sbp`, exact integer-ms onset window, `window_overlap`, `ResponseModel` protocol), `docs/benchmark/pulse-evaluation.md` (not evaluated, custom PK/PD retained) and the proposed ADR-039 `[DA-CONFERMARE]`. Independent review: PASS, no blocker (232 brute-force window scans 0 mismatches, 2240 fuzz calls with no raw exception, 108 mutants); one fix round closed the four non-equivalent test gaps. Orchestrator verification on the final branch: `test_pkpd.py` 359 passed (72 MB peak), full suite 1223 passed, ruff, format, mypy, `--check-table`, `check_plan` exit 0; container test and lint passed.
+Deviations: the window search is an exact integer bisection (no float tolerance); per-intake scales weight the concentration sum (the only reading that gives task test 8); extra public names not exported from the package root.
+Impact on dependents: WS04-T06 is now `ready` (all dependencies done; it needs no real data, its tests use fixture segment files). WS04-T09 must pass all earlier days' intakes itself (no memory across calls). WS04-T12 must handle `None` windows before `window_overlap`, and the registry has no `delta_resp` entry yet (only `delta1`, `delta2`).
+Open MINOR: none beyond the notes above (equivalent mutants documented by the reviewer).
