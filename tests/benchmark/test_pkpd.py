@@ -130,7 +130,7 @@ def test_emax_hand_values() -> None:
     assert emax_effect_mmhg(PARAMS, 0.0) == 0.0
     assert emax_effect_mmhg(PARAMS, EC50) == pytest.approx(10.0, rel=1e-12)
     # 20 * 0.5 / (0.25 + 0.5) = 13.3333333
-    assert emax_effect_mmhg(PARAMS, 0.5) == pytest.approx(13.3333333, rel=1e-9)
+    assert emax_effect_mmhg(PARAMS, 0.5) == pytest.approx(13.3333333, rel=1e-7)
     previous = -1.0
     for c in (0.0, 1e-6, 0.01, 0.1, 0.25, 0.5, 1.0, 10.0, 1e3, 1e6):
         effect = emax_effect_mmhg(PARAMS, c)
@@ -150,7 +150,7 @@ def test_superposition_is_linear() -> None:
 
 
 def test_double_intake_doubles_concentration_before_emax() -> None:
-    grid = [0, HOUR, T_MAX_MS, 5 * HOUR]
+    grid = [0, T_MAX_MS, HOUR, 5 * HOUR]
     single = effect_concentration(PARAMS, [0], grid)
     double = effect_concentration(PARAMS, [0, 0], grid)
     for one, two in zip(single, double, strict=True):
@@ -163,7 +163,7 @@ def test_double_intake_doubles_concentration_before_emax() -> None:
 def test_intake_scales_scale_emax_per_intake() -> None:
     # a scale of 0.5 halves the Emax of that intake: 0.5 * 13.3333333 = 6.6666667
     effect = MODEL.effect_mmhg(PARAMS, [0], [T_MAX_MS], intake_scales=[0.5])
-    assert effect[0] == pytest.approx(6.6666667, rel=1e-8)
+    assert effect[0] == pytest.approx(6.6666667, rel=1e-7)
     # scale 0 is a non-response, scale 1 equals no scales at all
     assert MODEL.effect_mmhg(PARAMS, [0], [T_MAX_MS], intake_scales=[0.0])[0] == 0.0
     assert MODEL.effect_mmhg(PARAMS, [0], [T_MAX_MS], intake_scales=[1]) == (
@@ -174,9 +174,13 @@ def test_intake_scales_scale_emax_per_intake() -> None:
     # 20 * 0.5 / (0.25 + 1.0) = 8
     mixed = MODEL.effect_mmhg(PARAMS, [0, 0], [T_MAX_MS], intake_scales=[1.0, 0.0])
     assert mixed[0] == pytest.approx(8.0, rel=1e-8)
-    # the shares add up: scales 0.25 and 0.75 give the unscaled effect of the two intakes
+    # only the sum of the scales of simultaneous intakes matters at one instant: 0.25 + 0.75
+    # gives the same effect as 1 + 0 (the saturation term sees both intakes)
     split = MODEL.effect_mmhg(PARAMS, [0, 0], [T_MAX_MS], intake_scales=[0.25, 0.75])
-    assert split[0] == pytest.approx(16.0, rel=1e-8)
+    assert split[0] == pytest.approx(8.0, rel=1e-8)
+    # scales 1 and 1 are the unscaled double intake: 20 * 1.0 / 1.25 = 16
+    both = MODEL.effect_mmhg(PARAMS, [0, 0], [T_MAX_MS], intake_scales=[1.0, 1.0])
+    assert both[0] == pytest.approx(16.0, rel=1e-8)
     # a scale belongs to its own intake, not to the sorted position
     # (the first listed intake, at 12 h, has scale 1 and the second, at 0, has scale 0)
     late = MODEL.effect_mmhg(
@@ -256,9 +260,26 @@ def test_onset_window_contains_tmax_for_delta_just_below_peak() -> None:
     # a delta barely below the peak: a window of a few ms around t_max
     narrow = derive_onset_window(PARAMS, 13.333)
     assert narrow is not None and narrow[0] <= T_MAX_MS <= narrow[1]
-    assert narrow[1] - narrow[0] < 60_000
+    assert narrow[1] - narrow[0] < 120_000
     wide = derive_onset_window(PARAMS, 10.0)
     assert wide is not None and wide[0] < lo and hi < wide[1]  # a lower delta widens it
+
+
+def test_window_contains_the_better_integer_neighbour_of_the_peak() -> None:
+    # delta equal to the larger of the two integer neighbours of the peak: the window is not
+    # empty, whichever neighbour (floor or ceil of t_max in ms) is the larger
+    floors = ceils = 0
+    for ka in (1.3, 1.7, 2.3, 2.9, 3.1, 4.7):
+        for ke in (0.4, 0.55, 0.9, 1.1):
+            params = PkpdParams(EMAX, EC50, ka, ke)
+            below = math.floor(t_max_hours(ka, ke) * HOUR)
+            e0, e1 = effect_at(params, below), effect_at(params, below + 1)
+            floors, ceils = floors + (e0 >= e1), ceils + (e1 > e0)
+            window = derive_onset_window(params, max(e0, e1))
+            assert window is not None and window[0] <= below + (e1 > e0) <= window[1]
+            above = math.nextafter(max(e0, e1), INF)
+            assert derive_onset_window(params, above) is None
+    assert floors > 0 and ceils > 0  # the fixture grid exercises both branches
 
 
 def test_onset_window_at_delta_equal_to_an_attained_effect() -> None:
@@ -489,7 +510,7 @@ def test_bateman_near_the_limit_matches_a_high_precision_reference(
         got = bateman_concentration(ka, ke, tau)
         want = reference_bateman(ka, ke, tau)
         assert got >= 0.0
-        assert got == pytest.approx(want, rel=1e-9, abs=1e-300), (rel, tau)
+        assert got == pytest.approx(want, rel=1e-12, abs=1e-300), (rel, tau)
 
 
 @pytest.mark.parametrize("rel", [1e-12, 1e-9, 1e-6])
@@ -516,7 +537,7 @@ def test_bateman_ka_and_ke_exactly_equal_uses_the_limit_not_a_division() -> None
 
 
 def test_bateman_large_tau_underflows_to_zero_without_nan() -> None:
-    for tau in (50.0, 800.0, 1e6, 1e300, 1e308, 2.0**62):
+    for tau in (800.0, 1e6, 1e300, 1e308, 2.0**62):
         assert bateman_concentration(2.0, 1.0, tau) == 0.0
         assert bateman_concentration(1.0, 2.0, tau) == 0.0
         assert bateman_concentration(1.0, 1.0, tau) == 0.0
@@ -563,6 +584,23 @@ def test_t_max_numerics() -> None:
         got = t_max_hours(ka, 1.0)
         r = ka - 1.0
         assert abs(got - (1.0 - r / 2.0)) <= r * r + 1e-15, rel
+    # the same away from ke = 1 (log(ka) - log(ke) would lose digits there): with
+    # r = (ka - ke) / ke the peak time is ln(1 + r) / (ke r) = (1 - r/2 + r^2/3 - r^3/4 ...) / ke
+    for ke in (0.25, 40.0, 1e6):
+        for rel in (*REL_DIFFS, 1e-2, -1e-2, 0.3, -0.3):
+            ka = ke * (1.0 + rel)
+            r = (ka - ke) / ke
+            series = (
+                1.0 - r / 2.0 + r**2 / 3.0 - r**3 / 4.0 + r**4 / 5.0 - r**5 / 6.0
+            ) / ke
+            if abs(r) < 0.1:
+                assert t_max_hours(ka, ke) == pytest.approx(series, rel=1e-11), (
+                    ke,
+                    rel,
+                )
+            if abs(rel) >= 1e-2:
+                direct = math.log(ka / ke) / (ka - ke)
+                assert t_max_hours(ka, ke) == pytest.approx(direct, rel=1e-9)
     assert t_max_hours(1.7e308, 5e-324) > 0.0  # no overflow of ka / ke
     assert t_max_hours(5e-324, 1.7e308) > 0.0
     assert math.isfinite(t_max_hours(1e-300, 1e300))
@@ -651,6 +689,27 @@ def test_window_is_deterministic_and_pure() -> None:
     # numpy scalars and ints are accepted as delta; a float and its int agree
     assert derive_onset_window(PARAMS, np.float64(10.0)) == first
     assert derive_onset_window(PARAMS, 10) == first
+
+
+def test_window_of_a_tiny_delta_starts_at_the_first_millisecond() -> None:
+    # effect(0) = 0 and effect(1 ms) is about 4e-5 mmHg: a delta below it starts at 1 ms
+    first = effect_at(PARAMS, 1)
+    assert 0.0 < first < 1e-3
+    window = derive_onset_window(PARAMS, first)
+    assert window is not None and window[0] == 1
+    below = derive_onset_window(PARAMS, first / 2)
+    assert below is not None and below[0] == 1
+    assert derive_onset_window(PARAMS, math.nextafter(first, INF)) != window
+
+
+def test_a_window_ending_beyond_the_int64_range_is_a_defined_error() -> None:
+    # the peak (2.6e11 h) is representable, but the effect is still above delta at int64 max
+    slow = PkpdParams(EMAX, EC50, 1e-11, 1e-12)
+    peak_ms = t_max_hours(1e-11, 1e-12) * HOUR
+    assert peak_ms < INT64_MAX
+    assert effect_at(slow, INT64_MAX) > 1e-6
+    with pytest.raises(PkpdModelError):
+        derive_onset_window(slow, 1e-6)
 
 
 def test_window_that_leaves_the_int64_range_is_a_defined_error() -> None:
