@@ -87,3 +87,7 @@ Step 3 assumes instances "created at each DISPENSE, RESP and INT" (dynamic INT o
 ### Flag from the WS01-T05 review (orchestrator, 2026-10-01)
 
 Line 44 expects "records without `pending_until_ms`" for RANGE, HOLD and COUNT-limit, whereas `docs/formal/05-three-valued-semantics.md` section 3.1 sets it on every record (OP-T05-17). Kept `blocked` until ADR-029 (proposed) is decided.
+
+### Hand-over from the WS04-T03 review (orchestrator, 2026-10-05)
+
+The latent day has `K` points and does not emit the closing step (see WS04-T03 Notes): hold the last value or take step 0 of the next day. Per-day assembly needs the carry of the AR state through `start_day` and `ar_state_mmhg`.

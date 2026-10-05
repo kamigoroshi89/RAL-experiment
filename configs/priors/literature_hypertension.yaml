@@ -51,7 +51,7 @@ parameters:
     status: awaiting_human_value
     consumer_task: WS04-T03
     rationale: null
-    note: "Amplitude of the circadian component of the latent pressure (analisi §5.1 item 1). Circadian phase has no contract field: see the contract gaps in ADR-038."
+    note: "Amplitude A of the circadian component of the latent pressure (analisi §5.1 item 1). CONVENTION: A is HALF the peak-to-trough difference (the curve runs from baseline - A to baseline + A), so a source that reports a peak-to-trough dip D must be entered as A = D / 2. Circadian phase has no contract field: see the contract gaps in ADR-038."
   - parameter: ar_noise_sd_mmhg
     unit: "mmHg"
     value: null
@@ -73,7 +73,7 @@ parameters:
     status: awaiting_human_value
     consumer_task: WS04-T03
     rationale: null
-    note: "Autoregressive coefficient of the pressure noise. It is meaningless without its sampling step: the human supplies reference_step_ms (integer ms) with the value, and WS04-T03 rescales to the generator step."
+    note: "Autoregressive coefficient of the pressure noise. It is meaningless without its sampling step: the human supplies reference_step_ms (integer ms) with the value, and WS04-T03 rescales to the generator step as phi_s = phi ** (step / reference_step_ms). ASSUMPTION: this rescaling holds only if the continuous-time autocorrelation is exponentially decaying (the same process sampled at another step); a source with another autocorrelation structure does not justify it. NEGATIVE PHI: a negative coefficient has a real rescaled value only when the generator step is an integer multiple of reference_step_ms (phi ** n); any other ratio, for example a 1-minute grid with a 5-minute reference, is refused at build time (when the grid is built), not when the prior is loaded."
     reference_step_ms: null
   - parameter: emax_mmhg
     unit: "mmHg"
