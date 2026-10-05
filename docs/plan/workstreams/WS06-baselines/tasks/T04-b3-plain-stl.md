@@ -72,3 +72,9 @@ Write these first. Timing: `step_ms=60_000`, `reorder_delay_ms=0`. Stub evaluato
 - `ruff check src tests` and `mypy src/ralmon` exit 0.
 - `python -c "from ralmon.baselines import B3PlainSTL"` exits 0.
 - `grep -lE 'normalise|rank_alerts|scale_param|priority_param|Conformal|Forecaster|LatentDay|GroundTruthEvent' src/ralmon/baselines/b3_plain_stl.py src/ralmon/baselines/raw_robustness.py` prints nothing.
+
+## Notes
+
+### Hand-over from the WS05-T02 review (orchestrator, 2026-10-05)
+
+ADR-013 spike result (WS05-T02, `docs/plan/workstreams/WS05-monitor/rtamt-spike.md`): outcome C. RTAMT 0.4.10 does not run on the repository Python (3.14.4, `No module named typing.io`; Python 3.13 fails the same way) and only 4 of the 7 templates translate and equal the golden cases (`sched` and `int` contain the `age` term; the equality atom of `sys` is `-abs(a-b)` in RTAMT, which the document already encodes on the host side as an indicator, so `sys` translates too once fed that way). The task conditions B3 on RTAMT ("unless WS05-T02 replaced it"): use `make_point_evaluator` and say in the baseline description that B3 is the plain Boolean/STL reading without margin normalisation, not an RTAMT run.

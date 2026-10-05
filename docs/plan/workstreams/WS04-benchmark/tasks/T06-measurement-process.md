@@ -81,3 +81,7 @@ Fixture-only arithmetic: constant latent SBP 130 on a 60 000 ms grid, ticks at 0
 ## Notes
 
 Reconciliation (ADR-023): the open datasets are downloaded by a human in `WS00-T09` (which this task now depends on) into `data/raw/<dataset>/` with `SHA256SUMS`, and the signal-symbol resolution of `SignalId` comes from `WS05-T02` (also a dependency now). Agents never download data.
+
+### Hand-over from the WS05-T02 review (orchestrator, 2026-10-05)
+
+The `day_end` impulse must be emitted at exactly `T_day` of each day (choice M7 of `ralmon.signals`: `meas_count` day `d` covers `(d*T_day, (d+1)*T_day]`, so the closing step belongs to the day it closes; docs/formal/01-signals-sampling.md section 3.1 puts an event at exactly 24:00 on a continuing axis in the next day). Impulses are emitted only as events and mapped by `event_to_sample` (WS05-T02).

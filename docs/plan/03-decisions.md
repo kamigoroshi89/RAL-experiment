@@ -105,10 +105,12 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 ## ADR-013 RTAMT as reference STL tool [DA-CONFERMARE]
 
 - **Context.** The analysis lists RTAMT, Breach and S-TaLiRo and says "RTAMT o custom" for the monitor (analisi §3.1, §9 item 5, B3 uses RTAMT).
-- **Decision.** RTAMT is the reference implementation wrapped behind `ralmon.spec` and `ralmon.monitor`; a custom monitor may replace it if RTAMT cannot express robustness intervals or sparse sampling. WS05-T02 decides after a spike and updates this ADR. Installation of packages is not part of the bootstrap run.
-- **Alternatives.** Custom monitor from the start; Breach or S-TaLiRo (MATLAB dependence).
-- **Consequences.** The spike result is recorded in WS05.
+- **Decision.** Original proposal: RTAMT is the reference implementation wrapped behind `ralmon.spec` and `ralmon.monitor`; a custom monitor may replace it if RTAMT cannot express robustness intervals or sparse sampling. Updated by WS05-T02 after the spike: the evaluator is custom and RTAMT is not a dependency of the monitor (outcome C, see below).
+- **Alternatives.** Custom monitor from the start; Breach or S-TaLiRo (MATLAB dependence); outcome B (custom evaluator, RTAMT kept as test oracle and as the engine of baseline B3), not adopted for the reasons in the record.
+- **Consequences.** The spike result is recorded in `docs/plan/workstreams/WS05-monitor/rtamt-spike.md`. `ralmon.spec` and `ralmon.monitor` do not import RTAMT; no `rtamt` extra is added to `pyproject.toml`; WS06-T04 builds baseline B3 on `make_point_evaluator` and the paper says that its point-robustness evaluator is the project's own (the wording "same templates with RTAMT" of analisi §5.4 is not used).
 - **Status.** proposed [DA-CONFERMARE].
+
+Spike result (WS05-T02, closes the spike of ADR-013): outcome C. Tested RTAMT 0.4.10 on Python 3.12.8 (host throwaway venv) and 3.12.15 (`ralmon-dev` container, same report); on Python 3.14.4, the Python of the repository, `import rtamt` fails (`No module named 'typing.io'`). Q1 FAIL (4 of 7 templates translate mechanically and equal the goldens; `sched` and `int` contain `age`, `sys` uses an equality atom that RTAMT evaluates as `-abs(a - b)`), Q2 PASS, Q3 NOT-SUPPORTED (`update` returns a point value; the endpoint rule is unsound for `range`, `count` and `sys`), Q4 FAIL (no guard rule, no unknown value), Q5 FAIL (8 of 10 time-margin goldens only with hand rewrites), Q6 PASS (operator updates linear in the instances, but each timed `once` or `historically` scans its window at every step). Outcome C is forced by the Q1 failure (rule of WS05-T02 check 9). Entry point that WS06-T04 must call for raw robustness: `make_point_evaluator` of `ralmon.monitor`, created by WS05-T04. Evidence and the reasons for not adopting outcome B: `docs/plan/workstreams/WS05-monitor/rtamt-spike.md`. This remains `[DA-CONFERMARE]` until a human confirms it.
 
 ## ADR-014 Placement of §9 items in workstreams [DA-CONFERMARE]
 

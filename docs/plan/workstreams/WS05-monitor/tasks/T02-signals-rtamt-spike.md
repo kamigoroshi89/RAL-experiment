@@ -3,7 +3,7 @@ id: WS05-T02
 title: "Signals and derived signals; RTAMT spike (ADR-013)"
 workstream: WS05-monitor
 owner: agent
-status: ready
+status: done
 depends_on: ["WS05-T01", "WS01-T01", "WS01-T02"]
 critical_path: true
 non_negotiable: false
@@ -96,3 +96,58 @@ From the repository root, inside `.venv`:
 - `test -f docs/plan/workstreams/WS05-monitor/rtamt-spike.md` and `grep -c '^## ' docs/plan/workstreams/WS05-monitor/rtamt-spike.md` prints at least 9.
 - `grep -n "ADR-013" docs/plan/03-decisions.md` shows an updated entry containing the words `Spike result` and one of `outcome A`, `outcome B`, `outcome C`.
 - `! grep -nE 'T[O]DO|T[B]D|[?][?][?]|lore[m]' docs/plan/workstreams/WS05-monitor/rtamt-spike.md` succeeds.
+
+## Notes
+
+Completion note of the worker run (status left `in_progress`: the orchestrator reviews and closes the task).
+
+**Red state.** Commit `WS05-T02: add failing signals tests`: `pytest tests/signals -q` gave `90 failed, 3 passed`; failures were `NotImplementedError: <name> is a placeholder owned by WS05-T02` (hold_last, event_to_sample, impulses_on_grid, default_derived_signals, minutes) and `AttributeError: type object 'SignalId' has no attribute 'DOSE_COUNT'` (and the other derived members). The tests inherited from the stopped run were checked against `docs/formal/01-signals-sampling.md`; three were corrected: a false comment in `test_units.py` (0.1 * 60000 is exactly 6000.0 in floating point; the rounding test now uses 0.29 hours, 1043999.9999999999 ms), the property test of the ceiling rule for other step sizes (it built a grid of up to 86,400,001 points for step 1, the likely cause of the memory exhaustion; it now uses 101 grid points) and the missing W7 arithmetic test.
+
+**Contract gaps and conventions implemented (contracts untouched).**
+
+- CG-6: `hold_last` returns `Sequence[float]`; "before the first sample" is `nan`, never 0.0; the unavailable-channel state of `presence` and `intake` cannot be carried and needs an availability mask next to the array (not exported: a public name outside the contract table is not allowed). WS05-T04 must define it.
+- CG-11: negative `TimeMs`. `hold_last` does not reject it (a sample before the first grid point is held from it); `impulses_on_grid` does not show an impulse before the first grid point at step 0 (only `t == t_grid[0]` is visible there); `meas_count` puts negative times in the days before day 0.
+- CG-5: `auth`, `presence`, `day_end`, `cuff_health` travel as `Sample` (`event_to_sample` maps only the four event kinds that are signals; `MEASUREMENT_MISSED`, `NODE_STATE`, `ROBOT_TASK`, `DEVICE_ERROR` give None).
+- CG-13: a `Sample` has no `source`, so de-duplication by `(source, seq)` is the job of the accepting layer of the monitor; the derived signals count every sample they get.
+- `impulses_on_grid(samples, t_grid_ms, *, count=False)` is the signature chosen here (the contract names the function only): `count=True` returns the multiplicity per step; the `signal` field is not inspected; the result does not depend on the order of the samples.
+- `DerivedSignal` is `runtime_checkable` (additive; the signature is unchanged).
+
+**Modelling choices (not in the document, for review).**
+
+- M7 (`meas_count`, day boundary on a continuing axis): day `d` covers `(d * T_day, (d + 1) * T_day]`, day 0 also contains the instant 0; the closing step and the `day_end` marker belong to the day they close (so a day-end obligation reads the whole day). T01 section 3.1 puts the instant 24:00 in the next day; the two differ only for an event at exactly 24:00 on a continuing axis.
+- A counter has no output sample before its first event (no output means "unchanged"; the monitor must read an absent counter as 0). `dose_count` always emits on a `dispense` sample and otherwise only when entries expired; `meas_count` emits on `meas` and on the reset of a non-zero count at the first sample of a new day.
+- A sample whose device time is lower than the previous one raises `ValueError` and leaves the state unchanged (equal times are allowed); the clock advances on every sample, including signals not in `inputs`.
+- Equal device times in `hold_last`: ordered by `seq` when all of them carry one, else by `t_rx_ms`, ties keep the listed order; the last one is held (T01 section 3.2).
+- `bp_pre` is the global stream of T01 5.3: latched at each dispense from the held `bp`, re-latched by a `bp` sample with the same device time as the latest dispense (M5), NaN when no `bp` precedes; the per-instance capture belongs to WS05-T04.
+
+**Complexity.** `DoseCount`: amortised O(1) per sample (each dispense pushed once and popped once; one `update` may pop several entries), memory O(dispenses in 24 h); the other three derived signals are O(1) per sample; `hold_last` O(samples + grid); `impulses_on_grid` O((samples + grid) log grid). Not measured with a clock.
+
+**RTAMT spike.** Outcome C (rule of check 9, forced by the Q1 failure). RTAMT 0.4.10 does not import on the repository Python 3.14.4 (`No module named 'typing.io'`, ANTLR runtime 4.7); results are from Python 3.12.8 (host `/tmp` venv, outside the repository) and from the `ralmon-dev` container (3.12.15, same report; the container has no network, so the pure-Python `rtamt` and `antlr4` packages were copied in). Details and pasted outputs: `docs/plan/workstreams/WS05-monitor/rtamt-spike.md`; ADR-013 updated (`[DA-CONFERMARE]` kept). `pyproject.toml` is unchanged (no `rtamt` extra under outcome C).
+
+**Done when, run from the repository root inside `.venv`.**
+
+| Command | Exit | Output |
+|---|---|---|
+| `pytest tests/signals -q` | 0 | 94 passed |
+| `ruff check src tests` | 0 | All checks passed |
+| `ruff format --check src tests` | 0 | 45 files already formatted |
+| `mypy src/ralmon` | 0 | Success: no issues found in 24 source files |
+| `python -c "from ralmon.signals import ..."` (12 names) | 0 | no name has `__ralmon_stub_owner__` (printed `[]`) |
+| `python tools/rtamt_spike.py` | 0 | six lines `Q1`..`Q6`, all `NOT-RUN` here (rtamt not installed in `.venv`); the results come from the Python 3.12 runs of the record |
+| `test -f .../rtamt-spike.md`; `grep -c '^## '` | 0; 9 | present, 9 H2 headings |
+| `grep -n "ADR-013" docs/plan/03-decisions.md` | 0 | heading line 105 and the `Spike result ... outcome C` line 113 |
+| `! grep -nE '<forbidden words>' .../rtamt-spike.md` | 0 | no match |
+| `pytest -q` (host) / `docker compose run --rm test` | 0 / 0 | 268 passed / 268 passed |
+| `ruff`, `mypy` in `docker compose run --rm lint` | 0 | all passed |
+| `python3 tools/check_plan.py` | 0 | OK (103 tasks, 18 contracts, 31 findings) |
+
+The "Done when" line for the spike script runs in `.venv` (Python 3.14.4, no RTAMT) and therefore reports `NOT-RUN` for the six questions; this is the honest report of that environment, and the full results are in the record.
+
+### Post-task review
+
+- Produced: `ralmon.signals` for real (`ids.py`: `SignalId`; `samples.py`: `hold_last`, `event_to_sample`, `impulses_on_grid` with the additive keyword `count`, `ObservedTrace`; `derived.py`: the streaming `dose_count`, `meas_count`, `bp_pre`, `bp_drop` and `default_derived_signals`; `units.py`: `minutes`, `hours`; `_stubs.py` emptied), 94 tests in `tests/signals/`, the spike script `tools/rtamt_spike.py`, the record `docs/plan/workstreams/WS05-monitor/rtamt-spike.md` (9 sections) and the updated ADR-013 (`Spike result`, outcome C, RTAMT 0.4.10, `[DA-CONFERMARE]` kept). Orchestrator re-ran the "Done when" block on the host (94 tests in 0.65 s, 78 MB peak memory; the spike prints six NOT-RUN lines on Python 3.14.4 because RTAMT cannot be imported there), `ruff`, `mypy`, the full suite (268 tests) and `check_plan` (exit 0); `pyproject.toml` and the contract are untouched. Independent review with own code: PASS, no BLOCKER; W1 to W7 and 12000+ brute-force streams reproduce with 0 differences; 22 mutants (closed window, floor for ceil, no multiplicity, wrong day boundary, bp_pre not latched, off-by-one hold, ...) all caught; cost per sample flat (1.2 to 1.3 microseconds from 1e4 to 2e5 samples), no hidden O(n); the signals tests run in 77 MB under a 2 GB address-space limit; RTAMT results reproduced claim by claim in a throwaway Python 3.12 venv; the red commit failed for the right reason (90 failed, 3 passed).
+- Cause of the host memory exhaustion of 2026-10-05: an inherited property test of the ceiling rule built a grid of up to 86,400,001 points for step 1 ms; it now uses 101 points. Not caused by Docker or by the agents' transcripts alone.
+- Deviations from the task text: the spike results come from Python 3.12 runs (host throwaway venv and the `ralmon-dev` container, identical reports) because RTAMT 0.4.10 does not import on Python 3.14.4; no `rtamt` extra was added to `pyproject.toml` (outcome C); `impulses_on_grid` has the extra keyword `count=False`; `DerivedSignal` is `runtime_checkable` (additive).
+- Dependents: WS05-T03 (its dependencies WS05-T02, WS01-T03 and WS01-T04 are now done) stays `blocked` because of the flag from the WS01-T04 review (tests 7 and 9 versus ADR-028, proposed): the core of WS05 waits for a human decision. WS04-T06 and WS06-T02 stay `blocked` on other tasks. Hand-over notes were added to WS05-T04, WS04-T06 and WS06-T04 (not broken assumptions).
+- Open MINOR (apply at the next touch): (M1) derived outputs are stale between samples: `dose_count` after a lone 07:00 dispense, read through `hold_last`, is still 1.0 at day 2 07:00 (true value 0) unless a sample reaches `update`; the docstring says only "the clock advances on every sample given" and there is no `advance(t)` method; (M2) `impulses_on_grid` is not consistent under grid restriction (events at -5000 and 30000 on [0, 60000, 120000] give [0, 1, 0]; on `grid[1:]` the event at 30000 vanishes) and an event in (-T_s, 0) is dropped, whereas the literal `ceil(t/T_s)` would show it at step 0 (documented as CG-11; the docstring reason "the first step has no earlier bin" is not in the formal document); (M3) the choice M7 for `meas_count` is not in M1 to M6 of docs/formal/01 nor in an ADR (marked "for review"); (M4) the Q1 and Q4 failure of `sys` is partly an artefact of the feeding: docs/formal/02-templates.md line ~170 lists the equality `cuff_health == 1` among the indicators the host encodes as +-inf, and fed that way the spike's own guard-indicator variant equals all three G-SYS goldens (5 of 7 templates translate; `sched` and `int` still fail on `age`, so outcome C stands); (M5) the Q6 PASS is true by construction (the harness builds N independent specifications); the O(window) per update finding is real (confirmed in `once_timed_operation.py` and `historically_timed_operation.py`) and the `since` statement was read from source, not measured (the record says so); (M6) the record's advice "Python 3.12 or 3.13 (3.13 was not tested)" is wrong: 3.13 fails with the same `No module named typing.io`; (M7) the record's statement that `pip install rtamt` in the container printed "No matching distribution" was not reproduced (nothing depends on it); (M8) ADR-013 omits the untested items (other versions, newer ANTLR, C++ backend, dense-time class, `since`, Breach and S-TaLiRo), which sit only in the record, and its label "(C) RTAMT cannot host the templates" is stronger than the evidence (4 of 7 literally, `sys` with the indicator, 8 of 10 time-margin goldens with a hand-written time signal); (M9) the signatures of `impulses_on_grid`, `event_to_sample` and `default_derived_signals` are not in `02-interfaces.md` (names only, via ADR-024); `mypy tools/rtamt_spike.py` reports 2 errors (outside the Done-when scope); WS06 README line 11 still defines B3 as "the same STL templates with RTAMT".
+- Risks: the three hand-overs for WS05-T04 (clock pumping, counters read as 0 when absent, no `impulses_on_grid` on sub-grids); the decision to reject outcome B is flagged for the human in ADR-013.
