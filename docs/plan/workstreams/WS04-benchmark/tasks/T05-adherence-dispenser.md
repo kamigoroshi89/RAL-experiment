@@ -3,7 +3,7 @@ id: WS04-T05
 title: Adherence Markov model with DISPENSE and INTAKE events
 workstream: WS04-benchmark
 owner: agent
-status: ready
+status: done
 depends_on: ["WS04-T02"]
 critical_path: true
 non_negotiable: false
@@ -77,3 +77,46 @@ Fixture-only arithmetic values, written first. State order is fixed: `ON_TIME`, 
 ### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
 
 Adherence parameters are declared assumptions (`analisi §5.1`); `AdherenceParams.mean_delay_ms` is stored as an int, the onset range is one row `{lower_ms, upper_ms}` accepted as a constant only (ADR-038 G-list); the loader of `configs/benchmark/*.yaml` (`load_design_file`) reads only a top-level `parameters:` list of rows with numeric values: nested structures or strings in `care_plans.yaml` are ignored or refused, so the provenance table would not list them.
+
+### Completion note (worker, WS04-T05; status left `in_progress` for the orchestrator)
+
+Done when, run on the host: `pytest tests/benchmark/test_adherence.py -q` exit 0 (140 passed); `pytest tests/benchmark -q` exit 0; `ruff check src tests` exit 0; `mypy src/ralmon` exit 0; `python -m ralmon.benchmark.priors --check-table` exit 0; `grep -c 'double_take_gap_ms' docs/benchmark/parameter-provenance.md` prints 2. Full suite 797 passed on the host and in the container (`docker compose run --rm test`, then `lint`). Filled-state proof: a `git archive HEAD` copy with the three awaiting rows of `generator_design.yaml` filled with fixture-only values, table regenerated there, whole suite 797 passed (copy deleted).
+
+What the module produces. `adherence.py` produces the TRUE events of the latent day: a DISPENSE (source `dispenser`) per dispenser opening and, `intake_lag_ms` after each, a true INTAKE (source `patient`). It does not decide what the monitor sees: the observed trace holds an INTAKE only if the robot witnessed it, a mapping that belongs to WS04-T06. Declared simplification: no dispensed-but-not-taken case (counts of DISPENSE and INTAKE are equal).
+
+Modelling choices (all declared; none is a clinical value):
+- Slot of a dose = from its tick to the next dose tick, or to the day end for the last dose (events of a slot start inside its own day). A delayed dose is `tick + d`, `1 <= d <= L - 1` (at least 1 ms late so that DELAYED differs from ON_TIME; never leaves the slot); `d - 1` is the floor of an exponential of mean `mean_delay_ms` truncated at `L - 1`, by inverse CDF. The family is a declared assumption. An INTAKE may fall after the end of its day (only for a delayed dose); it keeps its place on the continuing axis.
+- Initial state: drawn from `initial_distribution`, default the marginals (the stationary law of the default chain). For a custom matrix the caller chooses it. The chain is carried across days (`final_state` returned, `state` accepted back); exactly two uniforms per slot are consumed whatever the outcome, so a run of n days equals shorter runs on one generator with the state carried (tested).
+- `double_take_gap_ms` must be shorter than every slot of the schedule (always checked, also when `p_double_take = 0`), `intake_lag_ms >= 0`, and `intake_lag_ms < double_take_gap_ms`. A dose in the last millisecond of the day has a 1 ms slot and cannot hold any gap (refused).
+- Tie rule: events sorted by `(t_device_ms, kind rank, slot order)`, DISPENSE before INTAKE at equal times (zero lag; an INTAKE meeting the next slot's DISPENSE); tested.
+- Schedule: `derive_schedule` places the pre-dose and post-dose ticks at the midpoints (floor) of the windows, the others in the largest gaps between ticks (earliest on ties); a tick must lie in its own day (`TICK_OUTSIDE_DAY` otherwise), coinciding ticks are refused, extra ticks need at least one dose (`NO_ANCHOR`), `n_measurements >= 2 * doses`. `check_schedule_consistency` runs F2, F3 and the slack requirement only; F1 (grid alignment), F4 (robot visits), F5 (counts), F6 (registry names) need data this module does not have. `load_schedule(path, *, hold_lookback_ms, delta1_ms, delta2_ms, sched_window_ms)` takes the windows as keyword arguments (the builder passes the registry values) and reads only dose times and the measurement count from the file.
+- `care_plans.yaml` holds two rows (`dose_times_clock_ms` as a list of integer ms, `n_measurements_per_day`) with `source_type: illustrative_unverified`; the measurement ticks themselves are derived, not stored (the design loader reads numbers and lists of numbers only). `generator_design.yaml` gains `intake_lag_ms` and `double_take_gap_ms` as `design_choice` rows with `awaiting_human_value`: no value was chosen by an agent. Until a human fills them `load_adherence_config` raises `UnfilledParameterError`, so no benchmark can be built from the committed design file (the expected state, ADR-020).
+
+Persistence of omissions (clusters of missed doses) needs an extra parameter that `AdherenceParams` does not carry (ADR-038, gap G7). `AdherenceModel` accepts `transition_matrix` (and `initial_distribution`), so a later contract version supplies the persistence without changing the generator. With the contract's parameters the transition rows are identical (memoryless), as the WS04 README states.
+
+Contract gaps and deviations from the task text:
+- `simulate` has two keyword arguments beyond the task signature (`start_day`, `state`) and `AdherenceResult` a third field (`final_state`), needed by test 11 (a 7-day run equals seven 1-day runs that carry the chain state). `adherence_stream(seed, patient_index)` is the named patient-level stream (`StreamPurpose.ADHERENCE`).
+- `load_schedule` takes the four windows (the task lists `load_schedule(path)` only; the windows must come from the registry, which this module must not import).
+- `load_filled_rows` in `schedule.py` is a small public helper (not exported from the package root) reused by `adherence.py`.
+- No contract signature changed; no ADR was added. Names of these modules are not in the `#package-public-api` table and are not exported from `ralmon.benchmark`.
+
+### Fix round 1 (worker, after the independent review; status unchanged)
+
+Review result: no blocker; the model, the schedule rule, the statistics and the state independence were verified and are kept. Fixed here: four code or test defects, with tests written first.
+
+- **M1, raw `OverflowError`.** `_real` (`adherence.py`) now turns the `float()` failure of an integer or fraction beyond the float range (for example `10**400`, `2**1024`) into `AdherenceConfigError` naming the field; huge values are shown cut short in messages. `sample_delay_ms` converts the mean and the slot length through `_real` (an integer of 2**1024 or more was another raw `OverflowError`); `AdherenceModel` also checks that `mean_delay_ms` is a float-representable integer at construction. `AdherenceModel(None, cfg)` (any non-`AdherenceParams`) raises `AdherenceConfigError` instead of `AttributeError`. Checked and defined, no change needed: infinities and NaN (refused), 1e308 and subnormal products in `truncated_exponential` (finite result in `[0, upper]`, clamped), huge `n_days`, `start_day`, lag and gap (refused by the slot, int64 and gap checks), huge schedule integers (refused by `ScheduleError`). `schedule.py` messages cut a huge integer too.
+- **M2, unbounded `n_measurements`.** `MAX_MEASUREMENTS = 100_000` (`# algorithmic`) in `schedule.py`; `derive_schedule` raises `ScheduleError` `TOO_MANY_MEASUREMENTS` for a larger count and `NO_POSITIONS` for a count above the `T_day` distinct integer-ms positions of a day, both before any placement. The extras placement is now a heap keyed by (-width, left end): same rule (widest gap, earliest on ties), O(n log n). Oracle: the existing tests plus a seeded comparison with an O(n^2) reference implementation on 400 random plans (coarse and millisecond windows, both outcomes including `NO_ROOM`).
+- **M3, wrong text.** Corrected: an INTAKE may fall after the end of its slot's day for a delayed dose and also for the second DISPENSE of a double take (reproduction: last slot 10 min, gap 8 min, lag 5 min, the second INTAKE lands 3 min past midnight); a DISPENSE never leaves its slot. Correction of the completion note above: its sentence "An INTAKE may fall after the end of its day (only for a delayed dose)" is false; read "(for a delayed dose or for the second dispense of a double take)". The module docstring is corrected and a test pins the double-take crossing (the entry keeps the day of its dose).
+- **M4, test gaps** (each mutant now fails a test, checked on a copy under /tmp, removed afterwards): A08b (delay uniform = state uniform), A22 (the clamp: `truncated_exponential(100, 5, TOP) == 5.0`, so `sample_delay_ms(100, 6, TOP) == 5`; plus a Hypothesis edge test), S01b (odd post window rounds down), S11 (a tick exactly at 24:00 is `TICK_OUTSIDE_DAY`), S21 (`delta2 < delta1` has its own message; equal windows accepted).
+
+Notes only (not changed):
+1. T09 expects a hook that T05 does not have: `simulate(..., state=...)` carries the chain state, it does not force the state of one slot (T09 test `test_forced_double_take_matches_markov_double_take`, "adherence (T05, with optional forced slot states)"). A forcing hook can be added later without moving the draws: two uniforms are consumed per slot whatever the state.
+2. `load_schedule` requires integers while the registry gives floats (`RegistryEntry.value: float`, for example `3600000.0` raises `ScheduleError: hold_lookback_ms must be an integer`): the caller (WS04-T11) must convert with `int()`.
+3. A dose in the last milliseconds of the day is refused when its slot is shorter than the gap, even if `p_double_take = 0` (the gap is always checked).
+
+### Post-task review (orchestrator, 2026-10-05)
+
+Produced: adherence Markov model with true DISPENSE and INTAKE events, derived measurement schedule, two illustrative care-plan rows, two new awaiting design rows (`intake_lag_ms`, `double_take_gap_ms`). Independent review: PASS, no blocker; one fix round applied (raw OverflowError, unbounded `n_measurements`, wrong midnight text, test gaps). Orchestrator verification on the final branch: `test_adherence.py` 207 passed (90 MB peak), full suite 864 passed, ruff, format, mypy, `--check-table` and `check_plan` all exit 0; the filled-state proof passes.
+Deviations: `simulate` carries two extra keywords and `AdherenceResult.final_state`; `load_schedule` takes the four windows as keywords; no contract or ADR change.
+Impact on dependents: WS04-T06 stays blocked on WS04-T04. WS04-T09 expects a forced-slot-state hook that does not exist (note 1 above); WS04-T11 must pass `int()` windows (note 2); the double take may cross midnight (its entry keeps its slot's day). `intake_lag_ms` and `double_take_gap_ms` await human values (ADR-020): no benchmark can be built from the committed design file until then.
+Open MINOR: none beyond the notes above.
