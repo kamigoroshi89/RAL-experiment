@@ -3,7 +3,7 @@ id: WS04-T03
 title: "Latent patient model: baseline pressure, circadian dip, autoregressive noise"
 workstream: WS04-benchmark
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS04-T02"]
 critical_path: true
 non_negotiable: false
