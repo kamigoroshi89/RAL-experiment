@@ -3,7 +3,7 @@ id: WS04-T05
 title: Adherence Markov model with DISPENSE and INTAKE events
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS04-T02"]
 critical_path: true
 non_negotiable: false
@@ -71,3 +71,9 @@ Fixture-only arithmetic values, written first. State order is fixed: `ON_TIME`, 
 - `pytest tests/benchmark/test_adherence.py -q` exits 0 (and the earlier benchmark tests still pass: `pytest tests/benchmark -q`).
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `python -m ralmon.benchmark.priors --check-table` exits 0 and `grep -c 'double_take_gap_ms' docs/benchmark/parameter-provenance.md` prints at least 1.
+
+## Notes
+
+### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
+
+Adherence parameters are declared assumptions (`analisi §5.1`); `AdherenceParams.mean_delay_ms` is stored as an int, the onset range is one row `{lower_ms, upper_ms}` accepted as a constant only (ADR-038 G-list); the loader of `configs/benchmark/*.yaml` (`load_design_file`) reads only a top-level `parameters:` list of rows with numeric values: nested structures or strings in `care_plans.yaml` are ignored or refused, so the provenance table would not list them.

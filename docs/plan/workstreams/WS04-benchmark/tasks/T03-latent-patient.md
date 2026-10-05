@@ -3,7 +3,7 @@ id: WS04-T03
 title: "Latent patient model: baseline pressure, circadian dip, autoregressive noise"
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS04-T02"]
 critical_path: true
 non_negotiable: false
@@ -67,3 +67,9 @@ Arithmetic fixtures, fixture-only (for example baseline 130, amplitude 10, SD 8,
 - `pytest tests/benchmark/test_latent.py tests/benchmark/test_priorsource.py -q` exits 0.
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `python -m ralmon.benchmark.priors --check-table` exits 0 and `grep -c circadian_peak_clock_ms docs/benchmark/parameter-provenance.md` prints at least 1.
+
+## Notes
+
+### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
+
+`LiteraturePriorSource` (WS04-T02, `src/ralmon/benchmark/priors.py`) reads the reference step through `LiteraturePriorSource.reference_step_ms(name)`, which raises `UnfilledParameterError` while the committed YAML row is unfilled; `make_fixture_prior(tmp_path)` in `tests/benchmark/conftest.py` builds FIXTURE-ONLY priors for tests. Every row of `configs/benchmark/generator_design.yaml` must carry all 11 keys explicitly (see the loader `load_design_file`, which reads a top-level `parameters:` list and numeric values only). Every distribution row consumes exactly one uniform and a plain value none, in the documented draw order (do not reorder draws). `patient_index` may be any integral numpy integer.

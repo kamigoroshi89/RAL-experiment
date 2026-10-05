@@ -3,7 +3,7 @@ id: WS00-T10
 title: "Verify the literature-prior provenance table produced by WS04-T02"
 workstream: WS00-admin
 owner: human
-status: blocked
+status: ready
 depends_on: ["WS04-T02"]
 critical_path: false
 non_negotiable: false

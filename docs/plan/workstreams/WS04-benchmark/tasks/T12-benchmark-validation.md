@@ -72,3 +72,9 @@ Checks are numbered V1 to V12 in the report. Statuses: `PASS`, `WARN`, `FAIL`, `
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `test -f docs/benchmark/validation-report.md && grep -c '^### V[0-9]' docs/benchmark/validation-report.md` prints `12`.
 - `pytest tests/benchmark/test_validation.py::test_validate_cli_exit_codes -q` exits 0 (it builds a small fixture-only benchmark and runs `python -m ralmon.benchmark validate` on it; show the output in the completion note).
+
+## Notes
+
+### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
+
+Same as WS04-T11: `fixture_only`, `n_unfilled` and `n_unverified` are not on the `PriorSource` Protocol (ADR-038 G10); the provenance table counts 0 of 17 rows verified until the human completes WS00-T10 and fills the rows.

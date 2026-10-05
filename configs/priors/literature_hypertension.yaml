@@ -1,0 +1,220 @@
+# Literature prior of the benchmark generator for hypertension (WS04-T02, ADR-005).
+# Read by ralmon.benchmark.LiteraturePriorSource; rendered into docs/benchmark/parameter-provenance.md by
+#   python -m ralmon.benchmark.priors --write-table
+#
+# Status: NO VALUE IN THIS FILE HAS BEEN CHOSEN BY AN AGENT (ADR-020, parameter policy of the WS04
+# README). Every row is awaiting_human_value: a human supplies `value` (or `dist`) and `source_ref`,
+# `source_type` and `rationale`, sets `status: filled` and, after checking the source, `verified_by`
+# (H1 of the WS04 README). A filled row with an empty source_ref makes the loader fail. Until
+# every row is filled a strict load refuses to run and a benchmark built from this file is provisional.
+#
+# Row schema (every key must be present; write null explicitly):
+#   parameter       the contract field name (PatientParams, AdherenceParams, DeviceErrorModel)
+#   unit            fixed per field: mmHg, 1, 1/h or ms
+#   value | dist    a number, or a distribution {family: constant|uniform|normal|lognormal, parameters,
+#                   optional truncate: {lo, hi}}; patient rows only for dist; onset_delay_range_ms
+#                   takes value: {lower_ms, upper_ms}
+#   source_ref      citation or dataset table; mandatory as soon as there is a value
+#   source_type     published_literature | standard | public_dataset | design_choice |
+#                   declared_assumption | illustrative_unverified | fixture_only (never in this file)
+#   verified_by     the human who checked the value against the source, or null
+#   status          filled | awaiting_human_value
+#   consumer_task   the task that reads the row
+#   rationale       why this value; mirrors RegistryEntry.rationale (null while awaiting)
+#   note            what the row means and what the human must decide
+#   reference_step_ms  only ar_noise_phi: the sampling step (ms) at which the coefficient holds
+#
+# Parameters that the contract has no field for go to configs/benchmark/generator_design.yaml (ADR-038).
+schema_version: "0.1.0"
+name: literature-hypertension
+pathology: hypertension
+fixture_only: false
+parameters:
+  - parameter: baseline_sbp_mmhg
+    unit: "mmHg"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T03
+    rationale: null
+    note: "Baseline systolic pressure of the latent patient. Supply a value or a distribution (dist) and its source_ref; analisi §5.1 item 1 expects distributions estimated on a cohort, which WS04-T13 provides once credentialing exists. No value has been chosen by an agent."
+  - parameter: circadian_amplitude_mmhg
+    unit: "mmHg"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T03
+    rationale: null
+    note: "Amplitude of the circadian component of the latent pressure (analisi §5.1 item 1). Circadian phase has no contract field: see the contract gaps in ADR-038."
+  - parameter: ar_noise_sd_mmhg
+    unit: "mmHg"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T03
+    rationale: null
+    note: "Standard deviation of the autoregressive pressure noise (analisi §5.1 item 1), in mmHg."
+  - parameter: ar_noise_phi
+    unit: "1"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T03
+    rationale: null
+    note: "Autoregressive coefficient of the pressure noise. It is meaningless without its sampling step: the human supplies reference_step_ms (integer ms) with the value, and WS04-T03 rescales to the generator step."
+    reference_step_ms: null
+  - parameter: emax_mmhg
+    unit: "mmHg"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T04
+    rationale: null
+    note: "Maximal drug effect of the Emax model (analisi §5.1 item 1). Drug anchor: none yet. configs/registry/hypertension.yaml anchors no drug or guideline (its delta1 and delta2 are labelled illustrative, unverified, and nothing in it is reviewed); this row must carry the anchor chosen at the clinical review of the registry (WS00-T07) and cite the same drug. No agent names a drug. The sign convention of the effect (a reduction as a positive magnitude or a signed value) is a contract gap, see ADR-038."
+  - parameter: ec50
+    unit: "1"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T04
+    rationale: null
+    note: "Concentration giving half of the maximal effect, read as dimensionless on a concentration normalised to the unit dose (the contract gives no unit; the dose normalisation convention is a gap, see ADR-038). Drug anchor: none yet, as for emax_mmhg: the anchor is the registry's, set at WS00-T07."
+  - parameter: absorption_rate_per_h
+    unit: "1/h"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T04
+    rationale: null
+    note: "First-order oral absorption rate of the one-compartment model (analisi §5.1 item 1), per hour. Drug anchor: none yet, as for emax_mmhg: the anchor is the registry's, set at WS00-T07."
+  - parameter: elimination_rate_per_h
+    unit: "1/h"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T04
+    rationale: null
+    note: "First-order elimination rate of the one-compartment model, per hour. Drug anchor: none yet, as for emax_mmhg: the anchor is the registry's, set at WS00-T07."
+  - parameter: onset_delay_range_ms
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T04
+    rationale: null
+    note: "Lower and upper bound of the onset window of the response, as value: {lower_ms, upper_ms} in integer ms, equal for every patient. It informs the clinician's choice of delta1 and delta2 in the registry (docs/formal/03-parameter-registry.md section 1.2 rule 6); the numbers are not copied between the files. Drug anchor: none yet in the registry; set at WS00-T07."
+  - parameter: p_delay
+    unit: "1"
+    value: null
+    dist: null
+    source_ref: "analisi §5.1: adherence is declared as an assumption (no public smart-dispenser dataset known)"
+    source_type: declared_assumption
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T05
+    rationale: null
+    note: "Probability that a dose is taken late (Markov adherence model, analisi §5.1). The sum of the three probabilities must not exceed 1; persistence between doses is a contract gap, see ADR-038."
+  - parameter: p_omission
+    unit: "1"
+    value: null
+    dist: null
+    source_ref: "analisi §5.1: adherence is declared as an assumption (no public smart-dispenser dataset known)"
+    source_type: declared_assumption
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T05
+    rationale: null
+    note: "Probability that a dose is omitted (Markov adherence model, analisi §5.1)."
+  - parameter: p_double_take
+    unit: "1"
+    value: null
+    dist: null
+    source_ref: "analisi §5.1: adherence is declared as an assumption (no public smart-dispenser dataset known)"
+    source_type: declared_assumption
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T05
+    rationale: null
+    note: "Probability of a double take (Markov adherence model, analisi §5.1). The double-take gap in time has no contract field, see ADR-038."
+  - parameter: mean_delay_ms
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "analisi §5.1: adherence is declared as an assumption (no public smart-dispenser dataset known)"
+    source_type: declared_assumption
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T05
+    rationale: null
+    note: "Mean delay of a late dose, in integer ms."
+  - parameter: cuff_error_sd_mmhg
+    unit: "mmHg"
+    value: null
+    dist: null
+    source_ref: "ISO 81060-2 (edition and clause to be confirmed by the human); named in analisi §5.1"
+    source_type: standard
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T06
+    rationale: null
+    note: "Standard deviation of the cuff error. ISO 81060-2 gives acceptance limits for a device under validation, not the error of one particular device: the human must declare whether the benchmark uses the limits as a conservative device model or a typical performance from a validation study, and states the choice in rationale. The edition and the clause are to be confirmed by the human (analisi §5.1: the values are to be verified). The registry has the same quantity as cuff_error_sd (unset): keep one source of truth."
+  - parameter: cuff_bias_mmhg
+    unit: "mmHg"
+    value: null
+    dist: null
+    source_ref: "ISO 81060-2 (edition and clause to be confirmed by the human); named in analisi §5.1"
+    source_type: standard
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T06
+    rationale: null
+    note: "Systematic cuff error (bias). ISO 81060-2 gives acceptance limits for a device under validation, not the error of one particular device: the human must declare whether the benchmark uses the limits as a conservative device model or a typical performance from a validation study, and states the choice in rationale. The edition and the clause are to be confirmed by the human."
+  - parameter: dispenser_bounce_prob
+    unit: "1"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T07
+    rationale: null
+    note: "Probability that a dispenser sensor bounce produces a spurious DISPENSE event (C2 fault, analisi §5.1 item 3). The human supplies the value and its source_ref."
+  - parameter: ble_dropout_rate_per_h
+    unit: "1/h"
+    value: null
+    dist: null
+    source_ref: null
+    source_type: null
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T07
+    rationale: null
+    note: "Rate per hour of BLE link dropouts (C2 fault, analisi §5.1 item 3). The human supplies the value and its source_ref."

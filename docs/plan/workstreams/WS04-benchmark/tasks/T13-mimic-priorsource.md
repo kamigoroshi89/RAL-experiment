@@ -3,7 +3,7 @@ id: WS04-T13
 title: MimicPriorSource and eICU variant (blocked until credentialing)
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS04-T02", "WS00-T04"]
 critical_path: false
 non_negotiable: false
@@ -73,3 +73,9 @@ Fixtures are tiny synthetic tables written after step 1, in the column layout th
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `grep -cE '^## (Purpose|Access and handling|MIMIC-IV hosp and ICU|MIMIC-IV-ED|eICU-CRD|Column mapping|Estimators|Evaluable templates for the unlabeled run|Verification)$' docs/benchmark/mimic-schema-verification.md` prints `9`, and `grep -E '^verified_by: .+' docs/benchmark/mimic-schema-verification.md` prints one line.
 - `python -c "from ralmon.benchmark.mimic_prior import MimicPriorSource"` exits 0.
+
+## Notes
+
+### Blocking note (orchestrator, 2026-10-05)
+
+SKIPPED by the loop (the status is `ready` only because `tools/check_plan.py` rejects `blocked` when every dependency is `done`; the loop skips tasks that carry an unresolved blocking note). WS04-T02 is done and WS00-T04 is `done` by the human's attestation, but the task needs the credentialed MIMIC-IV and eICU data under `data/raw/` and the record `docs/plan/workstreams/WS00-admin/outputs/WS00-T04.md` (`access_status: granted`), and neither exists in the repository (PhysioNet data is under a data use agreement and is never redistributed or fetched by the agent). Set the status aside (delete this subsection) once the data and the record exist.

@@ -68,3 +68,9 @@ Fixture-only arithmetic values: `ka = 2 per h`, `ke = 1 per h`, `Emax = 20 mmHg`
 - `pytest tests/benchmark/test_pkpd.py -q` exits 0; `ruff check src tests` and `mypy src/ralmon` exit 0.
 - `test -f docs/benchmark/pulse-evaluation.md && grep -c '^## ' docs/benchmark/pulse-evaluation.md` prints at least 7, and `grep -q '^## Decision' docs/benchmark/pulse-evaluation.md` exits 0.
 - `grep -c '^## ADR-' docs/plan/03-decisions.md` has increased by one and the new entry names `ResponseModel`.
+
+## Notes
+
+### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
+
+ADR-038 (proposed, `[DA-CONFERMARE]`) gap G6: the contract gives `ec50` no unit and `emax_mmhg` only the comment "maximal drug effect"; WS04-T02 enforces `ec50` as dimensionless ("1") and accepts any real `emax_mmhg`, while this task validates `Emax < 0` as an error and composes `baseline - effect`: this task fixes the sign convention in practice; record it when the ADR is confirmed.
