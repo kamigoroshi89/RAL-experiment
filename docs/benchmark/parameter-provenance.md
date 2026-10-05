@@ -50,7 +50,8 @@ A benchmark is `provisional` while any row is `awaiting_human_value`, and every 
 - Source files: `configs/priors/literature_hypertension.yaml`
 - Parameter rows: 17
 - Rows by status: filled: 0, awaiting_human_value: 17
-- Filled rows without verified_by (unverified): 0
+- Rows verified by a human (verified_by set): 0 of 17
+- Filled rows still without verified_by (unfilled rows are not counted): 0
 - Fixture-only rows: 0
 
 | parameter | field | unit | value or distribution | source_ref | source_type | verified_by | status | consumer task | note |

@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import numbers
 import re
 import statistics
 import sys
@@ -320,6 +321,7 @@ _PROBABILITY_SUM: Final = ("p_delay", "p_omission", "p_double_take")
 _STD_NORMAL: Final = statistics.NormalDist()
 _P_MIN: Final = math.nextafter(0.0, 1.0)
 _P_MAX: Final = math.nextafter(1.0, 0.0)
+_U_MAX: Final = math.nextafter(1.0, 0.0)  # the largest value of Generator.random()
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,8 +359,32 @@ class Distribution:
             if self.family == "normal":
                 x = self.param("mean") + self.param("sd") * z
             else:
-                x = math.exp(self.param("log_mean") + self.param("log_sd") * z)
+                x = _exp(self.param("log_mean") + self.param("log_sd") * z)
         return min(max(x, self.support_lo), self.support_hi)
+
+    def check_sampling_range(self, parameter: str) -> None:
+        """Refuse a distribution whose quantile range is not a finite set of floats.
+
+        ``ppf`` is monotone, so its two edge values bound every draw: both must be finite
+        and must not sit on an open end of the support (a lognormal underflowing to
+        ``0.0`` would be a draw outside the strictly positive support the loader checked).
+        """
+        for u in (0.0, _U_MAX):
+            x = self.ppf(u)
+            if not math.isfinite(x):
+                raise PriorConfigError(
+                    f"{parameter}: {self.describe()} draws a non-finite value "
+                    f"({x}) at u = {u}; its parameters are out of the float range"
+                )
+        low, high = self.ppf(0.0), self.ppf(_U_MAX)
+        if (self.support_lo_open and low <= self.support_lo) or (
+            self.support_hi_open and high >= self.support_hi
+        ):
+            raise PriorConfigError(
+                f"{parameter}: {self.describe()} cannot be represented as floats inside "
+                f"its support over the quantile range used for sampling "
+                f"(draws {low} to {high})"
+            )
 
     def describe(self) -> str:
         inner = ", ".join(f"{k}={v!r}" for k, v in self.params)
@@ -371,6 +397,14 @@ class Distribution:
                 bounds.append(f"hi={self.trunc_hi!r}")
             text += f" truncate[{', '.join(bounds)}]"
         return text
+
+
+def _exp(x: float) -> float:
+    """``math.exp`` that returns ``inf`` on overflow (the caller refuses a non-finite draw)."""
+    try:
+        return math.exp(x)
+    except OverflowError:
+        return math.inf
 
 
 def _is_number(x: object) -> bool:
@@ -513,7 +547,13 @@ def _build(
         sup_lo, lo_open = (t_lo if positive_lo else 0.0), not positive_lo
         sup_hi, hi_open = t_hi, trunc_hi is None
         if spread == 0.0:
-            return point(math.exp(centre))
+            mode = _exp(centre)
+            if not 0.0 < mode < math.inf:
+                raise PriorConfigError(
+                    f"{parameter}: exp({centre}) of this lognormal is not a finite "
+                    "strictly positive float"
+                )
+            return point(mode)
         z_lo = (math.log(t_lo) - centre) / spread if positive_lo else -math.inf
         z_hi = (math.log(t_hi) - centre) / spread if trunc_hi is not None else math.inf
     p_lo, p_hi = _phi(z_lo), _phi(z_hi)
@@ -521,7 +561,7 @@ def _build(
         raise PriorConfigError(
             f"{parameter}: the truncation of {family} carries a negligible probability mass"
         )
-    return Distribution(
+    dist = Distribution(
         family,
         params,
         trunc_lo,
@@ -534,6 +574,8 @@ def _build(
         p_lo,
         p_hi,
     )
+    dist.check_sampling_range(parameter)
+    return dist
 
 
 # ---------------------------------------------------------------------------
@@ -965,13 +1007,14 @@ class LiteraturePriorSource:
         self, rng: np.random.Generator, patient_index: int
     ) -> PatientParams:
         if (
-            isinstance(patient_index, bool)
-            or not isinstance(patient_index, int)
+            isinstance(patient_index, (bool, np.bool_))
+            or not isinstance(patient_index, numbers.Integral)
             or patient_index < 0
         ):
             raise ValueError(
                 f"patient_index must be a non-negative integer, got {patient_index!r}"
             )
+        patient_index = int(patient_index)
         self._require_filled(_PATIENT)
         # Keyword arguments are evaluated left to right: the draws follow contract order.
         return PatientParams(
@@ -1091,6 +1134,7 @@ def render_provenance_table(
     rows = [row for parsed in files for row in parsed.rows]
     filled = sum(1 for r in rows if r.filled)
     unverified = sum(1 for r in rows if r.filled and r.verified_by is None)
+    verified = sum(1 for r in rows if r.verified_by is not None)
     fixture = sum(1 for r in rows if r.source_type == SOURCE_FIXTURE)
 
     def shown(path: Path) -> str:
@@ -1105,7 +1149,8 @@ def render_provenance_table(
         "- Source files: " + ", ".join(f"`{shown(f.path)}`" for f in files),
         f"- Parameter rows: {len(rows)}",
         f"- Rows by status: filled: {filled}, {STATUS_AWAITING}: {len(rows) - filled}",
-        f"- Filled rows without verified_by (unverified): {unverified}",
+        f"- Rows verified by a human (verified_by set): {verified} of {len(rows)}",
+        f"- Filled rows still without verified_by (unfilled rows are not counted): {unverified}",
         f"- Fixture-only rows: {fixture}",
         "",
         "| " + " | ".join(_TABLE_COLUMNS) + " |",

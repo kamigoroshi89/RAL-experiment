@@ -1251,8 +1251,10 @@ def test_committed_provenance_table_is_current() -> None:
 
 
 def test_committed_prior_has_one_row_per_contract_field() -> None:
+    """Invariants of the committed file that hold whether or not a human has filled it."""
     parsed = load_prior_file(COMMITTED_PRIOR)
     assert parsed.fixture_only is False
+    assert len(parsed.rows) == 17
     assert [row.parameter for row in parsed.rows] == list(CONTRACT_NUMERIC_NAMES)
     source = LiteraturePriorSource(COMMITTED_PRIOR, strict=False)
     assert set(source.unfilled_names()) | {
@@ -1260,22 +1262,34 @@ def test_committed_prior_has_one_row_per_contract_field() -> None:
     } == set(CONTRACT_NUMERIC_NAMES)
     assert "-FIXTURE-ONLY" not in source.name
     assert all(row.source_type != "fixture_only" for row in parsed.rows)
-    # a filled row always has a source_ref (the loader enforces it; stated here for the reader)
+    # no non-null value or distribution without a source_ref (the loader enforces it)
+    assert all(
+        row.source_ref and row.source_ref.strip()
+        for row in parsed.rows
+        if row.value is not None or row.distribution is not None
+    )
     assert all(row.source_ref for row in parsed.rows if row.status == "filled")
-    # a strict load of a prior with unfilled rows refuses to run
+    # a strict load refuses exactly while some row is unfilled
     if source.unfilled_names():
         with pytest.raises(UnfilledParameterError):
             LiteraturePriorSource(COMMITTED_PRIOR)
+    else:
+        LiteraturePriorSource(COMMITTED_PRIOR)
 
 
 def test_committed_prior_carries_the_standing_notes() -> None:
+    """Pre-filled pointers are asserted only for rows no human has filled yet."""
     rows = {r.parameter: r for r in load_prior_file(COMMITTED_PRIOR).rows}
     for name in ("cuff_error_sd_mmhg", "cuff_bias_mmhg"):
         row = rows[name]
+        if row.filled:
+            continue
         assert row.source_ref is not None and "ISO 81060-2" in row.source_ref
         assert "acceptance limits" in row.note and "conservative" in row.note
         assert "edition" in row.note and "clause" in row.note
     for name in CONTRACT_ADHERENCE_FIELDS:
+        if rows[name].filled:
+            continue
         assert rows[name].source_type == "declared_assumption"
         ref = rows[name].source_ref
         assert ref is not None and "analisi" in ref
@@ -1286,11 +1300,15 @@ def test_committed_prior_carries_the_standing_notes() -> None:
         "elimination_rate_per_h",
         "onset_delay_range_ms",
     ):
-        assert (
-            "registry" in rows[name].note
-        )  # the drug anchor is the registry's, not ours
         assert rows[name].consumer_task == "WS04-T04"
-    assert rows["ar_noise_phi"].reference_step_ms is None  # awaiting the human
+        if not rows[name].filled:
+            # the drug anchor is the registry's, not ours
+            assert "registry" in rows[name].note
+    # the row declares its reference step key; a filled row always has a step
+    phi = rows["ar_noise_phi"]
+    assert phi.declares_reference_step
+    if phi.filled:
+        assert phi.reference_step_ms is not None
 
 
 def test_committed_table_counts_match_the_prior() -> None:
@@ -1567,3 +1585,258 @@ def test_protocol_is_satisfied_for_mypy(tmp_path: Path) -> None:
         tmp_path, MYPY_BROKEN_SNIPPET
     )  # a stub missing a member is rejected
     assert broken.returncode != 0 and "provenance" in broken.stdout
+
+
+# ---------------------------------------------------------------------------
+# 16. Review round 1
+# ---------------------------------------------------------------------------
+
+
+def test_reference_step_behaviour_in_both_states_of_the_row(tmp_path: Path) -> None:
+    """M1: the scenario is built in tmp_path, so it does not depend on the committed YAML."""
+    unfilled = prior(
+        fresh(tmp_path, "unfilled"), strict=False, unfilled=["ar_noise_phi"]
+    )
+    row = {r.parameter: r for r in load_prior_file(unfilled.path).rows}["ar_noise_phi"]
+    assert row.reference_step_ms is None and not row.filled
+    with pytest.raises(UnfilledParameterError, match="ar_noise_phi"):
+        unfilled.reference_step_ms("ar_noise_phi")
+    with pytest.raises(UnfilledParameterError, match="ar_noise_phi"):
+        unfilled.sample_patient(np.random.default_rng(0), 0)
+    filled = prior(fresh(tmp_path, "filled"))
+    row = {r.parameter: r for r in load_prior_file(filled.path).rows}["ar_noise_phi"]
+    assert row.filled and row.reference_step_ms == 60_000
+    assert filled.reference_step_ms("ar_noise_phi") == 60_000
+    # a filled row without its step is refused, an unfilled one may carry a step already
+    assert_config_error(
+        fresh(tmp_path, "nostep"),
+        match="ar_noise_phi",
+        row_updates={"ar_noise_phi": {"reference_step_ms": None}},
+    )
+    early = prior(
+        fresh(tmp_path, "early"),
+        strict=False,
+        unfilled=["ar_noise_phi"],
+        row_updates={"ar_noise_phi": {"reference_step_ms": 30_000}},
+    )
+    assert early.unfilled_names() == ("ar_noise_phi",)
+
+
+class _ScriptedRng:
+    """Duck-typed generator: returns scripted uniforms and counts every call."""
+
+    def __init__(self, values: Sequence[float]) -> None:
+        self.values = list(values)
+        self.calls = 0
+
+    def random(self) -> float:
+        value = self.values[self.calls]  # IndexError if more draws than scripted
+        self.calls += 1
+        return value
+
+
+def test_one_uniform_per_distribution_row_in_documented_order(tmp_path: Path) -> None:
+    """M4a: degenerate rows still consume one uniform; plain values consume none."""
+    updates: dict[str, dict[str, Any]] = {
+        "baseline_sbp_mmhg": {"dist": {"family": "uniform", "lo": 100.0, "hi": 200.0}},
+        "circadian_amplitude_mmhg": {
+            "value": None,
+            "dist": {"family": "constant", "value": 5.0},
+        },
+        "ar_noise_sd_mmhg": {
+            "value": None,
+            "dist": {"family": "uniform", "lo": 0.0, "hi": 10.0},
+        },
+        "ar_noise_phi": {
+            "value": None,
+            "dist": {"family": "uniform", "lo": -0.5, "hi": 0.5},
+        },
+        "emax_mmhg": {
+            "value": None,
+            "dist": {"family": "uniform", "lo": 0.0, "hi": 1000.0},
+        },
+        "ec50": {
+            "value": None,
+            "dist": {"family": "normal", "mean": 3.0, "sd": 0.0},
+        },
+    }
+    source = prior(tmp_path, row_updates=updates)
+    rng = _ScriptedRng([0.5, 0.0, 0.25, 0.75, 0.125, 0.0625])
+    patient = source.sample_patient(rng, 0)  # type: ignore[arg-type]
+    assert rng.calls == 6  # one per distribution row; absorption, elimination are plain
+    # contract order: baseline, circadian, ar_noise_sd, ar_noise_phi, emax, ec50
+    assert patient.baseline_sbp_mmhg == pytest.approx(150.0)
+    assert patient.circadian_amplitude_mmhg == 5.0
+    assert patient.ar_noise_sd_mmhg == pytest.approx(2.5)
+    assert patient.ar_noise_phi == pytest.approx(0.25)
+    assert patient.emax_mmhg == pytest.approx(125.0)
+    assert patient.ec50 == 3.0
+    assert patient.absorption_rate_per_h == 2.0
+    assert patient.elimination_rate_per_h == 0.5
+    # and with only plain values nothing is drawn at all
+    plain = _ScriptedRng([])
+    prior(
+        fresh(tmp_path, "plain"),
+        row_updates={"baseline_sbp_mmhg": {"value": 99.0, "dist": None}},
+    ).sample_patient(plain, 0)  # type: ignore[arg-type]
+    assert plain.calls == 0
+
+
+def test_untruncated_normal_is_defined_at_both_edges_of_the_unit_interval() -> None:
+    """M4b: inv_cdf(0.0) raises StatisticsError; the quantile clamp keeps the draw finite."""
+    dist = parse_distribution(
+        "emax_mmhg", {"family": "normal", "mean": 10.0, "sd": 2.0}
+    )
+    low, high = dist.ppf(0.0), dist.ppf(math.nextafter(1.0, 0.0))
+    assert math.isfinite(low) and math.isfinite(high)
+    assert (
+        10.0 - 2.0 * 39.0 < low < 10.0 - 2.0 * 38.0
+    )  # about -38.47 standard deviations
+    assert 10.0 + 2.0 * 8.0 < high < 10.0 + 2.0 * 8.5
+    assert low < dist.ppf(0.5) < high
+
+
+def test_mean_delay_is_an_int_after_loading_a_float_spelling(tmp_path: Path) -> None:
+    """M4c: ``600000.0`` is accepted as an integral number and stored and returned as int."""
+    path = make_fixture_prior(
+        tmp_path, row_updates={"mean_delay_ms": {"value": 600_000.0}}
+    )
+    row = {r.parameter: r for r in load_prior_file(path).rows}["mean_delay_ms"]
+    assert type(row.value) is int and row.value == 600_000
+    params = LiteraturePriorSource(path, allow_fixture_only=True).adherence()
+    assert type(params.mean_delay_ms) is int and params.mean_delay_ms == 600_000
+
+
+@pytest.mark.parametrize("version", ["0.2.0", "0.1", "", 0.1, 1, None, "0.1.0 "])
+def test_wrong_schema_version_is_a_config_error(tmp_path: Path, version: Any) -> None:
+    assert_config_error(
+        tmp_path, match="schema_version", top_level={"schema_version": version}
+    )
+
+
+_UNREPRESENTABLE_LOGNORMALS: list[dict[str, Any]] = [
+    {"family": "lognormal", "log_mean": 1000.0, "log_sd": 50.0},  # 0.0 at u = 0
+    {"family": "lognormal", "log_mean": 1000.0, "log_sd": 0.0},  # exp overflows
+    {"family": "lognormal", "log_mean": -1000.0, "log_sd": 0.0},  # exp underflows to 0
+    {"family": "lognormal", "log_mean": 0.0, "log_sd": 50.0},  # 0.0 at u = 0
+    {"family": "lognormal", "log_mean": 705.0, "log_sd": 1.0},  # overflows near u = 1
+    {"family": "lognormal", "log_mean": 5000.0, "log_sd": 1.0},
+]
+
+
+@pytest.mark.parametrize("dist", _UNREPRESENTABLE_LOGNORMALS)
+def test_lognormal_without_a_finite_positive_support_is_refused(
+    tmp_path: Path, dist: dict[str, Any]
+) -> None:
+    """M2: never a raw OverflowError, never a draw of 0.0 in a strictly positive field."""
+    with pytest.raises(PriorConfigError, match="lognormal"):
+        parse_distribution("ec50", dist)
+    assert_config_error(
+        tmp_path, match="ec50", row_updates={"ec50": {"value": None, "dist": dist}}
+    )
+
+
+def test_extreme_lognormal_that_is_truncated_stays_inside_the_truncation() -> None:
+    dist = parse_distribution(
+        "ec50",
+        {
+            "family": "lognormal",
+            "log_mean": 10.0,
+            "log_sd": 50.0,  # untruncated, this one is refused (0.0 at u = 0)
+            "truncate": {"lo": 1.0, "hi": 100.0},
+        },
+    )
+    for u in (0.0, 0.5, math.nextafter(1.0, 0.0)):
+        assert 1.0 <= dist.ppf(u) <= 100.0
+
+
+@settings(max_examples=100, deadline=None)
+@given(
+    log_mean=st.floats(min_value=-2000.0, max_value=2000.0),
+    log_sd=st.floats(min_value=0.0, max_value=100.0),
+    u=_EDGE_UNIFORMS,
+)
+def test_a_loaded_lognormal_always_draws_a_finite_positive_number(
+    log_mean: float, log_sd: float, u: float
+) -> None:
+    try:
+        dist = parse_distribution(
+            "ec50", {"family": "lognormal", "log_mean": log_mean, "log_sd": log_sd}
+        )
+    except PriorConfigError:
+        return
+    assert 0.0 < dist.ppf(u) < math.inf
+
+
+@pytest.mark.parametrize("index", [np.int64(3), np.int32(3), np.uint8(3), 3])
+def test_patient_index_accepts_integral_numpy_integers(
+    tmp_path: Path, index: Any
+) -> None:
+    patient = prior(tmp_path).sample_patient(np.random.default_rng(0), index)
+    assert patient.patient_id == "p0003"
+
+
+@pytest.mark.parametrize(
+    "index", [True, np.bool_(True), 3.0, np.float64(3.0), -1, np.int64(-1), "3", None]
+)
+def test_patient_index_still_rejects_other_types_and_negatives(
+    tmp_path: Path, index: Any
+) -> None:
+    with pytest.raises(ValueError, match="patient_index"):
+        prior(tmp_path).sample_patient(np.random.default_rng(0), index)
+
+
+def test_benchmark_dir_lists_the_lazy_names_without_loading_priors() -> None:
+    code = (
+        "import sys, ralmon.benchmark as b\n"
+        "names = dir(b)\n"
+        "assert names == sorted(names), names\n"
+        "missing = set(b.__all__) - set(names)\n"
+        "assert not missing, missing\n"
+        "assert 'ralmon.benchmark.priors' not in sys.modules\n"
+        "assert 'LiteraturePriorSource' in names and 'PriorSource' in names\n"
+        "assert sorted(b.__all__) == b.__all__\n"
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [str(SRC), env.get("PYTHONPATH", "")])
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_table_says_that_unfilled_rows_are_not_counted_as_verified(
+    tmp_path: Path,
+) -> None:
+    """M5: '0 unverified' must not read as reassurance while nothing is verified."""
+    root = make_root(
+        tmp_path,
+        prior_kwargs={
+            "unfilled": ["ec50", "p_delay"],
+            "row_updates": {"p_omission": {"verified_by": "A. Human"}},
+        },
+    )
+    text = render_provenance_table([load_prior_file(prior_path(root))], root=root)
+    assert "Rows verified by a human (verified_by set): 1 of 17" in text
+    assert "unfilled rows are not counted" in text
+    assert (
+        "Filled rows still without verified_by (unfilled rows are not counted): 14"
+        in text
+    )
+    nothing = make_root(
+        fresh(tmp_path, "none"), prior_kwargs={"unfilled": list(FIXTURE_PARAMETERS)}
+    )
+    text = render_provenance_table([load_prior_file(prior_path(nothing))], root=nothing)
+    assert "Rows verified by a human (verified_by set): 0 of 17" in text
+    assert (
+        "Filled rows still without verified_by (unfilled rows are not counted): 0"
+        in text
+    )
+    committed = COMMITTED_TABLE.read_text(encoding="utf-8")
+    assert "unfilled rows are not counted" in committed
