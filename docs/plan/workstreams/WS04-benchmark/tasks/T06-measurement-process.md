@@ -3,7 +3,7 @@ id: WS04-T06
 title: "Measurement process: schedule, cuff error, HR and SpO2 from public real-noise data"
 workstream: WS04-benchmark
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS04-T04", "WS04-T05", "WS05-T02", "WS00-T09"]
 critical_path: true
 non_negotiable: false
