@@ -3,7 +3,7 @@ id: WS05-T02
 title: "Signals and derived signals; RTAMT spike (ADR-013)"
 workstream: WS05-monitor
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS05-T01", "WS01-T01", "WS01-T02"]
 critical_path: true
 non_negotiable: false
