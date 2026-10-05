@@ -194,6 +194,15 @@ def test_derived_signals_reject_samples_out_of_device_time_order(signal: str) ->
         d.update(s(SignalId(signal), 1_000))  # equal device time is allowed
 
 
+def test_rejected_out_of_order_sample_leaves_the_state_unchanged() -> None:
+    dose = derived(SignalId.DOSE_COUNT)
+    run(dose, [s(SignalId.DISPENSE, 1_000), s(SignalId.DISPENSE, 2_000)])
+    with pytest.raises(ValueError, match="non-decreasing"):
+        dose.update(s(SignalId.DISPENSE, 1_500))
+    # the rejected dispense was not counted and the clock stays at 2,000
+    assert values([dose.update(s(SignalId.DISPENSE, 2_000))]) == [3.0]
+
+
 def _naive_dose_count(times: list[int], t: int) -> int:
     return sum(1 for d in times if t - T_DAY < d <= t)
 
