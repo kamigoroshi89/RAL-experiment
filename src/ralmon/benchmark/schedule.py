@@ -24,7 +24,9 @@ F3 plus that slack for a given schedule (any schedule, derived or hand-written).
 
 Declared limits: the ticks of one day must lie inside that day (a window that reaches into the
 neighbouring day is refused, ``OUTSIDE_DAY``); the extra ticks need at least one dose to sit
-between (``NO_ANCHOR``); checks F1 (alignment to the grid step), F4 (robot visits), F5 (dose
+between (``NO_ANCHOR``); a plan of more than ``MAX_MEASUREMENTS`` ticks, or than the integer-ms
+positions of a day, is refused before any placement (``TOO_MANY_MEASUREMENTS``,
+``NO_POSITIONS``); checks F1 (alignment to the grid step), F4 (robot visits), F5 (dose
 counts) and F6 (registry names) need data this module does not have and are not run here.
 
 The care-plan design rows (dose times of day, number of measurements) live in
@@ -33,6 +35,7 @@ The care-plan design rows (dose times of day, number of measurements) live in
 
 from __future__ import annotations
 
+import heapq
 import numbers
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -53,6 +56,7 @@ from ralmon.signals import MS_PER_HOUR, MS_PER_MINUTE, MS_PER_SECOND, DurationMs
 __all__ = [
     "CARE_PLAN_RELPATH",
     "DOSES_ROW",
+    "MAX_MEASUREMENTS",
     "N_MEASUREMENTS_ROW",
     "Schedule",
     "ScheduleError",
@@ -68,6 +72,11 @@ __all__ = [
 CARE_PLAN_RELPATH: Final = "configs/benchmark/care_plans.yaml"
 DOSES_ROW: Final = "dose_times_clock_ms"
 N_MEASUREMENTS_ROW: Final = "n_measurements_per_day"
+# Largest number of measurement ticks one plan may ask for (the check precedes any placement).
+_SHOWN_DIGITS: Final = 12  # algorithmic: digits kept of a long integer
+MAX_MEASUREMENTS: Final[int] = (
+    100_000  # algorithmic: guard on the size of one derivation
+)
 
 # Problem codes of ScheduleProblem.check.
 F2_HOLD: Final = "F2_HOLD"  # no tick in [a - hold_lookback, a)
@@ -83,6 +92,8 @@ NO_ANCHOR: Final = "NO_ANCHOR"
 OUTSIDE_DAY: Final = "TICK_OUTSIDE_DAY"
 COINCIDES: Final = "TICK_COINCIDES"
 NO_ROOM: Final = "NO_ROOM"
+TOO_MANY: Final = "TOO_MANY_MEASUREMENTS"  # more ticks than MAX_MEASUREMENTS
+NO_POSITIONS: Final = "NO_POSITIONS"  # more ticks than distinct integer ms in the day
 
 
 class ScheduleError(ValueError):
@@ -120,8 +131,16 @@ def _int(name: str, x: object, *, minimum: int) -> int:
         raise ScheduleError(f"{name} must be an integer, got {x!r}")
     value = int(x)
     if value < minimum:
-        raise ScheduleError(f"{name} must be >= {minimum}, got {value}")
+        raise ScheduleError(f"{name} must be >= {minimum}, got {_shown(value)}")
     return value
+
+
+def _shown(value: int) -> str:
+    """A number for a message; a huge integer is cut short."""
+    text = str(value)
+    if len(text) <= 2 * _SHOWN_DIGITS:
+        return text
+    return f"{text[:_SHOWN_DIGITS]}... ({len(text)} digits)"
 
 
 def _ticks(name: str, ticks: object) -> tuple[int, ...]:
@@ -283,9 +302,22 @@ def derive_schedule(
 
     ``dose_times_ms`` are strictly increasing times of day; ``n_measurements`` is the total
     number of measurement ticks and must be at least two per dose (one pre and one post tick).
+    A count above ``MAX_MEASUREMENTS`` is refused (``ScheduleError``, ``TOO_MANY_MEASUREMENTS``),
+    and so is one above the ``T_day`` distinct integer-ms positions of a day (``NO_POSITIONS``),
+    both before any tick is placed.
     """
     doses = _ticks("dose_times_ms", dose_times_ms)
     total = _int("n_measurements", n_measurements, minimum=0)
+    if total > MAX_MEASUREMENTS:
+        raise ScheduleError(
+            f"{TOO_MANY}: n_measurements = {_shown(total)} exceeds "
+            f"MAX_MEASUREMENTS = {MAX_MEASUREMENTS}"
+        )
+    if total > T_DAY_MS:
+        raise ScheduleError(
+            f"{NO_POSITIONS}: n_measurements = {_shown(total)} ticks cannot be distinct "
+            f"integer ms inside a day of {T_DAY_MS} ms"
+        )
     w = _windows(hold_lookback_ms, delta1_ms, delta2_ms, sched_window_ms)
 
     problems: list[ScheduleProblem] = []
@@ -354,33 +386,43 @@ def derive_schedule(
         seen[tick] = dose
 
     ticks = sorted(seen)
-    for _ in range(total - len(required)):
-        if len(ticks) < 2:
-            raise ScheduleInfeasibleError(
-                [
-                    _problem(
-                        NO_ANCHOR,
-                        None,
-                        "an extra measurement needs at least two ticks to sit between; "
-                        "the plan has no dose",
-                    )
-                ]
-            )
-        widths = [after - before for before, after in pairwise(ticks)]
-        widest = widths.index(max(widths))  # the earliest gap on ties
-        low, high = ticks[widest], ticks[widest + 1]
-        if high - low < 2:  # a midpoint strictly between two integers needs a gap of 2
+    extras = total - len(required)
+    if extras > 0 and len(ticks) < 2:
+        raise ScheduleInfeasibleError(
+            [
+                _problem(
+                    NO_ANCHOR,
+                    None,
+                    "an extra measurement needs at least two ticks to sit between; "
+                    "the plan has no dose",
+                )
+            ]
+        )
+    # Each extra splits the widest gap at its midpoint (the earliest gap on ties). A heap keyed
+    # by (-width, left end) pops exactly that gap: gaps never overlap, so the left end orders
+    # equal widths from the earliest, and splitting leaves every other gap unchanged.
+    gaps = [(low - high, low, high) for low, high in pairwise(ticks)]
+    heapq.heapify(gaps)
+    for _ in range(extras):
+        negative_width, low, high = heapq.heappop(gaps)
+        if (
+            -negative_width < 2
+        ):  # a midpoint strictly between two integers needs a gap of 2
             raise ScheduleInfeasibleError(
                 [
                     _problem(
                         NO_ROOM,
                         None,
-                        f"the largest gap between ticks ({high - low} ms) leaves no "
+                        f"the largest gap between ticks ({-negative_width} ms) leaves no "
                         "integer time strictly between its ends",
                     )
                 ]
             )
-        ticks.insert(widest + 1, (low + high) // 2)
+        middle = (low + high) // 2
+        ticks.append(middle)
+        heapq.heappush(gaps, (low - middle, low, middle))
+        heapq.heappush(gaps, (middle - high, middle, high))
+    ticks.sort()
     return Schedule(dose_ticks_ms=doses, measurement_ticks_ms=tuple(ticks))
 
 

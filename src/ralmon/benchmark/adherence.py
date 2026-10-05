@@ -47,9 +47,12 @@ does not change these numbers (streams share nothing).
 Time. All times are integer milliseconds on the continuing axis ``day * T_day + clock time``.
 Event order: ``(t_device_ms, kind rank, slot order)`` with DISPENSE before INTAKE at equal times
 (a zero lag gives a DISPENSE and its INTAKE at one instant; an INTAKE can meet the next slot's
-DISPENSE). An event may fall after the end of its slot's day (an intake of a late dose); it keeps
-its place on the continuing axis and its slot keeps the day of the dose. ``t_rx_ms ==
-t_device_ms`` and ``seq`` is ``None`` (latent events have no transport).
+DISPENSE). An INTAKE may fall after the end of its slot's day: the intake of a delayed dose,
+and the intake of the second DISPENSE of a double take (``tick + gap + lag`` passes midnight when
+the slot is the last of the day and shorter than ``gap + lag``). A DISPENSE never leaves its
+slot. Such an event keeps its place on the continuing axis and its slot keeps the day of the
+dose (so does its behaviour log entry). ``t_rx_ms == t_device_ms`` and ``seq`` is ``None``
+(latent events have no transport).
 """
 
 from __future__ import annotations
@@ -96,6 +99,7 @@ _N_STATES: Final = 4  # algorithmic: the four outcome states of the model
 MAX_SLOTS: Final[int] = 100_000  # algorithmic: memory guard of the generator
 # Tolerance on a probability sum or a stochastic row (float rounding of the inputs).
 TRANSITION_TOLERANCE: Final[float] = 1e-9  # algorithmic: float tolerance of row sums
+_SHOWN_CHARS: Final = 16  # algorithmic: characters kept at each end in a message
 _INT64_MAX: Final = int(np.iinfo(np.int64).max)
 _NO_PAYLOAD: Final[Mapping[str, float | int | str | bool]] = MappingProxyType({})
 _DISPENSER: Final = "dispenser"  # Event.source of a DISPENSE
@@ -126,7 +130,7 @@ def _is_integer(x: object) -> TypeGuard[numbers.Integral]:
 
 def _int(name: str, x: object, *, minimum: int) -> int:
     if not _is_integer(x):
-        raise AdherenceConfigError(f"{name} must be an integer, got {x!r}")
+        raise AdherenceConfigError(f"{name} must be an integer, got {_shown(x)}")
     value = int(x)
     if value < minimum:
         raise AdherenceConfigError(f"{name} must be >= {minimum}, got {value}")
@@ -135,11 +139,25 @@ def _int(name: str, x: object, *, minimum: int) -> int:
 
 def _real(name: str, x: object) -> float:
     if isinstance(x, (bool, np.bool_)) or not isinstance(x, numbers.Real):
-        raise AdherenceConfigError(f"{name} must be a finite number, got {x!r}")
-    value = float(x)
+        raise AdherenceConfigError(f"{name} must be a finite number, got {_shown(x)}")
+    try:
+        value = float(x)
+    except (OverflowError, ValueError, TypeError) as error:
+        # an integer or fraction beyond the float range: ``float`` raises OverflowError
+        raise AdherenceConfigError(
+            f"{name} must be a finite number representable as a float, got {_shown(x)}"
+        ) from error
     if not math.isfinite(value):
         raise AdherenceConfigError(f"{name} must be a finite number, got {x!r}")
     return value
+
+
+def _shown(x: object) -> str:
+    """``repr`` of a value, cut short so that a huge integer does not flood a message."""
+    text = repr(x)
+    if len(text) <= 2 * _SHOWN_CHARS:
+        return text
+    return f"{text[:_SHOWN_CHARS]}...{text[-_SHOWN_CHARS:]} ({len(text)} chars)"
 
 
 def _probability(name: str, x: object) -> float:
@@ -221,7 +239,10 @@ def sample_delay_ms(
     mean = _int("mean_delay_ms", mean_delay_ms, minimum=1)
     slot = _int("slot_length_ms", slot_length_ms, minimum=2)
     longest = slot - 1
-    x = truncated_exponential(float(mean), float(longest), u)
+    # an integer beyond the float range (2**1024) is a defined error, not an OverflowError
+    x = truncated_exponential(
+        _real("mean_delay_ms", mean), _real("slot_length_ms", longest), u
+    )
     return 1 + min(int(x), longest - 1)
 
 
@@ -358,6 +379,10 @@ class AdherenceModel:
         transition_matrix: Sequence[Sequence[float]] | None = None,
         initial_distribution: Sequence[float] | None = None,
     ) -> None:
+        if not isinstance(params, AdherenceParams):
+            raise AdherenceConfigError(
+                f"params must be an AdherenceParams, got {_shown(params)}"
+            )
         p_delay = _probability("p_delay", params.p_delay)
         p_omission = _probability("p_omission", params.p_omission)
         p_double = _probability("p_double_take", params.p_double_take)
@@ -368,6 +393,9 @@ class AdherenceModel:
             )
         marginals = (max(0.0, 1.0 - total), p_delay, p_omission, p_double)
         self._mean_delay_ms = _int("mean_delay_ms", params.mean_delay_ms, minimum=0)
+        _real(
+            "mean_delay_ms", self._mean_delay_ms
+        )  # it must be a float for the delay law
         if not isinstance(config, AdherenceConfig):
             raise AdherenceConfigError(
                 f"config must be an AdherenceConfig, got {config!r}"

@@ -22,6 +22,7 @@ import ast
 import dataclasses
 import math
 from collections.abc import Sequence
+from fractions import Fraction
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -1595,3 +1596,447 @@ def test_names_outside_the_contract_are_not_exported_from_the_package_root() -> 
 
 def test_the_time_axis_constant_is_the_day() -> None:
     assert T_DAY_MS == DAY
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 (review): defined errors for numbers that overflow a float
+# ---------------------------------------------------------------------------
+
+TOO_BIG: list[Any] = [
+    10**400,
+    -(10**400),
+    2**1024,
+    Fraction(10**400),
+]  # float() overflows
+NOT_FINITE: list[Any] = [float("inf"), float("-inf"), float("nan")]
+
+
+def ident(value: object) -> str:
+    return f"{type(value).__name__}-{str(value)[:12]}"
+
+
+@pytest.mark.parametrize("bad", TOO_BIG + NOT_FINITE, ids=ident)
+def test_probabilities_that_overflow_or_are_not_finite_name_their_field(
+    bad: Any,
+) -> None:
+    for position, name in enumerate(("p_delay", "p_omission", "p_double_take")):
+        values: list[Any] = [0.1, 0.1, 0.1]
+        values[position] = bad
+        with pytest.raises(AdherenceConfigError, match=name):
+            AdherenceModel(AdherenceParams(*values, HOUR), CFG)
+
+
+@pytest.mark.parametrize("bad", TOO_BIG + NOT_FINITE, ids=ident)
+def test_matrix_and_initial_law_entries_that_overflow_name_their_field(
+    bad: Any,
+) -> None:
+    for row in range(4):
+        matrix = [list(r) for r in STICKY]
+        matrix[row][0] = bad
+        with pytest.raises(AdherenceConfigError, match=f"transition_matrix row {row}"):
+            AdherenceModel(params(0.2, 0.1, 0.1), CFG, transition_matrix=matrix)
+    with pytest.raises(AdherenceConfigError, match="initial_distribution"):
+        AdherenceModel(
+            params(0.2, 0.1, 0.1), CFG, initial_distribution=[bad, 0.0, 0.0, 1.0]
+        )
+
+
+@pytest.mark.parametrize("bad", [10**400, 2**1024, 2**1024 - 1, 10**309], ids=ident)
+def test_a_mean_delay_that_is_not_a_float_is_refused_by_name(bad: int) -> None:
+    with pytest.raises(AdherenceConfigError, match="mean_delay_ms"):
+        AdherenceModel(AdherenceParams(0.0, 0.0, 0.0, bad), CFG)
+    with pytest.raises(AdherenceConfigError, match="mean_delay_ms"):
+        AdherenceModel(AdherenceParams(0.1, 0.0, 0.0, bad), CFG)
+
+
+@pytest.mark.parametrize("bad", TOO_BIG + NOT_FINITE, ids=ident)
+def test_delay_law_arguments_that_overflow_name_their_argument(bad: Any) -> None:
+    mean, upper, u = float(HOUR), float(3 * HOUR), 0.5
+    with pytest.raises(AdherenceConfigError, match="mean"):
+        truncated_exponential(bad, upper, u)
+    with pytest.raises(AdherenceConfigError, match="upper"):
+        truncated_exponential(mean, bad, u)
+    with pytest.raises(AdherenceConfigError, match="u"):
+        truncated_exponential(mean, upper, bad)
+    if isinstance(bad, int):  # the integer entry point
+        with pytest.raises(AdherenceConfigError, match="mean_delay_ms"):
+            sample_delay_ms(bad, HOUR, 0.5)
+        with pytest.raises(AdherenceConfigError, match="slot_length_ms"):
+            sample_delay_ms(HOUR, bad, 0.5)
+    with pytest.raises(AdherenceConfigError, match="u"):
+        sample_delay_ms(HOUR, HOUR, bad)
+
+
+@pytest.mark.parametrize("bad", [10**400, 2**1024], ids=ident)
+def test_the_largest_integers_a_float_cannot_hold_are_refused_by_the_delay_law(
+    bad: int,
+) -> None:
+    for slot in (bad, bad + 1, 2**1024 - 1):
+        with pytest.raises(AdherenceConfigError, match="slot_length_ms"):
+            sample_delay_ms(1, slot, TOP)
+    with pytest.raises(AdherenceConfigError, match="mean_delay_ms"):
+        sample_delay_ms(2**1024 - 1, 2, 0.5)
+
+
+@pytest.mark.parametrize(
+    ("mean", "upper", "u"),
+    [
+        (1e308, 1e308, 0.5),
+        (1.7e308, 1.79e308, TOP),
+        (5e-324, 1e308, 0.5),
+        (1e-308, 1e-308, TOP),
+        (1e308, 5e-324, 0.5),
+        (5e-324, 5e-324, TOP),
+        (1e-320, 1e308, TOP),
+        (1e308, 1e308, 0.0),
+    ],
+)
+def test_extreme_finite_floats_give_a_defined_result_in_range(
+    mean: float, upper: float, u: float
+) -> None:
+    x = truncated_exponential(mean, upper, u)
+    assert math.isfinite(x)
+    assert 0.0 <= x <= upper
+
+
+@pytest.mark.parametrize(
+    ("mean", "slot"),
+    [(10**300, 10**300), (1, 10**300), (10**308, 10**308), (1, 2**1023), (2**1023, 2)],
+)
+def test_huge_representable_integers_give_a_delay_inside_the_slot(
+    mean: int, slot: int
+) -> None:
+    for u in (0.0, 0.5, TOP):
+        assert 1 <= sample_delay_ms(mean, slot, u) <= slot - 1
+
+
+@pytest.mark.parametrize("big", [10**400, 2**1024], ids=ident)
+def test_huge_integer_arguments_of_the_simulation_are_defined_errors(big: int) -> None:
+    model = AdherenceModel(params(0.2, 0.1, 0.1), CFG)
+    for kwargs in ({"n_days": big}, {"n_days": 1, "start_day": big}):
+        with pytest.raises(AdherenceConfigError):
+            model.simulate(
+                TWO_DOSES, kwargs.pop("n_days"), adherence_stream(0, 0), **kwargs
+            )
+    empty = Schedule(dose_ticks_ms=(), measurement_ticks_ms=())
+    with pytest.raises(AdherenceConfigError, match="int64"):
+        model.simulate(
+            empty, big, adherence_stream(0, 0)
+        )  # no slot: axis still checked
+    for lag, gap in ((big, big + 1), (1, big), (big, big + 1)):
+        huge = AdherenceModel(
+            params(0.2, 0.1, 0.1),
+            AdherenceConfig(intake_lag_ms=lag, double_take_gap_ms=gap),
+        )
+        with pytest.raises(AdherenceConfigError):
+            huge.simulate(TWO_DOSES, 1, adherence_stream(0, 0))
+    for bad in (-big, -1):
+        with pytest.raises(AdherenceConfigError):
+            AdherenceConfig(intake_lag_ms=bad, double_take_gap_ms=5)
+        with pytest.raises(AdherenceConfigError):
+            AdherenceConfig(intake_lag_ms=0, double_take_gap_ms=bad)
+
+
+@pytest.mark.parametrize(
+    "bad", [None, 0.5, "params", object(), (0.1, 0.1, 0.1, HOUR)], ids=ident
+)
+def test_a_model_without_adherence_params_is_a_defined_error(bad: object) -> None:
+    with pytest.raises(AdherenceConfigError, match="params"):
+        AdherenceModel(bad, CFG)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("big", [10**400, -(10**400), 2**1024], ids=ident)
+def test_schedule_arguments_that_overflow_give_a_schedule_error(big: int) -> None:
+    base: dict[str, Any] = {
+        "dose_times_ms": (clock(8),),
+        "n_measurements": 2,
+        "hold_lookback_ms": HOLD,
+        "delta1_ms": D1,
+        "delta2_ms": D2,
+        "sched_window_ms": SW,
+    }
+    for name in base:
+        arguments = {**base, name: (big,) if name == "dose_times_ms" else big}
+        with pytest.raises(ScheduleError):
+            derive_schedule(**arguments)
+    windows = ("hold_lookback_ms", "delta1_ms", "delta2_ms", "sched_window_ms")
+    schedule = derive_schedule((clock(8),), 2, HOLD, D1, D2, SW)
+    for name in windows:
+        arguments = {k: base[k] for k in windows} | {name: big}
+        try:
+            check_schedule_consistency(schedule, **arguments)
+        except ScheduleError:
+            pass  # a defined error is as good as a defined list of problems
+    with pytest.raises(ScheduleError):
+        Schedule(dose_ticks_ms=(big,), measurement_ticks_ms=())
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 (review): the number of measurements is bounded before any work
+# ---------------------------------------------------------------------------
+
+
+def test_the_measurement_bound_is_a_named_constant_below_the_day_positions() -> None:
+    assert isinstance(schedule_module.MAX_MEASUREMENTS, int)
+    assert 2 <= schedule_module.MAX_MEASUREMENTS < T_DAY_MS
+
+
+@pytest.mark.parametrize("n", [10**9, 10**400, 2**1024, T_DAY_MS + 1])
+def test_a_huge_measurement_count_is_refused_before_any_work(n: int) -> None:
+    # no timing: the refusal comes from a comparison, so a loop over ``n`` would not return
+    with pytest.raises(ScheduleError, match="TOO_MANY_MEASUREMENTS"):
+        derive_schedule((clock(8),), n, HOLD, D1, D2, SW)
+    with pytest.raises(ScheduleError, match="TOO_MANY_MEASUREMENTS"):
+        derive_schedule((), n, HOLD, D1, D2, SW)
+
+
+def test_the_measurement_bound_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(schedule_module, "MAX_MEASUREMENTS", 9)
+    ticks = derive_schedule((clock(8),), 9, HOLD, D1, D2, SW).measurement_ticks_ms
+    assert len(ticks) == 9  # exactly at the bound
+    with pytest.raises(ScheduleError, match="TOO_MANY_MEASUREMENTS"):
+        derive_schedule((clock(8),), 10, HOLD, D1, D2, SW)
+
+
+def test_more_ticks_than_distinct_positions_in_the_day_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # even with the bound lifted, a day holds T_DAY distinct integer-ms ticks at most
+    monkeypatch.setattr(schedule_module, "MAX_MEASUREMENTS", 10**12)
+    with pytest.raises(ScheduleError, match="NO_POSITIONS"):
+        derive_schedule((clock(8),), T_DAY_MS + 1, HOLD, D1, D2, SW)
+    with pytest.raises(ScheduleError, match="NO_POSITIONS"):
+        derive_schedule((clock(8),), 10**11, HOLD, D1, D2, SW)
+
+
+def test_a_count_in_the_realistic_range_is_still_derived() -> None:
+    ticks = derive_schedule(
+        (clock(8), clock(20)), 3_000, HOLD, D1, D2, SW
+    ).measurement_ticks_ms
+    assert len(ticks) == 3_000 and list(ticks) == sorted(set(ticks))
+    assert all(0 <= t < T_DAY_MS for t in ticks)
+    # the largest admissible count works in negligible time (sub-quadratic placement)
+    top = schedule_module.MAX_MEASUREMENTS
+    many = derive_schedule((clock(8), clock(20)), top, HOLD, D1, D2, SW)
+    assert len(many.measurement_ticks_ms) == top
+
+
+def reference_extras(
+    ticks: Sequence[int], extras: int
+) -> tuple[int, ...] | ScheduleInfeasibleError:
+    """The straightforward O(n^2) placement: split the earliest of the widest gaps."""
+    out = list(ticks)
+    for _ in range(extras):
+        if len(out) < 2:
+            return ScheduleInfeasibleError(
+                [ScheduleProblem("NO_ANCHOR", None, "no anchor")]
+            )
+        widths = [b - a for a, b in pairwise(out)]
+        i = widths.index(max(widths))
+        if out[i + 1] - out[i] < 2:
+            return ScheduleInfeasibleError(
+                [ScheduleProblem("NO_ROOM", None, "no room")]
+            )
+        out.insert(i + 1, (out[i] + out[i + 1]) // 2)
+    return tuple(out)
+
+
+def test_extras_placement_equals_the_quadratic_reference_on_random_plans() -> None:
+    rng = np.random.default_rng(20261005)
+    compared = rooms = 0
+    for case in range(400):
+        n_doses = int(rng.integers(0, 5))
+        if case % 2:  # coarse windows: room for many extras
+            lo = HOUR
+            hold, d1, d2, sw = (
+                int(rng.integers(HOUR, 2 * HOUR)),
+                int(rng.integers(0, HOUR)),
+                0,
+                int(rng.integers(0, 20 * MIN)),
+            )
+            d2 = d1 + int(rng.integers(MIN, 2 * HOUR))
+        else:  # millisecond windows: the NO_ROOM boundary is reached
+            lo = 10
+            hold, d1, d2, sw = (
+                int(rng.integers(0, 12)),
+                int(rng.integers(0, 6)),
+                0,
+                int(rng.integers(0, 4)),
+            )
+            d2 = d1 + int(rng.integers(0, 8))
+        doses = sorted({int(x) for x in rng.integers(lo, DAY - 3 * HOUR, size=n_doses)})
+        try:
+            base = derive_schedule(doses, 2 * len(doses), hold, d1, d2, sw)
+        except ScheduleError:
+            continue
+        extras = int(rng.integers(0, 40))
+        expected = reference_extras(base.measurement_ticks_ms, extras)
+        compared += 1
+        try:
+            got = derive_schedule(
+                doses, 2 * len(doses) + extras, hold, d1, d2, sw
+            ).measurement_ticks_ms
+        except ScheduleInfeasibleError as error:
+            assert isinstance(expected, ScheduleInfeasibleError), (case, error)
+            assert [p.check for p in error.problems] == [
+                p.check for p in expected.problems
+            ]
+            rooms += 1
+        else:
+            assert got == expected, case
+    assert compared > 100 and rooms > 5  # the comparison has both outcomes
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 (review): rounding of the post window, exact reasons of two refusals
+# ---------------------------------------------------------------------------
+
+
+def test_the_post_dose_midpoint_of_an_odd_width_window_rounds_down() -> None:
+    a = clock(8)
+    d2 = 3 * HOUR + 1  # window [a + 1 h, a + 3 h + 1 ms - 30 min]: low + high is odd
+    schedule = derive_schedule((a,), 2, HOLD, D1, d2, SW)
+    low, high = a + D1, a + d2 - SW
+    assert (low + high) % 2 == 1
+    assert (
+        schedule.measurement_ticks_ms[1] == (low + high) // 2
+    )  # not (low + high + 1) // 2
+    assert schedule.measurement_ticks_ms[1] == a + 6_300_000
+
+
+def test_a_tick_exactly_at_midnight_is_outside_the_day_with_its_own_reason() -> None:
+    a = DAY - HOUR  # post tick = a + 1 h = 24:00 exactly
+    with pytest.raises(ScheduleInfeasibleError) as info:
+        derive_schedule((a,), 2, HOUR, HOUR, HOUR, 0)
+    assert [p.check for p in info.value.problems] == ["TICK_OUTSIDE_DAY"]
+    assert info.value.problems[0].dose_tick_ms == a
+    ok = derive_schedule((a - 1,), 2, HOUR, HOUR, HOUR, 0)  # post tick 23:59:59.999
+    assert ok.measurement_ticks_ms[-1] == DAY - 1
+    first = derive_schedule((HOUR,), 2, HOUR, 0, 0, 0).measurement_ticks_ms[0]
+    assert first == HOUR // 2  # a pre tick strictly inside the day
+    with pytest.raises(ScheduleInfeasibleError) as info:
+        derive_schedule((HOUR // 4,), 2, HOUR, 0, 0, 0)  # pre tick at -15 min
+    assert [p.check for p in info.value.problems] == ["TICK_OUTSIDE_DAY"]
+    assert (
+        derive_schedule((1,), 2, 2, 0, 0, 0).measurement_ticks_ms[0] == 0
+    )  # tick 0 is inside
+    with pytest.raises(ScheduleInfeasibleError) as info:
+        derive_schedule((0,), 2, 2, 0, 0, 0)  # pre tick at -1
+    assert [p.check for p in info.value.problems] == ["TICK_OUTSIDE_DAY"]
+
+
+def test_delta2_below_delta1_is_refused_with_its_own_message() -> None:
+    for call in (
+        lambda d2: derive_schedule((clock(8),), 2, HOLD, D1, d2, 0),
+        lambda d2: check_schedule_consistency(TWO_DOSES, HOLD, D1, d2, 0),
+    ):
+        with pytest.raises(ScheduleError, match="delta2_ms .* below delta1_ms") as info:
+            call(D1 - 1)
+        assert not isinstance(info.value, ScheduleInfeasibleError)
+    # equal windows are a point window: accepted, with the post tick at delta1
+    point = derive_schedule((clock(8),), 2, HOLD, D1, D1, 0)
+    assert point.measurement_ticks_ms[1] == clock(8) + D1
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1 (review): a double take can cross midnight too; delay uniform; clamp
+# ---------------------------------------------------------------------------
+
+
+def test_the_intake_of_a_double_take_can_cross_midnight_and_keeps_its_slot_day() -> (
+    None
+):
+    # last slot of the day is 10 min, gap 8 min, lag 5 min: the second dispense is at
+    # 23:58 and its intake at 00:03 of the next day (3 min past midnight)
+    schedule = Schedule(dose_ticks_ms=(DAY - 10 * MIN,), measurement_ticks_ms=())
+    config = AdherenceConfig(intake_lag_ms=5 * MIN, double_take_gap_ms=8 * MIN)
+    result = run(params(p_double_take=1.0), schedule=schedule, config=config, n_days=2)
+    first, second = result.behaviour_log
+    assert first.day_index == 0 and second.day_index == 1
+    assert first.dispense_times_ms == (DAY - 10 * MIN, DAY - 2 * MIN)
+    assert [(e.kind, e.t_device_ms) for e in result.events[:4]] == [
+        (EventKind.DISPENSE, DAY - 10 * MIN),
+        (EventKind.INTAKE, DAY - 5 * MIN),
+        (EventKind.DISPENSE, DAY - 2 * MIN),
+        (EventKind.INTAKE, DAY + 3 * MIN),  # past midnight, on the continuing axis
+    ]
+    crossing = result.events[3]
+    assert (
+        crossing.t_device_ms // DAY == first.day_index + 1
+    )  # the event is in day 1 ...
+    assert (
+        first.dispense_times_ms[-1] // DAY == first.day_index
+    )  # ... its dispense in day 0
+    # no dispense ever leaves its slot's day, whatever the state
+    for entry in result.behaviour_log:
+        assert all(t // DAY == entry.day_index for t in entry.dispense_times_ms)
+    times = [e.t_device_ms for e in result.events]
+    assert times == sorted(times)
+
+
+def test_simulated_delays_are_drawn_from_the_delay_uniform_not_the_state_uniform() -> (
+    None
+):
+    # All four states present. Replaying the stream pairs (state, delay) uniform by uniform,
+    # every delayed dose must be sample_delay_ms of ITS delay uniform.
+    one = Schedule(dose_ticks_ms=(8 * HOUR,), measurement_ticks_ms=())
+    n = 6_000
+    p = params(0.25, 0.25, 0.25, mean_delay_ms=HOUR)
+    result = run(p, schedule=one, n_days=n, seed=21)
+    assert set(state_sequence(result)) == set(STATES)
+    uniforms = adherence_stream(21, 0).random(2 * n)
+    (length,) = one.slot_lengths_ms()
+    delays = []
+    for k, entry in enumerate(result.behaviour_log):
+        if entry.state is DELAYED:
+            expected = sample_delay_ms(HOUR, length, float(uniforms[2 * k + 1]))
+            assert entry.dispense_times_ms == (entry.slot_tick_ms + expected,)
+            delays.append(expected)
+    # the state uniform of a delayed slot lies in [0.25, 0.5): reusing it would bias the delays
+    # low; the delay law has its analytic truncated mean (plus the 1 ms discretisation shift)
+    analytic, sd = truncated_moments(float(HOUR), float(length - 1))
+    assert len(delays) > 1_000
+    assert (
+        abs(sum(delays) / len(delays) - analytic)
+        < 4.0 * sd / math.sqrt(len(delays)) + 1.0
+    )
+    # and the uniforms really differ from the state ones on those slots
+    state_u = [
+        float(uniforms[2 * k])
+        for k, e in enumerate(result.behaviour_log)
+        if e.state is DELAYED
+    ]
+    reused = [sample_delay_ms(HOUR, length, u) for u in state_u]
+    assert reused != delays
+    assert sum(reused) / len(reused) < sum(delays) / len(delays) - 4.0 * sd / math.sqrt(
+        len(delays)
+    )
+
+
+def test_the_delay_never_reaches_the_end_of_a_slot_for_a_uniform_next_to_one() -> None:
+    # truncated_exponential reaches ``upper`` exactly for u just below 1, so int(x) would equal
+    # the slot length minus one and the dose would leave its slot: the clamp keeps it inside
+    assert truncated_exponential(100.0, 5.0, TOP) == 5.0
+    assert sample_delay_ms(100, 6, TOP) <= 5
+    assert sample_delay_ms(100, 6, TOP) == 5
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    slot=st.sampled_from([2, 3, 4, 6, 7, 100, 1_001, 3_600_000]),
+    mean=st.sampled_from([1, 3, 100, 10**6, 10**12]),
+    steps=st.integers(min_value=0, max_value=64),
+)
+def test_the_delay_stays_inside_the_slot_near_one(
+    slot: int, mean: int, steps: int
+) -> None:
+    u = 1.0
+    for _ in range(steps + 1):
+        u = math.nextafter(u, 0.0)  # TOP, then 63 doubles below it
+    assert 1 <= sample_delay_ms(mean, slot, u) <= slot - 1
+
+
+def test_the_module_text_names_both_ways_an_intake_crosses_midnight() -> None:
+    doc = " ".join((adherence_module.__doc__ or "").split())
+    assert "double take" in doc.split("INTAKE may fall after the end")[1][:400]
+    assert "an intake of a late dose" not in doc
