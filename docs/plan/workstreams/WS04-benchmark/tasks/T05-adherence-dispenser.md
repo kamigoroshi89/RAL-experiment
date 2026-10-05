@@ -3,7 +3,7 @@ id: WS04-T05
 title: Adherence Markov model with DISPENSE and INTAKE events
 workstream: WS04-benchmark
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS04-T02"]
 critical_path: true
 non_negotiable: false
@@ -113,3 +113,10 @@ Notes only (not changed):
 1. T09 expects a hook that T05 does not have: `simulate(..., state=...)` carries the chain state, it does not force the state of one slot (T09 test `test_forced_double_take_matches_markov_double_take`, "adherence (T05, with optional forced slot states)"). A forcing hook can be added later without moving the draws: two uniforms are consumed per slot whatever the state.
 2. `load_schedule` requires integers while the registry gives floats (`RegistryEntry.value: float`, for example `3600000.0` raises `ScheduleError: hold_lookback_ms must be an integer`): the caller (WS04-T11) must convert with `int()`.
 3. A dose in the last milliseconds of the day is refused when its slot is shorter than the gap, even if `p_double_take = 0` (the gap is always checked).
+
+### Post-task review (orchestrator, 2026-10-05)
+
+Produced: adherence Markov model with true DISPENSE and INTAKE events, derived measurement schedule, two illustrative care-plan rows, two new awaiting design rows (`intake_lag_ms`, `double_take_gap_ms`). Independent review: PASS, no blocker; one fix round applied (raw OverflowError, unbounded `n_measurements`, wrong midnight text, test gaps). Orchestrator verification on the final branch: `test_adherence.py` 207 passed (90 MB peak), full suite 864 passed, ruff, format, mypy, `--check-table` and `check_plan` all exit 0; the filled-state proof passes.
+Deviations: `simulate` carries two extra keywords and `AdherenceResult.final_state`; `load_schedule` takes the four windows as keywords; no contract or ADR change.
+Impact on dependents: WS04-T06 stays blocked on WS04-T04. WS04-T09 expects a forced-slot-state hook that does not exist (note 1 above); WS04-T11 must pass `int()` windows (note 2); the double take may cross midnight (its entry keeps its slot's day). `intake_lag_ms` and `double_take_gap_ms` await human values (ADR-020): no benchmark can be built from the committed design file until then.
+Open MINOR: none beyond the notes above.
