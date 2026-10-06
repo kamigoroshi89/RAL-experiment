@@ -1,4 +1,5 @@
-# Injection design of the benchmark generator (WS04-T07 writes the C2 section; WS04-T08 adds C3).
+# Injection design of the benchmark generator (WS04-T07 writes the C2 section; WS04-T08 the C3 section
+# and the attacker section).
 # Same row schema as configs/priors/literature_hypertension.yaml for the rows of `parameters:`; read
 # by ralmon.benchmark.injection.load_injection_design and rendered into
 # docs/benchmark/parameter-provenance.md by
@@ -19,6 +20,18 @@
 # below one second, "illustrative, unverified"; the analysis gives no number) and the larger gaps are
 # "stress, physical plausibility unverified". The `status` and `value` of each row are authoritative,
 # not this comment.
+#
+# WS04-T08 (C3). `injections.c3` has the five attacks that benchmark v1 injects (docs/models/threat-model.md,
+# section Subtype vocabulary), with the same structure; an attack has no magnitude (a replay copies the
+# previous day, an injection draws in bounds or in the range of the patient's own readings), so only the
+# window attacks have a duration block, and the three duration levels per attack are rows of `parameters:`
+# (design_choice, awaiting_human_value, no value chosen by an agent). The top-level `attacker:` section holds
+# what is not a number of the design: the two capability sets (the knowledge levels of the threat model, as
+# booleans, each citing the section it is copied from), the names of the population bounds that a naive
+# forger draws in (the registry names for the pressure, the two rows below for the pulse rate, whose
+# values wait for a human) and the two attack classes that the threat model lists and benchmark v1 does not
+# inject. The attacker level of a replay, a forgery or a spoof is the `level` of its spec, recorded in the
+# injection log; whether a device authenticates is a property of the run, not of the attack.
 schema_version: "0.1.0"
 injections:
   c2:
@@ -103,6 +116,74 @@ injections:
       onset: "the tick of the failed visit (a measurement tick, or a dose tick with the param kind), chosen by the injection plan"
       duration: null
       magnitude: null
+  c3:
+    replay:
+      family: ble_attack
+      target: [cuff]
+      onset: "window start drawn by the injection plan over the day (WS04-T11); the day must not be the first (the attack replays the previous day's cuff messages one day after they arrived); the attacker level is the level of the spec"
+      duration:
+        key: duration_ms
+        unit: ms
+        levels: {short: replay_duration_short, medium: replay_duration_medium, long: replay_duration_long}
+      magnitude: null
+    injection_naive:
+      family: ble_attack
+      target: [cuff]
+      onset: "window start drawn by the injection plan over the day (WS04-T11); one forged message in place of each genuine measurement of the window; the values are drawn in the population bounds named under attacker.bounds"
+      duration:
+        key: duration_ms
+        unit: ms
+        levels: {short: injection_naive_duration_short, medium: injection_naive_duration_medium, long: injection_naive_duration_long}
+      magnitude: null
+    injection_informed:
+      family: ble_attack
+      target: [cuff]
+      onset: "window start drawn by the injection plan over the day (WS04-T11), timed with the care-plan schedule; the values are drawn between the minimum and the maximum of the patient's own genuine readings captured before the onset and on the previous day"
+      duration:
+        key: duration_ms
+        unit: ms
+        levels: {short: injection_informed_duration_short, medium: injection_informed_duration_medium, long: injection_informed_duration_long}
+      magnitude: null
+    dispense_forgery:
+      family: ble_attack
+      target: [dispenser]
+      onset: "the instant of the forged dispense, chosen by the injection plan; the informed level times it with a dispense tick of the care plan; with spoofs_witness it is composed with a presence_spoof (WS04-T09)"
+      duration: null
+      magnitude: null
+    presence_spoof:
+      family: perception_attack
+      target: [robot]
+      onset: "an instant inside a robot visit (the robot must be co-located); the option spoof_intake (informed level only) adds an INTAKE event of the robot at the same instant"
+      duration: null
+      magnitude: null
+attacker:
+  capability_sets:
+    naive:
+      fresh_metadata: false
+      coherent_pulse: false
+      plausible_values: false
+      spoofs_witness: false
+      source_type: declared_assumption
+      source_ref: "docs/models/threat-model.md, section Knowledge levels, table of the capability flags, column naive (copied, not chosen here)"
+    informed:
+      fresh_metadata: true
+      coherent_pulse: true
+      plausible_values: true
+      spoofs_witness: true
+      source_type: declared_assumption
+      source_ref: "docs/models/threat-model.md, section Knowledge levels, table of the capability flags, column informed (copied, not chosen here)"
+  bounds:
+    bp:
+      lower: bound_bp_lower
+      upper: bound_bp_upper
+      source: "registry entries of configs/registry/hypertension.yaml (analisi 4.7, illustrative, unverified); the builder passes them as InjectionContext.bp_bounds_mmhg"
+    hr:
+      lower: injection_naive_pulse_lower_bpm
+      upper: injection_naive_pulse_upper_bpm
+      source: "rows of parameters: below, awaiting a human value; the builder passes them as InjectionContext.hr_bounds_bpm"
+  not_injected_in_v1:
+    dispenser_physical_tamper: "not injected in v1: modelled in the threat model (physical access to the dispenser; the event is a genuine device output, so no field of the trace separates it from a patient who opened the dispenser); no injector exists"
+    timestamp_manipulation: "not injected in v1: modelled in the threat model (the time metadata of a message, basis inferred from analisi 4.9 item 2); the benchmark injects no clock or delay fault of any class; no injector exists"
 parameters:
   - parameter: ble_dropout_duration_short
     unit: "ms"
@@ -412,3 +493,124 @@ parameters:
     consumer_task: WS04-T07
     rationale: null
     note: "Level high of the navigation delay of one robot visit, a multiple of the registry entry sched_window (the interval from a schedule tick to the deadline of its robot task): below 1 the robot still arrives in time and nothing is violated, above 1 the task is late and its outcome is late. The injected delay in ms is the value times sched_window read from the registry, so no absolute time is invented here. Levels are ordered low < medium < high. No value has been chosen by an agent."
+  - parameter: replay_duration_short
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "Level short of the window duration of replay, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of the window in which the previous day's cuff messages are delivered again and the genuine messages of the window do not reach the gateway; a window shorter than the interval between two measurements replays at most one message, a longer one several. Rationale: the level fixes how much of the patient's day the attack covers; the count of attacks per day is the plan of WS04-T11. The window is half open on the arrival time of the messages. No value has been chosen by an agent."
+  - parameter: replay_duration_medium
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "Level medium of the window duration of replay, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of the window in which the previous day's cuff messages are delivered again and the genuine messages of the window do not reach the gateway; a window shorter than the interval between two measurements replays at most one message, a longer one several. Rationale: the level fixes how much of the patient's day the attack covers; the count of attacks per day is the plan of WS04-T11. The window is half open on the arrival time of the messages. No value has been chosen by an agent."
+  - parameter: replay_duration_long
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "Level long of the window duration of replay, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of the window in which the previous day's cuff messages are delivered again and the genuine messages of the window do not reach the gateway; a window shorter than the interval between two measurements replays at most one message, a longer one several. Rationale: the level fixes how much of the patient's day the attack covers; the count of attacks per day is the plan of WS04-T11. The window is half open on the arrival time of the messages. No value has been chosen by an agent."
+  - parameter: injection_naive_duration_short
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "Level short of the window duration of injection_naive, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of the window in which a naive forger replaces the genuine measurement messages by forged ones with values drawn in the population bounds. Rationale: a short window forges one message and a long one the whole day, which changes how many instances of the range, response and hold templates the attack can reach. The window is half open on the arrival time of the messages. No value has been chosen by an agent."
+  - parameter: injection_naive_duration_medium
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "Level medium of the window duration of injection_naive, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of the window in which a naive forger replaces the genuine measurement messages by forged ones with values drawn in the population bounds. Rationale: a short window forges one message and a long one the whole day, which changes how many instances of the range, response and hold templates the attack can reach. The window is half open on the arrival time of the messages. No value has been chosen by an agent."
+  - parameter: injection_naive_duration_long
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "Level long of the window duration of injection_naive, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of the window in which a naive forger replaces the genuine measurement messages by forged ones with values drawn in the population bounds. Rationale: a short window forges one message and a long one the whole day, which changes how many instances of the range, response and hold templates the attack can reach. The window is half open on the arrival time of the messages. No value has been chosen by an agent."
+  - parameter: injection_informed_duration_short
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "Level short of the window duration of injection_informed, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of the window in which an informed attacker replaces the genuine measurement messages by forged ones inside the range of the patient's own readings. Rationale: the informed attacker that is coherent on every channel is the declared diagnosability limit, and the duration only fixes how many messages it replaces; the levels are the same grid as for the other window attacks so that the two attacker levels are compared at equal exposure. The window is half open on the arrival time of the messages. No value has been chosen by an agent."
+  - parameter: injection_informed_duration_medium
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "Level medium of the window duration of injection_informed, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of the window in which an informed attacker replaces the genuine measurement messages by forged ones inside the range of the patient's own readings. Rationale: the informed attacker that is coherent on every channel is the declared diagnosability limit, and the duration only fixes how many messages it replaces; the levels are the same grid as for the other window attacks so that the two attacker levels are compared at equal exposure. The window is half open on the arrival time of the messages. No value has been chosen by an agent."
+  - parameter: injection_informed_duration_long
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "Level long of the window duration of injection_informed, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of the window in which an informed attacker replaces the genuine measurement messages by forged ones inside the range of the patient's own readings. Rationale: the informed attacker that is coherent on every channel is the declared diagnosability limit, and the duration only fixes how many messages it replaces; the levels are the same grid as for the other window attacks so that the two attacker levels are compared at equal exposure. The window is half open on the arrival time of the messages. No value has been chosen by an agent."
+  - parameter: injection_naive_pulse_lower_bpm
+    unit: "bpm"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "The lower population bound of the heart rate (bpm) in which a naive forger draws the pulse rate of a forged cuff message, independently of the ECG heart rate at the same instant (a naive attacker does not know the cross-device invariant between the cuff pulse rate and the ECG). The registry holds pressure bounds only (bound_bp_lower and bound_bp_upper, illustrative, unverified, analisi 4.7), so the heart-rate bounds are rows of this file. A physiological value: the human supplies it with a source; the lower bound must not exceed the upper one. Rationale: a population bound and not the patient's own range is what makes the naive level naive. No value has been chosen by an agent."
+  - parameter: injection_naive_pulse_upper_bpm
+    unit: "bpm"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T08; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T08
+    rationale: null
+    note: "The upper population bound of the heart rate (bpm) in which a naive forger draws the pulse rate of a forged cuff message, independently of the ECG heart rate at the same instant (a naive attacker does not know the cross-device invariant between the cuff pulse rate and the ECG). The registry holds pressure bounds only (bound_bp_lower and bound_bp_upper, illustrative, unverified, analisi 4.7), so the heart-rate bounds are rows of this file. A physiological value: the human supplies it with a source; the lower bound must not exceed the upper one. Rationale: a population bound and not the patient's own range is what makes the naive level naive. No value has been chosen by an agent."

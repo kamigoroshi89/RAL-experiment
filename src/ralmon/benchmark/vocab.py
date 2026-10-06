@@ -21,6 +21,14 @@ the injectors use the outcomes ``late`` and ``failed``. A ``NODE_STATE`` event n
 "non-empty"). Later tasks add the keys they emit (the declined-task outcome, the gateway
 verification outcome): they extend ``PAYLOAD_KEYS`` here, so a key can only enter a trace by
 being declared. ``check_payload`` is the one conformity check.
+
+WS04-T08 adds the gateway verification outcome of the conventions table (gap G-4 of
+``docs/models/evidence-channels.md``, ADR-035, interim until it is confirmed): a ``DEVICE_ERROR``
+event from the source ``gateway`` with ``verification`` (the value ``failed``) and ``subject``
+(the identifier of the device whose message failed verification). A device error carries
+``error_code`` or the two keys of the gateway, never both kinds. The schema has no event kind for
+a gateway outcome, so the failed verification of one message is logged as this event (the policy
+"flag" of ``docs/models/threat-model.md`` hypothesis H-GW: the message itself stays in the trace).
 """
 
 from __future__ import annotations
@@ -35,6 +43,7 @@ from ralmon.signals import EventKind
 
 __all__ = [
     "ALL_PAYLOAD_KEYS",
+    "BLE_DEVICES",
     "KEY_COMMANDED",
     "KEY_CONTENT_CHANGE",
     "KEY_ERROR_CODE",
@@ -42,7 +51,9 @@ __all__ = [
     "KEY_OUTCOME",
     "KEY_PATIENT_ID",
     "KEY_STATE",
+    "KEY_SUBJECT",
     "KEY_TASK",
+    "KEY_VERIFICATION",
     "KINDS",
     "KIND_DOSE",
     "KIND_MEASUREMENT",
@@ -56,6 +67,7 @@ __all__ = [
     "SOURCE_CUFF",
     "SOURCE_DISPENSER",
     "SOURCE_ECG",
+    "SOURCE_GATEWAY",
     "SOURCE_OXIMETER",
     "SOURCE_ROBOT",
     "SOURCE_WARD",
@@ -70,6 +82,8 @@ __all__ = [
     "TASK_MANIPULATE",
     "TASK_NAVIGATE",
     "TASK_WITNESS",
+    "VERIFICATIONS",
+    "VERIFICATION_FAILED",
     "VocabularyError",
     "check_payload",
 ]
@@ -81,6 +95,11 @@ SOURCE_ROBOT: Final = "robot"
 SOURCE_WARD: Final = "ward"  # the ward node that issues the care-plan ticks
 SOURCE_ECG: Final = "ecg"  # the ECG device (heart rate); a BLE device
 SOURCE_OXIMETER: Final = "oximeter"  # the pulse oximeter (SpO2); a BLE device
+SOURCE_GATEWAY: Final = (
+    "gateway"  # the ward gateway: it verifies messages (a node, not a device)
+)
+# The BLE devices whose messages the gateway receives; a message of one of them can be verified.
+BLE_DEVICES: Final = (SOURCE_CUFF, SOURCE_DISPENSER, SOURCE_ECG, SOURCE_OXIMETER)
 
 # SCHEDULE_TICK: which care-plan step is due (owned by this module).
 KEY_KIND: Final = "kind"
@@ -126,6 +145,14 @@ KEY_COMMANDED: Final = "commanded"  # bool: the transition was announced as deli
 # DEVICE_ERROR: a device-defined label, never a clinical value.
 KEY_ERROR_CODE: Final = "error_code"
 _MAX_ERROR_CODE: Final = 256  # algorithmic: longest error label
+# DEVICE_ERROR from the gateway: the verification of one message failed (evidence-channels.md,
+# Trace evidence conventions: interim convention of gap G-4).
+KEY_VERIFICATION: Final = "verification"
+VERIFICATION_FAILED: Final = "failed"
+VERIFICATIONS: Final = (VERIFICATION_FAILED,)
+KEY_SUBJECT: Final = (
+    "subject"  # the source identifier of the device whose message failed
+)
 
 PAYLOAD_KEYS: Final[Mapping[EventKind, frozenset[str]]] = MappingProxyType(
     {
@@ -135,7 +162,9 @@ PAYLOAD_KEYS: Final[Mapping[EventKind, frozenset[str]]] = MappingProxyType(
         EventKind.INTAKE: frozenset(),
         EventKind.ROBOT_TASK: frozenset({KEY_TASK, KEY_OUTCOME, KEY_PATIENT_ID}),
         EventKind.NODE_STATE: frozenset({KEY_STATE, KEY_COMMANDED}),
-        EventKind.DEVICE_ERROR: frozenset({KEY_ERROR_CODE}),
+        EventKind.DEVICE_ERROR: frozenset(
+            {KEY_ERROR_CODE, KEY_VERIFICATION, KEY_SUBJECT}
+        ),
         EventKind.MEASUREMENT_MISSED: frozenset(),
     }
 )
@@ -147,14 +176,23 @@ REQUIRED_ALTERNATIVES: Final[Mapping[EventKind, tuple[frozenset[str], ...]]] = (
     MappingProxyType(
         {
             EventKind.NODE_STATE: (frozenset({KEY_STATE}),),
-            EventKind.DEVICE_ERROR: (frozenset({KEY_ERROR_CODE}),),
+            EventKind.DEVICE_ERROR: (
+                frozenset({KEY_ERROR_CODE}),
+                frozenset({KEY_VERIFICATION, KEY_SUBJECT}),
+            ),
         }
     )
 )
 ALL_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset().union(*PAYLOAD_KEYS.values())
 
 _ENUMERATED: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
-    {KEY_KIND: KINDS, KEY_TASK: TASKS, KEY_OUTCOME: OUTCOMES, KEY_STATE: STATES}
+    {
+        KEY_KIND: KINDS,
+        KEY_TASK: TASKS,
+        KEY_OUTCOME: OUTCOMES,
+        KEY_STATE: STATES,
+        KEY_VERIFICATION: VERIFICATIONS,
+    }
 )
 
 
@@ -176,7 +214,7 @@ def _check_value(key: str, value: object) -> None:
     elif key == KEY_COMMANDED:
         if not isinstance(value, bool):
             raise VocabularyError(f"payload {key!r} must be a bool, got {value!r}")
-    elif key == KEY_ERROR_CODE:
+    elif key in (KEY_ERROR_CODE, KEY_SUBJECT):
         if (
             not isinstance(value, str)
             or not value.strip()
@@ -208,18 +246,31 @@ def check_payload(kind: object, payload: object) -> None:
             f"payload must be a mapping, got {type(payload).__name__}"
         )
     allowed = PAYLOAD_KEYS[kind]
-    for key, value in payload.items():
+    try:
+        items = list(payload.items())
+    except Exception as exc:  # a mapping whose methods misbehave
+        raise VocabularyError(f"payload cannot be read: {type(exc).__name__}") from exc
+    for key, value in items:
         if not isinstance(key, str) or key not in allowed:
             raise VocabularyError(
                 f"payload key {key!r} is not declared for {kind.value} events "
                 f"(declared: {sorted(allowed)})"
             )
         _check_value(key, value)
+    keys = {key for key, _ in items}
     alternatives = REQUIRED_ALTERNATIVES.get(kind)
     if alternatives is not None and not any(
-        alternative <= set(payload) for alternative in alternatives
+        alternative <= keys for alternative in alternatives
     ):
         raise VocabularyError(
             f"payload of a {kind.value} event needs "
             + " or ".join(str(sorted(a)) for a in alternatives)
+        )
+    if (
+        kind is EventKind.DEVICE_ERROR
+        and KEY_ERROR_CODE in keys
+        and (KEY_VERIFICATION in keys or KEY_SUBJECT in keys)
+    ):
+        raise VocabularyError(
+            "a device error carries an error code or a failed verification, not both"
         )

@@ -39,8 +39,13 @@ from typing import Any
 
 import numpy as np
 import pytest
-import ralmon.benchmark.inject_c3 as c3_mod
 import yaml
+
+import ralmon.benchmark as benchmark_pkg
+import ralmon.benchmark.inject_c2 as c2_mod
+import ralmon.benchmark.inject_c3 as c3_mod
+import ralmon.benchmark.injection as injection_mod
+from ralmon.benchmark import vocab
 from ralmon.benchmark.inject_c3 import (
     C3_SUBTYPES,
     CAPABILITY_SETS,
@@ -53,11 +58,6 @@ from ralmon.benchmark.inject_c3 import (
     capabilities_of,
     load_capability_sets,
 )
-
-import ralmon.benchmark as benchmark_pkg
-import ralmon.benchmark.inject_c2 as c2_mod
-import ralmon.benchmark.injection as injection_mod
-from ralmon.benchmark import vocab
 from ralmon.benchmark.injection import (
     InjectionContext,
     InjectionContextError,
@@ -321,6 +321,21 @@ def run(
     return apply_observation_injections(stream_, specs, ctx(**kwargs))
 
 
+def items_at(out: InjectionResult | ObservedStream, t_rx: int) -> list[Any]:
+    """The keys of the cuff items (samples and events) that arrived at ``t_rx``, in order."""
+    s = out_stream(out)
+    cuff = [x for x in s.samples if x.signal in CUFF_SIGNALS]
+    cuff += [
+        e for e in s.events if e.source == "cuff" and e.kind is not EventKind.NODE_STATE
+    ]
+    return [item_key(x) for x in cuff if x.t_rx_ms == t_rx]
+
+
+def in_window(item: Sample | Event, window: tuple[int, int] = WINDOW) -> bool:
+    """Whether an item arrived in the half-open window ``(onset, duration)``."""
+    return window[0] <= item.t_rx_ms < window[0] + window[1]
+
+
 def day0(**kwargs: Any) -> dict[str, Any]:
     """Keyword arguments for a run on a stream of day 0 (no previous day)."""
     return {"previous_day": None, "cuff_start": 1, "dispenser_start": 1, **kwargs}
@@ -550,6 +565,14 @@ def test_replay_window_is_half_open_and_only_the_window_is_replaced() -> None:
     out2 = run([before])
     assert values_of(out2, "bp") == [128.0, 127.0, 133.0]  # 12:00:30 is outside
     assert out.records[0].realised and out2.records[0].realised
+    # the message that arrives exactly at the end of the window is the genuine one, whole: its
+    # four samples and its event, with the number the device gave it
+    genuine = run([])
+    for result, boundary in ((out, AT[2]), (out2, AT[1])):
+        assert items_at(result, boundary) == items_at(genuine, boundary)
+        assert len([k for k in items_at(result, boundary) if k[0] == "S"]) >= 4
+    # and one that arrives exactly at the start belongs to the window
+    assert items_at(out, AT[1]) != items_at(genuine, AT[1])
 
 
 def test_replay_needs_previous_day() -> None:
@@ -587,6 +610,13 @@ def test_naive_replay_keeps_stale_metadata() -> None:
     assert [e.seq for e in events_of(out, EventKind.MEASUREMENT)] == [1, 2, 3]
     for signal in CUFF_SIGNALS:
         assert [s.seq for s in samples_of(out, signal)] == [1, 2, 3]
+    # a verbatim copy: the pulse is the one the cuff sent (70), not the ECG rate (78, 82, 86)
+    assert values_of(out, "hr_pulse") == [PULSE] * 3
+    assert [
+        s.value
+        for s in samples_of(out, "hr_ecg")
+        if s.t_device_ms % DAY in (8 * HOUR, 12 * HOUR, 16 * HOUR)
+    ] == [78.0, 82.0, 86.0]
     (record,) = out.records
     assert C_SEQ in record.evidence_paths and C_TS in record.evidence_paths
     assert record.level == "naive" and record.details["capabilities"] == {
@@ -732,6 +762,187 @@ def test_informed_replay_keeps_the_delivered_sequence_contiguous() -> None:
 TODAY_NEXT_CUFF = run([]).stream.settings["next_cuff_seq"]
 
 
+def test_informed_replay_numbers_start_after_the_last_earlier_message_or_the_day_counter() -> (
+    None
+):
+    # no genuine message in the window, one before it: the copies follow it
+    early = fixture_stream(1, (6 * HOUR,), [126.0])
+    out = run([replay(*WINDOW, "informed")], stream_=early)
+    assert [s for _, s in cuff_seqs(out)] == [4, 5, 6, 7]
+    assert out.records[0].details["n_suppressed"] == 0
+    assert out.stream.settings["next_cuff_seq"] == 8  # 5 + 3
+    # no genuine message at all: the first number of the day
+    none = fixture_stream(1, (), ())
+    out2 = run([replay(*WINDOW, "informed")], stream_=none, cuff_start=9)
+    assert [s for _, s in cuff_seqs(out2)] == [9, 10, 11]
+    assert out2.stream.settings["next_cuff_seq"] == 12
+    # a genuine message exactly at the end of the window belongs to the sequence that follows
+    end = DAY + 18 * HOUR + INFLATION
+    late = fixture_stream(1, (8 * HOUR, 12 * HOUR, 18 * HOUR), [131.0, 127.0, 140.0])
+    out3 = run([replay(WINDOW[0], end - WINDOW[0], "informed")], stream_=late)
+    assert [(t, s) for t, s in cuff_seqs(out3)][-1] == (
+        end,
+        7,
+    )  # it was 6: three copies, two genuine
+    assert [s for _, s in cuff_seqs(out3)] == [4, 5, 6, 7]
+    assert values_of(out3, "bp") == [128.0, 135.0, 120.0, 140.0]
+    for signal in (
+        CUFF_SIGNALS
+    ):  # the samples of the message at the boundary moved with its event
+        assert [s.seq for s in samples_of(out3, signal)] == [4, 5, 6, 7], signal
+
+
+def test_a_replay_that_equals_the_genuine_messages_is_not_realised() -> None:
+    # today the cuff sent what the previous day sent, with the pulse of the ECG: nothing changes
+    same_bps = fixture_stream(1, bps=PREV_BPS)
+    ecg = {s.t_device_ms: s.value for s in samples_of(same_bps, "hr_ecg")}
+    patched = tuple(
+        dataclasses.replace(s, value=ecg[(s.t_rx_ms // HOUR) * HOUR])
+        if s.signal == "hr_pulse"
+        else s
+        for s in same_bps.samples
+    )
+    today = dataclasses.replace(same_bps, samples=patched)
+    out = run([replay(*WINDOW, "informed")], stream_=today)
+    (record,) = out.records
+    assert (
+        record.n_changed == 0
+        and record.realised is False
+        and "reason" in record.details
+    )
+    assert same(out, run([], stream_=today))
+    assert ground_truth_events(out.records) == []
+    assert out.stream.settings["next_cuff_seq"] == TODAY_NEXT_CUFF
+    # with the authentication of the cuff the rewritten messages still fail verification
+    secured = run(
+        [replay(*WINDOW, "informed")], stream_=today, authenticating_devices=CUFF_AUTH
+    )
+    assert secured.records[0].realised and len(gateway_events(secured)) == 3
+
+
+def test_no_attack_writes_an_auth_sample() -> None:
+    # a keyless injector cannot write the authentication of a dispense (EC-GAP-9, ADR-035 (3)):
+    # the genuine one of the 08:10 dispense stays, nothing is added, in either deployment
+    genuine = S("auth", DAY + DOSE_TICKS[0], 1.0)
+    today = dataclasses.replace(
+        NO_EVENING_DOSE, samples=tuple(by_rx([*NO_EVENING_DOSE.samples, genuine]))
+    )
+    for auth in ((), ("cuff", "dispenser")):
+        out = run(ALL_C3, stream_=today, authenticating_devices=auth)
+        assert all(r.realised for r in out.records)
+        assert samples_of(out, "auth") == [genuine]
+        for one in ALL_C3:
+            single = run([one], stream_=today, authenticating_devices=auth)
+            assert samples_of(single, "auth") == [genuine], one.subtype
+    assert "auth" not in {s.signal for s in NO_EVENING_DOSE.samples}
+
+
+def test_the_pulse_follows_the_last_ecg_sample_at_or_before_the_instant() -> None:
+    extra = S(
+        "hr_ecg", AT[0], 99.0
+    )  # an ECG sample exactly at the instant of the message
+    later = S("hr_ecg", AT[0] + 1, 55.0)  # and one just after it
+    today = dataclasses.replace(
+        TODAY, samples=tuple(by_rx([*TODAY.samples, extra, later]))
+    )
+    out = run([replay(*WINDOW, "informed")], stream_=today)
+    assert [s.value for s in samples_of(out, "hr_pulse")] == [99.0, 82.0, 86.0]
+    # an ECG that only starts after the message leaves the pulse of the replay as it was
+    start = dataclasses.replace(
+        TODAY,
+        samples=tuple(
+            s for s in TODAY.samples if s.signal != "hr_ecg" or s.t_rx_ms > AT[2]
+        ),
+    )
+    out2 = run([replay(*WINDOW, "informed")], stream_=start)
+    assert [s.value for s in samples_of(out2, "hr_pulse")] == [PULSE] * 3
+    out3 = run([inj_informed(*WINDOW)], stream_=start)
+    assert [s.value for s in samples_of(out3, "hr_pulse")] == [PULSE] * 3
+
+
+def test_a_replay_cannot_leave_the_range_of_time() -> None:
+    last = injection_mod._MAX_DAY_INDEX  # the last day the pipeline accepts
+    top = last * DAY
+    limit = injection_mod.MAX_TIME_MS
+    assert (
+        top + DAY > limit > top + HOUR
+    )  # the premise: the end of the day is past the limit
+
+    def previous(t: int) -> ObservedStream:
+        return ObservedStream(
+            PATIENT,
+            last - 1,
+            0,
+            "plan-1",
+            (S("bp", t, 131.0, 1),),
+            (E(EventKind.MEASUREMENT, t, "cuff", None, 1),),
+        )
+
+    today = ObservedStream(PATIENT, last, 0, "plan-1", (), ())
+    window = (top, DAY)  # the whole day, which ends past the limit
+    bad = ctx(
+        previous_day=previous(top - 10 * SEC)
+    )  # lands one day later: past the limit
+    work = injection_mod.InjectionWork(today, bad)
+    with pytest.raises(InjectionContextError):  # refused before anything is written
+        c3_mod.replay(work, [replay(*window, "naive")], bad)
+    assert not work.samples and not work.events
+    # a window that ends at the limit and a message that lands inside it: replayed as usual
+    inside = (top, limit - top)
+    good = ctx(previous_day=previous(top - DAY + HOUR))
+    out = apply_observation_injections(today, [replay(*inside, "naive")], good)
+    assert out.records[0].realised
+    assert [s.t_rx_ms for s in samples_of(out, "bp")] == [top + HOUR]
+    finalize_observed(out.stream)
+
+
+def test_a_stream_without_numbers_gets_replayed_messages_without_numbers() -> None:
+    raw_prev = fixture_stream(0)
+    raw_today = fixture_stream(1)
+    work = injection_mod.InjectionWork(raw_today, ctx(previous_day=raw_prev))
+    (record,) = c3_mod.replay(
+        work, [replay(*WINDOW, "informed")], ctx(previous_day=raw_prev)
+    )
+    assert record.realised
+    assert {s.seq for s in work.samples if s.signal in CUFF_SIGNALS} == {None}
+    assert {e.seq for e in work.events if e.kind is EventKind.MEASUREMENT} == {None}
+    assert (
+        "next_cuff_seq" not in work.settings
+    )  # nothing numbered it, nothing invented it
+
+
+def test_a_replay_with_nothing_to_replay_leaves_the_genuine_messages_alone() -> None:
+    # the previous day sent nothing between 16:30 and 18:30, today's patient did (17:00)
+    out = run(
+        [replay(DAY + 16 * HOUR + 30 * MIN, 2 * HOUR, "informed")],
+        stream_=TODAY_HOURLY,
+        previous_day=PREV,
+    )
+    (record,) = out.records
+    assert (
+        record.realised is False
+        and record.n_changed == 0
+        and record.details["n_copies"] == 0
+    )
+    assert same(out, run([], stream_=TODAY_HOURLY, previous_day=PREV))
+    assert 17 * HOUR + INFLATION in {s.t_rx_ms % DAY for s in samples_of(out, "bp")}
+
+
+def test_the_previous_day_must_be_exactly_the_day_before() -> None:
+    three = numbered(fixture_stream(0))
+    today = fixture_stream(2)
+    with pytest.raises(InjectionContextError):
+        run([replay(2 * DAY + 7 * HOUR, 10 * HOUR)], stream_=today, previous_day=three)
+    with pytest.raises(InjectionContextError):
+        run([], stream_=today, previous_day=three)
+    ok = run(
+        [replay(2 * DAY + 7 * HOUR, 10 * HOUR)],
+        stream_=today,
+        previous_day=numbered(fixture_stream(1)),
+    )
+    assert ok.records[0].realised
+
+
 def test_a_replayed_duplicate_sequence_number_is_not_renumbered_by_finalisation() -> (
     None
 ):
@@ -751,39 +962,42 @@ def test_injection_naive_values_and_incoherent_pulse() -> None:
     out = run([inj_naive(*WINDOW)], stream_=TODAY_HOURLY, previous_day=PREV_HOURLY)
     (record,) = out.records
     assert record.realised and record.level == "naive"
-    window_start = WINDOW[0]
-    forged = [s for s in samples_of(out, "bp") if s.t_rx_ms >= window_start]
-    assert (
-        len(forged) == 11
-    )  # one forged message for each genuine message of the window
+    forged = [s for s in samples_of(out, "bp") if in_window(s)]
+    # one forged message for each genuine message of the window (07:00 to 16:00)
+    assert len(forged) == 10
     lo, hi = BOUNDS_BP
     assert all(lo <= s.value <= hi for s in forged)
-    assert not {160.0 + k for k in range(11)} & {
-        s.value for s in forged
-    }  # the genuine ones are gone
+    genuine = {160.0 + k for k in range(10)}
+    assert not genuine & {s.value for s in forged}  # the genuine ones are gone
+    # the messages outside the window are the genuine ones
+    outside = [s.value for s in samples_of(out, "bp") if not in_window(s)]
+    assert outside == [128.0, 170.0]
     # the values ignore the patient's history: some lie outside the range of the readings
-    history = [120.0, 135.0]
-    assert any(not history[0] <= s.value <= history[1] for s in forged)
+    assert any(not 120.0 <= s.value <= 135.0 for s in forged)
     # the pulse rate is independent of the ECG at the same instant
     ecg = {s.t_device_ms: s.value for s in samples_of(out, "hr_ecg")}
-    pulses = [s for s in samples_of(out, "hr_pulse") if s.t_rx_ms >= window_start]
-    assert len(pulses) == 11
+    pulses = [s for s in samples_of(out, "hr_pulse") if in_window(s)]
+    assert len(pulses) == 10
     for p in pulses:
         held = ecg[(p.t_rx_ms // HOUR) * HOUR]
         assert p.value != held and BOUNDS_HR[0] <= p.value <= BOUNDS_HR[1]
     assert X_DIFF in record.evidence_paths and C_SEQ in record.evidence_paths
-    assert (
-        C_TS not in record.evidence_paths
-    )  # the stamp is the receive time, inside the bounds
+    # the stamp is the receive time, inside the bounds: nothing is late
+    assert C_TS not in record.evidence_paths
     # the forged messages carry no group: the system template reads the held earlier values
-    in_window = lambda s: s.t_rx_ms >= window_start
     assert not [s for s in samples_of(out, "cuff_health") if in_window(s)]
     assert not [s for s in samples_of(out, "inflation_ms") if in_window(s)]
     messages = [e for e in events_of(out, EventKind.MEASUREMENT) if in_window(e)]
-    assert len(messages) == 11 and all(e.t_device_ms == e.t_rx_ms for e in messages)
+    assert len(messages) == 10 and all(e.t_device_ms == e.t_rx_ms for e in messages)
     # a keyless forger that does not know the counter numbers its own messages from one
-    assert [e.seq for e in messages] == list(range(1, 12))
-    assert [s.seq for s in forged] == list(range(1, 12))
+    assert [e.seq for e in messages] == list(range(1, 11))
+    assert [s.seq for s in forged] == list(range(1, 11))
+    assert [s.seq for s in pulses] == list(range(1, 11))
+    # the genuine messages around the window keep the device's numbers
+    assert [
+        e.seq for e in events_of(out, EventKind.MEASUREMENT) if not in_window(e)
+    ] == [4, 15]
+    assert record.details["n_forged"] == 10 and record.details["n_suppressed"] == 50
 
 
 def test_injection_naive_ignores_the_history_of_the_patient() -> None:
@@ -792,16 +1006,16 @@ def test_injection_naive_ignores_the_history_of_the_patient() -> None:
     b = run([inj_naive(*WINDOW)], stream_=TODAY_HOURLY, previous_day=shifted)
     assert samples_of(a, "bp") == samples_of(b, "bp")
     assert samples_of(a, "hr_pulse") == samples_of(b, "hr_pulse")
-    no_prev = run(
-        [inj_naive(*WINDOW)],
-        stream_=TODAY_HOURLY,
-        previous_day=None,
-    )
+    no_prev = run([inj_naive(*WINDOW)], stream_=TODAY_HOURLY, previous_day=None)
     assert samples_of(a, "bp") == samples_of(no_prev, "bp")
-    # nor does it read what today's genuine readings were
+    # nor does it read what today's genuine readings were (the forged ones are the same)
     other_today = fixture_stream(1, HOURLY_TICKS, [90.0 + k for k in range(12)])
     c = run([inj_naive(*WINDOW)], stream_=other_today, previous_day=PREV_HOURLY)
-    assert samples_of(a, "bp") == samples_of(c, "bp")
+    forged = [s for s in samples_of(a, "bp") if in_window(s)]
+    assert forged and forged == [s for s in samples_of(c, "bp") if in_window(s)]
+    assert [s for s in samples_of(a, "hr_pulse") if in_window(s)] == [
+        s for s in samples_of(c, "hr_pulse") if in_window(s)
+    ]
 
 
 def test_injection_naive_needs_the_population_bounds() -> None:
@@ -818,8 +1032,8 @@ def test_injection_informed_values_and_coherent_pulse() -> None:
     out = run([inj_informed(*WINDOW)], stream_=TODAY_HOURLY, previous_day=PREV_HOURLY)
     (record,) = out.records
     assert record.realised and record.level == "informed"
-    forged = [s for s in samples_of(out, "bp") if s.t_rx_ms >= WINDOW[0]]
-    assert len(forged) == 11
+    forged = [s for s in samples_of(out, "bp") if in_window(s)]
+    assert len(forged) == 10
     # inside the minimum and the maximum of the patient's own genuine readings: the previous day
     # (120 to 135) and the reading of 06:00 (128); the genuine readings of the window, which
     # lie far above, are not part of what the attacker has captured before the attack
@@ -827,20 +1041,23 @@ def test_injection_informed_values_and_coherent_pulse() -> None:
     assert len({s.value for s in forged}) > 1  # drawn, not copied
     # the pulse rate equals the ECG rate exactly at each injected instant
     ecg = {s.t_device_ms: s.value for s in samples_of(out, "hr_ecg")}
-    pulses = [s for s in samples_of(out, "hr_pulse") if s.t_rx_ms >= WINDOW[0]]
-    assert len(pulses) == 11
+    pulses = [s for s in samples_of(out, "hr_pulse") if in_window(s)]
+    assert len(pulses) == 10
     assert all(p.value == ecg[(p.t_rx_ms // HOUR) * HOUR] for p in pulses)
+    assert all(p.value != PULSE for p in pulses)  # the genuine pulse (70) was replaced
     # fresh metadata: the stamp is the receive time and the numbers are the genuine ones
-    messages = [
-        e for e in events_of(out, EventKind.MEASUREMENT) if e.t_rx_ms >= WINDOW[0]
-    ]
+    messages = [e for e in events_of(out, EventKind.MEASUREMENT) if in_window(e)]
     assert all(e.t_device_ms == e.t_rx_ms for e in messages)
-    assert [e.seq for e in messages] == list(range(5, 16))
-    assert [s.seq for s in forged] == list(range(5, 16))
+    assert [e.seq for e in messages] == list(range(5, 15))
+    assert [s.seq for s in forged] == list(range(5, 15))
+    assert [s.seq for s in pulses] == list(range(5, 15))
+    assert [e.seq for e in events_of(out, EventKind.MEASUREMENT)] == list(range(4, 16))
     # the group is written as the device does: the genuine health and inflation stay
     assert values_of(out, "cuff_health") == [1.0] * 12
     assert values_of(out, "inflation_ms") == [float(INFLATION)] * 12
     assert record.evidence_paths == ()  # no authentication: nothing at all
+    assert record.details["n_renumbered"] == 0
+    assert out.stream.settings["next_cuff_seq"] == 16
 
 
 def test_injection_informed_range_is_the_range_of_what_was_captured_before() -> None:
@@ -853,14 +1070,73 @@ def test_injection_informed_range_is_the_range_of_what_was_captured_before() -> 
             stream_=dataclasses.replace(wide, seed=seed),
             previous_day=dataclasses.replace(PREV_HOURLY, seed=seed),
         )
-        forged = [s.value for s in samples_of(out, "bp") if s.t_rx_ms >= WINDOW[0]]
-        assert all(120.0 <= v <= 140.0 for v in forged)
+        forged = [s.value for s in samples_of(out, "bp") if in_window(s)]
+        assert len(forged) == 10 and all(120.0 <= v <= 140.0 for v in forged)
         reached.add(max(forged) > 135.0)
-    assert reached == {True}  # the reading of today before the window is in the history
+    # the reading of today before the window is in the history: values above 135 are drawn
+    assert True in reached
     # a single captured value is the only value that can be forged
     one = numbered(fixture_stream(0, (8 * HOUR,), [127.0]))
     out2 = run([inj_informed(*WINDOW)], previous_day=one)
     assert set(values_of(out2, "bp")) == {127.0}
+
+
+def test_a_reading_that_arrives_at_the_onset_is_not_part_of_what_was_captured_before() -> (
+    None
+):
+    onset = DAY + 7 * HOUR + INFLATION  # the 07:00 reading (160) arrives exactly then
+    window = (onset, 9 * HOUR)
+    for seed in range(8):
+        out = run(
+            [inj_informed(*window)],
+            stream_=dataclasses.replace(TODAY_HOURLY, seed=seed),
+            previous_day=dataclasses.replace(PREV_HOURLY, seed=seed),
+        )
+        forged = [s.value for s in samples_of(out, "bp") if in_window(s, window)]
+        assert len(forged) == 9 and all(120.0 <= v <= 135.0 for v in forged), seed
+
+
+def test_a_naive_pulse_is_not_the_pressure_draw() -> None:
+    out = run([inj_naive(*WINDOW)], stream_=TODAY_HOURLY)
+    (bp_lo, bp_hi), (hr_lo, hr_hi) = BOUNDS_BP, BOUNDS_HR
+    bp = [
+        (s.value - bp_lo) / (bp_hi - bp_lo)
+        for s in samples_of(out, "bp")
+        if in_window(s)
+    ]
+    hr = [
+        (s.value - hr_lo) / (hr_hi - hr_lo)
+        for s in samples_of(out, "hr_pulse")
+        if in_window(s)
+    ]
+    assert len(bp) == len(hr) == 10 and len({round(x, 12) for x in bp + hr}) == 20
+
+
+def test_forged_values_stay_in_the_bounds_whatever_the_rounding() -> None:
+    # degenerate and huge bounds: the value is exactly the bound, and always finite
+    for bounds in ((50.1, 50.1), (-1e308, 1e308), (0.1, 0.1), (1e308, 1e308)):
+        out = run(
+            [inj_naive(*WINDOW)],
+            stream_=TODAY_HOURLY,
+            bp_bounds_mmhg=bounds,
+            hr_bounds_bpm=bounds,
+        )
+        values = [
+            s.value
+            for s in samples_of(out, "bp") + samples_of(out, "hr_pulse")
+            if in_window(s)
+        ]
+        assert len(values) == 20 and all(math.isfinite(v) for v in values)
+        assert all(bounds[0] <= v <= bounds[1] for v in values)
+        if bounds[0] == bounds[1]:
+            assert set(values) == {bounds[0]}
+        finalize_observed(out.stream)
+    rng = np.random.default_rng(7)  # FIXTURE-ONLY seed of the test
+    for _ in range(2_000):
+        low = float(rng.uniform(-300, 300))
+        high = low + float(rng.choice([0.0, 1e-9, 1.0, 400.0]))
+        for u in (0.0, float(rng.random()), float(np.nextafter(1.0, 0.0))):
+            assert low <= c3_mod._draw(low, high, u) <= high
 
 
 def test_injection_informed_without_a_capture_is_not_realised() -> None:
@@ -880,13 +1156,31 @@ def test_injection_windows_without_a_genuine_message_are_not_realised() -> None:
         assert same(out, run([]))
 
 
+def test_a_window_that_holds_only_a_failed_attempt_has_no_reading_to_forge() -> None:
+    failed = InjectionSpec(InjectedClass.C2, "cuff_detached", DAY + 11 * HOUR, 2 * HOUR)
+    around = (
+        DAY + 11 * HOUR + 30 * MIN,
+        2 * HOUR,
+    )  # holds the failed 12:00:30 attempt only
+    base = run([failed])
+    assert events_of(base, EventKind.MEASUREMENT_MISSED) and events_of(
+        base, EventKind.DEVICE_ERROR
+    )
+    for attack in (inj_naive(*around), inj_informed(*around)):
+        out = run([failed, attack])
+        assert out.records[-1].realised is False and out.records[-1].n_changed == 0
+        assert same(
+            out, base
+        )  # the failure report is the device's: nobody forges over it
+
+
 def test_injection_with_authentication_logs_a_failed_verification_for_every_message() -> (
     None
 ):
     for s in (inj_naive(*WINDOW), inj_informed(*WINDOW)):
         out = run([s], authenticating_devices=CUFF_AUTH)
         assert [e.t_rx_ms for e in gateway_events(out)] == list(AT)
-        assert out.records[0].evidence_paths[-1] == C_AUTH
+        assert C_AUTH in out.records[0].evidence_paths
     assert run([inj_informed(*WINDOW)], authenticating_devices=CUFF_AUTH).records[
         0
     ].evidence_paths == (C_AUTH,)
@@ -905,6 +1199,77 @@ def test_informed_injection_keeps_the_sequence_contiguous_over_a_failed_attempt(
     assert out.stream.settings["next_cuff_seq"] == 6
     day = finalize_observed(out.stream)
     assert [s.seq for s in day.samples if s.signal == "bp"] == [4, 5]
+
+
+def test_an_informed_attack_does_not_renumber_attacker_traffic_that_ignores_the_counter() -> (
+    None
+):
+    detached = InjectionSpec(InjectedClass.C2, "cuff_detached", DAY + 8 * HOUR, HOUR)
+    informed = inj_informed(
+        DAY + 7 * HOUR, 3 * HOUR
+    )  # 07:00 to 10:00, with a failed attempt
+    # 14:00:30 and 15:00:30 are forged; the genuine message of 16:00:30 arrives at the very end
+    naive = inj_naive(DAY + 14 * HOUR, 2 * HOUR + INFLATION)
+    kwargs = {"stream_": TODAY_HOURLY, "previous_day": PREV_HOURLY}
+    base = run([detached, naive], **kwargs)
+    both = run([detached, naive, informed], **kwargs)
+    # the informed window held three messages (07:00, the failed 08:00, 09:00) and two forged
+    # readings: the relay closes the gap, so every genuine message after the window moves by one
+    assert (
+        both.records[-1].spec == informed
+        and both.records[-1].details["n_renumbered"] > 0
+    )
+    forged_at = [DAY + 14 * HOUR + INFLATION, DAY + 15 * HOUR + INFLATION]
+    for signal in ("bp", "hr_pulse"):  # the samples as well as the events
+        moved = {s.t_rx_ms: s.seq for s in samples_of(both, signal)}
+        original = {s.t_rx_ms: s.seq for s in samples_of(base, signal)}
+        for t in forged_at:  # the numbers of the naive forger are its own: untouched
+            assert moved[t] == original[t] and original[t] in (1, 2)
+        for t, seq in moved.items():
+            if t > DAY + 10 * HOUR and t not in forged_at:
+                assert seq == original[t] - 1, (
+                    signal,
+                    t,
+                )  # the genuine ones moved by one
+    events_moved = {t: seq for t, seq in cuff_seqs(both)}
+    events_original = {t: seq for t, seq in cuff_seqs(base)}
+    assert [events_moved[t] for t in forged_at] == [
+        events_original[t] for t in forged_at
+    ]
+    boundary = (
+        DAY + 16 * HOUR + INFLATION
+    )  # arrives exactly when the naive window closes
+    assert events_moved[boundary] == events_original[boundary] - 1
+    assert (
+        both.stream.settings["next_cuff_seq"]
+        == base.stream.settings["next_cuff_seq"] - 1
+    )
+    assert duplicates_at_one_instant(both) == []
+
+
+def test_a_stale_replay_keeps_its_numbers_whatever_an_informed_attack_does() -> None:
+    detached = InjectionSpec(InjectedClass.C2, "cuff_detached", DAY + 8 * HOUR, HOUR)
+    informed = inj_informed(DAY + 7 * HOUR, 3 * HOUR)
+    stale = replay(
+        DAY + 15 * HOUR, 2 * HOUR, "naive"
+    )  # copies of the previous day, 15:00 and 16:00
+    kwargs = {"stream_": TODAY_HOURLY, "previous_day": PREV_HOURLY}
+    out = run([detached, informed, stale], **kwargs)
+    copies = [
+        e
+        for e in events_of(out, EventKind.MEASUREMENT)
+        if DAY + 15 * HOUR <= e.t_rx_ms < DAY + 17 * HOUR
+    ]
+    previous = [
+        e
+        for e in events_of(PREV_HOURLY, EventKind.MEASUREMENT)
+        if 15 * HOUR <= e.t_rx_ms < 17 * HOUR
+    ]
+    assert len(copies) == len(previous) == 2
+    assert [e.seq for e in copies] == [
+        e.seq for e in previous
+    ]  # the previous day's numbers
+    assert all(e.t_device_ms == e.t_rx_ms - DAY for e in copies)
 
 
 # ---------------------------------------------------------------------------
@@ -975,6 +1340,19 @@ def test_dispense_forgery_numbers_follow_the_fresh_metadata_flag() -> None:
     assert same(a, b)
     assert [e.seq for e in events_of(a, EventKind.DISPENSE)] == [3, 4, 5, 6]
     assert a.stream.settings["next_dispenser_seq"] == 7
+
+
+def test_a_forgery_on_a_day_without_a_dispense_takes_the_counter_of_the_day() -> None:
+    quiet = fixture_stream(
+        1, doses_taken=()
+    )  # the robot visits, the dispenser never opens
+    assert not events_of(quiet, EventKind.DISPENSE)
+    informed = run([forge(FORGED_AT, "informed")], stream_=quiet, dispenser_start=7)
+    assert [e.seq for e in events_of(informed, EventKind.DISPENSE)] == [7]
+    assert informed.stream.settings["next_dispenser_seq"] == 8
+    naive = run([forge(FORGED_AT, "naive")], stream_=quiet, dispenser_start=7)
+    assert [e.seq for e in events_of(naive, EventKind.DISPENSE)] == [1]
+    assert naive.stream.settings["next_dispenser_seq"] == 7
 
 
 def test_a_naive_forgery_never_shares_the_number_of_a_genuine_dispense_at_its_instant() -> (
@@ -1485,11 +1863,11 @@ def test_records_are_json_native_and_describe_the_attack() -> None:
         d = record.details
         assert d["capabilities"] == dataclasses.asdict(
             capabilities_of(record.level or "")
-        ) or record.spec.subtype in (
-            "injection_naive",
-            "injection_informed",
         )
+        assert set(d["capabilities"]) == set(FLAGS)
         assert d["gateway_policy"] == "flag"
+        unit = {"dispense_forgery": "dispenser", "presence_spoof": "robot"}
+        assert d["target"] == unit.get(record.spec.subtype, "cuff")
         assert isinstance(d["auth_deployed"], bool) and isinstance(
             d[EXPECTED_UNDETECTABLE], bool
         )
@@ -1669,18 +2047,18 @@ def test_samples_outside_effect_are_bit_identical(subtype: str) -> None:
     assert same(run(others, **kwargs), without)
 
 
-@pytest.mark.parametrize("subtype", sorted(PAIRED))
+NOTHING: dict[str, InjectionSpec] = {
+    "replay": replay(DAY + 20 * HOUR, HOUR, "naive"),
+    "injection_naive": inj_naive(DAY + 20 * HOUR, HOUR),
+    "injection_informed": inj_informed(DAY + 20 * HOUR + 1, HOUR),
+    "presence_spoof": spoof(DAY + 12 * HOUR + 30 * MIN),
+}  # a forgery is always realised: there is none here
+
+
+@pytest.mark.parametrize("subtype", sorted(NOTHING))
 def test_an_unrealised_injection_shifts_no_draw_of_another(subtype: str) -> None:
     others = [s for k, s in PAIRED.items() if k != subtype]
-    nothing = {
-        "replay": replay(DAY + 20 * HOUR, HOUR, "naive"),
-        "injection_naive": inj_naive(DAY + 20 * HOUR, HOUR),
-        "injection_informed": inj_informed(DAY + 20 * HOUR + 1, HOUR),
-        "dispense_forgery": None,
-        "presence_spoof": spoof(DAY + 12 * HOUR + 30 * MIN),
-    }[subtype]
-    if nothing is None:
-        pytest.skip("a forgery is always realised")
+    nothing = NOTHING[subtype]
     kwargs = {"stream_": PAIRED_STREAM, "previous_day": PAIRED_PREV}
     base = run(others, **kwargs)
     extra = run([*others, nothing], **kwargs)
@@ -1942,6 +2320,119 @@ def test_written_observed_day_reads_back(tmp_path: Path) -> None:
         ALL_C3, stream_=NO_EVENING_DOSE, authenticating_devices=("cuff", "dispenser")
     )
     day = finalize_observed(out.stream)
+    write_observed_day(tmp_path, day)
+    assert read_observed_day(tmp_path, day.patient_id, day.day_index) == day
+
+
+def test_the_attacks_compose_with_built_base_streams_of_two_days(
+    tmp_path: Path,
+) -> None:
+    from ralmon.benchmark.measurement import (
+        MeasurementDesign,
+        NoJitter,
+        build_observed_base,
+    )
+    from ralmon.benchmark.priors import DeviceErrorModel
+    from ralmon.benchmark.schedule import Schedule
+    from ralmon.benchmark.segments import InlineSegment, SegmentLibrary
+
+    lib = SegmentLibrary.from_memory(
+        [
+            InlineSegment(
+                "hr-1",
+                "hr_clean",
+                [70.0 + i % 30 for i in range(DAY // MIN)],
+                MIN,
+                "bpm",
+            ),
+            InlineSegment("sp-1", "spo2_clean", [95.0] * (DAY // MIN), MIN, "%"),
+        ]
+    )
+    design = MeasurementDesign(INFLATION, 0, 0.0, DWELL, MIN, INFLATION)
+    schedule = Schedule(
+        dose_ticks_ms=(8 * HOUR, 20 * HOUR),
+        measurement_ticks_ms=(9 * HOUR, 13 * HOUR, 21 * HOUR),
+    )
+
+    def build(day: int) -> tuple[ObservedStream, LatentDay]:
+        samples = tuple(
+            S("bp", day * DAY + t, 128.0 + day + t // (6 * HOUR))
+            for t in range(0, DAY, MIN)
+        )
+        events = (
+            E(EventKind.DISPENSE, day * DAY + 8 * HOUR, "dispenser"),
+            E(EventKind.INTAKE, day * DAY + 8 * HOUR + SEC, "patient"),
+            E(EventKind.DISPENSE, day * DAY + 20 * HOUR, "dispenser"),
+        )
+        latent = LatentDay(PATIENT, day, 0, samples, events)
+        errors = DeviceErrorModel(0.0, 0.0, 0.0, 0.0)
+        base = build_observed_base(
+            latent, schedule, "plan-1", errors, design, NoJitter(), lib, 0, 0
+        )
+        return base, latent
+
+    base0, _ = build(0)
+    day0_out = apply_observation_injections(base0, [], InjectionContext(0, library=lib))
+    base1, latent1 = build(1)
+    settings = day0_out.stream.settings
+    context = InjectionContext(
+        0,
+        library=lib,
+        latent=latent1,
+        previous_day=day0_out.stream,
+        bp_bounds_mmhg=BOUNDS_BP,
+        hr_bounds_bpm=BOUNDS_HR,
+        cuff_start=settings["next_cuff_seq"],
+        dispenser_start=settings["next_dispenser_seq"],
+        authenticating_devices=("cuff", "dispenser"),
+    )
+    specs = [
+        replay(DAY + 8 * HOUR + 30 * MIN, 2 * HOUR, "informed"),  # the 09:00 reading
+        inj_naive(DAY + 12 * HOUR, 2 * HOUR),  # the 13:00 reading
+        forge(DAY + 15 * HOUR, "informed"),
+        spoof(DAY + 20 * HOUR + MIN, "informed", intake=True),
+    ]
+    before = copy.deepcopy(latent1)
+    out = apply_observation_injections(base1, specs, context)
+    assert latent1 == before
+    assert [r.spec.subtype for r in out.records] == [
+        "replay", "injection_naive", "dispense_forgery", "presence_spoof",
+    ]  # fmt: skip
+    assert all(r.realised for r in out.records)
+    day = finalize_observed(out.stream)
+    validate_day(day)
+    # the replayed 09:00 reading is the one of the previous day, delivered one day later
+    t = 9 * HOUR + INFLATION
+    old = [
+        s.value for s in day0_out.stream.samples if s.signal == "bp" and s.t_rx_ms == t
+    ]
+    new = [s.value for s in day.samples if s.signal == "bp" and s.t_rx_ms == DAY + t]
+    assert (
+        new == old
+        and len(new) == 1
+        and new != [s.value for s in base1.samples if s.signal == "bp"][:1]
+    )
+    # the informed replay continues the device's numbers (4 after the 3 of the previous day), the
+    # naive forger counts from one, and the genuine 21:00 message keeps its own number
+    cuff = [e.seq for e in day.events if e.kind is EventKind.MEASUREMENT]
+    assert cuff == [settings["next_cuff_seq"], 1, settings["next_cuff_seq"] + 2]
+    # the informed forgery took the number after the 08:00 dispense and moved the 20:00 one
+    dispenses = [e.seq for e in day.events if e.kind is EventKind.DISPENSE]
+    start = settings["next_dispenser_seq"]
+    assert dispenses == [start, start + 1, start + 2]
+    assert out.stream.settings["next_dispenser_seq"] == start + 3
+    # the replay, the naive message and the forged dispense of authenticating devices failed
+    assert len(gateway_events(out)) == 3
+    # the spoofed intake is the only intake of the evening, inside the visit of the 20:00 dose
+    evening = [
+        e.t_device_ms
+        for e in day.events
+        if e.kind is EventKind.INTAKE and e.t_device_ms > DAY + 12 * HOUR
+    ]
+    assert evening == [DAY + 20 * HOUR + MIN]
+    # the day is written and read back unchanged
+    from ralmon.benchmark.trace import read_observed_day
+
     write_observed_day(tmp_path, day)
     assert read_observed_day(tmp_path, day.patient_id, day.day_index) == day
 
@@ -2521,7 +3012,7 @@ ALLOWED_C3_IMPORTS = (
     "ralmon.benchmark.vocab",
 )
 ALLOWED_THIRD_PARTY = {
-    "__future__", "collections", "dataclasses", "itertools", "math", "numbers", "os",
+    "__future__", "bisect", "collections", "dataclasses", "itertools", "math", "numbers", "os",
     "pathlib", "types", "typing", "numpy", "ralmon", "yaml",
 }  # fmt: skip
 
@@ -2686,6 +3177,97 @@ def test_every_public_function_raises_only_the_named_error_for_junk() -> None:
     assert total > 2_000
 
 
+class BadList(list):  # type: ignore[type-arg]
+    """A list whose methods misbehave."""
+
+    def __len__(self) -> int:
+        raise RuntimeError("boom")
+
+    def __iter__(self) -> Any:
+        raise RuntimeError("boom")
+
+
+class BadTuple(tuple):  # type: ignore[type-arg]
+    def __len__(self) -> int:
+        raise RuntimeError("boom")
+
+    def __iter__(self) -> Any:
+        raise RuntimeError("boom")
+
+    def __getitem__(self, key: Any) -> Any:
+        raise RuntimeError("boom")
+
+
+class BadSet(set):  # type: ignore[type-arg]
+    def __iter__(self) -> Any:
+        raise RuntimeError("boom")
+
+
+class BadFloat(float):
+    def __float__(self) -> float:
+        raise RuntimeError("boom")
+
+
+class BadInt(int):
+    def __int__(self) -> int:
+        raise RuntimeError("boom")
+
+
+def test_collections_that_misbehave_raise_the_named_error() -> None:
+    for bad in (
+        BadList([1.0, 2.0]),
+        BadTuple((1.0, 2.0)),
+        (BadFloat(1.0), 2.0),
+        [1.0, BadFloat(2.0)],
+    ):
+        for name in ("bp_bounds_mmhg", "hr_bounds_bpm"):
+            with pytest.raises(InjectionContextError):
+                InjectionContext(0, **{name: bad})
+    for bad in (BadList(["cuff"]), BadTuple(("cuff",)), BadSet({"cuff"})):
+        with pytest.raises(InjectionContextError):
+            InjectionContext(0, authenticating_devices=bad)
+    for field in ("cuff_start", "dispenser_start", "patient_index"):
+        with pytest.raises(InjectionContextError):
+            InjectionContext(**{"patient_index": 0, field: BadInt(3)})
+    assert InjectionContext(
+        0, authenticating_devices={"cuff", "ecg"}
+    ).authenticating_devices == ("cuff", "ecg")
+    assert InjectionContext(
+        0, authenticating_devices=frozenset({"dispenser"})
+    ).authenticating_devices == ("dispenser",)
+
+
+def test_new_public_functions_raise_only_the_named_error_for_junk() -> None:
+    total = 0
+    total += fuzz(injection_mod.check_previous_day, [fresh_work(), ctx()])
+    total += fuzz(injection_mod.load_design_mapping, [INJECTIONS_FILE, "attacker"])
+    total += fuzz(
+        injection_mod.Injector,
+        list(injector_kwargs().values()),
+        {
+            "levels": ("naive",),
+            "level_required": False,
+            "overlap_group": "g",
+            "magnitude_optional": False,
+        },
+    )
+    assert total > 500
+    # the vocabulary raises its own error, never another one
+    for junk in _junk():
+        for payload in (
+            {"verification": junk, "subject": "cuff"},
+            {"verification": "failed", "subject": junk},
+            {"verification": junk},
+            {"subject": junk},
+            {"error_code": "x", "verification": junk},
+            junk,
+        ):
+            try:
+                vocab.check_payload(EventKind.DEVICE_ERROR, payload)
+            except vocab.VocabularyError:
+                pass
+
+
 def test_junk_in_the_attack_fields_of_the_context_raises_only_the_named_error() -> None:
     specs = list(ALL_C3)
     calls = 0
@@ -2762,7 +3344,7 @@ def test_junk_in_the_genuine_stream_raises_only_the_named_error() -> None:
                     )
                 except InjectionError:
                     pass
-    assert calls > 1_000
+    assert calls > 900
 
 
 def test_hostile_numbers_in_the_stream_cannot_break_an_attack() -> None:
@@ -2781,12 +3363,17 @@ def test_hostile_numbers_in_the_stream_cannot_break_an_attack() -> None:
                 ]
             )
         ),
-    )
-    with pytest.raises(InjectionContextError):
-        run(
-            [forge(FORGED_AT, "informed")], stream_=odd
-        )  # the renumbering would pass the limit
-    run([forge(FORGED_AT, "naive")], stream_=odd)  # the naive forger does not renumber
+    )  # called directly: the pipeline would number the dispenses again
+    with pytest.raises(InjectionContextError):  # the renumbering would pass the limit
+        c3_mod.dispense_forgery(
+            injection_mod.InjectionWork(odd, ctx()),
+            [forge(FORGED_AT, "informed")],
+            ctx(),
+        )
+    work = injection_mod.InjectionWork(odd, ctx())
+    (record,) = c3_mod.dispense_forgery(work, [forge(FORGED_AT, "naive")], ctx())
+    assert record.realised  # the naive forger does not renumber
+    assert [e.seq for e in work.events if e.kind is EventKind.DISPENSE][-1] == 1
     negative = dataclasses.replace(
         TODAY,
         events=tuple(
