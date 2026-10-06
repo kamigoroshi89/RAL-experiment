@@ -1077,6 +1077,10 @@ def assign_device_seq(
     events: list[Event] = []
     attempts = first_cuff - 1  # one counter for MEASUREMENT and MEASUREMENT_MISSED
     last_attempt: tuple[object, int] | None = None
+    unmatched: list[
+        int
+    ] = []  # missed attempts of one instant still waiting for their error
+    unmatched_t: object = None
     dispenses = first_dispense - 1
     for event in stream_.events:
         if not isinstance(event, Event):
@@ -1086,6 +1090,10 @@ def assign_device_seq(
         if event.kind in _CUFF_ATTEMPT_EVENTS:
             attempts += 1
             last_attempt = (event.t_device_ms, attempts)
+            if event.kind is EventKind.MEASUREMENT_MISSED:
+                if event.t_device_ms != unmatched_t:
+                    unmatched, unmatched_t = [], event.t_device_ms
+                unmatched.append(attempts)
             event = replace(event, seq=attempts)
         elif event.kind is EventKind.DISPENSE:
             dispenses += 1
@@ -1096,7 +1104,12 @@ def assign_device_seq(
             and last_attempt is not None
             and event.t_device_ms == last_attempt[0]
         ):
-            event = replace(event, seq=last_attempt[1])
+            # the n-th error of an instant belongs to the n-th missed attempt of that instant: two
+            # attempts at one instant (a delayed visit landing on another) keep distinct numbers
+            if unmatched and event.t_device_ms == unmatched_t:
+                event = replace(event, seq=unmatched.pop(0))
+            else:
+                event = replace(event, seq=last_attempt[1])
         events.append(event)
     settings = dict(old_settings)
     settings["next_cuff_seq"] = max(message, attempts) + 1

@@ -156,9 +156,7 @@ __all__ = [
 MAX_PLANNED_DISPENSES: Final[int] = (
     100_000  # algorithmic: dispenses given to the planner
 )
-DETACHED_ERROR_CODE: Final = (
-    "cuff_detached"  # a generator-defined label, not a vendor code
-)
+DETACHED_ERROR_CODE: Final = "CUFF_E01"  # a generator-defined opaque code: not a vendor code, not a ground-truth label
 DETACHED_HEALTH: Final = 0.0  # cuff_health of a failed attempt (1.0 is healthy)
 DETACHED_INFLATION_MS: Final = 0  # no inflation: below any positive registry minimum
 

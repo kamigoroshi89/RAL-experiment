@@ -749,12 +749,18 @@ def injection_sub_index(spec: InjectionSpec) -> int:
     """The ``sub_index`` of the named stream of an injection (module docstring)."""
     if not isinstance(spec, InjectionSpec):
         raise InjectionSpecError("spec must be an InjectionSpec")
-    target = spec.params.get("target")
+    _ensure_registered()
+    injector = _REGISTRY.get((spec.cls, spec.subtype))
+    if injector is not None:
+        target = _target_of(spec, injector)  # an omitted default target is the target
+    else:
+        raw = spec.params.get("target")
+        target = raw if isinstance(raw, str) else None
     return stable_index(
         "injection",
         spec.cls.value,
         spec.subtype,
-        target if isinstance(target, str) else None,
+        target,
         spec.onset_ms,
         spec.duration_ms,
     )
@@ -798,6 +804,13 @@ def _checked_specs(specs: object) -> tuple[InjectionSpec, ...]:
     return tuple(specs)
 
 
+def _params_key(params: Mapping[str, Any]) -> tuple[tuple[str, str, str], ...]:
+    """Params as a sortable key: values of different types are never compared with each other."""
+    return tuple(
+        sorted((repr(k), type(v).__name__, repr(v)) for k, v in params.items())
+    )
+
+
 def _sort_key(spec: InjectionSpec) -> tuple[Any, ...]:
     injector = _injector_of(spec)
     target = _target_of(spec, injector)
@@ -812,7 +825,7 @@ def _sort_key(spec: InjectionSpec) -> tuple[Any, ...]:
         -1 if spec.duration_ms is None else spec.duration_ms,
         magnitude,
         spec.magnitude_unit or "",
-        tuple(spec.params.items()),
+        _params_key(spec.params),
         spec.level or "",
         spec.confounder_group or "",
     )
@@ -1287,6 +1300,12 @@ class LevelRow:
     filled: bool
     source_type: str
     source_ref: str
+    quantity_unit: str = ""
+
+    @property
+    def reference(self) -> str | None:
+        """The quantity this value is a multiple of (``unit`` is ``"x <name>"``), else None."""
+        return self.unit[2:] if self.unit.startswith("x ") else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1363,16 +1382,24 @@ def _read_design(path: Path) -> Mapping[str, Any]:
     return document
 
 
-def _has_number(node: object) -> bool:
+def _has_number(node: object, seen: set[int] | None = None) -> bool:
     if isinstance(node, bool):
         return False
     if isinstance(node, (int, float)):
         return True
+    if not isinstance(node, (Mapping, list, tuple)):
+        return False
+    # YAML aliases share nodes: a node already walked held no number (else the walk would have
+    # stopped), so walking it again only costs time (exponential in the depth of the aliases)
+    seen = set() if seen is None else seen
+    if id(node) in seen:
+        return False
+    seen.add(id(node))
     if isinstance(node, Mapping):
-        return any(_has_number(k) or _has_number(v) for k, v in node.items())
-    if isinstance(node, (list, tuple)):
-        return any(_has_number(v) for v in node)
-    return False
+        return any(
+            _has_number(k, seen) or _has_number(v, seen) for k, v in node.items()
+        )
+    return any(_has_number(v, seen) for v in node)
 
 
 def _design_text(where: str, value: object) -> str:
@@ -1426,6 +1453,7 @@ def _quantity(
                 row.filled,
                 row.source_type,
                 row.source_ref,
+                unit,
             )
         )
     return QuantityDesign(key, unit, reference, tuple(made))
@@ -1539,15 +1567,31 @@ def load_injection_design(
     return MappingProxyType(design)
 
 
-def resolve_magnitude(level: LevelRow, reference_value: float) -> float:
+def resolve_magnitude(level: LevelRow, reference_value: float, reference: str) -> float:
     """The absolute magnitude of a relative level: ``level.value * reference_value``.
 
-    ``reference_value`` is the value of the reference quantity the design names (for the bias,
-    ``cuff_error_sd_mmhg`` from the prior source); a level that is still awaiting a value is an
-    error, never a default.
+    ``reference`` names the quantity whose value ``reference_value`` is (the prior or registry
+    name, for the bias ``cuff_error_sd_mmhg``) and must be the one the level itself names in its
+    unit: a block can mix references (the level ``device_bias`` is a multiple of
+    ``cuff_bias_mmhg`` inside a block whose other levels are multiples of the SD), and an
+    absolute row has no reference to resolve. A quantity in milliseconds is rounded to whole
+    milliseconds (ADR-017: a product such as ``1.1 * 900000`` is not an integer in binary
+    floating point). A level that is still awaiting a value is an error, never a default.
     """
     if not isinstance(level, LevelRow):
         raise InjectionDesignError("level must be a LevelRow")
+    if not isinstance(reference, str) or not reference:
+        raise InjectionDesignError(
+            "reference must be the name of the reference quantity"
+        )
+    if level.reference is None:
+        raise InjectionDesignError(
+            f"row {level.name!r} is absolute ({level.unit}): its value is the magnitude"
+        )
+    if reference != level.reference:
+        raise InjectionDesignError(
+            f"row {level.name!r} is a multiple of {level.reference!r}, not of {reference!r}"
+        )
     if level.value is None:
         raise InjectionDesignError(f"row {level.name!r} is awaiting_human_value")
     value = level.value * _real(
@@ -1555,4 +1599,6 @@ def resolve_magnitude(level: LevelRow, reference_value: float) -> float:
     )
     if not math.isfinite(value):
         raise InjectionDesignError("the resolved magnitude is not finite")
+    if level.quantity_unit == "ms":
+        value = float(round(value))
     return value

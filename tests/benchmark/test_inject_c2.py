@@ -2564,14 +2564,18 @@ def test_design_loader_unfilled_and_filled_state_on_copies(tmp_path: Path) -> No
     magnitude = full["cuff_silent_bias"].magnitude
     assert magnitude is not None and magnitude.reference == "cuff_error_sd_mmhg"
     level = magnitude.levels[0]
-    assert resolve_magnitude(level, 4.0) == level.value * 4.0
+    sd = "cuff_error_sd_mmhg"
+    assert resolve_magnitude(level, 4.0, sd) == level.value * 4.0
     with pytest.raises(InjectionDesignError):
-        resolve_magnitude(empty["cuff_silent_bias"].magnitude.levels[0], 4.0)  # type: ignore[union-attr]
+        resolve_magnitude(empty["cuff_silent_bias"].magnitude.levels[0], 4.0, sd)  # type: ignore[union-attr]
     for bad in (math.nan, math.inf, True, "4", None, 10**400):
         with pytest.raises(InjectionDesignError):
-            resolve_magnitude(level, bad)  # type: ignore[arg-type]
+            resolve_magnitude(level, bad, sd)  # type: ignore[arg-type]
     with pytest.raises(InjectionDesignError):
-        resolve_magnitude("level", 4.0)  # type: ignore[arg-type]
+        resolve_magnitude("level", 4.0, sd)  # type: ignore[arg-type]
+    for bad_reference in (None, "", 4, b"x"):
+        with pytest.raises(InjectionDesignError):
+            resolve_magnitude(level, 4.0, bad_reference)  # type: ignore[arg-type]
     # the committed file loads in whatever state it is
     committed = load_injection_design(INJECTIONS_FILE)
     assert set(committed) == set(C2_SUBTYPES)
@@ -2994,7 +2998,7 @@ def test_every_public_function_raises_only_the_named_error_for_junk() -> None:
     total += fuzz(
         injection_mod.check_call, [fresh_work(), [GOOD_SPEC], ctx(), "cuff_silent_bias"]
     )
-    total += fuzz(resolve_magnitude, [level, 4.0])
+    total += fuzz(resolve_magnitude, [level, 4.0, "cuff_error_sd_mmhg"])
     total += fuzz(load_injection_design, [INJECTIONS_FILE], {"section": "c2"})
     total += fuzz(
         plan_dispenser_bounces,
@@ -3316,7 +3320,8 @@ def test_sub_index_separates_units_and_is_pinned() -> None:
         len({injection_sub_index(ble(9 * HOUR, HOUR, t)) for t in DEVICE_SIGNALS}) == 4
     )
     # pinned: a change of the derivation would change every benchmark (like StreamPurpose ids)
-    assert injection_sub_index(ecg(11 * HOUR, 3 * MIN)) == 101811575
+    # (review round 1: an omitted default target hashes as the target it stands for, "ecg")
+    assert injection_sub_index(ecg(11 * HOUR, 3 * MIN)) == 3505845073
     assert injection_sub_index(a) == 3598622535
     assert injection_mod.stable_index("bounce_plan", 1000) == 1463015463
     assert injection_mod.stable_index(
@@ -3409,7 +3414,7 @@ def test_the_detached_attempt_reports_no_inflation() -> None:
     assert (
         DETACHED_INFLATION_MS == 0
     )  # no inflation: below any positive registry minimum
-    assert DETACHED_HEALTH == 0.0 and DETACHED_ERROR_CODE == "cuff_detached"
+    assert DETACHED_HEALTH == 0.0 and DETACHED_ERROR_CODE == "CUFF_E01"
 
 
 def test_ecg_quality_is_dropped_when_the_library_carries_none() -> None:
@@ -4022,3 +4027,111 @@ def test_a_required_alternative_needs_all_of_its_keys(
     with pytest.raises(vocab.VocabularyError):
         vocab.check_payload(EventKind.NODE_STATE, {"state": "active"})
     vocab.check_payload(EventKind.NODE_STATE, {"state": "active", "commanded": True})
+
+
+# ---------------------------------------------------------------------------
+# Review round 1 (independent review of 2026-10-06): each test failed before its fix
+# ---------------------------------------------------------------------------
+
+
+def test_canonical_order_survives_params_of_mixed_types() -> None:
+    # the sort key compared param values of different types and raised a raw TypeError
+    good = manip(8 * HOUR, kind="measurement")
+    odd = manip(8 * HOUR, kind=5)
+    flag = manip(8 * HOUR, kind=True)
+    for other in (odd, flag):
+        assert canonical_order([good, other]) == canonical_order([other, good])
+        with pytest.raises(InjectionSpecError):
+            run([good, other])
+
+
+def test_resolve_magnitude_gives_whole_milliseconds_for_a_ms_quantity(
+    tmp_path: Path,
+) -> None:
+    full = load_injection_design(edited_injections(tmp_path, fill=True))
+    magnitude = full["nav_delay"].magnitude
+    assert magnitude is not None and magnitude.unit == "ms"
+    base = magnitude.levels[0]
+    assert base.reference == "sched_window"
+    # 1.1 * 900_000 is 990000.0000000001 in binary floating point
+    for multiple, reference_ms, expected in (
+        (1.1, 900_000.0, 990_000.0),
+        (2.3, 900_000.0, 2_070_000.0),
+        (1.1, 420_000.0, 462_000.0),
+    ):
+        level = dataclasses.replace(base, value=multiple)
+        delay = resolve_magnitude(level, reference_ms, "sched_window")
+        assert delay == expected
+        # the resolved delay is a valid spec magnitude (the documented path of the builder)
+        assert run([nav(TICKS[1], int(delay))]).records
+
+
+def test_resolve_magnitude_checks_which_reference_the_level_names(
+    tmp_path: Path,
+) -> None:
+    full = load_injection_design(edited_injections(tmp_path, fill=True))
+    magnitude = full["cuff_silent_bias"].magnitude
+    assert magnitude is not None and magnitude.reference == "cuff_error_sd_mmhg"
+    levels = {lv.level: lv for lv in magnitude.levels}
+    # the block names the SD, but the level device_bias is a multiple of the device bias itself
+    assert levels["low"].reference == "cuff_error_sd_mmhg"
+    assert levels["device_bias"].reference == "cuff_bias_mmhg"
+    assert resolve_magnitude(levels["device_bias"], -2.0, "cuff_bias_mmhg") == -2.0
+    with pytest.raises(InjectionDesignError):
+        resolve_magnitude(levels["device_bias"], 7.0, "cuff_error_sd_mmhg")
+    with pytest.raises(InjectionDesignError):
+        resolve_magnitude(levels["low"], 7.0, "cuff_bias_mmhg")
+    # an absolute row (a duration in ms) has no reference: its value is the magnitude
+    duration = full["ble_dropout"].duration
+    assert duration is not None
+    assert duration.levels[0].reference is None
+    with pytest.raises(InjectionDesignError):
+        resolve_magnitude(duration.levels[0], 2.0, "sched_window")
+
+
+def test_sub_index_and_draws_do_not_depend_on_spelling_the_default_target() -> None:
+    plain = ecg(11 * HOUR, 3 * MIN)
+    explicit = spec("ecg_noise", 11 * HOUR, 3 * MIN, None, None, target="ecg")
+    assert injection_sub_index(plain) == injection_sub_index(explicit)
+    assert values_of(run([plain]), "hr_ecg") == values_of(run([explicit]), "hr_ecg")
+
+
+def test_two_cuff_attempts_at_one_instant_keep_distinct_error_numbers() -> None:
+    # a delayed visit lands on the 12:00 attempt: two attempts, two errors, at one instant
+    out = run([nav(TICKS[1], 2 * HOUR), detached(TICKS[2] - 30 * MIN, 3 * HOUR)])
+    errors = [e for e in events_of(out, EventKind.DEVICE_ERROR) if e.source == "cuff"]
+    missed = events_of(out, EventKind.MEASUREMENT_MISSED)
+    at = [e for e in missed if e.t_device_ms == TICKS[2] + INFLATION]
+    assert len(at) == 2
+    assert len({(e.kind, e.seq) for e in errors}) == len(errors)
+    for t in {e.t_device_ms for e in missed}:
+        assert sorted(e.seq for e in errors if e.t_device_ms == t) == sorted(
+            e.seq for e in missed if e.t_device_ms == t
+        )
+
+
+def test_design_number_scan_visits_a_shared_node_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # YAML aliases share nodes: a walk that treats them as a tree is exponential in the depth
+    node: dict[str, Any] = {}
+    for _ in range(22):
+        node = {"a": node, "b": node}
+    calls = 0
+    real = injection_mod._has_number
+
+    def counting(candidate: object, seen: set[int] | None = None) -> bool:
+        nonlocal calls
+        calls += 1
+        return real(candidate, seen)
+
+    monkeypatch.setattr(injection_mod, "_has_number", counting)
+    assert counting(node) is False
+    assert calls < 200
+
+
+def test_the_detached_error_code_is_not_a_ground_truth_label() -> None:
+    labels = {s.lower() for s in C2_SUBTYPES}
+    code = DETACHED_ERROR_CODE.lower()
+    assert code not in labels
+    assert not any(label in code or code in label for label in labels)
