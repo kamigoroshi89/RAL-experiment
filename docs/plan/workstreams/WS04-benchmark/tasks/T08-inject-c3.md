@@ -3,7 +3,7 @@ id: WS04-T08
 title: C3 integrity attacks at naive and informed attacker levels
 workstream: WS04-benchmark
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS04-T06", "WS02-T02", "WS02-T03"]
 critical_path: true
 non_negotiable: false
