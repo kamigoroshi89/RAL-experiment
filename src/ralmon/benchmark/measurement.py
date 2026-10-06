@@ -88,7 +88,11 @@ counter that starts at 1 and follows the order of the stream (arrival order, not
 index): all four cuff samples of a message and its ``MEASUREMENT`` event share one number,
 as in ``docs/models/threat-model.md`` ("(source, name, seq)"), a ``DISPENSE`` has its own
 counter; robot, ward, ECG and SpO2 items keep ``seq`` None. A message starts when a cuff
-signal repeats within the current one. The counters can start at another number and the next
+signal repeats within the current one or when the instant changes (WS04-T07: a failed attempt
+of the cuff has no ``bp``, so the signal alone would merge its samples with the next
+message); a ``MEASUREMENT_MISSED`` event takes the number of the attempt like a
+``MEASUREMENT`` event, and a ``DEVICE_ERROR`` of the cuff reported at the instant of that
+attempt shares it. The counters can start at another number and the next
 ones are recorded in the settings (``next_cuff_seq``, ``next_dispenser_seq``), so that days
 chain without a restart that a replay check would flag.
 
@@ -206,6 +210,9 @@ _SPO2: Final = SignalId.SPO2.value
 _PRESENCE: Final = SignalId.PRESENCE.value
 _DAY_END: Final = SignalId.DAY_END.value
 _CUFF_SIGNALS: Final = frozenset({_BP, _INFLATION, _HEALTH, _PULSE})
+_CUFF_ATTEMPT_EVENTS: Final = frozenset(
+    {EventKind.MEASUREMENT, EventKind.MEASUREMENT_MISSED}
+)
 _VITALS_SUB: Final = {KIND_HR_CLEAN: 0, KIND_SPO2_CLEAN: 1}
 _NO_SEGMENTS: Final = "none"
 _MAX_SEQ: Final = _INT64_MAX // 2  # algorithmic: room for a counter that keeps growing
@@ -1047,6 +1054,7 @@ def assign_device_seq(
     samples: list[Sample] = []
     message = first_cuff - 1
     started = False
+    message_t: object = None
     present: set[str] = set()
     for sample in stream_.samples:
         if not isinstance(sample, Sample):
@@ -1054,30 +1062,58 @@ def assign_device_seq(
         if not isinstance(sample.signal, str):
             raise MeasurementConfigError("every sample needs a signal name")
         if sample.signal in _CUFF_SIGNALS:
-            if not started or sample.signal in present:
+            if (
+                not started
+                or sample.signal in present
+                or sample.t_device_ms != message_t
+            ):
                 message += 1
                 started = True
                 present = set()
+                message_t = sample.t_device_ms
             present.add(sample.signal)
             sample = replace(sample, seq=message)
         samples.append(sample)
     events: list[Event] = []
-    counters = {
-        EventKind.MEASUREMENT: first_cuff - 1,
-        EventKind.DISPENSE: first_dispense - 1,
-    }
+    attempts = first_cuff - 1  # one counter for MEASUREMENT and MEASUREMENT_MISSED
+    last_attempt: tuple[object, int] | None = None
+    unmatched: list[
+        int
+    ] = []  # missed attempts of one instant still waiting for their error
+    unmatched_t: object = None
+    dispenses = first_dispense - 1
     for event in stream_.events:
         if not isinstance(event, Event):
             raise MeasurementConfigError("every event must be an Event")
         if not isinstance(event.kind, EventKind):
             raise MeasurementConfigError("every event needs an EventKind")
-        if event.kind in counters:
-            counters[event.kind] += 1
-            event = replace(event, seq=counters[event.kind])
+        if event.kind in _CUFF_ATTEMPT_EVENTS:
+            attempts += 1
+            last_attempt = (event.t_device_ms, attempts)
+            if event.kind is EventKind.MEASUREMENT_MISSED:
+                if event.t_device_ms != unmatched_t:
+                    unmatched, unmatched_t = [], event.t_device_ms
+                unmatched.append(attempts)
+            event = replace(event, seq=attempts)
+        elif event.kind is EventKind.DISPENSE:
+            dispenses += 1
+            event = replace(event, seq=dispenses)
+        elif (
+            event.kind is EventKind.DEVICE_ERROR
+            and event.source == SOURCE_CUFF
+            and last_attempt is not None
+            and event.t_device_ms == last_attempt[0]
+        ):
+            # the n-th error of an instant belongs to the n-th missed attempt of that instant: two
+            # attempts at one instant (a delayed visit landing on another) keep distinct numbers
+            if unmatched and event.t_device_ms == unmatched_t:
+                event = replace(event, seq=unmatched.pop(0))
+            else:
+                event = replace(event, seq=last_attempt[1])
         events.append(event)
     settings = dict(old_settings)
-    settings["next_cuff_seq"] = max(message, counters[EventKind.MEASUREMENT]) + 1
-    settings["next_dispenser_seq"] = counters[EventKind.DISPENSE] + 1
+    settings["next_cuff_seq"] = max(message, attempts) + 1
+    settings["next_dispenser_seq"] = dispenses + 1
     return replace(
         stream_,
         samples=tuple(samples),
