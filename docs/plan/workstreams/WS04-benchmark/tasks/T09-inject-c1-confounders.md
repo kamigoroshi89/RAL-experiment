@@ -3,7 +3,7 @@ id: WS04-T09
 title: C1 injection and deliberate confounders
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS04-T07", "WS04-T08"]
 critical_path: true
 non_negotiable: false
