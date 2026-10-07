@@ -70,7 +70,9 @@ counted twice (WS04 README issue I10). The witnessed ``INTAKE`` carries no paylo
 the reading, ``evidence-channels.md``); a latent INTAKE becomes an observed one only if a visit
 covers it, so a true intake is never copied verbatim and a dose delayed beyond the dwell has
 a DISPENSE and no INTAKE. The observed ``DISPENSE`` repeats the latent time with source
-``dispenser`` and an empty payload. Not emitted here: ``NODE_STATE`` events for the robot
+``dispenser`` and an empty payload (with ``dispenser_content_sensing`` it carries ``content_change``
+``CONTENT_PER_RELEASE``: WS04-T09, the capability that separates a double take from a bounce).
+Not emitted here: ``NODE_STATE`` events for the robot
 co-location status (needed by the availability mask H-MASK of the evidence conventions),
 which WS04-T07 declares in ``vocab.py``; the visits are in ``ObservedStream.visits`` for it.
 Fault-free ECG heart rate and SpO2 equal the clean segments: noise enters only through the
@@ -135,6 +137,7 @@ from ralmon.benchmark.segments import (
 )
 from ralmon.benchmark.trace import JsonValue, LatentDay
 from ralmon.benchmark.vocab import (
+    KEY_CONTENT_CHANGE,
     KEY_KIND,
     KEY_OUTCOME,
     KEY_PATIENT_ID,
@@ -151,6 +154,7 @@ from ralmon.benchmark.vocab import (
 from ralmon.signals import DurationMs, Event, EventKind, Sample, SignalId, TimeMs
 
 __all__ = [
+    "CONTENT_PER_RELEASE",
     "DESIGN_ROWS",
     "MAX_JITTER_DELAYS",
     "MAX_JITTER_FILE_BYTES",
@@ -189,6 +193,9 @@ _MIB: Final = 1024 * 1024  # algorithmic: one mebibyte
 MAX_JITTER_FILE_BYTES: Final[int] = 4 * _MIB  # algorithmic: jitter file size
 MAX_JITTER_DELAYS: Final[int] = 100_000  # algorithmic: delays in a jitter file
 _N_NORMALS: Final = 3  # algorithmic: cuff error, inflation, pulse error per measurement
+# ``content_change`` of a real release of a dispenser that senses its content: one unit leaves it (the
+# unit the dispenser declares is a released-pill counter, so a release is +1 and a bounce is 0).
+CONTENT_PER_RELEASE: Final[float] = 1.0
 _MAX_TEXT: Final = 256  # algorithmic: longest identifier
 _INT64_MAX: Final = int(np.iinfo(np.int64).max)
 _INT64_MIN: Final = int(np.iinfo(np.int64).min)
@@ -858,8 +865,14 @@ def build_observed_base(
     *,
     allow_no_segments: bool = False,
     skip_measurement_ticks_ms: Iterable[int] = (),
+    dispenser_content_sensing: bool = False,
 ) -> ObservedStream:
     """The fault-free observed stream of one latent day (module docstring).
+
+    ``dispenser_content_sensing`` (WS04-T09, default False: the stream is then exactly as before)
+    says that the dispenser senses its content: every observed ``DISPENSE`` then carries
+    ``content_change`` ``CONTENT_PER_RELEASE`` (a real release; the extra dispense of a bounce reports
+    0.0, see ``inject_c2``). It is the capability that separates a double take from a bounce.
 
     ``skip_measurement_ticks_ms`` lists measurement ticks (clock time in the schedule) that
     the patient refuses: the robot visits, no reading is made, and no draw of any other
@@ -879,6 +892,8 @@ def build_observed_base(
         raise MeasurementConfigError("library must be a SegmentLibrary")
     if not isinstance(allow_no_segments, bool):
         raise MeasurementConfigError("allow_no_segments must be a bool")
+    if not isinstance(dispenser_content_sensing, bool):
+        raise MeasurementConfigError("dispenser_content_sensing must be a bool")
     key = _key(seed, patient_index, day_index)
     if not _is_integer(latent.seed) or int(latent.seed) != key[0]:
         raise MeasurementConfigError(
@@ -976,7 +991,15 @@ def build_observed_base(
         _event(EventKind.MEASUREMENT, r.t_ms, SOURCE_CUFF, {}) for r in records
     )
     events.extend(
-        _event(EventKind.DISPENSE, t, SOURCE_DISPENSER, {}) for t in latent_dispenses
+        _event(
+            EventKind.DISPENSE,
+            t,
+            SOURCE_DISPENSER,
+            {KEY_CONTENT_CHANGE: CONTENT_PER_RELEASE}
+            if dispenser_content_sensing
+            else {},
+        )
+        for t in latent_dispenses
     )
     arrivals = sorted(v.arrival_ms for v in visits)
     for t in latent_intakes:
@@ -1000,6 +1023,7 @@ def build_observed_base(
         "n_visits": len(visits),
         "skipped_measurement_indices": sorted(skipped),
         "n_measurements_after_day_end": n_past_end,
+        "dispenser_content_sensing": dispenser_content_sensing,
     }
     return ObservedStream(
         patient_id=patient_id,

@@ -32,6 +32,27 @@
 # values wait for a human) and the two attack classes that the threat model lists and benchmark v1 does not
 # inject. The attacker level of a replay, a forgery or a spoof is the `level` of its spec, recorded in the
 # injection log; whether a device authenticates is a property of the run, not of the attack.
+#
+# WS04-T09 (C1 and the confounder pairs). `injections.c1` has the four C1 subtypes of analisi 5.1 item 3
+# (hypertensive_spike, drug_nonresponse, hypotension_below_hold, measurement_refusal) and the forced
+# double_take that the confounder pair needs, with the families `physiology` and `behaviour`. A C1
+# injection changes the LATENT day (src/ralmon/benchmark/inject_c1.py); its truth is computed by the
+# labeller on the latent trace (WS04-T10), so these rows describe injections, not ground truth. A
+# pressure magnitude is a multiple of a named reference quantity, never an absolute mmHg: `scale_range`
+# of the registry for the spike, the distance between the patient's baseline and the registry entry
+# `bp_hold_threshold` (`baseline_to_hold_distance`) for the hypotension; the Emax scale of the
+# non-response is dimensionless (the reference is the unscaled effect, 1). Each magnitude has three
+# levels, ordered below < near < above the reference (for the non-response: complete, partial, mild),
+# so that some levels deliberately do not violate the template; the multipliers are agent-proposed grid
+# points awaiting a human value (H3), none is a clinical value. The top-level `confounders:` section
+# is the variant grid of the three confounder groups (src/ralmon/benchmark/confounders.py): which
+# discriminating channels are withheld in each variant and the expected outcome (`expected_indistinguishable`,
+# checked against the computation by tests/benchmark/test_c1_confounders.py). It holds no number: the
+# bounce gap and the double-take gap are rows of `parameters:` (dispenser_bounce_magnitude_nominal and
+# double_take_gap_ms of generator_design.yaml); a variant's `source_type` and `source_ref` are its
+# provenance (design choices of WS04-T09, awaiting confirmation by H3). The group `refusal_vs_robot_missed`
+# is not one of the two groups named in analisi 5.1 item 4: it was added by this plan from review finding
+# R3-W4 (a missed measurement is often caused by the robot, not by the patient).
 schema_version: "0.1.0"
 injections:
   c2:
@@ -156,6 +177,57 @@ injections:
       onset: "an instant inside a robot visit (the robot must be co-located); the option spoof_intake (informed level only) adds an INTAKE event of the robot at the same instant"
       duration: null
       magnitude: null
+  c1:
+    hypertensive_spike:
+      family: physiology
+      target: [patient]
+      onset: "window start drawn by the injection plan over the day (WS04-T11); the window lies inside one day"
+      duration:
+        key: duration_ms
+        unit: ms
+        levels: {short: hypertensive_spike_duration_short, medium: hypertensive_spike_duration_medium, long: hypertensive_spike_duration_long}
+      magnitude:
+        key: magnitude_mmhg
+        unit: mmHg
+        reference: scale_range
+        levels: {below: hypertensive_spike_magnitude_below, near: hypertensive_spike_magnitude_near, above: hypertensive_spike_magnitude_above}
+    drug_nonresponse:
+      family: physiology
+      target: [patient]
+      onset: "window start drawn by the injection plan over the day (WS04-T11); the window covers the true intakes whose Emax is scaled"
+      duration:
+        key: duration_ms
+        unit: ms
+        levels: {short: drug_nonresponse_duration_short, medium: drug_nonresponse_duration_medium, long: drug_nonresponse_duration_long}
+      magnitude:
+        key: emax_scale
+        unit: "1"
+        levels: {complete: drug_nonresponse_magnitude_complete, partial: drug_nonresponse_magnitude_partial, mild: drug_nonresponse_magnitude_mild}
+    hypotension_below_hold:
+      family: physiology
+      target: [patient]
+      onset: "window start drawn by the injection plan over the day (WS04-T11); the window lies inside one day"
+      duration:
+        key: duration_ms
+        unit: ms
+        levels: {short: hypotension_below_hold_duration_short, medium: hypotension_below_hold_duration_medium, long: hypotension_below_hold_duration_long}
+      magnitude:
+        key: magnitude_mmhg
+        unit: mmHg
+        reference: baseline_to_hold_distance
+        levels: {below: hypotension_below_hold_magnitude_below, near: hypotension_below_hold_magnitude_near, above: hypotension_below_hold_magnitude_above}
+    measurement_refusal:
+      family: behaviour
+      target: [patient]
+      onset: "a measurement tick of the care-plan schedule, chosen by the injection plan (WS04-T11); the robot still visits and reports the task as declined"
+      duration: null
+      magnitude: null
+    double_take:
+      family: behaviour
+      target: [patient]
+      onset: "a dose tick of the care-plan schedule; the second dispense follows after double_take_gap_ms of generator_design.yaml (a forced slot of the adherence chain, used by the confounder pair double_take_vs_bounce)"
+      duration: null
+      magnitude: null
 attacker:
   capability_sets:
     naive:
@@ -184,6 +256,159 @@ attacker:
   not_injected_in_v1:
     dispenser_physical_tamper: "not injected in v1: modelled in the threat model (physical access to the dispenser; the event is a genuine device output, so no field of the trace separates it from a patient who opened the dispenser); no injector exists"
     timestamp_manipulation: "not injected in v1: modelled in the threat model (the time metadata of a message, basis inferred from analisi 4.9 item 2); the benchmark injects no clock or delay fault of any class; no injector exists"
+confounders:
+  groups:
+    double_take_vs_bounce:
+      members:
+        A: {class: C1, subtype: double_take}
+        B: {class: C2, subtype: dispenser_bounce}
+      matrix_rows: ["analisi 4.5 row 6 (double take of the patient: a deviation of adherence)", "analisi 4.5 row 7 (sensor bounce of the dispenser: C2)"]
+      added_by: "analisi 5.1 item 4 (confounders on purpose)"
+      variants:
+        nominal_content_robot:
+          bounce_gap: nominal
+          withheld: []
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 6 and 7; awaiting confirmation by H3"
+          rationale: "Separable by the dispense interval (a sub-second bounce against the double-take gap), the content change of the second dispense (1 against 0), the witnessed second intake."
+        nominal_content_norobot:
+          bounce_gap: nominal
+          withheld: [witness, robot_task_outcome]
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 6 and 7; awaiting confirmation by H3"
+          rationale: "Separable by the dispense interval (a sub-second bounce against the double-take gap), the content change of the second dispense (1 against 0)."
+        nominal_nocontent_robot:
+          bounce_gap: nominal
+          withheld: [content_change]
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 6 and 7; awaiting confirmation by H3"
+          rationale: "Separable by the dispense interval (a sub-second bounce against the double-take gap), the witnessed second intake."
+        nominal_nocontent_norobot:
+          bounce_gap: nominal
+          withheld: [content_change, witness, robot_task_outcome]
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 6 and 7; awaiting confirmation by H3"
+          rationale: "Separable by the dispense interval (a sub-second bounce against the double-take gap)."
+        stress_content_robot:
+          bounce_gap: double_take_gap
+          withheld: []
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 6 and 7; awaiting confirmation by H3"
+          rationale: "Separable by the content change of the second dispense (1 against 0), the witnessed second intake."
+        stress_content_norobot:
+          bounce_gap: double_take_gap
+          withheld: [witness, robot_task_outcome]
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 6 and 7; awaiting confirmation by H3"
+          rationale: "Separable by the content change of the second dispense (1 against 0)."
+        stress_nocontent_robot:
+          bounce_gap: double_take_gap
+          withheld: [content_change]
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 6 and 7; awaiting confirmation by H3"
+          rationale: "Separable by the witnessed second intake."
+        stress_nocontent_norobot:
+          bounce_gap: double_take_gap
+          withheld: [content_change, witness, robot_task_outcome]
+          expected_indistinguishable: true
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 6 and 7; awaiting confirmation by H3"
+          rationale: "No discriminating channel is left: the bounce gap equals the double-take gap, the dispenser does not sense its content and no robot is co-located, so the observed dispense streams are equal while the latent days differ (two intakes against one): abstention is the right output."
+    nonresponse_vs_falsified_dispense:
+      members:
+        A: {class: C1, subtype: drug_nonresponse}
+        B: {class: C3, subtype: dispense_forgery}
+      matrix_rows: ["analisi 4.5 row 2 (drug non-response: separable only with a witness)", "analisi 4.5 row 9 (forged dispense event: partial)"]
+      added_by: "analisi 5.1 item 4 (confounders on purpose)"
+      variants:
+        naive_robot_noauth:
+          attacker: naive
+          withheld: [verification]
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 2 and 9; awaiting confirmation by H3"
+          rationale: "Separable by the missing witnessed intake of the forged variant, the sequence number of the forged dispense (a naive forger leaves a repeat or a gap)."
+        naive_robot_auth:
+          attacker: naive
+          withheld: []
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 2 and 9; awaiting confirmation by H3"
+          rationale: "Separable by the missing witnessed intake of the forged variant, the sequence number of the forged dispense (a naive forger leaves a repeat or a gap), the failed gateway verification of the forged message."
+        naive_norobot_noauth:
+          attacker: naive
+          withheld: [witness, robot_task_outcome, verification]
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 2 and 9; awaiting confirmation by H3"
+          rationale: "Separable by the sequence number of the forged dispense (a naive forger leaves a repeat or a gap)."
+        naive_norobot_auth:
+          attacker: naive
+          withheld: [witness, robot_task_outcome]
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 2 and 9; awaiting confirmation by H3"
+          rationale: "Separable by the sequence number of the forged dispense (a naive forger leaves a repeat or a gap), the failed gateway verification of the forged message."
+        informed_robot_noauth:
+          attacker: informed
+          withheld: [verification]
+          expected_indistinguishable: true
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 2 and 9; awaiting confirmation by H3"
+          rationale: "The informed attacker keeps the metadata coherent, spoofs the witness (presence and intake) where a robot is co-located and no device authenticates: the observed streams equal those of a real non-response (threat model TM-OP-5, analisi 4.5 row 9 and the last row), so the pair is the declared diagnosability limit."
+        informed_robot_auth:
+          attacker: informed
+          withheld: []
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 2 and 9; awaiting confirmation by H3"
+          rationale: "Separable by the failed gateway verification of the forged message."
+        informed_norobot_noauth:
+          attacker: informed
+          withheld: [witness, robot_task_outcome, verification]
+          expected_indistinguishable: true
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 2 and 9; awaiting confirmation by H3"
+          rationale: "With no robot co-located and an informed attacker with coherent metadata and no authentication, the observed streams equal those of a real non-response (threat model TM-OP-5)."
+        informed_norobot_auth:
+          attacker: informed
+          withheld: [witness, robot_task_outcome]
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows 2 and 9; awaiting confirmation by H3"
+          rationale: "Separable by the failed gateway verification of the forged message."
+    refusal_vs_robot_missed:
+      members:
+        A: {class: C1, subtype: measurement_refusal}
+        B: {class: C2, subtype: manipulation_failure}
+      matrix_rows: ["none: this group is not a row of the diagnosability matrix of analisi 4.5 (a missed measurement is separated by the robot task outcome, fault-model.md, patient behaviour is C1)"]
+      added_by: "added by this plan from review finding R3-W4 (a missed measurement is often caused by the robot); not one of the two groups named in analisi 5.1 item 4"
+      variants:
+        outcome_reported:
+          withheld: []
+          expected_indistinguishable: false
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows none: added from R3-W4; awaiting confirmation by H3"
+          rationale: "The robot reports the outcome of the manipulation step: declined (the patient refused) against failed (the robot failed), so the pair is separable by the robot task outcome."
+        outcome_withheld:
+          withheld: [robot_task_outcome]
+          expected_indistinguishable: true
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows none: added from R3-W4; awaiting confirmation by H3"
+          rationale: "The robot is co-located but reports no task outcome: both members lack the measurement and nothing else differs, so UNDETERMINED is a valid output (fault-model.md, patient behaviour is C1)."
+        robot_absent:
+          withheld: [witness, robot_task_outcome]
+          expected_indistinguishable: true
+          source_type: design_choice
+          source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; analisi 4.5 rows none: added from R3-W4; awaiting confirmation by H3"
+          rationale: "No robot channel at all (the embodied channel of ablation A4 removed): the two members are the same observed stream."
 parameters:
   - parameter: ble_dropout_duration_short
     unit: "ms"
@@ -614,3 +839,201 @@ parameters:
     consumer_task: WS04-T08
     rationale: null
     note: "The upper population bound of the heart rate (bpm) in which a naive forger draws the pulse rate of a forged cuff message, independently of the ECG heart rate at the same instant (a naive attacker does not know the cross-device invariant between the cuff pulse rate and the ECG). The registry holds pressure bounds only (bound_bp_lower and bound_bp_upper, illustrative, unverified, analisi 4.7), so the heart-rate bounds are rows of this file. A physiological value: the human supplies it with a source; the lower bound must not exceed the upper one. Rationale: a population bound and not the patient's own range is what makes the naive level naive. No value has been chosen by an agent."
+  - parameter: hypertensive_spike_duration_short
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level short of the window duration of hypertensive_spike, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which a constant pulse is added to the latent systolic pressure at every grid point (a hypertensive spike of the patient, not a cuff fault: the measurement process then reads the raised pressure). The window is half open, [onset, onset + duration), and lies inside one day. Whether the spike violates the range template depends on the scheduled measurements that fall in it, which the labeller decides on the latent trace (WS04-T10). No value has been chosen by an agent."
+  - parameter: hypertensive_spike_duration_medium
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level medium of the window duration of hypertensive_spike, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which a constant pulse is added to the latent systolic pressure at every grid point (a hypertensive spike of the patient, not a cuff fault: the measurement process then reads the raised pressure). The window is half open, [onset, onset + duration), and lies inside one day. Whether the spike violates the range template depends on the scheduled measurements that fall in it, which the labeller decides on the latent trace (WS04-T10). No value has been chosen by an agent."
+  - parameter: hypertensive_spike_duration_long
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level long of the window duration of hypertensive_spike, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which a constant pulse is added to the latent systolic pressure at every grid point (a hypertensive spike of the patient, not a cuff fault: the measurement process then reads the raised pressure). The window is half open, [onset, onset + duration), and lies inside one day. Whether the spike violates the range template depends on the scheduled measurements that fall in it, which the labeller decides on the latent trace (WS04-T10). No value has been chosen by an agent."
+  - parameter: drug_nonresponse_duration_short
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level short of the window duration of drug_nonresponse, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which the Emax of every true intake whose time lies in it is scaled (a non-response of the patient to the dose). The window is half open, [onset, onset + duration), and lies inside one day; a window shorter than the interval between two intakes scales at most one. No value has been chosen by an agent."
+  - parameter: drug_nonresponse_duration_medium
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level medium of the window duration of drug_nonresponse, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which the Emax of every true intake whose time lies in it is scaled (a non-response of the patient to the dose). The window is half open, [onset, onset + duration), and lies inside one day; a window shorter than the interval between two intakes scales at most one. No value has been chosen by an agent."
+  - parameter: drug_nonresponse_duration_long
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level long of the window duration of drug_nonresponse, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which the Emax of every true intake whose time lies in it is scaled (a non-response of the patient to the dose). The window is half open, [onset, onset + duration), and lies inside one day; a window shorter than the interval between two intakes scales at most one. No value has been chosen by an agent."
+  - parameter: hypotension_below_hold_duration_short
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level short of the window duration of hypotension_below_hold, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which a constant pulse is subtracted from the latent systolic pressure at every grid point (hypotension relative to the hold parameter). The window is half open, [onset, onset + duration), and lies inside one day. No value has been chosen by an agent."
+  - parameter: hypotension_below_hold_duration_medium
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level medium of the window duration of hypotension_below_hold, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which a constant pulse is subtracted from the latent systolic pressure at every grid point (hypotension relative to the hold parameter). The window is half open, [onset, onset + duration), and lies inside one day. No value has been chosen by an agent."
+  - parameter: hypotension_below_hold_duration_long
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level long of the window duration of hypotension_below_hold, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which a constant pulse is subtracted from the latent systolic pressure at every grid point (hypotension relative to the hold parameter). The window is half open, [onset, onset + duration), and lies inside one day. No value has been chosen by an agent."
+  - parameter: hypertensive_spike_magnitude_below
+    unit: "x scale_range"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level below of the hypertensive spike magnitude, a multiple of scale_range (the registry entry, in mmHg: the scale of the range template). The pulse added to the latent pressure is the value times scale_range read from the registry, so no absolute pressure is invented here. Proposed ordering below < near < above with below less than 1 and above greater than 1: the level below is meant to leave most latent days inside the band (the injection is then in the log and not in the ground truth), the level above to cross it. No value has been chosen by an agent."
+  - parameter: hypertensive_spike_magnitude_near
+    unit: "x scale_range"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level near of the hypertensive spike magnitude, a multiple of scale_range (the registry entry, in mmHg). The pulse is the value times scale_range read from the registry, so no absolute pressure is invented here. Proposed ordering below < near < above, near around 1: a pulse of about the scale of the range template, whose effect on the truth depends on the patient's baseline and the band. No value has been chosen by an agent."
+  - parameter: hypertensive_spike_magnitude_above
+    unit: "x scale_range"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level above of the hypertensive spike magnitude, a multiple of scale_range (the registry entry, in mmHg). The pulse is the value times scale_range read from the registry, so no absolute pressure is invented here. Proposed ordering below < near < above with above greater than 1: a pulse that crosses the band for most baselines. No value has been chosen by an agent."
+  - parameter: hypotension_below_hold_magnitude_below
+    unit: "x baseline_to_hold_distance"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level below of the hypotension magnitude, a multiple of the distance between the patient's baseline and the registry entry bp_hold_threshold (baseline_sbp_mmhg minus bp_hold_threshold, hold_distance_mmhg): the pulse subtracted is the value times that distance, so no absolute pressure is invented here. Proposed ordering below < near < above with below less than 1: the pressure stays above the hold threshold and the hold template is not violated by the pulse alone (the injection is in the log, not in the ground truth). No value has been chosen by an agent."
+  - parameter: hypotension_below_hold_magnitude_near
+    unit: "x baseline_to_hold_distance"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level near of the hypotension magnitude, a multiple of the distance between the patient's baseline and the registry entry bp_hold_threshold (hold_distance_mmhg). Proposed ordering below < near < above, near around 1: a level of exactly 1 takes the pressure from the baseline to the threshold. No value has been chosen by an agent."
+  - parameter: hypotension_below_hold_magnitude_above
+    unit: "x baseline_to_hold_distance"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level above of the hypotension magnitude, a multiple of the distance between the patient's baseline and the registry entry bp_hold_threshold (hold_distance_mmhg). Proposed ordering below < near < above with above greater than 1: the pressure goes below the hold threshold. No value has been chosen by an agent."
+  - parameter: drug_nonresponse_magnitude_complete
+    unit: "1"
+    value: 0.0
+    dist: null
+    source_ref: "definition: the level is a complete non-response, the Emax of the intake scaled to zero (WS04-T09 step 3); the value 0 is not a measured quantity"
+    source_type: design_choice
+    verified_by: null
+    status: filled
+    consumer_task: WS04-T09
+    rationale: "By definition of the level the Emax of the intake is scaled to zero; the number is a reference, not a clinical value."
+    note: "Level complete of the Emax scale of a drug non-response: a dimensionless scale in [0, 1] applied to the Emax of the intakes inside the window (the reference, 1, is the unscaled effect). The level is a definition, not a measured value: complete means that the whole effect of the intake is removed (scale 0), while its drug still occupies the saturation term (ADR-039). Used by the confounder pair nonresponse_vs_falsified_dispense. H3 confirms that the level is wanted."
+  - parameter: drug_nonresponse_magnitude_partial
+    unit: "1"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level partial of the Emax scale of a drug non-response: a dimensionless scale in [0, 1] applied to the Emax of the intakes inside the window (the reference, 1, is the unscaled effect). Proposed ordering complete < partial < mild: a partial non-response leaves a reduced effect, which may or may not violate the response template depending on the registry threshold. No value has been chosen by an agent."
+  - parameter: drug_nonresponse_magnitude_mild
+    unit: "1"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T09; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T09
+    rationale: null
+    note: "Level mild of the Emax scale of a drug non-response: a dimensionless scale in [0, 1] applied to the Emax of the intakes inside the window (the reference, 1, is the unscaled effect). Proposed ordering complete < partial < mild with mild close to 1: a reduction that deliberately may not violate the response template. No value has been chosen by an agent."

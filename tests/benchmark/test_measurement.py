@@ -1457,13 +1457,16 @@ def test_vocab_matches_the_evidence_conventions_table() -> None:
     assert {vocab.TASK_NAVIGATE, vocab.TASK_MANIPULATE, vocab.TASK_WITNESS} == set(
         vocab.TASKS
     )
-    assert {
+    table_outcomes = {
         vocab.OUTCOME_SUCCESS,
         vocab.OUTCOME_LATE,
         vocab.OUTCOME_FAILED,
         vocab.OUTCOME_TIMEOUT,
-    } == set(vocab.OUTCOMES)
-    for word in vocab.TASKS + vocab.OUTCOMES:
+    }
+    # WS04-T09 adds one outcome that the table does not list (a contract gap recorded in its
+    # completion note): the patient declined the step. Nothing else may be added silently.
+    assert set(vocab.OUTCOMES) == table_outcomes | {vocab.OUTCOME_DECLINED}
+    for word in vocab.TASKS + tuple(table_outcomes):
         assert f"`{word}`" in table
 
 

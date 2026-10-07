@@ -40,11 +40,12 @@ from typing import Any
 import numpy as np
 import pytest
 import yaml
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 import ralmon.benchmark as benchmark_pkg
 import ralmon.benchmark.confounders as confounders_mod
 import ralmon.benchmark.inject_c1 as c1_mod
-import ralmon.benchmark.injection as injection_mod
 import ralmon.benchmark.latent_day as latent_day_mod
 from ralmon.benchmark import vocab
 from ralmon.benchmark.adherence import (
@@ -58,6 +59,7 @@ from ralmon.benchmark.confounders import (
     GROUP_NONRESPONSE_VS_FORGERY,
     GROUP_REFUSAL_VS_ROBOT_MISSED,
     GROUPS,
+    WITHHOLDABLE,
     ConfounderError,
     PairBase,
     PairEvaluation,
@@ -118,6 +120,7 @@ from ralmon.benchmark.latent_day import (
     assemble_latent_days,
 )
 from ralmon.benchmark.measurement import (
+    LatentSbpHold,
     MeasurementConfigError,
     MeasurementDesign,
     NoJitter,
@@ -135,7 +138,6 @@ from ralmon.benchmark.priors import (
     AdherenceParams,
     DeviceErrorModel,
     PatientParams,
-    load_design_file,
 )
 from ralmon.benchmark.rng import StreamPurpose, stream
 from ralmon.benchmark.schedule import Schedule
@@ -163,7 +165,9 @@ DAY = T_DAY_MS
 C1, C2, C3 = InjectedClass.C1, InjectedClass.C2, InjectedClass.C3
 
 STEP = MIN  # FIXTURE-ONLY latent grid: 1440 points a day
-FINE = 10 * SEC  # FIXTURE-ONLY: a grid fine enough to sit on the pressure peak
+FINE = (
+    20 * SEC
+)  # FIXTURE-ONLY: a grid fine enough to sit near the pressure peak (error < 4e-5 mmHg)
 LAG = 5 * SEC  # FIXTURE-ONLY intake lag
 GAP = 2 * MIN  # FIXTURE-ONLY double-take gap
 BOUNCE = 500  # FIXTURE-ONLY nominal (sub-second) bounce gap, ms
@@ -174,7 +178,8 @@ PATIENT_INDEX = 3
 
 DOSE = 8 * HOUR
 SCHED_ONE = Schedule(
-    dose_ticks_ms=(DOSE,), measurement_ticks_ms=(7 * HOUR + 15 * MIN, 9 * HOUR + 45 * MIN)
+    dose_ticks_ms=(DOSE,),
+    measurement_ticks_ms=(7 * HOUR + 15 * MIN, 9 * HOUR + 45 * MIN),
 )
 SCHED_TWO = Schedule(
     dose_ticks_ms=(DOSE, 20 * HOUR),
@@ -191,7 +196,9 @@ SCHED_LATE = Schedule(
 )  # a dose ten minutes before midnight: its drug effect spills into the next day
 
 ZERO_ERRORS = DeviceErrorModel(0.0, 0.0, 0.0, 0.0)
-NOISY_ERRORS = DeviceErrorModel(4.0, 1.0, 0.0, 0.0)  # FIXTURE-ONLY cuff error SD 4, bias 1
+NOISY_ERRORS = DeviceErrorModel(
+    4.0, 1.0, 0.0, 0.0
+)  # FIXTURE-ONLY cuff error SD 4, bias 1
 DESIGN = MeasurementDesign(
     inflation_ms_nominal=30 * SEC,
     inflation_ms_sd=0,
@@ -241,11 +248,13 @@ def make_adherence(
     lag: int = LAG,
     gap: int = GAP,
     matrix: Sequence[Sequence[float]] | None = None,
+    initial: Sequence[float] | None = None,
 ) -> AdherenceModel:
     return AdherenceModel(
         AdherenceParams(p_delay, p_omission, p_double_take, mean_delay),
         AdherenceConfig(intake_lag_ms=lag, double_take_gap_ms=gap),
         transition_matrix=matrix,
+        initial_distribution=initial,
     )
 
 
@@ -478,7 +487,11 @@ def test_nonresponse_window_edges_apply_to_intakes_in_the_half_open_window() -> 
     for onset, duration, scaled in (
         (intake, 1, True),  # the intake instant is the first instant of the window
         (intake - 1, 2, True),
-        (intake - 10 * MIN, 10 * MIN, False),  # [intake - 10 min, intake): the end is excluded
+        (
+            intake - 10 * MIN,
+            10 * MIN,
+            False,
+        ),  # [intake - 10 min, intake): the end is excluded
         (intake + 1, 10 * MIN, False),  # starts one ms after the intake
         (intake - 10 * MIN, 10 * MIN + 1, True),  # one ms longer reaches the intake
     ):
@@ -526,19 +539,24 @@ def test_measurement_refusal_removes_latent_and_observed_measurement() -> None:
     ticks = times_of(out, EventKind.MEASUREMENT)
     assert ticks == [first]  # the latent MEASUREMENT at the refused tick is absent
     assert out.refused_ticks_ms == (second,)
-    assert times_of(out, EventKind.SCHEDULE_TICK).count(second) == 1  # the tick still happens
+    assert (
+        times_of(out, EventKind.SCHEDULE_TICK).count(second) == 1
+    )  # the tick still happens
     [record] = out.c1_records
     assert record.spec.subtype == "measurement_refusal" and record.realised
     assert record.realised_onset_ms == second and record.realised_end_ms is None
 
     stream_ = observe_refusals(observed_of(out), out.c1_records)
     day = finalize_observed(stream_)
-    visit = next(v for v in stream_.visits if v.kind == "measurement" and v.tick_ms == second)
+    visit = next(
+        v for v in stream_.visits if v.kind == "measurement" and v.tick_ms == second
+    )
     presences = [s.t_device_ms for s in day.samples if s.signal == "presence"]
     assert visit.arrival_ms in presences  # the robot visit is there
     tasks = [e for e in day.events if e.kind is EventKind.ROBOT_TASK]
     assert any(
-        e.payload["task"] == "navigate" and e.payload["outcome"] == "success"
+        e.payload["task"] == "navigate"
+        and e.payload["outcome"] == "success"
         and e.t_device_ms == second
         for e in tasks
     )
@@ -619,12 +637,21 @@ def test_c1_injectors_return_records_not_ground_truth() -> None:
         assert not isinstance(records[0], GroundTruthEvent)
         assert records[0].evidence_paths == ()  # a C1 has no evidence signature
     # the whole assembly: nothing in a result is a ground-truth event
-    out = assemble([spike(HOUR, HOUR, 10.0), refusal(SCHED_ONE.measurement_ticks_ms[0])])[0]
-    for item in dataclasses.astuple(out.latent) + tuple(out.c1_records) + (out.end_state,):
+    out = assemble(
+        [spike(HOUR, HOUR, 10.0), refusal(SCHED_ONE.measurement_ticks_ms[0])]
+    )[0]
+    for item in (
+        *out.latent.samples,
+        *out.latent.events,
+        *out.c1_records,
+        out.end_state,
+    ):
         assert not isinstance(item, GroundTruthEvent)
     assert all(r.spec.cls is C1 for r in out.c1_records)
     # the module has no constructor of a truth event in its namespace
-    assert not hasattr(c1_mod, "GroundTruthEvent") and not hasattr(latent_day_mod, "GroundTruthEvent")
+    assert not hasattr(c1_mod, "GroundTruthEvent") and not hasattr(
+        latent_day_mod, "GroundTruthEvent"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -641,7 +668,13 @@ def test_latent_day_has_no_observation_only_fields() -> None:
     }  # fmt: skip
     signals = {s.signal for s in day.samples}
     assert signals == {"bp", "hr_ecg", "spo2"}
-    assert not signals & {"cuff_health", "inflation_ms", "presence", "hr_pulse", "day_end"}
+    assert not signals & {
+        "cuff_health",
+        "inflation_ms",
+        "presence",
+        "hr_pulse",
+        "day_end",
+    }
     assert all(s.quality is None and s.seq is None for s in day.samples)
     assert all(s.t_rx_ms == s.t_device_ms for s in day.samples)
     kinds = {e.kind for e in day.events}
@@ -650,6 +683,13 @@ def test_latent_day_has_no_observation_only_fields() -> None:
     }  # fmt: skip
     assert {EventKind.MEASUREMENT, EventKind.SCHEDULE_TICK} <= kinds
     assert all(e.seq is None and e.t_rx_ms == e.t_device_ms for e in day.events)
+    sources = {
+        EventKind.SCHEDULE_TICK: "ward",
+        EventKind.MEASUREMENT: "cuff",
+        EventKind.DISPENSE: "dispenser",
+        EventKind.INTAKE: "patient",
+    }
+    assert all(e.source == sources[e.kind] for e in day.events)
     for e in day.events:
         vocab.check_payload(e.kind, e.payload)
         if e.kind is EventKind.SCHEDULE_TICK:
@@ -662,7 +702,9 @@ def test_latent_day_has_no_observation_only_fields() -> None:
     assert [s.value for s in day.samples if s.signal == "hr_ecg"] == hr_values()
     assert [s.value for s in day.samples if s.signal == "spo2"] == spo2_values()
     # types: plain python ints and floats (the trace schema rejects numpy scalars)
-    assert all(type(s.t_device_ms) is int and type(s.value) is float for s in day.samples)
+    assert all(
+        type(s.t_device_ms) is int and type(s.value) is float for s in day.samples
+    )
     assert all(type(e.t_device_ms) is int for e in day.events)
 
 
@@ -684,11 +726,10 @@ def test_latent_measurements_at_scheduled_ticks_with_exact_values() -> None:
     # the latent bp at a tick is the held value of the latent trace: the last grid point at or before
     bp = bp_series(out)
     grid = sorted(bp)
+    hold = LatentSbpHold(out.latent.samples)
     for t in ticks:
         held = bp[max(g for g in grid if g <= t)]
-        from ralmon.benchmark.measurement import LatentSbpHold
-
-        assert LatentSbpHold(out.latent.samples).at(t) == held
+        assert hold.at(t) == held
     # an off-grid tick and a day with no measurement tick
     off = Schedule(dose_ticks_ms=(), measurement_ticks_ms=(8 * HOUR + 17 * SEC,))
     odd = assemble(schedule=off, patient=NOISY_PATIENT)[0]
@@ -700,23 +741,39 @@ def test_latent_measurements_at_scheduled_ticks_with_exact_values() -> None:
 def test_assembly_without_injections_equals_baseline_minus_effect() -> None:
     config = make_config(step=STEP, adherence=NATURAL)
     for patient in (FIX_PATIENT, NOISY_PATIENT):
-        out = assemble(patient=patient, schedule=SCHED_TWO, config=config)[0]
-        # the same pipeline written out by hand with the same named streams
-        rng = stream(SEED, PATIENT_INDEX, 0, StreamPurpose.LATENT_AR)
-        base = simulate_baseline_sbp(
-            patient, STEP, 1, PEAK_CLOCK, STEP, rng, start_day=0
-        )
-        adh_rng = stream(SEED, PATIENT_INDEX, 0, StreamPurpose.ADHERENCE)
-        events = NATURAL.simulate(SCHED_TWO, 1, adh_rng, start_day=0).events
-        intakes = intake_times_from_events(events)
-        effect = OneCompartmentEmax().effect_mmhg(patient, intakes, base.t_ms.tolist())
-        expected = compose_latent_sbp(base.sbp_mmhg, effect)
-        assert [s.value for s in out.latent.samples if s.signal == "bp"] == expected.tolist()
-        assert list(out.baseline_sbp_mmhg) == base.sbp_mmhg.tolist()
-        assert dispense_intake(out) == [
-            (e.kind.value, e.t_device_ms, e.source) for e in events
-        ]
-        assert out.c1_records == ()
+        out = assemble(patient=patient, schedule=SCHED_TWO, n_days=3, config=config)
+        # the same pipeline written out by hand with the same named streams, day by day
+        state_ar: float | None = None
+        chain: AdherenceState | None = None
+        history: list[int] = []
+        for day, result in enumerate(out):
+            rng = stream(SEED, PATIENT_INDEX, day, StreamPurpose.LATENT_AR)
+            base = simulate_baseline_sbp(
+                patient,
+                STEP,
+                1,
+                PEAK_CLOCK,
+                STEP,
+                rng,
+                start_day=day,
+                ar_state_mmhg=state_ar,
+            )
+            adh_rng = stream(SEED, PATIENT_INDEX, day, StreamPurpose.ADHERENCE)
+            adh = NATURAL.simulate(SCHED_TWO, 1, adh_rng, start_day=day, state=chain)
+            history += list(intake_times_from_events(adh.events))
+            effect = OneCompartmentEmax().effect_mmhg(
+                patient, history, base.t_ms.tolist()
+            )
+            expected = compose_latent_sbp(base.sbp_mmhg, effect)
+            got = [s.value for s in result.latent.samples if s.signal == "bp"]
+            assert got == expected.tolist(), (day, patient)
+            assert list(result.baseline_sbp_mmhg) == base.sbp_mmhg.tolist()
+            assert dispense_intake(result) == [
+                (e.kind.value, e.t_device_ms, e.source) for e in adh.events
+            ]
+            assert result.behaviour_log == adh.behaviour_log
+            assert result.c1_records == ()
+            state_ar, chain = base.ar_state_mmhg, adh.final_state
 
 
 def test_no_intake_means_the_baseline_is_returned_bit_for_bit() -> None:
@@ -734,11 +791,16 @@ def test_no_intake_means_the_baseline_is_returned_bit_for_bit() -> None:
 
 
 def test_forced_double_take_matches_markov_double_take() -> None:
-    chain = make_adherence(p_double_take=1.0)  # every slot is a double take, same gap and lag
+    chain = make_adherence(
+        p_double_take=1.0
+    )  # every slot is a double take, same gap and lag
     chain_events = chain.simulate(
-        SCHED_TWO, 1, stream(SEED, PATIENT_INDEX, 0, StreamPurpose.ADHERENCE), start_day=0
+        SCHED_TWO,
+        1,
+        stream(SEED, PATIENT_INDEX, 0, StreamPurpose.ADHERENCE),
+        start_day=0,
     )
-    first_slot, second_slot = chain_events.behaviour_log
+    first_slot = chain_events.behaviour_log[0]
     assert first_slot.state is AdherenceState.DOUBLE_TAKE
     forced = assemble([double_take_spec(DOSE)], schedule=SCHED_TWO)[0]
     expected = [
@@ -749,7 +811,10 @@ def test_forced_double_take_matches_markov_double_take() -> None:
     got = [row for row in dispense_intake(forced) if row[1] < 20 * HOUR]
     assert got == expected
     assert [row[1] for row in got if row[0] == "dispense"] == [DOSE, DOSE + GAP]
-    assert [row[1] for row in got if row[0] == "intake"] == [DOSE + LAG, DOSE + GAP + LAG]
+    assert [row[1] for row in got if row[0] == "intake"] == [
+        DOSE + LAG,
+        DOSE + GAP + LAG,
+    ]
     # the other slot follows the natural chain (here: perfect adherence), untouched
     assert [r for r in dispense_intake(forced) if r[1] >= 20 * HOUR] == [
         r for r in dispense_intake(assemble(schedule=SCHED_TWO)[0]) if r[1] >= 20 * HOUR
@@ -763,14 +828,17 @@ def test_forced_double_take_matches_markov_double_take() -> None:
     assert record.details["second_dispense_ms"] == DOSE + GAP
     # forcing a state that the chain draws anyway still records the injection (and changes nothing)
     again = assemble(
-        [double_take_spec(DOSE)], schedule=SCHED_TWO, config=make_config(adherence=chain)
+        [double_take_spec(DOSE)],
+        schedule=SCHED_TWO,
+        config=make_config(adherence=chain),
     )[0]
     assert again.c1_records[0].realised
     assert [r for r in dispense_intake(again) if r[1] < 20 * HOUR] == expected
 
 
 @pytest.mark.parametrize(
-    "state", [AdherenceState.ON_TIME, AdherenceState.OMITTED, AdherenceState.DOUBLE_TAKE]
+    "state",
+    [AdherenceState.ON_TIME, AdherenceState.OMITTED, AdherenceState.DOUBLE_TAKE],
 )
 def test_forced_slot_equals_the_chain_in_that_state(state: AdherenceState) -> None:
     probabilities = {
@@ -780,22 +848,47 @@ def test_forced_slot_equals_the_chain_in_that_state(state: AdherenceState) -> No
     }[state]
     chain = make_adherence(**probabilities)
     reference = chain.simulate(
-        SCHED_TWO, 1, stream(SEED, PATIENT_INDEX, 0, StreamPurpose.ADHERENCE), start_day=0
+        SCHED_TWO,
+        1,
+        stream(SEED, PATIENT_INDEX, 0, StreamPurpose.ADHERENCE),
+        start_day=0,
     )
     # natural chain: the delayed / omitted / double mix; force slot 0 into `state`
-    out = assemble(
-        schedule=SCHED_TWO,
-        config=make_config(adherence=NATURAL),
-        forced_slots=[ForcedSlot(0, 0, state)] if state is not AdherenceState.DOUBLE_TAKE else (),
-        specs=[double_take_spec(DOSE)] if state is AdherenceState.DOUBLE_TAKE else (),
-    )[0]
-    assert out.behaviour_log[0].state is state
-    assert out.behaviour_log[0].dispense_times_ms == reference.behaviour_log[0].dispense_times_ms
     natural = assemble(schedule=SCHED_TWO, config=make_config(adherence=NATURAL))[0]
-    assert out.behaviour_log[1] == natural.behaviour_log[1]  # the other slot is bit-identical
-    assert [r for r in dispense_intake(out) if r[1] >= 20 * HOUR] == [
-        r for r in dispense_intake(natural) if r[1] >= 20 * HOUR
-    ] or natural.behaviour_log[0].dispense_times_ms[:1] == ()  # a delayed first slot may cross
+    forced = (
+        {"specs": [double_take_spec(DOSE)]}
+        if state is AdherenceState.DOUBLE_TAKE
+        else {"forced_slots": [ForcedSlot(0, 0, state)]}
+    )
+    out = assemble(schedule=SCHED_TWO, config=make_config(adherence=NATURAL), **forced)[
+        0
+    ]
+    assert out.behaviour_log[0].state is state
+    assert (
+        out.behaviour_log[0].dispense_times_ms
+        == reference.behaviour_log[0].dispense_times_ms
+    )
+    assert (
+        out.behaviour_log[1] == natural.behaviour_log[1]
+    )  # the other slot is bit-identical
+
+    def of_slot(result: LatentResult, slot: int) -> list[tuple[str, int, str]]:
+        times = set(result.behaviour_log[slot].dispense_times_ms)
+        return [
+            row
+            for row in dispense_intake(result)
+            if (row[0] == "dispense" and row[1] in times)
+            or (row[0] == "intake" and row[1] - LAG in times)
+        ]
+
+    assert of_slot(out, 1) == of_slot(
+        natural, 1
+    )  # the events of the other slot are identical
+    assert of_slot(out, 0) == [
+        (e.kind.value, e.t_device_ms, e.source)
+        for e in reference.events
+        if e.t_device_ms < 20 * HOUR
+    ]
 
 
 def test_forced_slots_do_not_shift_the_other_draws() -> None:
@@ -835,7 +928,9 @@ def test_rebuilding_events_from_the_log_matches_the_adherence_model() -> None:
             forced_slots=[ForcedSlot(0, 0, slot)]
             if slot is not AdherenceState.DOUBLE_TAKE
             else (),
-            specs=[double_take_spec(DOSE)] if slot is AdherenceState.DOUBLE_TAKE else (),
+            specs=[double_take_spec(DOSE)]
+            if slot is AdherenceState.DOUBLE_TAKE
+            else (),
         )[0]
         assert dispense_intake(forced) == dispense_intake(natural), seed
         assert forced.behaviour_log == natural.behaviour_log, seed
@@ -845,9 +940,13 @@ def test_forcing_a_delayed_dose_is_refused() -> None:
     with pytest.raises(LatentAssemblyError):
         ForcedSlot(0, 0, AdherenceState.DELAYED)
     with pytest.raises(LatentAssemblyError):
-        assemble(forced_slots=[ForcedSlot(0, 5, AdherenceState.OMITTED)])  # no such dose
+        assemble(
+            forced_slots=[ForcedSlot(0, 5, AdherenceState.OMITTED)]
+        )  # no such dose
     with pytest.raises(LatentAssemblyError):
-        assemble(forced_slots=[ForcedSlot(3, 0, AdherenceState.OMITTED)])  # day outside the call
+        assemble(
+            forced_slots=[ForcedSlot(3, 0, AdherenceState.OMITTED)]
+        )  # day outside the call
     with pytest.raises(LatentAssemblyError):  # the same slot forced twice
         assemble(
             forced_slots=[
@@ -855,9 +954,12 @@ def test_forcing_a_delayed_dose_is_refused() -> None:
                 ForcedSlot(0, 0, AdherenceState.ON_TIME),
             ]
         )
-    with pytest.raises(LatentAssemblyError):  # a double-take spec and a forced slot on one slot
+    with pytest.raises(
+        LatentAssemblyError
+    ):  # a double-take spec and a forced slot on one slot
         assemble(
-            [double_take_spec(DOSE)], forced_slots=[ForcedSlot(0, 0, AdherenceState.OMITTED)]
+            [double_take_spec(DOSE)],
+            forced_slots=[ForcedSlot(0, 0, AdherenceState.OMITTED)],
         )
 
 
@@ -873,7 +975,14 @@ def level_row(
     quantity_unit: str = UNIT_MMHG,
 ) -> LevelRow:
     return LevelRow(
-        "row", "above", unit, value, value is not None, "design_choice", "fixture", quantity_unit
+        "row",
+        "above",
+        unit,
+        value,
+        value is not None,
+        "design_choice",
+        "fixture",
+        quantity_unit,
     )
 
 
@@ -887,7 +996,12 @@ def test_magnitude_levels_are_relative_to_named_reference() -> None:
     assert spec.level == "above"
     assert spec.params["reference"] == REFERENCE_SCALE_RANGE
     assert spec.params["multiple"] == 2.0 and spec.params["reference_value"] == 20.0
-    assert assemble([spec])[0].c1_records[0].spec.magnitude == 40.0
+    record = assemble([spec])[0].c1_records[0]
+    assert record.spec.magnitude == 40.0 and record.level == "above"
+    assert record.details["reference"] == REFERENCE_SCALE_RANGE
+    assert (
+        record.details["multiple"] == 2.0 and record.details["reference_value"] == 20.0
+    )
     # the other named reference: the distance from the baseline to the hold threshold
     assert hold_distance_mmhg(130.0, 100.0) == 30.0
     hold_level = level_row(1.5, f"x {REFERENCE_HOLD_DISTANCE}")
@@ -901,13 +1015,19 @@ def test_magnitude_levels_are_relative_to_named_reference() -> None:
         resolve_c1_magnitude(level_row(None), 20.0, REFERENCE_SCALE_RANGE)
     # the dimensionless Emax scale is an absolute level: it is its own magnitude
     scale = level_row(0.5, UNIT_SCALE, quantity_unit=UNIT_SCALE)
-    nonresp = c1_spec_from_level("drug_nonresponse", DOSE, scale, None, duration_ms=HOUR)
+    nonresp = c1_spec_from_level(
+        "drug_nonresponse", DOSE, scale, None, duration_ms=HOUR
+    )
     assert nonresp.magnitude == 0.5 and nonresp.magnitude_unit == UNIT_SCALE
     assert "reference" not in nonresp.params
 
 
 def design_rows(path: Path, task: str = "WS04-T09") -> list[dict[str, Any]]:
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document = (
+        _committed_document()
+        if path == INJECTIONS_FILE
+        else yaml.safe_load(path.read_text(encoding="utf-8"))
+    )
     return [r for r in document["parameters"] if r["consumer_task"] == task]
 
 
@@ -930,7 +1050,9 @@ def check_c1_design_structure(path: Path) -> None:
                     )
                     assert level.unit == f"x {entry.magnitude.reference}", level
                 else:
-                    assert entry.magnitude.unit == UNIT_SCALE and level.unit == UNIT_SCALE
+                    assert (
+                        entry.magnitude.unit == UNIT_SCALE and level.unit == UNIT_SCALE
+                    )
         if entry.duration is not None:
             assert entry.duration.unit == "ms" and len(entry.duration.levels) >= 1
     # no row of the task is an absolute pressure
@@ -940,11 +1062,19 @@ def check_c1_design_structure(path: Path) -> None:
         assert isinstance(row["source_ref"], str) and row["source_ref"].strip()
 
 
-def rewrite_rows(
-    tmp_path: Path, *, filled: bool, name: str, drop_status_lines: bool = False
-) -> Path:
+@functools.cache
+def _committed_document() -> dict[str, Any]:
+    return yaml.safe_load(INJECTIONS_FILE.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+
+
+def committed_document() -> dict[str, Any]:
+    """A private deep copy of the committed design file (parsed once per test run)."""
+    return copy.deepcopy(_committed_document())
+
+
+def rewrite_rows(tmp_path: Path, *, filled: bool, name: str) -> Path:
     """A copy of injections.yaml with every row of the task awaiting a value, or filled."""
-    document = yaml.safe_load(INJECTIONS_FILE.read_text(encoding="utf-8"))
+    document = committed_document()
     for row in document["parameters"]:
         unit = row["unit"]
         if filled:
@@ -964,7 +1094,9 @@ def rewrite_rows(
     return path
 
 
-def test_c1_rows_are_structured_relative_and_valid_in_every_state(tmp_path: Path) -> None:
+def test_c1_rows_are_structured_relative_and_valid_in_every_state(
+    tmp_path: Path,
+) -> None:
     for path in (
         INJECTIONS_FILE,  # whatever its state
         rewrite_rows(tmp_path, filled=False, name="unfilled.yaml"),
@@ -984,7 +1116,9 @@ def test_c1_rows_are_structured_relative_and_valid_in_every_state(tmp_path: Path
     # the checker catches an absolute pressure row (a mutated copy)
     document = yaml.safe_load((tmp_path / "filled.yaml").read_text(encoding="utf-8"))
     for row in document["parameters"]:
-        if row["consumer_task"] == "WS04-T09" and row["unit"].startswith("x scale_range"):
+        if row["consumer_task"] == "WS04-T09" and row["unit"].startswith(
+            "x scale_range"
+        ):
             row["unit"] = "mmHg"
     bad = tmp_path / "absolute.yaml"
     bad.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
@@ -1051,7 +1185,11 @@ def g1(gap: str, content: bool, robot: bool) -> Variant:
     vid = f"{'nominal' if gap == 'nominal' else 'stress'}_{'content' if content else 'nocontent'}_{'robot' if robot else 'norobot'}"
     expected = gap == "double_take_gap" and not content and not robot
     return variant(
-        GROUP_DOUBLE_TAKE_VS_BOUNCE, vid, withheld=withheld, bounce_gap=gap, expected=expected
+        GROUP_DOUBLE_TAKE_VS_BOUNCE,
+        vid,
+        withheld=withheld,
+        bounce_gap=gap,
+        expected=expected,
     )
 
 
@@ -1081,8 +1219,18 @@ G3_ABSENT = variant(
     withheld=["witness", "robot_task_outcome"], expected=True,
 )  # fmt: skip
 
-G1_GRID = [g1(gap, c, r) for gap in ("nominal", "double_take_gap") for c in (True, False) for r in (True, False)]
-G2_GRID = [g2(a, r, u) for a in ("naive", "informed") for r in (True, False) for u in (False, True)]
+G1_GRID = [
+    g1(gap, c, r)
+    for gap in ("nominal", "double_take_gap")
+    for c in (True, False)
+    for r in (True, False)
+]
+G2_GRID = [
+    g2(a, r, u)
+    for a in ("naive", "informed")
+    for r in (True, False)
+    for u in (False, True)
+]
 G3_GRID = [G3_REPORTED, G3_WITHHELD, G3_ABSENT]
 
 
@@ -1104,11 +1252,21 @@ def test_double_take_vs_bounce_pair_shares_base_and_seed() -> None:
     ra, rb = ev.a, ev.b
     # the same baseline: the latent pressure before any drug, drawn from the same stream
     assert ra.latent.baseline_sbp_mmhg == rb.latent.baseline_sbp_mmhg
-    assert len(set(ra.latent.baseline_sbp_mmhg)) > 100  # a real, noisy, circadian baseline
+    assert (
+        len(set(ra.latent.baseline_sbp_mmhg)) > 100
+    )  # a real, noisy, circadian baseline
     # the same cuff noise draws: the stream (seed, patient, day, MEASUREMENT, k) feeds both
-    for k, (ma, mb) in enumerate(zip(ra.stream.measurements, rb.stream.measurements, strict=True)):
-        z0 = float(stream(SEED, PATIENT_INDEX, 0, StreamPurpose.MEASUREMENT, ma.index).standard_normal(3)[0])
-        expected_error = NOISY_ERRORS.cuff_bias_mmhg + NOISY_ERRORS.cuff_error_sd_mmhg * z0
+    for k, (ma, mb) in enumerate(
+        zip(ra.stream.measurements, rb.stream.measurements, strict=True)
+    ):
+        z0 = float(
+            stream(
+                SEED, PATIENT_INDEX, 0, StreamPurpose.MEASUREMENT, ma.index
+            ).standard_normal(3)[0]
+        )
+        expected_error = (
+            NOISY_ERRORS.cuff_bias_mmhg + NOISY_ERRORS.cuff_error_sd_mmhg * z0
+        )
         assert ma.error_mmhg == mb.error_mmhg == expected_error, k
         assert ma.inflation_ms == mb.inflation_ms and ma.index == mb.index
     assert len(ra.stream.measurements) == len(SCHED_TWO.measurement_ticks_ms)
@@ -1116,12 +1274,20 @@ def test_double_take_vs_bounce_pair_shares_base_and_seed() -> None:
     assert ra.observed.patient_id == rb.observed.patient_id == "p0003"
     assert ra.observed.seed == rb.observed.seed == SEED
     assert ra.observed.care_plan_id == rb.observed.care_plan_id
-    assert [e.t_device_ms for e in ra.latent.latent.events if e.kind is EventKind.SCHEDULE_TICK] == [
-        e.t_device_ms for e in rb.latent.latent.events if e.kind is EventKind.SCHEDULE_TICK
+    assert [
+        e.t_device_ms
+        for e in ra.latent.latent.events
+        if e.kind is EventKind.SCHEDULE_TICK
+    ] == [
+        e.t_device_ms
+        for e in rb.latent.latent.events
+        if e.kind is EventKind.SCHEDULE_TICK
     ]
-    assert [e.t_device_ms for e in ra.latent.latent.events if e.kind is EventKind.MEASUREMENT] == list(
-        SCHED_TWO.measurement_ticks_ms
-    )
+    assert [
+        e.t_device_ms
+        for e in ra.latent.latent.events
+        if e.kind is EventKind.MEASUREMENT
+    ] == list(SCHED_TWO.measurement_ticks_ms)
     # only the mechanism differs
     assert a.mechanism == "double_take" and b.mechanism == "dispenser_bounce"
     assert (a.mechanism_class, b.mechanism_class) == (C1, C2)
@@ -1144,11 +1310,16 @@ def test_double_take_vs_bounce_identical_when_discriminators_withheld() -> None:
     assert [e.t_device_ms for e in dispenses(da)][:2] == [DOSE, DOSE + GAP]
     assert [e.seq for e in dispenses(da)] == list(range(1, len(dispenses(da)) + 1))
     assert all(dict(e.payload) == {} for e in dispenses(da))  # no content_change key
-    assert not [e for e in da.events if e.kind is EventKind.INTAKE]  # the robot is absent
+    assert not [
+        e for e in da.events if e.kind is EventKind.INTAKE
+    ]  # the robot is absent
     assert not [s for s in da.samples if s.signal == "presence"]
     assert not [e for e in da.events if e.kind is EventKind.ROBOT_TASK]
     # the latent days differ: two intakes against one
-    assert len(times_of(ev.a.latent, EventKind.INTAKE)) == len(times_of(ev.b.latent, EventKind.INTAKE)) + 1
+    assert (
+        len(times_of(ev.a.latent, EventKind.INTAKE))
+        == len(times_of(ev.b.latent, EventKind.INTAKE)) + 1
+    )
     assert ev.a.latent.latent.events != ev.b.latent.latent.events
     # the records: C1 double_take against C2 dispenser_bounce, both with the group
     [ra] = [r for r in ev.a.records if r.spec.subtype == "double_take"]
@@ -1173,8 +1344,14 @@ def test_double_take_vs_bounce_separable_with_sensing_or_interval() -> None:
     assert ev.indistinguishable_by_construction is False
     # at the sub-second nominal gap the interval alone separates them
     nominal = evaluated(g1("nominal", False, False))
-    assert [e.t_device_ms for e in dispenses(nominal.b.observed)][:2] == [DOSE, DOSE + BOUNCE]
-    assert [e.t_device_ms for e in dispenses(nominal.a.observed)][:2] == [DOSE, DOSE + GAP]
+    assert [e.t_device_ms for e in dispenses(nominal.b.observed)][:2] == [
+        DOSE,
+        DOSE + BOUNCE,
+    ]
+    assert [e.t_device_ms for e in dispenses(nominal.a.observed)][:2] == [
+        DOSE,
+        DOSE + GAP,
+    ]
     assert nominal.separated_by == ("dispense_interval",)
     assert nominal.indistinguishable_by_construction is False
 
@@ -1195,14 +1372,20 @@ def test_double_take_vs_bounce_grid_separated_by(v: Variant) -> None:
     # a withheld channel is really absent from the released day
     for day in (ev.a.observed, ev.b.observed):
         if "content_change" in v.withheld:
-            assert all(vocab.KEY_CONTENT_CHANGE not in e.payload for e in dispenses(day))
+            assert all(
+                vocab.KEY_CONTENT_CHANGE not in e.payload for e in dispenses(day)
+            )
         if "witness" in v.withheld:
             assert not [e for e in day.events if e.kind is EventKind.INTAKE]
             assert not [s for s in day.samples if s.signal == "presence"]
 
 
 def only(day: ObservedDay, kind: EventKind, source: str | None = None) -> list[Event]:
-    return [e for e in day.events if e.kind is kind and (source is None or e.source == source)]
+    return [
+        e
+        for e in day.events
+        if e.kind is kind and (source is None or e.source == source)
+    ]
 
 
 def test_nonresponse_vs_forgery_identical_without_witness() -> None:
@@ -1210,25 +1393,51 @@ def test_nonresponse_vs_forgery_identical_without_witness() -> None:
     spoofed = evaluated(g2("informed", True, False))
     real, forged = spoofed.a, spoofed.b
     assert {r.spec.subtype for r in real.records} == {"drug_nonresponse"}
-    assert {r.spec.subtype for r in forged.records} == {"dispense_forgery", "presence_spoof"}
+    assert {r.spec.subtype for r in forged.records} == {
+        "dispense_forgery",
+        "presence_spoof",
+    }
     assert real.records[0].spec.cls is C1 and real.records[0].spec.magnitude == 0.0
+    assert real.records[0].level == "complete"
+    assert {r.level for r in forged.records} == {"informed"}
     assert {r.spec.cls for r in forged.records} == {C3}
     assert dispenses(real.observed) == dispenses(forged.observed)
-    assert only(real.observed, EventKind.INTAKE) == only(forged.observed, EventKind.INTAKE)
+    assert only(real.observed, EventKind.INTAKE) == only(
+        forged.observed, EventKind.INTAKE
+    )
     assert len(only(real.observed, EventKind.INTAKE, "robot")) >= 1
-    assert spoofed.separated_by == () and spoofed.indistinguishable_by_construction is True
-    # the whole observed days agree outside the presence samples (an extra 1.0 inside a visit
-    # changes no held level): the pressure response is equal because scale 0 removes the effect
-    assert [s for s in real.observed.samples if s.signal == "bp"] == [
-        s for s in forged.observed.samples if s.signal == "bp"
+    assert (
+        spoofed.separated_by == () and spoofed.indistinguishable_by_construction is True
+    )
+    # the pressure response is equal because scale 0 removes the effect of the dose (an extra
+    # presence 1.0 inside a visit changes no held level); on a day with a later dose the drug of the
+    # real intake still occupies the saturation term, so the later pressure differs by a residual
+    # that the comparison ignores and the evaluation reports
+    early = lambda day: [
+        s for s in day.samples if s.signal == "bp" and s.t_device_ms < 20 * HOUR
     ]
+    assert early(real.observed) == early(forged.observed) and early(real.observed)
+    assert spoofed.pressure_response_differs is True
+    one_dose = evaluated(g2("informed", True, False), pair_base(schedule=SCHED_ONE))
+    assert one_dose.pressure_response_differs is False  # no later dose: exactly equal
+    assert [s for s in one_dose.a.observed.samples if s.signal == "bp"] == [
+        s for s in one_dose.b.observed.samples if s.signal == "bp"
+    ]
+    assert one_dose.separated_by == () and one_dose.indistinguishable_by_construction
     # the robot absent: equal streams without any witness
     absent = evaluated(g2("informed", False, False))
     assert dispenses(absent.a.observed) == dispenses(absent.b.observed)
-    assert not only(absent.a.observed, EventKind.INTAKE) and not only(absent.b.observed, EventKind.INTAKE)
-    assert absent.separated_by == () and absent.indistinguishable_by_construction is True
+    assert not only(absent.a.observed, EventKind.INTAKE) and not only(
+        absent.b.observed, EventKind.INTAKE
+    )
+    assert (
+        absent.separated_by == () and absent.indistinguishable_by_construction is True
+    )
     # the latent days differ: a dose against none
-    assert len(times_of(real.latent, EventKind.DISPENSE)) == len(times_of(forged.latent, EventKind.DISPENSE)) + 1
+    assert (
+        len(times_of(real.latent, EventKind.DISPENSE))
+        == len(times_of(forged.latent, EventKind.DISPENSE)) + 1
+    )
     assert DOSE in times_of(real.latent, EventKind.DISPENSE)
     assert DOSE not in times_of(forged.latent, EventKind.DISPENSE)
     assert forged.latent.behaviour_log[0].state is AdherenceState.OMITTED
@@ -1242,8 +1451,12 @@ def test_nonresponse_vs_forgery_separable_by_witness() -> None:
     forged_intakes = only(ev.b.observed, EventKind.INTAKE, "robot")
     assert DOSE + LAG in [e.t_device_ms for e in real_intakes]
     assert DOSE + LAG not in [e.t_device_ms for e in forged_intakes]
-    assert "witness" in ev.separated_by and ev.indistinguishable_by_construction is False
-    assert {r.spec.subtype for r in ev.b.records} == {"dispense_forgery"}  # a naive spoof is not made
+    assert (
+        "witness" in ev.separated_by and ev.indistinguishable_by_construction is False
+    )
+    assert {r.spec.subtype for r in ev.b.records} == {
+        "dispense_forgery"
+    }  # a naive spoof is not made
     # the forged dispense is the same event for the dispenser; the robot is what differs
     assert ev.b.records[0].spec.level == "naive"
 
@@ -1273,7 +1486,9 @@ def test_refusal_vs_robot_missed_pair() -> None:
     assert {r.spec.subtype for r in b.records} == {"manipulation_failure"}
     assert (a.records[0].spec.cls, b.records[0].spec.cls) == (C1, C2)
     assert a.records[0].spec.onset_ms == b.records[0].spec.onset_ms == tick
-    assert {r.confounder_group for r in a.records + b.records} == {GROUP_REFUSAL_VS_ROBOT_MISSED}
+    assert {r.confounder_group for r in a.records + b.records} == {
+        GROUP_REFUSAL_VS_ROBOT_MISSED
+    }
     # both lack the measurement at the tick
     for day in (a.observed, b.observed):
         meas = [e.t_device_ms for e in day.events if e.kind is EventKind.MEASUREMENT]
@@ -1285,7 +1500,7 @@ def test_refusal_vs_robot_missed_pair() -> None:
     assert tick not in times_of(a.latent, EventKind.MEASUREMENT)
     assert tick in times_of(b.latent, EventKind.MEASUREMENT)
     # the robot task outcome differs: declined against failed
-    outcomes = lambda day: [  # noqa: E731
+    outcomes = lambda day: [
         (e.payload["task"], e.payload["outcome"])
         for e in day.events
         if e.kind is EventKind.ROBOT_TASK and e.payload["task"] == "manipulate"
@@ -1327,7 +1542,9 @@ def test_confounder_group_carried_by_records_of_both_members() -> None:
     bias = InjectionSpec(
         C2, "cuff_silent_bias", 6 * HOUR, 6 * HOUR, 5.0, "mmHg", {"target": "cuff"}
     )
-    result = apply_observation_injections(stream_, [bias], InjectionContext(PATIENT_INDEX))
+    result = apply_observation_injections(
+        stream_, [bias], InjectionContext(PATIENT_INDEX)
+    )
     assert all(r.confounder_group is None for r in result.records)
     assert all(g.confounder_group is None for g in ground_truth_events(result.records))
 
@@ -1355,7 +1572,10 @@ def test_pair_records_flag_indistinguishable_by_construction() -> None:
             json.dumps(log, allow_nan=False)  # a JSON-native sidecar
     # an ordinary record has neither key
     plain = injection_log(assemble([spike(HOUR, HOUR, 10.0)])[0].c1_records)
-    assert "variant_id" not in plain[0] and "indistinguishable_by_construction" not in plain[0]
+    assert (
+        "variant_id" not in plain[0]
+        and "indistinguishable_by_construction" not in plain[0]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1372,8 +1592,17 @@ def check_variant_grid_structure(path: Path) -> None:
         assert len(ids) == len(set(ids))
         for v in variants:
             assert v.group == group
-            assert v.source_type in SOURCE_TYPES and v.source_ref.strip() and v.rationale.strip()
-            assert set(v.withheld) <= {"content_change", "witness", "robot_task_outcome", "verification"}
+            assert (
+                v.source_type in SOURCE_TYPES
+                and v.source_ref.strip()
+                and v.rationale.strip()
+            )
+            assert set(v.withheld) <= {
+                "content_change",
+                "witness",
+                "robot_task_outcome",
+                "verification",
+            }
 
 
 def test_c1_and_confounder_rows_have_provenance(tmp_path: Path) -> None:
@@ -1406,7 +1635,9 @@ def test_c1_and_confounder_rows_have_provenance(tmp_path: Path) -> None:
     assert {r["parameter"] for r in design_rows(INJECTIONS_FILE)} == named
     assert document["injections"]["c1"]  # the structured section exists
     # at least three magnitude levels per C1 magnitude is enforced by the loader
-    short = copy.deepcopy(yaml.safe_load((tmp_path / "f.yaml").read_text(encoding="utf-8")))
+    short = copy.deepcopy(
+        yaml.safe_load((tmp_path / "f.yaml").read_text(encoding="utf-8"))
+    )
     levels = short["injections"]["c1"]["hypertensive_spike"]["magnitude"]["levels"]
     levels.pop(next(iter(levels)))
     bad = tmp_path / "two_levels.yaml"
@@ -1414,7 +1645,9 @@ def test_c1_and_confounder_rows_have_provenance(tmp_path: Path) -> None:
     with pytest.raises(InjectionError):
         load_c1_design(bad)
     # a variant without provenance is refused
-    broken = copy.deepcopy(yaml.safe_load((tmp_path / "f.yaml").read_text(encoding="utf-8")))
+    broken = copy.deepcopy(
+        yaml.safe_load((tmp_path / "f.yaml").read_text(encoding="utf-8"))
+    )
     group = next(iter(broken["confounders"]["groups"].values()))
     next(iter(group["variants"].values())).pop("source_ref")
     bad2 = tmp_path / "no_ref.yaml"
@@ -1426,10 +1659,12 @@ def test_c1_and_confounder_rows_have_provenance(tmp_path: Path) -> None:
 def test_committed_grid_matches_the_computed_separation() -> None:
     """The ``expected_indistinguishable`` of every committed variant is what the code computes."""
     design = load_confounder_design(INJECTIONS_FILE)
-    for group, variants in design.items():
+    for variants in design.values():
         for v in variants:
             ev = evaluated(v)
-            assert ev.indistinguishable_by_construction is v.expected_indistinguishable, v.variant_id
+            assert (
+                ev.indistinguishable_by_construction is v.expected_indistinguishable
+            ), v.variant_id
     # the grid has separable and indistinguishable variants for every group (abstention can be scored)
     for group, variants in design.items():
         flags = {v.expected_indistinguishable for v in variants}
@@ -1445,7 +1680,13 @@ def S(signal: str, t: int, value: float = 1.0, seq: int | None = None) -> Sample
     return Sample(signal, t, t, value, seq, None)
 
 
-def E(kind: EventKind, t: int, source: str, payload: Mapping[str, Any] | None = None, seq: int | None = None) -> Event:
+def E(
+    kind: EventKind,
+    t: int,
+    source: str,
+    payload: Mapping[str, Any] | None = None,
+    seq: int | None = None,
+) -> Event:
     return Event(kind, t, t, source, dict(payload or {}), seq)
 
 
@@ -1467,16 +1708,46 @@ def test_compare_observed_names_each_discriminating_field() -> None:
     assert compare_observed(base, base, VISITS, ()) == ()
     cases: dict[str, tuple[ObservedDay, ObservedDay]] = {
         "content_change": (
-            day_of(events=[E(EventKind.DISPENSE, DOSE, "dispenser", {"content_change": 1.0}, 1)]),
-            day_of(events=[E(EventKind.DISPENSE, DOSE, "dispenser", {"content_change": 0.0}, 1)]),
+            day_of(
+                events=[
+                    E(EventKind.DISPENSE, DOSE, "dispenser", {"content_change": 1.0}, 1)
+                ]
+            ),
+            day_of(
+                events=[
+                    E(EventKind.DISPENSE, DOSE, "dispenser", {"content_change": 0.0}, 1)
+                ]
+            ),
         ),
         "witness": (
             day_of(events=[E(EventKind.INTAKE, DOSE + LAG, "robot")]),
             day_of(),
         ),
         "robot_task_outcome": (
-            day_of(events=[E(EventKind.ROBOT_TASK, DOSE, "robot", {"task": "manipulate", "outcome": "failed", "patient_id": "p0"})]),
-            day_of(events=[E(EventKind.ROBOT_TASK, DOSE, "robot", {"task": "manipulate", "outcome": "declined", "patient_id": "p0"})]),
+            day_of(
+                events=[
+                    E(
+                        EventKind.ROBOT_TASK,
+                        DOSE,
+                        "robot",
+                        {"task": "manipulate", "outcome": "failed", "patient_id": "p0"},
+                    )
+                ]
+            ),
+            day_of(
+                events=[
+                    E(
+                        EventKind.ROBOT_TASK,
+                        DOSE,
+                        "robot",
+                        {
+                            "task": "manipulate",
+                            "outcome": "declined",
+                            "patient_id": "p0",
+                        },
+                    )
+                ]
+            ),
         ),
         "dispense_interval": (
             day_of(events=[D0, E(EventKind.DISPENSE, DOSE + 500, "dispenser", {}, 2)]),
@@ -1487,7 +1758,16 @@ def test_compare_observed_names_each_discriminating_field() -> None:
             day_of(events=[E(EventKind.DISPENSE, DOSE, "dispenser", {}, 5)]),
         ),
         "verification": (
-            day_of(events=[E(EventKind.DEVICE_ERROR, DOSE, "gateway", {"verification": "failed", "subject": "dispenser"})]),
+            day_of(
+                events=[
+                    E(
+                        EventKind.DEVICE_ERROR,
+                        DOSE,
+                        "gateway",
+                        {"verification": "failed", "subject": "dispenser"},
+                    )
+                ]
+            ),
             day_of(),
         ),
         "other": (day_of([S("bp", 1, 120.0)]), day_of([S("bp", 1, 121.0)])),
@@ -1501,23 +1781,33 @@ def test_compare_observed_names_each_discriminating_field() -> None:
     a, b = cases["other"]
     assert compare_observed(a, b, VISITS, (), ignore_pressure=True) == ()
     assert compare_observed(
-        day_of([S("hr_ecg", 1, 70.0)]), day_of([S("hr_ecg", 1, 71.0)]), VISITS, (), ignore_pressure=True
+        day_of([S("hr_ecg", 1, 70.0)]),
+        day_of([S("hr_ecg", 1, 71.0)]),
+        VISITS,
+        (),
+        ignore_pressure=True,
     ) == ("other",)
 
 
 def test_compare_observed_presence_is_a_level_over_the_visit() -> None:
     one = day_of([S("presence", DOSE)])
     extra_in_visit = day_of([S("presence", DOSE), S("presence", DOSE + LAG)])
-    assert compare_observed(one, extra_in_visit, VISITS, ()) == ()  # a held level: no new information
+    assert (
+        compare_observed(one, extra_in_visit, VISITS, ()) == ()
+    )  # a held level: no new information
     outside = day_of([S("presence", DOSE), S("presence", DOSE + 2 * DWELL)])
-    assert compare_observed(one, outside, VISITS, ()) == ("witness",)  # a sample off every visit
+    assert compare_observed(one, outside, VISITS, ()) == (
+        "witness",
+    )  # a sample off every visit
     no_visit = day_of()
     assert compare_observed(one, no_visit, VISITS, ()) == ("witness",)
     assert compare_observed(one, no_visit, VISITS, ("witness",)) == ()
     # the order of items at one instant is not a difference
     x = E(EventKind.SCHEDULE_TICK, 5, "ward", {"kind": "dose"})
     y = E(EventKind.NODE_STATE, 5, "cuff", {"state": "active"})
-    assert compare_observed(day_of(events=[x, y]), day_of(events=[y, x]), VISITS, ()) == ()
+    assert (
+        compare_observed(day_of(events=[x, y]), day_of(events=[y, x]), VISITS, ()) == ()
+    )
 
 
 def test_compare_observed_reads_observed_days_only() -> None:
@@ -1527,7 +1817,7 @@ def test_compare_observed_reads_observed_days_only() -> None:
     code_names = set(compare_observed.__code__.co_names)
     assert not code_names & {"LatentDay", "latent", "LatentResult", "baseline_sbp_mmhg"}
     src = inspect.getsource(confounders_mod)
-    comparison = src[src.index("def compare_observed"):]
+    comparison = src[src.index("def compare_observed") :]
     comparison = comparison[: comparison.index("\ndef ", 10)]
     assert "latent" not in comparison.lower()
 
@@ -1550,20 +1840,42 @@ def snapshot(result: LatentResult) -> Any:
 def test_assembly_is_deterministic_and_seeded() -> None:
     specs = [spike(HOUR, HOUR, 10.0), nonresponse(DOSE, HOUR, 0.5)]
     cfg = make_config(adherence=NATURAL)
-    one = assemble(specs, patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg)
-    two = assemble(specs, patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg)
+    one = assemble(
+        specs, patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg
+    )
+    two = assemble(
+        specs, patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg
+    )
     assert [snapshot(r) for r in one] == [snapshot(r) for r in two]
-    other = assemble(specs, patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg, seed=SEED + 1)
+    other = assemble(
+        specs,
+        patient=NOISY_PATIENT,
+        schedule=SCHED_TWO,
+        n_days=2,
+        config=cfg,
+        seed=SEED + 1,
+    )
     assert bp_series(other[0]) != bp_series(one[0])
-    other_patient = assemble(specs, patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg, patient_index=PATIENT_INDEX + 1)
+    other_patient = assemble(
+        specs,
+        patient=NOISY_PATIENT,
+        schedule=SCHED_TWO,
+        n_days=2,
+        config=cfg,
+        patient_index=PATIENT_INDEX + 1,
+    )
     assert bp_series(other_patient[0]) != bp_series(one[0])
     # the order of the specs is irrelevant
-    swapped = assemble(specs[::-1], patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg)
+    swapped = assemble(
+        specs[::-1], patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg
+    )
     assert [snapshot(r) for r in swapped] == [snapshot(r) for r in one]
     assert [r.c1_records for r in swapped] == [r.c1_records for r in one]
 
 
-def test_adding_one_c1_injection_leaves_everything_it_does_not_touch_identical() -> None:
+def test_adding_one_c1_injection_leaves_everything_it_does_not_touch_identical() -> (
+    None
+):
     cfg = make_config(adherence=NATURAL)
     base = assemble(patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg)
     far = 10 * HOUR + 3 * MIN
@@ -1574,7 +1886,9 @@ def test_adding_one_c1_injection_leaves_everything_it_does_not_touch_identical()
         (refusal(SCHED_TWO.measurement_ticks_ms[1]), lambda t: False),
     ]
     for spec, touches in cases:
-        out = assemble([spec], patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg)
+        out = assemble(
+            [spec], patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=2, config=cfg
+        )
         for plain, injected in zip(base, out, strict=True):
             # the draws (adherence, noise, vitals) and the latent baseline are untouched
             assert plain.behaviour_log == injected.behaviour_log
@@ -1593,27 +1907,40 @@ def test_adding_one_c1_injection_leaves_everything_it_does_not_touch_identical()
 
 def test_c1_stream_is_the_named_injection_stream() -> None:
     spec = spike(HOUR, HOUR, 10.0)
-    again = spike(HOUR, HOUR, 99.0)  # a different magnitude: the same injection identity
+    again = spike(
+        HOUR, HOUR, 99.0
+    )  # a different magnitude: the same injection identity
     one = c1_stream(SEED, PATIENT_INDEX, 0, spec).standard_normal(4).tolist()
     assert one == c1_stream(SEED, PATIENT_INDEX, 0, again).standard_normal(4).tolist()
     expected = stream(
         SEED, PATIENT_INDEX, 0, StreamPurpose.INJECTION_C1, injection_sub_index(spec)
     ).standard_normal(4)
     assert one == expected.tolist()
-    assert one != c1_stream(SEED, PATIENT_INDEX, 0, spike(2 * HOUR, HOUR, 10.0)).standard_normal(4).tolist()
+    assert (
+        one
+        != c1_stream(SEED, PATIENT_INDEX, 0, spike(2 * HOUR, HOUR, 10.0))
+        .standard_normal(4)
+        .tolist()
+    )
     assert one != c1_stream(SEED, PATIENT_INDEX, 1, spec).standard_normal(4).tolist()
     # the injectors themselves are deterministic functions of the spec: no draw is consumed
     source = (SRC / "inject_c1.py").read_text(encoding="utf-8")
-    assert "default_rng" not in source and "np.random." not in source.replace("np.random.Generator", "")
-    assert "import random" not in source and "time." not in source.replace("datetime", "")
+    assert "default_rng" not in source and "np.random." not in source.replace(
+        "np.random.Generator", ""
+    )
+    assert "import random" not in source and "time." not in source.replace(
+        "datetime", ""
+    )
 
 
 def test_pair_members_do_not_shift_each_others_draws() -> None:
     v = g1("double_take_gap", True, True)
     ev = evaluated(v)
     # the draws of the cuff and of the vitals are the same whatever the mechanism
-    assert [m.error_mmhg for m in ev.a.stream.measurements] == [m.error_mmhg for m in ev.b.stream.measurements]
-    hr = lambda r: [s.value for s in r.latent.latent.samples if s.signal == "hr_ecg"]  # noqa: E731
+    assert [m.error_mmhg for m in ev.a.stream.measurements] == [
+        m.error_mmhg for m in ev.b.stream.measurements
+    ]
+    hr = lambda r: [s.value for s in r.latent.latent.samples if s.signal == "hr_ecg"]
     assert hr(ev.a) == hr(ev.b)
     # the second dose is natural in both members and bit-identical
     assert [r for r in dispense_intake(ev.a.latent) if r[1] >= 20 * HOUR] == [
@@ -1630,9 +1957,7 @@ def test_pair_members_do_not_shift_each_others_draws() -> None:
 # ---------------------------------------------------------------------------
 
 
-def chained(
-    n_days: int, **kwargs: Any
-) -> list[LatentResult]:
+def chained(n_days: int, **kwargs: Any) -> list[LatentResult]:
     """``n_days`` one-day assemblies, each carrying the state of the previous one."""
     out: list[LatentResult] = []
     state: AssemblyState | None = None
@@ -1659,16 +1984,33 @@ def test_three_day_assembly_equals_three_one_day_assemblies_that_carry_state() -
     for w, p in zip(whole, parts, strict=True):
         assert snapshot(w) == snapshot(p)
         assert w.c1_records == p.c1_records
-    # the end state of the whole call is the state to continue from
-    [day3] = assemble(start_day=3, state=whole[-1].end_state, **{k: v for k, v in kwargs.items() if k != "specs"}, specs=[])
-    [day3_whole] = assemble(n_days=4, **{k: v for k, v in kwargs.items() if k != "specs"}, specs=[])[3:]
-    assert bp_series(day3)  # continues
-    assert day3.latent.day_index == 3
+    # each record is returned once, with the day of its onset
+    for day, result in enumerate(whole):
+        assert [r.spec.onset_ms // DAY for r in result.c1_records] == [day]
+        times = {s.signal: [] for s in result.latent.samples}
+        for sample in result.latent.samples:
+            times[sample.signal].append(sample.t_device_ms)
+        for signal, values in times.items():  # every sample of a day lies in that day
+            assert day * DAY <= min(values) and max(values) < (day + 1) * DAY, (
+                day,
+                signal,
+            )
+            assert min(values) == day * DAY, (day, signal)
+    # the end state of a call is the state to continue from: a 4-day call equals the 3-day call
+    # followed by the call that starts at day 3 with its end state
+    four = assemble(n_days=4, **kwargs)
+    [day3] = assemble(start_day=3, state=whole[-1].end_state, **kwargs)
+    assert snapshot(day3) == snapshot(four[3]) and day3.latent.day_index == 3
+    assert [snapshot(r) for r in four[:3]] == [snapshot(r) for r in whole]
 
 
 def test_midnight_carries_the_drug_the_noise_and_the_chain() -> None:
     cfg = make_config(adherence=NATURAL)
-    kwargs: dict[str, Any] = {"patient": NOISY_PATIENT, "schedule": SCHED_LATE, "config": cfg}
+    kwargs: dict[str, Any] = {
+        "patient": NOISY_PATIENT,
+        "schedule": SCHED_LATE,
+        "config": cfg,
+    }
     whole = assemble(n_days=2, **kwargs)
     # (1) drug accumulation: the dose of day 0 at 23:50 acts on day 1 (intake 23:50:05, effect at 00:30)
     perfect = make_config(adherence=PERFECT)
@@ -1677,7 +2019,13 @@ def test_midnight_carries_the_drug_the_noise_and_the_chain() -> None:
     t = DAY + 30 * MIN  # 40 minutes after the intake, near the effect peak
     assert 130.0 - carried[t] > 5.0  # a large drop on day 1 caused by the dose of day 0
     # without the history of day 0 the effect is gone: a day 1 assembled alone has none of it
-    [alone] = assemble(start_day=1, state=AssemblyState(1, 0.0, None, ()), patient=FIX_PATIENT, schedule=SCHED_LATE, config=perfect)
+    [alone] = assemble(
+        start_day=1,
+        state=AssemblyState(1, 0.0, None, ()),
+        patient=FIX_PATIENT,
+        schedule=SCHED_LATE,
+        config=perfect,
+    )
     assert 130.0 - bp_series(alone)[t] < 130.0 - carried[t] - 5.0
     # (2) autoregressive noise continues: day 1 starts from the last value of day 0
     first_noise_day1 = whole[1].baseline_sbp_mmhg[0]
@@ -1687,7 +2035,13 @@ def test_midnight_carries_the_drug_the_noise_and_the_chain() -> None:
     assert first_noise_day1 == reset
     assert last_noise_day0 == whole[0].end_state.ar_state_mmhg
     # a state that is not carried (a fresh AR state) gives another day 1
-    [fresh] = assemble(start_day=1, state=AssemblyState(1, 0.0, whole[0].end_state.chain_state, whole[0].end_state.intake_times_ms), **kwargs)
+    [fresh] = assemble(
+        start_day=1,
+        state=AssemblyState(
+            1, 0.0, whole[0].end_state.chain_state, whole[0].end_state.intake_times_ms
+        ),
+        **kwargs,
+    )
     assert fresh.baseline_sbp_mmhg != whole[1].baseline_sbp_mmhg
     # (3) the adherence chain continues: the carried state is the last outcome of day 0
     assert whole[0].end_state.chain_state is whole[0].behaviour_log[-1].state
@@ -1699,7 +2053,9 @@ def test_assembly_state_must_match_the_start_day() -> None:
         with pytest.raises(LatentAssemblyError):
             assemble(start_day=2, state=state)  # the state is of day 1, or absent
     with pytest.raises(LatentAssemblyError):
-        assemble(start_day=0, state=first.end_state)  # a start from day 0 has no state to carry
+        assemble(
+            start_day=0, state=first.end_state
+        )  # a start from day 0 has no state to carry
     with pytest.raises(LatentAssemblyError):
         assemble(state="state")  # type: ignore[arg-type]
     assert first.end_state.next_day == 1
@@ -1717,20 +2073,42 @@ def test_c1_specs_validation_table() -> None:
     bad_specs: list[Any] = [
         InjectionSpec(C2, "hypertensive_spike", HOUR, HOUR, 5.0, "mmHg"),  # not a C1
         InjectionSpec(C1, "no_such_subtype", HOUR, HOUR, 5.0, "mmHg"),
-        InjectionSpec(C1, "hypertensive_spike", HOUR, None, 5.0, "mmHg"),  # a window needs a duration
-        InjectionSpec(C1, "hypertensive_spike", HOUR, HOUR, None, None),  # needs a magnitude
+        InjectionSpec(
+            C1, "hypertensive_spike", HOUR, None, 5.0, "mmHg"
+        ),  # a window needs a duration
+        InjectionSpec(
+            C1, "hypertensive_spike", HOUR, HOUR, None, None
+        ),  # needs a magnitude
         InjectionSpec(C1, "hypertensive_spike", HOUR, HOUR, 5.0, "ms"),  # wrong unit
-        InjectionSpec(C1, "hypertensive_spike", HOUR, HOUR, 0.0, "mmHg"),  # must be above zero
-        InjectionSpec(C1, "hypertensive_spike", HOUR, HOUR, -5.0, "mmHg"),  # the sign is the subtype's
+        InjectionSpec(
+            C1, "hypertensive_spike", HOUR, HOUR, 0.0, "mmHg"
+        ),  # must be above zero
+        InjectionSpec(
+            C1, "hypertensive_spike", HOUR, HOUR, -5.0, "mmHg"
+        ),  # the sign is the subtype's
         InjectionSpec(C1, "hypotension_below_hold", HOUR, HOUR, -5.0, "mmHg"),
-        InjectionSpec(C1, "drug_nonresponse", HOUR, HOUR, 1.5, "1"),  # a scale above 1 is no non-response
+        InjectionSpec(
+            C1, "drug_nonresponse", HOUR, HOUR, 1.5, "1"
+        ),  # a scale above 1 is no non-response
         InjectionSpec(C1, "drug_nonresponse", HOUR, HOUR, -0.5, "1"),
         InjectionSpec(C1, "drug_nonresponse", HOUR, HOUR, 0.5, "mmHg"),
         InjectionSpec(C1, "measurement_refusal", HOUR, HOUR),  # a refusal is per tick
-        InjectionSpec(C1, "measurement_refusal", HOUR, None, 1.0, "1"),  # and has no magnitude
+        InjectionSpec(
+            C1, "measurement_refusal", HOUR, None, 1.0, "1"
+        ),  # and has no magnitude
         InjectionSpec(C1, "double_take", HOUR, None, 1.0, "1"),
-        InjectionSpec(C1, "hypertensive_spike", HOUR, HOUR, 5.0, "mmHg", {"foo": 1}),  # unknown param
-        InjectionSpec(C1, "hypertensive_spike", HOUR, HOUR, 5.0, "mmHg", {"multiple": 2.0, "reference_value": 20.0, "reference": "scale_range"}),  # 5 != 2 * 20
+        InjectionSpec(
+            C1, "hypertensive_spike", HOUR, HOUR, 5.0, "mmHg", {"foo": 1}
+        ),  # unknown param
+        InjectionSpec(
+            C1,
+            "hypertensive_spike",
+            HOUR,
+            HOUR,
+            5.0,
+            "mmHg",
+            {"multiple": 2.0, "reference_value": 20.0, "reference": "scale_range"},
+        ),  # 5 != 2 * 20
         # windows beyond the day, and a window that crosses midnight
         InjectionSpec(C1, "hypertensive_spike", DAY - HOUR, 2 * HOUR, 5.0, "mmHg"),
         InjectionSpec(C1, "hypotension_below_hold", 5 * DAY - 1, 2, 5.0, "mmHg"),
@@ -1747,8 +2125,12 @@ def test_c1_specs_validation_table() -> None:
         check_c1_specs([refusal(HOUR), refusal(HOUR)])
     with pytest.raises(C1InjectionError):
         check_c1_specs([double_take_spec(HOUR), double_take_spec(HOUR)])
-    check_c1_specs([spike(HOUR, HOUR, 5.0), spike(2 * HOUR, HOUR, 5.0)])  # touching windows
-    check_c1_specs([spike(HOUR, HOUR, 5.0), hypo(HOUR, HOUR, 5.0)])  # different subtypes overlap
+    check_c1_specs(
+        [spike(HOUR, HOUR, 5.0), spike(2 * HOUR, HOUR, 5.0)]
+    )  # touching windows
+    check_c1_specs(
+        [spike(HOUR, HOUR, 5.0), hypo(HOUR, HOUR, 5.0)]
+    )  # different subtypes overlap
     check_c1_specs([nonresponse(HOUR, HOUR, 0.0), nonresponse(2 * HOUR, HOUR, 1.0)])
     # negative durations and onsets never reach a spec (the generic spec refuses them)
     for onset, duration in ((-1, HOUR), (HOUR, -1), (HOUR, 0)):
@@ -1764,7 +2146,10 @@ def test_windows_beyond_the_day_or_the_horizon_raise_the_named_error() -> None:
     assert out.c1_records == () and bp_series(out) == bp_series(assemble()[0])
     # the window must end by the day end exactly: [DAY - 1 hour, DAY) is the last admissible one
     ok = assemble([spike(DAY - HOUR, HOUR, 5.0)])[0]
-    assert ok.c1_records[0].realised and bp_series(ok)[DAY - STEP] == bp_series(assemble()[0])[DAY - STEP] + 5.0
+    assert (
+        ok.c1_records[0].realised
+        and bp_series(ok)[DAY - STEP] == bp_series(assemble()[0])[DAY - STEP] + 5.0
+    )
 
 
 def test_canonical_order_is_independent_of_the_input_order() -> None:
@@ -1779,7 +2164,10 @@ def test_canonical_order_is_independent_of_the_input_order() -> None:
     first = canonical_c1_order(specs)
     for shuffled in itertools.islice(itertools.permutations(specs), 40):
         assert canonical_c1_order(list(shuffled)) == first
-    assert [s.subtype for s in first][:2] == ["hypertensive_spike", "hypertensive_spike"]
+    assert [s.subtype for s in first][:2] == [
+        "hypertensive_spike",
+        "hypertensive_spike",
+    ]
     assert tuple(s.subtype for s in first) == tuple(
         sorted((s.subtype for s in specs), key=C1_SUBTYPES.index)
     )
@@ -1803,7 +2191,11 @@ def test_spec_list_and_horizon_are_bounded() -> None:
             dose_ticks_ms=tuple(range(0, 30_000 * 1000, 1000)),
             measurement_ticks_ms=(),
         )
-        assemble(schedule=many, config=make_config(step=SEC, adherence=make_adherence(gap=1000 - 1, lag=1)), n_days=1)
+        assemble(
+            schedule=many,
+            config=make_config(step=SEC, adherence=make_adherence(gap=1000 - 1, lag=1)),
+            n_days=1,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1817,7 +2209,9 @@ JUNK: list[Any] = [
 ]  # fmt: skip
 
 
-def fuzz(fn: Callable[..., Any], good: Mapping[str, Any], *, skip: Iterable[str] = ()) -> int:
+def fuzz(
+    fn: Callable[..., Any], good: Mapping[str, Any], *, skip: Iterable[str] = ()
+) -> int:
     """Call ``fn`` with each argument replaced by each junk value; only named errors may escape."""
     skipped = set(skip)
     calls = 0
@@ -1848,22 +2242,64 @@ def fresh_work() -> LatentWork:
 
 
 def test_extreme_inputs_c1_helpers() -> None:
-    fuzz(c1_spec, {"subtype": "hypertensive_spike", "onset_ms": HOUR, "duration_ms": HOUR, "magnitude": 5.0})
-    fuzz(c1_spec, {"subtype": "measurement_refusal", "onset_ms": HOUR}, skip=("onset_ms",))
-    fuzz(hold_distance_mmhg, {"baseline_sbp_mmhg": 130.0, "bp_hold_threshold_mmhg": 100.0})
+    fuzz(
+        c1_spec,
+        {
+            "subtype": "hypertensive_spike",
+            "onset_ms": HOUR,
+            "duration_ms": HOUR,
+            "magnitude": 5.0,
+        },
+    )
+    fuzz(
+        c1_spec,
+        {"subtype": "measurement_refusal", "onset_ms": HOUR},
+        skip=("onset_ms",),
+    )
+    fuzz(
+        hold_distance_mmhg,
+        {"baseline_sbp_mmhg": 130.0, "bp_hold_threshold_mmhg": 100.0},
+    )
     fuzz(
         resolve_c1_magnitude,
-        {"level": level_row(2.0), "reference_value": 20.0, "reference": REFERENCE_SCALE_RANGE},
+        {
+            "level": level_row(2.0),
+            "reference_value": 20.0,
+            "reference": REFERENCE_SCALE_RANGE,
+        },
     )
     fuzz(
         c1_spec_from_level,
-        {"subtype": "hypertensive_spike", "onset_ms": HOUR, "level": level_row(2.0), "reference_value": 20.0, "duration_ms": HOUR},
+        {
+            "subtype": "hypertensive_spike",
+            "onset_ms": HOUR,
+            "level": level_row(2.0),
+            "reference_value": 20.0,
+            "duration_ms": HOUR,
+        },
     )
     fuzz(check_c1_specs, {"specs": [spike(HOUR, HOUR, 5.0)]})
     fuzz(canonical_c1_order, {"specs": [spike(HOUR, HOUR, 5.0)]})
-    fuzz(c1_stream, {"seed": SEED, "patient_index": 0, "day_index": 0, "spec": spike(HOUR, HOUR, 5.0)})
+    fuzz(
+        c1_stream,
+        {
+            "seed": SEED,
+            "patient_index": 0,
+            "day_index": 0,
+            "spec": spike(HOUR, HOUR, 5.0),
+        },
+    )
     # the wrong type of a spec inside a list, and a list that is not a list
-    for bad in (["x"], [None], "ab", b"ab", 5, {1: 2}, iter([1]), [spike(HOUR, HOUR, 5.0)] * 3):
+    for bad in (
+        ["x"],
+        [None],
+        "ab",
+        b"ab",
+        5,
+        {1: 2},
+        iter([1]),
+        [spike(HOUR, HOUR, 5.0)] * 3,
+    ):
         try:
             check_c1_specs(bad)  # type: ignore[arg-type]
         except Exception as exc:  # noqa: BLE001
@@ -1884,7 +2320,11 @@ def test_extreme_inputs_c1_injectors_and_work() -> None:
     ):
         fuzz(fn, {"work": fresh_work(), "specs": [spec]})
         # a spec of another subtype is refused, never mis-applied
-        other = spike(HOUR, HOUR, 5.0) if fn is not hypertensive_spike else hypo(HOUR, HOUR, 5.0)
+        other = (
+            spike(HOUR, HOUR, 5.0)
+            if fn is not hypertensive_spike
+            else hypo(HOUR, HOUR, 5.0)
+        )
         with pytest.raises(C1InjectionError):
             fn(fresh_work(), [other])
     fuzz(
@@ -1902,7 +2342,9 @@ def test_extreme_inputs_c1_injectors_and_work() -> None:
     stream_ = observed_of(assemble([refusal(SCHED_ONE.measurement_ticks_ms[0])])[0])
     records = assemble([refusal(SCHED_ONE.measurement_ticks_ms[0])])[0].c1_records
     fuzz(observe_refusals, {"stream_": stream_, "records": records})
-    with pytest.raises(C1InjectionError):  # a refusal whose tick has no visit in the stream
+    with pytest.raises(
+        C1InjectionError
+    ):  # a refusal whose tick has no visit in the stream
         observe_refusals(dataclasses.replace(stream_, visits=()), records)
     with pytest.raises(C1InjectionError):
         observe_refusals(stream_, [spike(HOUR, HOUR, 5.0)])  # a spec is not a record
@@ -1923,7 +2365,11 @@ def test_extreme_inputs_latent_assembly() -> None:
     }
     calls = fuzz(assemble_latent_days, good)
     assert calls > 150
-    fuzz(assemble_latent_days, {**good, "start_day": 0, "state": None, "forced_slots": ()}, skip=tuple(good))
+    fuzz(
+        assemble_latent_days,
+        {**good, "start_day": 0, "state": None, "forced_slots": ()},
+        skip=tuple(good),
+    )
     fuzz(
         AssemblyConfig,
         {
@@ -1936,7 +2382,16 @@ def test_extreme_inputs_latent_assembly() -> None:
         },
     )
     fuzz(ForcedSlot, {"day_index": 0, "dose_index": 0, "state": AdherenceState.OMITTED})
-    fuzz(AssemblyState, {"next_day": 1, "ar_state_mmhg": 0.0, "chain_state": None, "intake_times_ms": ()})
+    fuzz(
+        AssemblyState,
+        {
+            "next_day": 1,
+            "ar_state_mmhg": 0.0,
+            "chain_state": None,
+            "intake_times_ms": (),
+        },
+    )
+
     # a response model that misbehaves is a named error as well
     class Broken:
         def effect_mmhg(self, *args: Any, **kwargs: Any) -> Any:
@@ -1949,12 +2404,38 @@ def test_extreme_inputs_latent_assembly() -> None:
     for model in (Broken(), Wrong(), object(), None):
         with pytest.raises(LatentAssemblyError):
             assemble_latent_days(
-                FIX_PATIENT, SCHED_ONE, 1, [], model, LIB, SEED, 0, config=make_config(step=HOUR)  # type: ignore[arg-type]
+                FIX_PATIENT,
+                SCHED_ONE,
+                1,
+                [],
+                model,
+                LIB,
+                SEED,
+                0,
+                config=make_config(step=HOUR),  # type: ignore[arg-type]
             )
     with pytest.raises(LatentAssemblyError):  # a library without heart-rate segments
         assemble(library=SegmentLibrary.from_memory([]))
-    ok = assemble(library=SegmentLibrary.from_memory([]), config=make_config(allow_no_segments=True))[0]
+    ok = assemble(
+        library=SegmentLibrary.from_memory([]),
+        config=make_config(allow_no_segments=True),
+    )[0]
     assert {s.signal for s in ok.latent.samples} == {"bp"}  # no vitals are invented
+
+
+def test_the_number_of_days_is_bounded_exactly() -> None:
+    # one vitals point a day and two pressure points a day keep the work small enough to hit the
+    # bound on the number of days itself rather than the bound on the work
+    coarse = dataclasses.replace(
+        make_config(step=DAY // 2),
+        vitals=dataclasses.replace(DESIGN, vitals_period_ms=DAY),
+    )
+    with pytest.raises(LatentAssemblyError):
+        assemble(n_days=0, config=coarse)
+    with pytest.raises(LatentAssemblyError):
+        assemble(n_days=MAX_DAYS + 1, config=coarse)
+    week = assemble(n_days=MAX_DAYS, config=coarse)
+    assert len(week) == MAX_DAYS and week[-1].latent.day_index == MAX_DAYS - 1
 
 
 def test_extreme_inputs_schedules_and_spec_lists() -> None:
@@ -1981,7 +2462,9 @@ def test_group_names_are_the_workstream_vocabulary() -> None:
         "nonresponse_vs_falsified_dispense",
         "refusal_vs_robot_missed",
     )
-    readme = (ROOT / "docs/plan/workstreams/WS04-benchmark/README.md").read_text(encoding="utf-8")
+    readme = (ROOT / "docs/plan/workstreams/WS04-benchmark/README.md").read_text(
+        encoding="utf-8"
+    )
     for group in GROUPS:
         assert group in readme
     assert DISCRIMINATORS == (
@@ -1993,10 +2476,18 @@ def test_group_names_are_the_workstream_vocabulary() -> None:
 def test_build_confounder_pair_scenarios() -> None:
     v = g1("double_take_gap", False, True)
     a, b = build_confounder_pair(v.group, v, BASE)
-    assert a.group == b.group == v.group and a.variant_id == b.variant_id == v.variant_id
-    assert [s.subtype for s in a.c1_specs] == ["double_take"] and not a.c2_specs and not a.c3_specs
+    assert (
+        a.group == b.group == v.group and a.variant_id == b.variant_id == v.variant_id
+    )
+    assert (
+        [s.subtype for s in a.c1_specs] == ["double_take"]
+        and not a.c2_specs
+        and not a.c3_specs
+    )
     assert [s.subtype for s in b.c2_specs] == ["dispenser_bounce"] and not b.c1_specs
-    assert b.c2_specs[0].magnitude == GAP  # the stress level: the double-take gap itself
+    assert (
+        b.c2_specs[0].magnitude == GAP
+    )  # the stress level: the double-take gap itself
     assert b.c2_specs[0].onset_ms == DOSE and a.c1_specs[0].onset_ms == DOSE
     assert b.forced_slots == (ForcedSlot(0, 0, AdherenceState.ON_TIME),)
     nominal = build_confounder_pair(v.group, g1("nominal", False, True), BASE)[1]
@@ -2009,12 +2500,18 @@ def test_build_confounder_pair_scenarios() -> None:
     v2 = g2("informed", True, False)
     a2, b2 = build_confounder_pair(v2.group, v2, BASE)
     assert [s.subtype for s in a2.c1_specs] == ["drug_nonresponse"]
-    assert a2.c1_specs[0].magnitude == 0.0 and a2.c1_specs[0].magnitude_unit == UNIT_SCALE
+    assert (
+        a2.c1_specs[0].magnitude == 0.0 and a2.c1_specs[0].magnitude_unit == UNIT_SCALE
+    )
     assert a2.forced_slots == (ForcedSlot(0, 0, AdherenceState.ON_TIME),)
     assert b2.forced_slots == (ForcedSlot(0, 0, AdherenceState.OMITTED),)
-    assert [s.subtype for s in b2.c3_specs] == ["presence_spoof", "dispense_forgery"] or sorted(
-        s.subtype for s in b2.c3_specs
-    ) == ["dispense_forgery", "presence_spoof"]
+    assert [s.subtype for s in b2.c3_specs] == [
+        "presence_spoof",
+        "dispense_forgery",
+    ] or sorted(s.subtype for s in b2.c3_specs) == [
+        "dispense_forgery",
+        "presence_spoof",
+    ]
     spoof = next(s for s in b2.c3_specs if s.subtype == "presence_spoof")
     assert spoof.onset_ms == DOSE + LAG and spoof.params["spoof_intake"] is True
     assert {s.level for s in b2.c3_specs} == {"informed"}
@@ -2025,35 +2522,55 @@ def test_build_confounder_pair_scenarios() -> None:
     # group 3
     a3, b3 = build_confounder_pair(G3_REPORTED.group, G3_REPORTED, BASE)
     tick = SCHED_TWO.measurement_ticks_ms[0]
-    assert a3.c1_specs[0].subtype == "measurement_refusal" and a3.c1_specs[0].onset_ms == tick
-    assert b3.c2_specs[0].subtype == "manipulation_failure" and b3.c2_specs[0].onset_ms == tick
+    assert (
+        a3.c1_specs[0].subtype == "measurement_refusal"
+        and a3.c1_specs[0].onset_ms == tick
+    )
+    assert (
+        b3.c2_specs[0].subtype == "manipulation_failure"
+        and b3.c2_specs[0].onset_ms == tick
+    )
     assert not a3.forced_slots and not b3.forced_slots
 
 
 def test_pair_builder_refuses_inconsistent_requests() -> None:
     v = g1("double_take_gap", True, True)
     with pytest.raises(ConfounderError):
-        build_confounder_pair(GROUP_REFUSAL_VS_ROBOT_MISSED, v, BASE)  # the variant is of another group
+        build_confounder_pair(
+            GROUP_REFUSAL_VS_ROBOT_MISSED, v, BASE
+        )  # the variant is of another group
     with pytest.raises(ConfounderError):
         build_confounder_pair("no_such_group", v, BASE)
     with pytest.raises(ConfounderError):
-        build_confounder_pair(v.group, g1("nominal", True, True), pair_base(nominal_bounce_gap_ms=None))
+        build_confounder_pair(
+            v.group, g1("nominal", True, True), pair_base(nominal_bounce_gap_ms=None)
+        )
     with pytest.raises(ConfounderError):
         build_confounder_pair(v.group, v, pair_base(dose_index=2))
     with pytest.raises(ConfounderError):
-        build_confounder_pair(G3_REPORTED.group, G3_REPORTED, pair_base(measurement_index=9))
-    with pytest.raises(ConfounderError):  # a nominal gap that is not shorter than the double-take gap
-        build_confounder_pair(v.group, g1("nominal", True, True), pair_base(nominal_bounce_gap_ms=GAP))
+        build_confounder_pair(
+            G3_REPORTED.group, G3_REPORTED, pair_base(measurement_index=9)
+        )
+    with pytest.raises(
+        ConfounderError
+    ):  # a nominal gap that is not shorter than the double-take gap
+        build_confounder_pair(
+            v.group, g1("nominal", True, True), pair_base(nominal_bounce_gap_ms=GAP)
+        )
     # the variant itself is validated
     for kwargs in (
         {"withheld": ("nothing",)},
-        {"withheld": ("witness",)},  # the robot channel is withheld as a pair: witness and task outcome
+        {
+            "withheld": ("witness",)
+        },  # the robot channel is withheld as a pair: witness and task outcome
         {"withheld": ("witness", "witness", "robot_task_outcome")},
         {"bounce_gap": "huge"},
         {"attacker": "informed"},  # an attacker has no place in group 1
     ):
         with pytest.raises(ConfounderError):
-            variant(GROUP_DOUBLE_TAKE_VS_BOUNCE, "v", **{"bounce_gap": "nominal", **kwargs})
+            variant(
+                GROUP_DOUBLE_TAKE_VS_BOUNCE, "v", **{"bounce_gap": "nominal", **kwargs}
+            )
     with pytest.raises(ConfounderError):
         variant(GROUP_NONRESPONSE_VS_FORGERY, "v", attacker=None)
     with pytest.raises(ConfounderError):
@@ -2080,9 +2597,13 @@ def test_realised_scenario_never_leaks_latent_values_into_the_observed_day() -> 
         text = repr(day.samples) + repr(day.events)
         assert "latent" not in text and "baseline" not in text
         # the latent baseline never equals an observed value except by coincidence of 0 error
-        latent_values = {s.value for s in member.latent.latent.samples if s.signal == "bp"}
+        latent_values = {
+            s.value for s in member.latent.latent.samples if s.signal == "bp"
+        }
         observed_bp = [s.value for s in day.samples if s.signal == "bp"]
-        assert not latent_values & set(observed_bp)  # the cuff error is not zero in this fixture
+        assert not latent_values & set(
+            observed_bp
+        )  # the cuff error is not zero in this fixture
         # a day written to disk contains no latent key
         import tempfile
 
@@ -2110,7 +2631,9 @@ def test_realise_scenario_matches_the_pipeline_written_by_hand() -> None:
         apply_observation_injections(
             observe_refusals(base_stream, res.c1_records),
             [],
-            InjectionContext(BASE.patient_index, library=BASE.library, latent=res.latent),
+            InjectionContext(
+                BASE.patient_index, library=BASE.library, latent=res.latent
+            ),
         ).stream
     )
     assert realised.observed == expected
@@ -2124,14 +2647,19 @@ def test_pair_works_for_a_late_day_and_a_jittered_robot() -> None:
         def delay_ms(self, rng: np.random.Generator, *, kind: str, index: int) -> int:
             return 2 * MIN if kind == vocab.KIND_DOSE else 0
 
-    base = pair_base(jitter=Late(), schedule=SCHED_ONE)
+    # the robot arrives two minutes late at the dose: the first intake (5 s after the dispense) is
+    # before the arrival and not witnessed; the second release of a double take (2 min 5 s) is
+    # covered, so only the double take has a witnessed INTAKE there
+    base = pair_base(
+        jitter=Late(), schedule=SCHED_ONE, config=make_config(adherence=PERFECT)
+    )
     v = g1("double_take_gap", True, True)
     ev = evaluate_pair(v.group, v, base)
+    intakes = lambda r: [e.t_device_ms for e in only(r.observed, EventKind.INTAKE)]
+    assert intakes(ev.a) == [DOSE + GAP + LAG]
+    assert intakes(ev.b) == []
     assert ev.separated_by == ("content_change", "witness")
-    # the robot arrives two minutes late: the first intake is before the arrival, only the second
-    # (DOSE + GAP + LAG) is covered, for the double take; the bounce has none after the arrival
-    intakes = lambda r: [e.t_device_ms for e in only(r.observed, EventKind.INTAKE)]  # noqa: E731
-    assert intakes(ev.a) != intakes(ev.b)
+    assert not ev.indistinguishable_by_construction
 
 
 # ---------------------------------------------------------------------------
@@ -2139,7 +2667,9 @@ def test_pair_works_for_a_late_day_and_a_jittered_robot() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_measurement_base_emits_content_change_only_when_the_dispenser_senses_it() -> None:
+def test_measurement_base_emits_content_change_only_when_the_dispenser_senses_it() -> (
+    None
+):
     result = assemble(schedule=SCHED_TWO)[0]
     plain = observed_of(result, SCHED_TWO)
     sensing = observed_of(result, SCHED_TWO, dispenser_content_sensing=True)
@@ -2181,11 +2711,16 @@ def test_c1_design_loader_accepts_the_c1_families_and_the_other_sections_still_r
             load_injection_design(mutated, section=section)
 
 
-def test_the_loader_rejects_aliases_duplicates_and_numbers_in_the_new_sections(tmp_path: Path) -> None:
+def test_the_loader_rejects_aliases_duplicates_and_numbers_in_the_new_sections(
+    tmp_path: Path,
+) -> None:
     text = INJECTIONS_FILE.read_text(encoding="utf-8")
     # a duplicate key
     dup = tmp_path / "dup.yaml"
-    dup.write_text(text.replace("  c1:\n", "  c1:\n    double_take: {}\n    double_take: {}\n", 1), encoding="utf-8")
+    dup.write_text(
+        text.replace("  c1:\n", "  c1:\n    double_take: {}\n    double_take: {}\n", 1),
+        encoding="utf-8",
+    )
     for loader in (load_c1_design, load_confounder_design):
         with pytest.raises(InjectionError):
             loader(dup)
@@ -2197,14 +2732,19 @@ def test_the_loader_rejects_aliases_duplicates_and_numbers_in_the_new_sections(t
     with pytest.raises(InjectionError):
         load_c1_design(num)
     document = yaml.safe_load(text)
-    next(iter(next(iter(document["confounders"]["groups"].values()))["variants"].values()))["margin"] = 5
+    next(
+        iter(
+            next(iter(document["confounders"]["groups"].values()))["variants"].values()
+        )
+    )["margin"] = 5
     num2 = tmp_path / "num2.yaml"
     num2.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
     with pytest.raises(InjectionError):
         load_confounder_design(num2)
     # a YAML alias bomb is read in bounded time and refused or accepted, never a hang or a raw error
     bomb = "a: &a [x]\n" + "".join(
-        f"{chr(98 + k)}: &{chr(98 + k)} [*{chr(97 + k)}, *{chr(97 + k)}]\n" for k in range(9)
+        f"{chr(98 + k)}: &{chr(98 + k)} [*{chr(97 + k)}, *{chr(97 + k)}]\n"
+        for k in range(9)
     )
     path = tmp_path / "bomb.yaml"
     path.write_text(bomb, encoding="utf-8")
@@ -2238,8 +2778,8 @@ def test_extreme_inputs_pair_builder() -> None:
             "source_ref": "r", "rationale": "r",
         },
     )  # fmt: skip
-    a, b = build_confounder_pair(v.group, v, BASE)
-    fuzz(realise_scenario, {"scenario": a, "base_context": BASE})
+    scenario_a, _ = build_confounder_pair(v.group, v, BASE)
+    fuzz(realise_scenario, {"scenario": scenario_a, "base_context": BASE})
     fuzz(evaluate_pair, {"group": v.group, "variant": v, "base_context": BASE})
     ev = evaluated(v)
     day = ev.a.observed
@@ -2261,11 +2801,13 @@ def test_extreme_inputs_pair_builder() -> None:
 NEW_MODULES = ("inject_c1", "latent_day", "confounders")
 ALLOWED_IMPORTS: dict[str, set[str]] = {
     "inject_c1": {
+        "ralmon.benchmark",
         "ralmon.benchmark.injection", "ralmon.benchmark.latent", "ralmon.benchmark.measurement",
         "ralmon.benchmark.rng", "ralmon.benchmark.trace", "ralmon.benchmark.vocab",
         "ralmon.signals",
     },
     "latent_day": {
+        "ralmon.benchmark",
         "ralmon.benchmark.adherence", "ralmon.benchmark.inject_c1", "ralmon.benchmark.injection",
         "ralmon.benchmark.latent", "ralmon.benchmark.measurement", "ralmon.benchmark.pkpd",
         "ralmon.benchmark.priors", "ralmon.benchmark.rng", "ralmon.benchmark.schedule",
@@ -2273,6 +2815,7 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
         "ralmon.signals",
     },
     "confounders": {
+        "ralmon.benchmark",
         "ralmon.benchmark.adherence", "ralmon.benchmark.inject_c1", "ralmon.benchmark.inject_c2",
         "ralmon.benchmark.inject_c3", "ralmon.benchmark.injection", "ralmon.benchmark.latent",
         "ralmon.benchmark.latent_day", "ralmon.benchmark.measurement", "ralmon.benchmark.pkpd",
@@ -2297,12 +2840,33 @@ def _imports(path: Path) -> set[str]:
 @pytest.mark.parametrize("name", NEW_MODULES)
 def test_new_modules_stay_below_monitor_and_spec(name: str) -> None:
     imports = {i for i in _imports(SRC / f"{name}.py") if i.startswith("ralmon")}
-    for forbidden in ("spec", "monitor", "conformal", "attribution", "baselines", "eval"):
-        assert not [i for i in imports if i.split(".")[1:2] == [forbidden]], (name, forbidden)
-    assert not imports - ALLOWED_IMPORTS[name] - {f"ralmon.benchmark.{name}"}, imports - ALLOWED_IMPORTS[name]
+    for forbidden in (
+        "spec",
+        "monitor",
+        "conformal",
+        "attribution",
+        "baselines",
+        "eval",
+    ):
+        assert not [i for i in imports if i.split(".")[1:2] == [forbidden]], (
+            name,
+            forbidden,
+        )
+    assert not imports - ALLOWED_IMPORTS[name] - {f"ralmon.benchmark.{name}"}, (
+        imports - ALLOWED_IMPORTS[name]
+    )
     # no wall clock, no global random state, no network, no subprocess
     source = (SRC / f"{name}.py").read_text(encoding="utf-8")
-    for token in ("import time", "datetime", "import random", "np.random.seed", "np.random.normal", "socket", "subprocess", "urllib"):
+    for token in (
+        "import time",
+        "datetime",
+        "import random",
+        "np.random.seed",
+        "np.random.normal",
+        "socket",
+        "subprocess",
+        "urllib",
+    ):
         assert token not in source, (name, token)
     assert not re.search(r"default_rng\(\s*\)", source)
 
@@ -2310,34 +2874,45 @@ def test_new_modules_stay_below_monitor_and_spec(name: str) -> None:
 def test_no_new_name_is_exported_from_the_package_root() -> None:
     exported = set(benchmark_pkg.__all__)
     for module in (c1_mod, latent_day_mod, confounders_mod):
-        for public in getattr(module, "__all__"):
+        for public in module.__all__:
             assert public not in exported, public
     table = (ROOT / "docs/plan/02-interfaces.md").read_text(encoding="utf-8")
-    row = next(line for line in table.splitlines() if line.startswith("| `ralmon.benchmark`"))
+    row = next(
+        line for line in table.splitlines() if line.startswith("| `ralmon.benchmark`")
+    )
     listed = set(re.findall(r"`([A-Za-z_]+)`", row))
     assert exported <= listed | {"ralmon.benchmark"}
 
 
 def test_new_modules_have_all_and_no_unannotated_numeric_parameters() -> None:
-    sys.path.insert(0, str(ROOT / "tests" / "benchmark"))
-    from test_priorsource import parameter_literals
+    from .test_priorsource import parameter_literals
 
     for name in NEW_MODULES:
         path = SRC / f"{name}.py"
         assert parameter_literals(path.read_text(encoding="utf-8")) == [], name
-        module = {"inject_c1": c1_mod, "latent_day": latent_day_mod, "confounders": confounders_mod}[name]
-        assert sorted(module.__all__) == list(module.__all__), name  # ruff RUF022 style: sorted
+        module = {
+            "inject_c1": c1_mod,
+            "latent_day": latent_day_mod,
+            "confounders": confounders_mod,
+        }[name]
+        # constants, then classes, then functions, each group sorted (the style of the other modules)
+        order = lambda n: (0 if n.isupper() else 1 if n[0].isupper() else 2, n)
+        assert sorted(module.__all__, key=order) == list(module.__all__), name
         for public in module.__all__:
             assert hasattr(module, public), (name, public)
     # no clinical value of the registry appears in the new modules
     registry = yaml.safe_load(REGISTRY_FILE.read_text(encoding="utf-8"))
-    clinical = {float(e["value"]) for e in registry["entries"] if abs(float(e["value"])) > 3.0}
+    clinical = {
+        float(e["value"]) for e in registry["entries"] if abs(float(e["value"])) > 3.0
+    }
     for name in NEW_MODULES:
         tree = ast.parse((SRC / f"{name}.py").read_text(encoding="utf-8"))
         values = {
             float(n.value)
             for n in ast.walk(tree)
-            if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) and not isinstance(n.value, bool)
+            if isinstance(n, ast.Constant)
+            and isinstance(n.value, (int, float))
+            and not isinstance(n.value, bool)
         }
         assert not values & clinical, (name, values & clinical)
 
@@ -2351,15 +2926,27 @@ def test_bound_constants_are_documented_values() -> None:
 
 
 def test_module_help_text_names_the_conventions() -> None:
-    doc = (c1_mod.__doc__ or "") + (latent_day_mod.__doc__ or "") + (confounders_mod.__doc__ or "")
-    for needle in ("[onset, onset + duration)", "ground", "paired", "midnight", "R3-W4"):
+    doc = (
+        (c1_mod.__doc__ or "")
+        + (latent_day_mod.__doc__ or "")
+        + (confounders_mod.__doc__ or "")
+    )
+    for needle in (
+        "[onset, onset + duration)",
+        "ground",
+        "paired",
+        "midnight",
+        "R3-W4",
+    ):
         assert needle in doc, needle
     fault_model = FAULT_MODEL.read_text(encoding="utf-8")
     assert "half" in fault_model.lower()  # the window convention the docstring cites
 
 
 def test_c1_subtypes_are_the_workstream_vocabulary() -> None:
-    readme = (ROOT / "docs/plan/workstreams/WS04-benchmark/README.md").read_text(encoding="utf-8")
+    readme = (ROOT / "docs/plan/workstreams/WS04-benchmark/README.md").read_text(
+        encoding="utf-8"
+    )
     for subtype in C1_SUBTYPES:
         assert subtype in readme, subtype
     assert C1_SUBTYPES[:4] == (
@@ -2376,3 +2963,1066 @@ def test_command_line_checks_still_pass() -> None:
     names = (SRC / "confounders.py").read_text(encoding="utf-8")
     assert sum(names.count(g) for g in GROUPS) >= 3
     assert math.isfinite(1.0)
+
+
+# ---------------------------------------------------------------------------
+# More behaviour of the injectors, the working copy and the records
+# ---------------------------------------------------------------------------
+
+
+def work_for(day: int = 0, *, step: int = HOUR) -> LatentWork:
+    work = LatentWork(
+        day,
+        np.arange(0, DAY, step, dtype=np.int64) + day * DAY,
+        dose_ticks_ms=SCHED_TWO.dose_ticks_ms,
+        measurement_ticks_ms=SCHED_TWO.measurement_ticks_ms,
+        double_take_gap_ms=GAP,
+    )
+    return work
+
+
+def test_latent_work_validates_its_grid_and_ticks() -> None:
+    grid = np.arange(0, DAY, HOUR, dtype=np.int64)
+    good: dict[str, Any] = {
+        "dose_ticks_ms": (DOSE,),
+        "measurement_ticks_ms": (HOUR,),
+        "double_take_gap_ms": GAP,
+    }
+    bad_grids: list[Any] = [
+        np.array([], dtype=np.int64),
+        np.array([1.0, 2.0]),  # floats
+        np.array([5, 3], dtype=np.int64),  # not increasing
+        np.array([3, 3], dtype=np.int64),
+        np.array([DAY], dtype=np.int64),  # a point after the day
+        np.array([-1, 0], dtype=np.int64),
+        np.arange(10**6 + 5, dtype=np.int64),  # more points than a call may build
+        np.zeros((2, 2), dtype=np.int64),
+        np.array([1, 2], dtype=np.uint64),
+        [0, 1, 2],
+    ]
+    for bad in bad_grids:
+        with pytest.raises(C1InjectionError):
+            LatentWork(0, bad, **good)
+    for bad_ticks in ((HOUR, HOUR), (2 * HOUR, HOUR), (DAY,), (-1,), ("x",)):
+        with pytest.raises(C1InjectionError):
+            LatentWork(0, grid, **{**good, "measurement_ticks_ms": bad_ticks})
+        with pytest.raises(C1InjectionError):
+            LatentWork(0, grid, **{**good, "dose_ticks_ms": bad_ticks})
+    with pytest.raises(C1InjectionError):
+        LatentWork(1, grid, **good)  # day 1 needs a grid inside day 1
+    work = LatentWork(0, grid, **good)
+    assert work.has_pulses is False and not work.pulse_mmhg.any()
+    assert work.dose_ticks_ms == (DOSE,) and work.day_end_ms == DAY
+    work.set_intakes([DOSE + LAG, 10])
+    assert work.intake_scales == [1.0, 1.0]
+    assert LatentWork(2, grid + 2 * DAY, **good).measurement_ticks_ms == (
+        2 * DAY + HOUR,
+    )
+    with pytest.raises(C1InjectionError):
+        work.set_intakes([-1])
+    with pytest.raises(C1InjectionError):
+        work.set_intakes([0] * (c1_mod.MAX_WORK_INTAKES + 1))
+
+
+def test_injector_records_state_what_changed_for_every_subtype() -> None:
+    work = work_for()
+    work.set_intakes((DOSE + LAG, 20 * HOUR + LAG))
+    [spike_rec] = hypertensive_spike(work, [spike(2 * HOUR, 3 * HOUR, 7.5)])
+    assert (spike_rec.n_changed, spike_rec.realised) == (3, True)
+    assert (spike_rec.realised_onset_ms, spike_rec.realised_end_ms) == (
+        2 * HOUR,
+        5 * HOUR,
+    )
+    assert (
+        spike_rec.details["n_grid_points"] == 3
+        and spike_rec.details["magnitude"] == 7.5
+    )
+    assert work.has_pulses and work.pulse_mmhg[2:5].tolist() == [7.5, 7.5, 7.5]
+    assert work.pulse_mmhg[:2].tolist() == [0.0, 0.0] and work.pulse_mmhg[5] == 0.0
+    [hypo_rec] = hypotension_below_hold(work, [hypo(4 * HOUR, 2 * HOUR, 2.5)])
+    assert hypo_rec.n_changed == 2 and work.pulse_mmhg[4:6].tolist() == [5.0, -2.5]
+    # a window with no grid point: unrealised, nothing changes
+    off = work_for()
+    [none_rec] = hypertensive_spike(off, [spike(HOUR + 1, HOUR - 2, 7.5)])
+    assert (none_rec.n_changed, none_rec.realised) == (0, False) and not off.has_pulses
+    # the non-response; the intakes may be given in any order (the history is not sorted by time)
+    unsorted = work_for()
+    unsorted.set_intakes((20 * HOUR + LAG, DOSE + LAG, 12 * HOUR))
+    [other] = drug_nonresponse(unsorted, [nonresponse(DOSE, HOUR, 0.5)])
+    assert other.n_changed == 1 and unsorted.intake_scales == [1.0, 0.5, 1.0]
+    assert other.details["intake_times_ms"] == [DOSE + LAG]
+    [nr] = drug_nonresponse(work, [nonresponse(DOSE, HOUR, 0.25)])
+    assert nr.n_changed == 1 and nr.details["n_intakes_in_window"] == 1
+    assert nr.details["intake_times_ms"] == [DOSE + LAG] and nr.details["scale"] == 0.25
+    assert work.intake_scales == [0.25, 1.0]
+    [again] = drug_nonresponse(work, [nonresponse(DOSE, HOUR, 0.25)])
+    assert again.n_changed == 0 and again.realised is False  # the scale is already that
+    assert work.intake_scales == [0.25, 1.0]
+    # a refusal of a tick and of an instant that is no tick
+    tick = SCHED_TWO.measurement_ticks_ms[1]
+    [ref_ok, ref_bad] = measurement_refusal(work, [refusal(tick), refusal(tick + 1)])
+    assert (ref_ok.n_changed, ref_ok.realised_onset_ms, ref_ok.realised_end_ms) == (
+        1,
+        tick,
+        None,
+    )
+    assert ref_bad.n_changed == 0 and "reason" in ref_bad.details
+    assert work.refused_ticks_ms == {tick} and work.refused_clock_ticks_ms() == (tick,)
+    # a double take on a dose tick and on an instant that is no dose tick
+    [dt_ok, dt_bad] = double_take(
+        work, [double_take_spec(DOSE), double_take_spec(DOSE + 1)]
+    )
+    assert (dt_ok.n_changed, dt_ok.realised_onset_ms) == (4, DOSE + GAP)
+    assert dt_ok.details["gap_ms"] == GAP and dt_ok.details["forced"] is True
+    assert dt_bad.n_changed == 0 and "reason" in dt_bad.details
+    assert work.double_take_ticks_ms == {DOSE}
+    for record in (spike_rec, hypo_rec, nr, ref_ok, dt_ok):
+        json.dumps(injection_log([record]), allow_nan=False)  # a JSON-native sidecar
+
+
+def test_work_on_a_later_day_uses_the_continuing_axis() -> None:
+    work = work_for(day=3)
+    tick = 3 * DAY + SCHED_TWO.measurement_ticks_ms[0]
+    [rec] = measurement_refusal(work, [refusal(tick)])
+    assert rec.realised and work.refused_clock_ticks_ms() == (
+        SCHED_TWO.measurement_ticks_ms[0],
+    )
+    [rec2] = hypertensive_spike(work, [spike(3 * DAY + 2 * HOUR, HOUR, 4.0)])
+    assert rec2.n_changed == 1 and work.pulse_mmhg[2] == 4.0
+    [rec3] = hypertensive_spike(
+        work, [spike(2 * DAY + 2 * HOUR, HOUR, 4.0)]
+    )  # another day
+    assert rec3.n_changed == 0
+
+
+def test_c1_spec_bookkeeping_of_the_reference() -> None:
+    ok = c1_spec(
+        "hypertensive_spike", HOUR, duration_ms=HOUR, magnitude=40.0,
+        reference=REFERENCE_SCALE_RANGE, multiple=2.0, reference_value=20.0,
+    )  # fmt: skip
+    assert dict(ok.params) == {
+        "multiple": 2.0,
+        "reference": "scale_range",
+        "reference_value": 20.0,
+    }
+    bad = [
+        {"reference": REFERENCE_SCALE_RANGE},  # all three or none
+        {"multiple": 2.0, "reference_value": 20.0},
+        {
+            "reference": REFERENCE_SCALE_RANGE,
+            "multiple": 2.0,
+            "reference_value": 21.0,
+        },  # 40 != 2 * 21
+        {
+            "reference": REFERENCE_HOLD_DISTANCE,
+            "multiple": 2.0,
+            "reference_value": 20.0,
+        },  # wrong name
+        {"reference": REFERENCE_SCALE_RANGE, "multiple": 0.0, "reference_value": 20.0},
+        {"reference": REFERENCE_SCALE_RANGE, "multiple": 2.0, "reference_value": -20.0},
+        {"reference": 5, "multiple": 2.0, "reference_value": 20.0},
+    ]
+    for extra in bad:
+        with pytest.raises(C1InjectionError):
+            c1_spec(
+                "hypertensive_spike", HOUR, duration_ms=HOUR, magnitude=40.0, **extra
+            )
+    with pytest.raises(C1InjectionError):  # a non-response takes no reference params
+        c1_spec(
+            "drug_nonresponse", HOUR, duration_ms=HOUR, magnitude=0.5,
+            reference=REFERENCE_SCALE_RANGE, multiple=2.0, reference_value=0.25,
+        )  # fmt: skip
+    with pytest.raises(C1InjectionError):
+        c1_spec("nothing", HOUR)
+    with pytest.raises(C1InjectionError):
+        c1_spec_from_level(
+            "measurement_refusal", HOUR, level_row(1.0), 20.0
+        )  # no magnitude
+    with pytest.raises(
+        C1InjectionError
+    ):  # a pressure level for the Emax scale: wrong quantity
+        c1_spec_from_level(
+            "drug_nonresponse", HOUR, level_row(1.0), 20.0, duration_ms=HOUR
+        )
+    with pytest.raises(C1InjectionError):  # a dimensionless scale is no pressure
+        c1_spec_from_level(
+            "hypertensive_spike", HOUR,
+            level_row(0.5, UNIT_SCALE, quantity_unit=UNIT_SCALE), None, duration_ms=HOUR,
+        )  # fmt: skip
+    with pytest.raises(C1InjectionError):  # an unfilled level
+        c1_spec_from_level(
+            "hypertensive_spike", HOUR, level_row(None), 20.0, duration_ms=HOUR
+        )
+    with pytest.raises(C1InjectionError):  # a relative level needs its reference value
+        c1_spec_from_level(
+            "hypertensive_spike", HOUR, level_row(2.0), None, duration_ms=HOUR
+        )
+    with pytest.raises(C1InjectionError):
+        c1_spec_from_level(
+            "hypertensive_spike", HOUR, level_row(2.0), -5.0, duration_ms=HOUR
+        )
+
+
+def test_observe_refusals_adds_only_declined_events_in_stable_order() -> None:
+    first, second = SCHED_TWO.measurement_ticks_ms[:2]
+    out = assemble([refusal(first), refusal(second)], schedule=SCHED_TWO)[0]
+    base = observed_of(out, SCHED_TWO)
+    observed = observe_refusals(base, out.c1_records)
+    added = [e for e in observed.events if e not in base.events]
+    assert [(e.t_device_ms, e.payload["outcome"]) for e in added] == [
+        (first, "declined"), (second, "declined"),
+    ]  # fmt: skip
+    assert observed.samples == base.samples and observed.visits == base.visits
+    assert observed.measurements == base.measurements  # nothing generator-side changes
+    # sorted by arrival, and each declined event follows the navigation event of its instant
+    assert [e.t_rx_ms for e in observed.events] == sorted(
+        e.t_rx_ms for e in observed.events
+    )
+    at = [
+        e
+        for e in observed.events
+        if e.kind is EventKind.ROBOT_TASK and e.t_device_ms == first
+    ]
+    assert [e.payload["task"] for e in at] == ["navigate", "manipulate"]
+    # an unrealised refusal and a record of another subtype add nothing
+    unrealised = measurement_refusal(work_for(), [refusal(first + 1)])
+    assert observe_refusals(base, unrealised + out.c1_records[:0]) == base
+    sp = assemble([spike(HOUR, HOUR, 1.0)], schedule=SCHED_TWO)[0].c1_records
+    assert observe_refusals(base, sp) == base
+    # the input stream is never changed
+    assert base == observed_of(out, SCHED_TWO)
+
+
+def test_truth_file_round_trip_of_the_sidecars(tmp_path: Path) -> None:
+    from ralmon.benchmark.trace import read_truth, write_truth
+
+    out = assemble(
+        [
+            spike(HOUR, HOUR, 5.0),
+            refusal(SCHED_TWO.measurement_ticks_ms[0]),
+            double_take_spec(DOSE),
+        ],
+        schedule=SCHED_TWO,
+        config=make_config(adherence=NATURAL),
+    )[0]
+    log = injection_log(out.c1_records)
+    behaviour = [e.to_json() for e in out.behaviour_log]
+    write_truth(tmp_path, out.latent, [], log, behaviour)
+    back = read_truth(tmp_path, out.latent.patient_id, out.latent.day_index)
+    assert [(e.kind, e.t_device_ms, e.source) for e in back.latent.events] == [
+        (e.kind, e.t_device_ms, e.source) for e in out.latent.events
+    ]
+    assert [s.value for s in back.latent.samples] == [
+        s.value for s in out.latent.samples
+    ]
+    assert back.injection_log == log and back.behaviour_log == behaviour
+    assert list(back.ground_truth) == []  # a C1 record is not ground truth
+
+
+def test_a_week_is_assembled_with_bounded_memory() -> None:
+    import tracemalloc
+
+    config = make_config(adherence=NATURAL)
+    specs = [spike(k * DAY + 2 * HOUR, HOUR, 5.0) for k in range(7)]
+    tracemalloc.start()
+    try:
+        week = assemble(
+            specs, patient=NOISY_PATIENT, schedule=SCHED_TWO, n_days=7, config=config
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert [r.latent.day_index for r in week] == list(range(7))
+    assert all(len(r.c1_records) == 1 and r.c1_records[0].realised for r in week)
+    assert peak < 120 * 1024 * 1024
+    assert len(week[-1].end_state.intake_times_ms) == len(
+        [t for r in week for t in times_of(r, EventKind.INTAKE)]
+    )
+
+
+def test_config_and_slot_validation_details() -> None:
+    cfg = make_config()
+    for step in (0, -1, 7 * SEC + 1, DAY + 1, 10**400, 1.5, True, None):
+        with pytest.raises(LatentAssemblyError):
+            AssemblyConfig(step, PEAK_CLOCK, STEP, PERFECT, DESIGN)  # type: ignore[arg-type]
+    with pytest.raises(LatentAssemblyError):  # more points a day than a call may build
+        AssemblyConfig(1, PEAK_CLOCK, 1, PERFECT, DESIGN)
+    for peak in (-1, DAY, 10**400):
+        with pytest.raises(LatentAssemblyError):
+            dataclasses.replace(cfg, circadian_peak_clock_ms=peak)
+    with pytest.raises(LatentAssemblyError):
+        dataclasses.replace(cfg, adherence="model")  # type: ignore[arg-type]
+    with pytest.raises(LatentAssemblyError):
+        dataclasses.replace(cfg, vitals=None)  # type: ignore[arg-type]
+    with pytest.raises(LatentAssemblyError):
+        dataclasses.replace(cfg, allow_no_segments=1)  # type: ignore[arg-type]
+    for state in (AdherenceState.DELAYED, AdherenceState.DOUBLE_TAKE, 0, None):
+        with pytest.raises(LatentAssemblyError):
+            ForcedSlot(0, 0, state)  # type: ignore[arg-type]
+    for bad in (-1, 10**400, 1.0, True):
+        with pytest.raises(LatentAssemblyError):
+            ForcedSlot(bad, 0, AdherenceState.OMITTED)  # type: ignore[arg-type]
+        with pytest.raises(LatentAssemblyError):
+            ForcedSlot(0, bad, AdherenceState.OMITTED)  # type: ignore[arg-type]
+    for args in (
+        (-1, 0.0, None, ()), (1, float("nan"), None, ()), (1, 0.0, 3, ()),
+        (1, 0.0, None, (-1,)), (1, 0.0, None, "abc"), (1, 0.0, None, (1.5,)),
+    ):  # fmt: skip
+        with pytest.raises(LatentAssemblyError):
+            AssemblyState(*args)  # type: ignore[arg-type]
+    # the day grid: a step that divides the day with the fewest points
+    assert AssemblyConfig(DAY, PEAK_CLOCK, DAY, PERFECT, DESIGN).latent_step_ms == DAY
+
+
+def test_a_misbehaving_library_or_model_is_a_named_error() -> None:
+    class NaNModel:
+        def effect_mmhg(
+            self, params: Any, intakes: Any, grid: Any, intake_scales: Any = None
+        ) -> Any:
+            return [float("nan")] * len(grid)
+
+    class Negative:
+        def effect_mmhg(
+            self, params: Any, intakes: Any, grid: Any, intake_scales: Any = None
+        ) -> Any:
+            return [-1.0] * len(grid)
+
+    for model in (NaNModel(), Negative()):
+        with pytest.raises(LatentAssemblyError):
+            assemble_latent_days(
+                FIX_PATIENT,
+                SCHED_ONE,
+                1,
+                [],
+                model,
+                LIB,
+                SEED,
+                0,
+                config=make_config(step=HOUR),  # type: ignore[arg-type]
+            )
+    # a patient with an impossible parameter: the named error, not a raw one
+    for patient in (
+        make_patient(baseline=-1.0), make_patient(baseline=float("nan")),
+        make_patient(emax=-1.0), make_patient(ka=0.0), make_patient(sd=-1.0),
+        make_patient(phi=1.0), make_patient(ec50=0.0),
+    ):  # fmt: skip
+        with pytest.raises(LatentAssemblyError):
+            assemble(patient=patient)
+    # a double-take gap that does not fit the shortest slot
+    tight = Schedule(dose_ticks_ms=(8 * HOUR, 8 * HOUR + MIN), measurement_ticks_ms=())
+    with pytest.raises(LatentAssemblyError):
+        assemble(schedule=tight)
+    # the largest representable baseline stays finite with the largest admissible pulse
+    huge = assemble([spike(HOUR, HOUR, 1e12)], patient=make_patient(baseline=1.7e308))[
+        0
+    ]
+    assert all(math.isfinite(v) for v in bp_series(huge).values())
+
+
+def test_evaluate_pair_refuses_members_with_different_bases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    v = g1("double_take_gap", False, False)
+    real = confounders_mod.realise_scenario
+    calls: list[RealisedScenario] = []
+
+    def other_visits(scenario: Scenario, base: PairBase) -> RealisedScenario:
+        out = real(scenario, base)
+        if calls:
+            out = dataclasses.replace(
+                out, stream=dataclasses.replace(out.stream, visits=())
+            )
+        calls.append(out)
+        return out
+
+    monkeypatch.setattr(confounders_mod, "realise_scenario", other_visits)
+    with pytest.raises(ConfounderError):
+        evaluate_pair(v.group, v, BASE)
+
+
+def test_pair_base_validation() -> None:
+    bad: dict[str, Any] = {
+        "patient": "p", "schedule": None, "config": None, "response_model": object(),
+        "device_errors": None, "design": None, "jitter": object(), "library": None,
+        "care_plan_id": "", "seed": -1, "patient_index": 2**32, "dose_index": -1,
+        "measurement_index": 1.5, "nominal_bounce_gap_ms": 0, "task_deadline_offset_ms": -5,
+    }  # fmt: skip
+    for key, value in bad.items():
+        with pytest.raises(ConfounderError):
+            pair_base(**{key: value})
+
+    class NoDescriptor:
+        def delay_ms(self, rng: Any, *, kind: str, index: int) -> int:
+            return 0
+
+    with pytest.raises(ConfounderError):
+        pair_base(jitter=NoDescriptor())
+    assert pair_base(nominal_bounce_gap_ms=None).nominal_bounce_gap_ms is None
+
+
+def test_scenarios_never_carry_the_other_members_specs() -> None:
+    for grid in (G1_GRID, G2_GRID, G3_GRID):
+        for v in grid:
+            a, b = build_confounder_pair(v.group, v, BASE)
+            assert {s.cls for s in a.c1_specs} == {C1} and not (
+                a.c2_specs or a.c3_specs
+            )
+            assert not b.c1_specs
+            assert {s.cls for s in b.c2_specs + b.c3_specs} <= {C2, C3} and (
+                b.c2_specs or b.c3_specs
+            )
+            specs = a.c1_specs + a.c2_specs + a.c3_specs + b.c2_specs + b.c3_specs
+            assert all(s.confounder_group == v.group for s in specs)
+            assert a.withheld == b.withheld == v.withheld
+            assert a.content_sensing == b.content_sensing == v.content_sensing
+            assert a.robot_present == b.robot_present == v.robot_present
+            assert a.task_outcomes == b.task_outcomes == v.task_outcomes
+
+
+def test_content_sensing_is_a_knob_of_the_double_take_pair_only() -> None:
+    for v in G2_GRID + G3_GRID:
+        assert variant_content(v) is False
+    assert g1("nominal", True, True).content_sensing is True
+    assert g1("nominal", False, True).content_sensing is False
+    assert g2("naive", True, True).authenticating is True
+    assert g2("naive", True, False).authenticating is False
+    assert g1("nominal", True, True).authenticating is False
+
+
+def variant_content(v: Variant) -> bool:
+    return v.content_sensing
+
+
+# ---------------------------------------------------------------------------
+# Mutated design files: every structural rule of the loaders is a named error
+# ---------------------------------------------------------------------------
+
+
+def mutated(
+    tmp_path: Path, name: str, mutate: Callable[[dict[str, Any]], None]
+) -> Path:
+    """A slim copy of the design file (only the sections and rows of this task) with a mutation."""
+    document = committed_document()
+    document["injections"] = {"c1": document["injections"]["c1"]}
+    document.pop("attacker", None)
+    document["parameters"] = [
+        r for r in document["parameters"] if r["consumer_task"] == "WS04-T09"
+    ]
+    mutate(document)
+    path = tmp_path / name
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def first_variant(
+    document: dict[str, Any], group: str = GROUP_DOUBLE_TAKE_VS_BOUNCE
+) -> dict[str, Any]:
+    variants = document["confounders"]["groups"][group]["variants"]
+    return variants[next(iter(variants))]
+
+
+def test_c1_design_rules_are_named_errors(tmp_path: Path) -> None:
+    c1 = lambda d: d["injections"]["c1"]
+    cases: dict[str, Callable[[dict[str, Any]], None]] = {
+        "missing_subtype": lambda d: c1(d).pop("double_take"),
+        "extra_subtype": lambda d: c1(d).update({"invented": c1(d)["double_take"]}),
+        "bad_family": lambda d: c1(d)["double_take"].update({"family": "device"}),
+        "no_target": lambda d: c1(d)["double_take"].update({"target": []}),
+        "refusal_with_duration": lambda d: c1(d)["measurement_refusal"].update(
+            {"duration": c1(d)["hypertensive_spike"]["duration"]}
+        ),
+        "spike_without_duration": lambda d: c1(d)["hypertensive_spike"].update(
+            {"duration": None}
+        ),
+        "spike_without_magnitude": lambda d: c1(d)["hypertensive_spike"].update(
+            {"magnitude": None}
+        ),
+        "wrong_unit": lambda d: c1(d)["hypertensive_spike"]["magnitude"].update(
+            {"unit": "1"}
+        ),
+        "wrong_reference": lambda d: c1(d)["hypertensive_spike"]["magnitude"].update(
+            {"reference": "baseline_to_hold_distance"}
+        ),
+        "hypotension_wrong_reference": lambda d: c1(d)["hypotension_below_hold"][
+            "magnitude"
+        ].update({"reference": "scale_range"}),
+        "scale_with_reference": lambda d: c1(d)["drug_nonresponse"]["magnitude"].update(
+            {"reference": "scale_range"}
+        ),
+        "duration_not_ms": lambda d: c1(d)["hypertensive_spike"]["duration"].update(
+            {"unit": "mmHg"}
+        ),
+        "unknown_row": lambda d: c1(d)["hypertensive_spike"]["magnitude"][
+            "levels"
+        ].update({"below": "no_such_row"}),
+        "two_levels": lambda d: c1(d)["drug_nonresponse"]["magnitude"].update(
+            {
+                "levels": dict(
+                    list(c1(d)["drug_nonresponse"]["magnitude"]["levels"].items())[:2]
+                )
+            }
+        ),
+        "row_without_provenance": lambda d: [
+            r.update({"source_ref": None})
+            for r in d["parameters"]
+            if r["parameter"] == "hypertensive_spike_magnitude_below"
+        ],
+        "duration_row_in_wrong_unit": lambda d: [
+            r.update({"unit": "mmHg"})
+            for r in d["parameters"]
+            if r["parameter"] == "hypertensive_spike_duration_short"
+        ],
+        "scale_row_in_wrong_unit": lambda d: [
+            r.update({"unit": "x scale_range"})
+            for r in d["parameters"]
+            if r["parameter"] == "drug_nonresponse_magnitude_mild"
+        ],
+        "number_in_structure": lambda d: c1(d)["double_take"].update({"onset": 3}),
+        "absolute_pressure_row": lambda d: [
+            r.update({"unit": "mmHg"})
+            for r in d["parameters"]
+            if r["parameter"] == "hypertensive_spike_magnitude_below"
+        ],
+        "hold_row_in_scale_units": lambda d: [
+            r.update({"unit": "x scale_range"})
+            for r in d["parameters"]
+            if r["parameter"] == "hypotension_below_hold_magnitude_near"
+        ],
+    }
+    for name, mutate in cases.items():
+        with pytest.raises(InjectionError):
+            load_c1_design(mutated(tmp_path, f"{name}.yaml", mutate))
+    load_c1_design(INJECTIONS_FILE)  # the committed file still loads
+
+
+def test_confounder_design_rules_are_named_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    groups = lambda d: d["confounders"]["groups"]
+    g1_name, g2_name, g3_name = GROUPS
+    cases: dict[str, Callable[[dict[str, Any]], None]] = {
+        "no_section": lambda d: d.pop("confounders"),
+        "section_not_a_mapping": lambda d: d.update({"confounders": [1]}),
+        "no_groups": lambda d: d["confounders"].pop("groups"),
+        "missing_group": lambda d: groups(d).pop(g3_name),
+        "extra_group": lambda d: groups(d).update({"other": groups(d)[g1_name]}),
+        "group_missing_key": lambda d: groups(d)[g1_name].pop("added_by"),
+        "group_extra_key": lambda d: groups(d)[g1_name].update({"extra": "x"}),
+        "members_wrong_class": lambda d: groups(d)[g1_name]["members"]["A"].update(
+            {"class": "C2"}
+        ),
+        "members_wrong_subtype": lambda d: groups(d)[g2_name]["members"]["B"].update(
+            {"subtype": "replay"}
+        ),
+        "members_missing": lambda d: groups(d)[g3_name]["members"].pop("B"),
+        "matrix_rows_not_list": lambda d: groups(d)[g1_name].update(
+            {"matrix_rows": "6"}
+        ),
+        "matrix_rows_empty_text": lambda d: groups(d)[g1_name].update(
+            {"matrix_rows": [" "]}
+        ),
+        "no_variants": lambda d: groups(d)[g1_name].update({"variants": {}}),
+        "variants_not_a_mapping": lambda d: groups(d)[g1_name].update(
+            {"variants": ["a"]}
+        ),
+        "unknown_field": lambda d: first_variant(d).update({"colour": "red"}),
+        "bad_gap": lambda d: first_variant(d).update({"bounce_gap": "huge"}),
+        "bad_withheld": lambda d: first_variant(d).update({"withheld": ["nothing"]}),
+        "withheld_not_list": lambda d: first_variant(d).update({"withheld": "witness"}),
+        "witness_alone": lambda d: first_variant(d).update({"withheld": ["witness"]}),
+        "expected_not_bool": lambda d: first_variant(d).update(
+            {"expected_indistinguishable": "yes"}
+        ),
+        "no_source_type": lambda d: first_variant(d).pop("source_type"),
+        "bad_source_type": lambda d: first_variant(d).update(
+            {"source_type": "invented"}
+        ),
+        "empty_source_ref": lambda d: first_variant(d).update({"source_ref": " "}),
+        "no_rationale": lambda d: first_variant(d).pop("rationale"),
+        "attacker_in_group_one": lambda d: first_variant(d).update(
+            {"attacker": "naive"}
+        ),
+        "gap_in_group_two": lambda d: first_variant(d, g2_name).update(
+            {"bounce_gap": "nominal"}
+        ),
+        "no_attacker": lambda d: first_variant(d, g2_name).pop("attacker"),
+        "number": lambda d: first_variant(d).update({"withheld": [1]}),
+    }
+    for name, mutate in cases.items():
+        with pytest.raises(InjectionError):
+            load_confounder_design(mutated(tmp_path, f"{name}.yaml", mutate))
+    # too many variants (the bound is lowered to keep the file small)
+    monkeypatch.setattr(confounders_mod, "MAX_VARIANTS", 25)
+    big = mutated(
+        tmp_path,
+        "big.yaml",
+        lambda d: groups(d)[g1_name]["variants"].update(
+            {f"v{k}": dict(first_variant(d)) for k in range(26)}
+        ),
+    )
+    with pytest.raises(InjectionError):
+        load_confounder_design(big)
+    monkeypatch.undo()
+    assert set(load_confounder_design(INJECTIONS_FILE)) == set(GROUPS)
+
+
+def test_the_committed_grid_lists_every_discriminator_it_withholds_consistently() -> (
+    None
+):
+    for variants in load_confounder_design(INJECTIONS_FILE).values():
+        for v in variants:
+            if not v.robot_present:
+                assert not v.task_outcomes, v.variant_id  # no robot, no task outcome
+            assert set(v.withheld) <= set(WITHHOLDABLE)
+    assert confounders_mod.WITHHOLDABLE == (
+        "content_change",
+        "witness",
+        "robot_task_outcome",
+        "verification",
+    )
+
+
+def test_measurement_refusal_design_has_no_numbers_and_double_take_names_the_gap_row() -> (
+    None
+):
+    design = load_c1_design(INJECTIONS_FILE)
+    assert (
+        design["measurement_refusal"].duration is None
+        and design["measurement_refusal"].magnitude is None
+    )
+    assert (
+        design["double_take"].duration is None
+        and design["double_take"].magnitude is None
+    )
+    assert "double_take_gap_ms" in design["double_take"].onset
+
+
+def test_provenance_table_lists_the_new_rows() -> None:
+    table = (ROOT / "docs" / "benchmark" / "parameter-provenance.md").read_text(
+        encoding="utf-8"
+    )
+    for row in design_rows(INJECTIONS_FILE):
+        assert f"`{row['parameter']}`" in table or row["parameter"] in table, row[
+            "parameter"
+        ]
+    rows = {r["parameter"] for r in design_rows(INJECTIONS_FILE)}
+    assert (
+        len(rows) >= 3 * 3 * 2 - 3 + 1
+    )  # three durations and three levels for three window subtypes
+    # every row of the task names its consumer and is a design choice
+    assert all(r["consumer_task"] == "WS04-T09" for r in design_rows(INJECTIONS_FILE))
+
+
+def test_latent_vitals_equal_the_observed_vitals_of_the_same_key() -> None:
+    out = assemble(schedule=SCHED_TWO)[0]
+    observed = observed_of(out, SCHED_TWO)
+    for signal in ("hr_ecg", "spo2"):
+        latent_values = [
+            (s.t_device_ms, s.value) for s in out.latent.samples if s.signal == signal
+        ]
+        observed_values = [
+            (s.t_device_ms, s.value) for s in observed.samples if s.signal == signal
+        ]
+        assert latent_values == observed_values and len(latent_values) == DAY // MIN
+    # another day, another seed: the same key on both sides
+    [day0, day1] = assemble(schedule=SCHED_TWO, n_days=2, seed=SEED + 3)
+    for result, day in ((day0, 0), (day1, 1)):
+        stream_ = build_observed_base(
+            result.latent, SCHED_TWO, "plan-1", ZERO_ERRORS, DESIGN, NoJitter(), LIB,
+            SEED + 3, PATIENT_INDEX,
+        )  # fmt: skip
+        assert [s.value for s in stream_.samples if s.signal == "hr_ecg"] == [
+            s.value for s in result.latent.samples if s.signal == "hr_ecg"
+        ], day
+
+
+def test_an_intake_after_midnight_belongs_to_the_day_of_its_slot_and_acts_on_the_next_day() -> (
+    None
+):
+    # a double take at 23:50 whose second release is at 23:59:58 and whose second intake (5 s
+    # later) falls at 00:00:03 of the next day
+    gap = 9 * MIN + 58 * SEC
+    cfg = make_config(adherence=make_adherence(p_double_take=1.0, gap=gap))
+    whole = assemble(n_days=2, schedule=SCHED_LATE, config=cfg, patient=FIX_PATIENT)
+    day0_intakes = times_of(whole[0], EventKind.INTAKE)
+    late_intake = DAY + 3 * SEC
+    assert late_intake in day0_intakes  # in the events of day 0, after its end
+    assert late_intake not in times_of(whole[1], EventKind.INTAKE)  # never twice
+    assert whole[0].behaviour_log[0].dispense_times_ms == (
+        DAY - 10 * MIN,
+        DAY - 2 * SEC,
+    )
+    assert whole[0].end_state.intake_times_ms == tuple(day0_intakes)
+    # its drug acts on day 1 from 00:00:03: compare with the model on the whole history
+    intakes = [
+        e.t_device_ms
+        for r in whole
+        for e in r.latent.events
+        if e.kind is EventKind.INTAKE
+    ]
+    grid = sorted(bp_series(whole[1]))
+    effect = OneCompartmentEmax().effect_mmhg(FIX_PATIENT, intakes, grid)
+    expected = compose_latent_sbp([130.0] * len(grid), effect)
+    assert [bp_series(whole[1])[t] for t in grid] == expected.tolist()
+    # chained one-day calls agree
+    parts = chained(2, schedule=SCHED_LATE, config=cfg, patient=FIX_PATIENT)
+    assert [snapshot(r) for r in parts] == [snapshot(r) for r in whole]
+    validate_day(
+        whole[0].latent
+    )  # events sorted although the last lies after the day end
+
+
+def test_the_kinds_at_one_instant_are_ordered_tick_dispense_intake_measurement() -> (
+    None
+):
+    # a dose tick, a measurement tick and a zero-lag intake at one instant
+    schedule = Schedule(dose_ticks_ms=(DOSE,), measurement_ticks_ms=(DOSE,))
+    cfg = make_config(adherence=make_adherence(lag=0, gap=GAP))
+    out = assemble(schedule=schedule, config=cfg)[0]
+    at = [e for e in out.latent.events if e.t_device_ms == DOSE]
+    assert [(e.kind.value, e.payload.get("kind")) for e in at] == [
+        ("schedule_tick", "dose"), ("schedule_tick", "measurement"),
+        ("dispense", None), ("intake", None), ("measurement", None),
+    ]  # fmt: skip
+
+
+def test_the_chain_state_is_carried_across_midnight_for_a_chain_with_memory() -> None:
+    # an absorbing OMITTED row: once a dose is omitted every later one is, so a chain that is not
+    # carried across midnight would start again from the initial law
+    absorbing = [
+        [1.0, 0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+    ]
+    model = make_adherence(matrix=absorbing, initial=[0.5, 0.0, 0.5, 0.0])
+    cfg = make_config(adherence=model)
+    carried_omission = 0
+    for seed in range(8):
+        whole = assemble(n_days=4, schedule=SCHED_TWO, config=cfg, seed=seed)
+        parts = chained(4, schedule=SCHED_TWO, config=cfg, seed=seed)
+        assert [snapshot(r) for r in whole] == [snapshot(r) for r in parts], seed
+        states = [e.state for r in whole for e in r.behaviour_log]
+        if AdherenceState.OMITTED in states:
+            first = states.index(AdherenceState.OMITTED)
+            assert set(states[first:]) == {AdherenceState.OMITTED}  # absorbing
+            carried_omission += first < len(states) - len(SCHED_TWO.dose_ticks_ms)
+    assert carried_omission >= 1  # the property was exercised across a day boundary
+    # a forced slot is an intervention: the natural chain continues underneath it
+    for seed in range(8):
+        natural = assemble(n_days=2, schedule=SCHED_TWO, config=cfg, seed=seed)
+        forced = assemble(
+            n_days=2, schedule=SCHED_TWO, config=cfg, seed=seed,
+            forced_slots=[ForcedSlot(0, 0, AdherenceState.ON_TIME)],
+        )  # fmt: skip
+        assert forced[0].behaviour_log[0].state is AdherenceState.ON_TIME
+        assert forced[0].end_state.chain_state is natural[0].end_state.chain_state
+        assert forced[1].behaviour_log == natural[1].behaviour_log
+
+
+def test_the_work_bounds_are_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = make_config(step=6 * HOUR)  # four grid points a day
+    per_day = (
+        4 + 2 * DESIGN.vitals_points + 5 * (1 + len(SCHED_ONE.measurement_ticks_ms))
+    )
+    monkeypatch.setattr(latent_day_mod, "MAX_TOTAL_POINTS", 2 * per_day)
+    assert len(assemble(n_days=2, config=cfg)) == 2  # exactly at the bound
+    with pytest.raises(LatentAssemblyError):
+        assemble(n_days=3, config=cfg)
+    monkeypatch.setattr(latent_day_mod, "MAX_TOTAL_POINTS", 2 * per_day - 1)
+    with pytest.raises(LatentAssemblyError):
+        assemble(n_days=2, config=cfg)
+    monkeypatch.undo()
+    # intake-by-point evaluations: two days, one intake each, four points a day
+    # day 0: 1 intake * 4 points; day 1: 2 intakes * 4 points; total 12
+    monkeypatch.setattr(latent_day_mod, "MAX_TOTAL_EVALUATIONS", 12)
+    assert len(assemble(n_days=2, config=cfg)) == 2
+    monkeypatch.setattr(latent_day_mod, "MAX_TOTAL_EVALUATIONS", 11)
+    with pytest.raises(LatentAssemblyError):
+        assemble(n_days=2, config=cfg)
+    monkeypatch.undo()
+    monkeypatch.setattr(c1_mod, "MAX_C1_SPECS", 2)
+    check_c1_specs([spike(HOUR, HOUR, 1.0), spike(3 * HOUR, HOUR, 1.0)])
+    with pytest.raises(C1InjectionError):
+        check_c1_specs(
+            [
+                spike(HOUR, HOUR, 1.0),
+                spike(3 * HOUR, HOUR, 1.0),
+                spike(5 * HOUR, HOUR, 1.0),
+            ]
+        )
+    monkeypatch.undo()
+    monkeypatch.setattr(latent_day_mod, "MAX_FORCED_SLOTS", 1)
+    assemble(forced_slots=[ForcedSlot(0, 0, AdherenceState.OMITTED)])
+    with pytest.raises(LatentAssemblyError):
+        assemble(forced_slots=[ForcedSlot(0, 0, AdherenceState.OMITTED)] * 2)
+
+
+def test_group_pressure_scope_is_a_declared_decision() -> None:
+    info = confounders_mod._GROUP_INFO
+    # the pressure of the double-take pair differs by construction (two doses against one) and that of
+    # the non-response pair by the drug that still occupies the saturation term; the refusal pair
+    # shares the latent pressure exactly, so its comparison keeps the pressure samples
+    assert {g: info[g].pressure_differs for g in GROUPS} == {
+        GROUP_DOUBLE_TAKE_VS_BOUNCE: True,
+        GROUP_NONRESPONSE_VS_FORGERY: True,
+        GROUP_REFUSAL_VS_ROBOT_MISSED: False,
+    }
+    # and a difference in the pressure of the refusal pair would be seen
+    ev = evaluated(G3_REPORTED)
+    shifted = dataclasses.replace(
+        ev.b.observed,
+        samples=tuple(
+            dataclasses.replace(s, value=s.value + 1.0) if s.signal == "bp" else s
+            for s in ev.b.observed.samples
+        ),
+    )
+    assert compare_observed(
+        ev.a.observed, shifted, ev.a.stream.visits, ("robot_task_outcome",)
+    ) == ("other",)
+
+
+def test_pair_scenarios_for_the_other_knobs() -> None:
+    # an informed attacker with no robot makes no spoof; with the robot, a spoof of the intake
+    no_robot = build_confounder_pair(
+        GROUP_NONRESPONSE_VS_FORGERY, g2("informed", False, False), BASE
+    )[1]
+    assert [s.subtype for s in no_robot.c3_specs] == ["dispense_forgery"]
+    assert no_robot.robot_present is False and no_robot.task_outcomes is False
+    robot = build_confounder_pair(
+        GROUP_NONRESPONSE_VS_FORGERY, g2("informed", True, False), BASE
+    )[1]
+    assert sorted(s.subtype for s in robot.c3_specs) == [
+        "dispense_forgery",
+        "presence_spoof",
+    ]
+    # the other dose and the other measurement tick
+    for index, tick in enumerate(SCHED_TWO.measurement_ticks_ms):
+        a, b = build_confounder_pair(
+            G3_REPORTED.group, G3_REPORTED, pair_base(measurement_index=index)
+        )
+        assert a.c1_specs[0].onset_ms == b.c2_specs[0].onset_ms == tick
+    second = pair_base(dose_index=1)
+    a1, b1 = build_confounder_pair(
+        GROUP_DOUBLE_TAKE_VS_BOUNCE, g1("double_take_gap", True, True), second
+    )
+    assert a1.c1_specs[0].onset_ms == b1.c2_specs[0].onset_ms == 20 * HOUR
+    assert b1.forced_slots == (ForcedSlot(0, 1, AdherenceState.ON_TIME),)
+    a2, b2 = build_confounder_pair(
+        GROUP_NONRESPONSE_VS_FORGERY, g2("informed", True, False), second
+    )
+    length = SCHED_TWO.slot_lengths_ms()[1]
+    assert (a2.c1_specs[0].onset_ms, a2.c1_specs[0].duration_ms) == (20 * HOUR, length)
+    assert a2.forced_slots == (ForcedSlot(0, 1, AdherenceState.ON_TIME),)
+    assert b2.forced_slots == (ForcedSlot(0, 1, AdherenceState.OMITTED),)
+    # the pair of the second dose realises: the 20:00 dose is the mechanism
+    ev = evaluate_pair(
+        GROUP_NONRESPONSE_VS_FORGERY, g2("informed", True, False), second
+    )
+    assert ev.indistinguishable_by_construction and ev.separated_by == ()
+    assert 20 * HOUR in [e.t_device_ms for e in dispenses(ev.b.observed)]
+
+
+def test_a_zero_reference_value_is_refused() -> None:
+    for reference_value in (0.0, -1.0):
+        with pytest.raises(C1InjectionError):
+            resolve_c1_magnitude(level_row(2.0), reference_value, REFERENCE_SCALE_RANGE)
+
+
+def test_records_come_back_in_canonical_order_whatever_the_order_of_the_specs() -> None:
+    specs = [
+        refusal(SCHED_ONE.measurement_ticks_ms[1]),
+        double_take_spec(DOSE),
+        hypo(3 * HOUR, HOUR, 2.0),
+        nonresponse(DOSE, HOUR, 0.5),
+        spike(HOUR, HOUR, 2.0),
+    ]
+    out = assemble(specs)[0]
+    assert [r.spec for r in out.c1_records] == list(canonical_c1_order(specs))
+    assert [r.spec.subtype for r in out.c1_records] == [
+        "hypertensive_spike", "drug_nonresponse", "hypotension_below_hold",
+        "measurement_refusal", "double_take",
+    ]  # fmt: skip
+    assert [r.spec for r in assemble(specs[::-1])[0].c1_records] == [
+        r.spec for r in out.c1_records
+    ]
+
+
+def test_a_forced_slot_must_name_a_dose_of_the_schedule() -> None:
+    assemble(forced_slots=[ForcedSlot(0, 0, AdherenceState.OMITTED)])  # the only dose
+    with pytest.raises(LatentAssemblyError):
+        assemble(
+            forced_slots=[ForcedSlot(0, 1, AdherenceState.OMITTED)]
+        )  # one past the last
+    assemble(
+        schedule=SCHED_TWO, forced_slots=[ForcedSlot(0, 1, AdherenceState.OMITTED)]
+    )
+    with pytest.raises(LatentAssemblyError):
+        assemble(
+            schedule=SCHED_TWO, forced_slots=[ForcedSlot(0, 2, AdherenceState.OMITTED)]
+        )
+    with pytest.raises(LatentAssemblyError):
+        assemble(
+            schedule=Schedule((), ()),
+            forced_slots=[ForcedSlot(0, 0, AdherenceState.OMITTED)],
+        )
+
+
+def test_a_forced_slot_must_lie_inside_the_days_of_the_call() -> None:
+    assemble(
+        n_days=2, forced_slots=[ForcedSlot(1, 0, AdherenceState.OMITTED)]
+    )  # the last day
+    for day in (2, 3):
+        with pytest.raises(LatentAssemblyError):
+            assemble(
+                n_days=2, forced_slots=[ForcedSlot(day, 0, AdherenceState.OMITTED)]
+            )
+    [first] = assemble()
+    with pytest.raises(
+        LatentAssemblyError
+    ):  # a slot of an earlier day than the call starts at
+        assemble(
+            start_day=1,
+            state=first.end_state,
+            forced_slots=[ForcedSlot(0, 0, AdherenceState.OMITTED)],
+        )
+    assemble(
+        start_day=1,
+        state=first.end_state,
+        forced_slots=[ForcedSlot(1, 0, AdherenceState.OMITTED)],
+    )
+
+
+def test_compare_observed_reads_times_orders_and_edges_exactly() -> None:
+    # presence at the departure instant is inside the visit (closed interval, as in the base)
+    one = day_of([S("presence", DOSE)])
+    assert (
+        compare_observed(
+            one, day_of([S("presence", DOSE), S("presence", DOSE + DWELL)]), VISITS, ()
+        )
+        == ()
+    )
+    assert compare_observed(
+        one, day_of([S("presence", DOSE), S("presence", DOSE + DWELL + 1)]), VISITS, ()
+    ) == ("witness",)
+    assert compare_observed(
+        one, day_of([S("presence", DOSE), S("presence", DOSE - 1)]), VISITS, ()
+    ) == ("witness",)
+    # a presence only at the departure instant is still inside the visit; one ms later is not
+    assert (
+        compare_observed(one, day_of([S("presence", DOSE + DWELL)]), VISITS, ()) == ()
+    )
+    assert compare_observed(
+        one, day_of([S("presence", DOSE + DWELL + 1)]), VISITS, ()
+    ) == ("witness",)
+    # the same sequence numbers in another order over the times are a difference
+    a = day_of(
+        events=[
+            E(EventKind.DISPENSE, 10, "dispenser", {}, 5),
+            E(EventKind.DISPENSE, 20, "dispenser", {}, 1),
+        ]
+    )
+    b = day_of(
+        events=[
+            E(EventKind.DISPENSE, 10, "dispenser", {}, 1),
+            E(EventKind.DISPENSE, 20, "dispenser", {}, 5),
+        ]
+    )
+    assert compare_observed(a, b, VISITS, ()) == ("dispense_seq",)
+    # an INTAKE at another time (the same count) is a difference; so is another source
+    early = day_of(events=[E(EventKind.INTAKE, 10, "robot")])
+    late = day_of(events=[E(EventKind.INTAKE, 11, "robot")])
+    other = day_of(events=[E(EventKind.INTAKE, 10, "patient")])
+    assert compare_observed(early, late, VISITS, ()) == ("witness",)
+    assert compare_observed(early, other, VISITS, ()) == ("witness",)
+    # a dispense at another time with the same count and sequence numbers is the interval
+    d1 = day_of(events=[E(EventKind.DISPENSE, 10, "dispenser", {}, 1)])
+    d2 = day_of(events=[E(EventKind.DISPENSE, 11, "dispenser", {}, 1)])
+    assert compare_observed(d1, d2, VISITS, ()) == ("dispense_interval",)
+    # a robot task at another time or with another payload key is a difference of the outcome field
+    t1 = day_of(
+        events=[
+            E(
+                EventKind.ROBOT_TASK,
+                10,
+                "robot",
+                {"task": "navigate", "outcome": "late", "patient_id": "p"},
+            )
+        ]
+    )
+    t2 = day_of(
+        events=[
+            E(
+                EventKind.ROBOT_TASK,
+                11,
+                "robot",
+                {"task": "navigate", "outcome": "late", "patient_id": "p"},
+            )
+        ]
+    )
+    assert compare_observed(t1, t2, VISITS, ()) == ("robot_task_outcome",)
+
+
+@st.composite
+def pulse_plans(
+    draw: Any,
+) -> tuple[list[tuple[int, int, float]], list[tuple[int, int, float]]]:
+    """Non-overlapping spike windows and non-overlapping hypotension windows on the hour grid."""
+
+    def windows(count: int) -> list[tuple[int, int, float]]:
+        cuts = sorted(
+            draw(
+                st.lists(
+                    st.integers(0, 24),
+                    min_size=2 * count,
+                    max_size=2 * count,
+                    unique=True,
+                )
+            )
+        )
+        magnitudes = draw(st.lists(st.integers(1, 80), min_size=count, max_size=count))
+        return [
+            (
+                cuts[2 * k] * HOUR,
+                (cuts[2 * k + 1] - cuts[2 * k]) * HOUR,
+                magnitudes[k] / 4.0,
+            )
+            for k in range(count)
+        ]
+
+    return windows(draw(st.integers(0, 3))), windows(draw(st.integers(0, 3)))
+
+
+@settings(max_examples=60, deadline=None, derandomize=True)
+@given(plan=pulse_plans(), data=st.data())
+def test_pulses_on_random_windows_are_exact_and_independent_of_the_order(
+    plan: tuple[list[tuple[int, int, float]], list[tuple[int, int, float]]],
+    data: st.DataObject,
+) -> None:
+    spikes, hypos = plan
+    specs = [spike(o, d, m) for o, d, m in spikes] + [
+        hypo(o, d, m) for o, d, m in hypos
+    ]
+    order = data.draw(st.permutations(specs)) if specs else []
+    cfg = make_config(step=HOUR)
+    plain = bp_series(assemble(config=cfg)[0])
+    out = assemble(order, config=cfg)[0]
+    got = bp_series(out)
+    for t, base in plain.items():
+        pulse = 0.0
+        for o, d, m in sorted(spikes):
+            if o <= t < o + d:
+                pulse += m
+        for o, d, m in sorted(hypos):
+            if o <= t < o + d:
+                pulse += -m
+        assert got[t] == (base + pulse if pulse != 0.0 else base), (
+            t
+        )  # exact: multiples of 0.25
+    assert {r.n_changed for r in out.c1_records} <= set(range(25))
+    assert sum(r.n_changed for r in out.c1_records) == sum(
+        d // HOUR for _, d, _ in spikes + hypos
+    )
+    assert (
+        out.c1_records == assemble(specs, config=cfg)[0].c1_records
+    )  # the input order is irrelevant
