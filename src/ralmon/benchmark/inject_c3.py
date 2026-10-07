@@ -24,9 +24,10 @@ What each flag does here:
                       before the attack (informed) or in the population bounds of the context
                       (naive), and the forged message carries the group as the device writes it;
   ``spoofs_witness``  the robot is made to report an intake (``presence_spoof`` with
-                      ``spoof_intake``); a forged dispense at this level declares the companion
-                      ``presence_spoof`` (WS04-T09 composes the two, the witness fields then
-                      carry no adverse reading).
+                      ``spoof_intake``). It is a capability of the attacker, not a property of a
+                      stream: a forged dispense hides from the witness only where the stream shows
+                      it (no robot co-located, or an ``INTAKE`` of the robot in the visit; the
+                      presence spoof ranks before the forgery so that its intake counts).
 
 Evidence signature and the declared limit. ``attack_signature(subtype, capabilities,
 auth_deployed)`` is the set of ``EvidenceVector`` paths that the attack can drive adverse, in the
@@ -40,7 +41,10 @@ policy "flag"); a verbatim copy has a valid tag and leaves none; a device that d
 authenticate leaves none (the field is ``None``, never a negative). A record whose signature is
 empty carries ``details["expected_undetectable"]`` True: the informed attacker that is coherent on
 every available channel is in the ground truth (it is an injected event) and is reported as the
-diagnosability limit of analisi section 4.5 (row 10), not as an error of the monitor.
+diagnosability limit of analisi section 4.5 (row 10), not as an error of the monitor. The tag is
+computed on the stream the attack is written to: a forged dispense whose witness the stream
+contradicts (a robot is in the room, no intake) is not tagged, whatever the capability, and one
+with the robot away or an intake in the visit is.
 
 Conventions of the attacks on the cuff stream (``replay``, ``injection_naive``,
 ``injection_informed``; ``[onset, onset + duration)`` on ``t_rx_ms``)
@@ -237,7 +241,11 @@ def capabilities_of(level: str) -> AttackerCapabilities:
 
 
 def attack_signature(
-    subtype: str, capabilities: AttackerCapabilities, auth_deployed: bool
+    subtype: str,
+    capabilities: AttackerCapabilities,
+    auth_deployed: bool,
+    *,
+    witness_contradicts: bool | None = None,
 ) -> tuple[str, ...]:
     """The evidence paths that an attack can drive adverse, in the order of the contract.
 
@@ -249,6 +257,13 @@ def attack_signature(
     ``dispense_forgery``: the witness fields read False when the robot is co-located and saw
     nothing, unless the witness is spoofed; ``presence_spoof``: only the identity check can
     contradict it). Nothing here is computed from a trace.
+
+    ``witness_contradicts`` is read by ``dispense_forgery`` only: whether, in the stream the
+    forgery is written to, a robot is co-located at the forged instant and no ``INTAKE`` of the
+    robot lies in the visit (the witness fields then read False). ``None`` (the default) takes
+    the capability at its word: the witness is spoofed exactly when ``spoofs_witness`` is set,
+    which is the pure attacker capability, not a statement about a stream; the injector passes
+    what the stream shows.
     """
     if not isinstance(subtype, str) or subtype not in C3_SUBTYPES:
         raise InjectionSpecError(f"subtype must be one of {C3_SUBTYPES}")
@@ -256,6 +271,8 @@ def attack_signature(
         raise InjectionSpecError("capabilities must be an AttackerCapabilities")
     if not isinstance(auth_deployed, bool):
         raise InjectionSpecError("auth_deployed must be a bool")
+    if witness_contradicts is not None and not isinstance(witness_contradicts, bool):
+        raise InjectionSpecError("witness_contradicts must be a bool or None")
     c = capabilities
     paths: set[str] = set()
     if subtype == "replay":
@@ -282,7 +299,10 @@ def attack_signature(
     elif subtype == "dispense_forgery":
         if not c.fresh_metadata:
             paths.add(_C_SEQ)
-        if not c.spoofs_witness:
+        contradicted = (
+            not c.spoofs_witness if witness_contradicts is None else witness_contradicts
+        )
+        if contradicted:
             paths |= {_W_ROBOT, _W_INTAKE}
         if auth_deployed:
             paths.add(_C_AUTH)
@@ -344,9 +364,12 @@ def _record(
     auth: bool,
     n_changed: int,
     details: Mapping[str, Any],
+    witness_contradicts: bool | None = None,
 ) -> InjectionRecord:
     caps = capabilities_of(level)
-    paths = attack_signature(spec.subtype, caps, auth)
+    paths = attack_signature(
+        spec.subtype, caps, auth, witness_contradicts=witness_contradicts
+    )
     end = None if spec.duration_ms is None else spec.onset_ms + spec.duration_ms
     base: dict[str, Any] = {
         "target": device,
@@ -591,13 +614,20 @@ def _message_items(
     ``group`` holds the genuine samples whose health and inflation (with their quality) the
     message repeats (the informed level; the naive one gives none and writes no group).
     """
-    items = [Sample(_BP, t_device, t_rx, pressure, seq, _quality(group, _BP))]
-    if pulse is not None:
-        items.append(
-            Sample(_PULSE, t_device, t_rx, pulse, seq, _quality(group, _PULSE))
-        )
-    for signal in (_HEALTH, _INFLATION):
-        if signal in group:
+    items: list[Sample] = []
+    for (
+        signal
+    ) in _CUFF_SIGNALS:  # the order of a genuine message: a forged one must not differ
+        if signal == _BP:
+            items.append(
+                Sample(_BP, t_device, t_rx, pressure, seq, _quality(group, _BP))
+            )
+        elif signal == _PULSE:
+            if pulse is not None:
+                items.append(
+                    Sample(_PULSE, t_device, t_rx, pulse, seq, _quality(group, _PULSE))
+                )
+        elif signal in group:
             items.append(
                 Sample(
                     signal,
@@ -805,7 +835,8 @@ def _inject(
                 samples, events, removed, lo, context.cuff_start, work.unsequenced
             )
         else:
-            first = FORGED_SEQ_START  # a forger that does not know the counter starts its own
+            # a forger that does not know the counter keeps one of its own for the whole day
+            first = work.attacker_next.get(device, FORGED_SEQ_START)
         new_samples: list[Sample] = []
         new_events: list[Event] = []
         failures: list[Event] = []
@@ -859,6 +890,8 @@ def _inject(
                 work.unsequenced.append(
                     (lo, hi)
                 )  # a counter of its own: not the device's
+                if numbered:
+                    work.attacker_next[device] = _seq_in_range(first + len(slots))
         else:
             details["reason"] = "the forged messages equal the genuine ones"
         records.append(_record(spec, level, device, auth, n, details))
@@ -922,9 +955,10 @@ def dispense_forgery(
                 for e in events
                 if _is_dispense(e) and e.t_rx_ms == t and e.seq is not None
             }
-            seq = FORGED_SEQ_START
+            seq = work.attacker_next.get(device, FORGED_SEQ_START)
             while seq in used:
                 seq += 1
+            work.attacker_next[device] = _seq_in_range(seq + 1)
         events.append(Event(EventKind.DISPENSE, t, t, device, {}, seq))
         n = 1 + shifted
         if auth:
@@ -934,8 +968,37 @@ def dispense_forgery(
         if scheme and caps.fresh_metadata:
             _bump_counter(work, "next_dispenser_seq", 1)
         details = {"seq": seq, "n_renumbered": shifted}
-        records.append(_record(spec, level, device, auth, n, details))
+        records.append(
+            _record(
+                spec,
+                level,
+                device,
+                auth,
+                n,
+                details,
+                witness_contradicts=_witness_contradicts(work, t),
+            )
+        )
     return tuple(records)
+
+
+def _witness_contradicts(work: InjectionWork, t: int) -> bool:
+    """Whether the witness reads False at ``t``: a robot is co-located and saw no intake.
+
+    The reading comes from the stream as it is when the forgery is written: a robot visit that
+    covers ``t`` and no ``INTAKE`` of the robot inside that visit (a genuine one, or one that a
+    ``presence_spoof`` with ``spoof_intake`` wrote before: that injector ranks first). With no
+    visit the robot is away and the witness is ``None``, never a negative.
+    """
+    visit = next((v for v in work.visits if v.arrival_ms <= t <= v.departure_ms), None)
+    if visit is None:
+        return False
+    return not any(
+        e.kind is EventKind.INTAKE
+        and e.source == vocab.SOURCE_ROBOT
+        and visit.arrival_ms <= e.t_device_ms <= visit.departure_ms
+        for e in work.events
+    )
 
 
 def presence_spoof(
@@ -956,13 +1019,24 @@ def presence_spoof(
         details: dict[str, Any] = {"spoof_intake": bool(intake)}
         n = 0
         if any(v.arrival_ms <= t <= v.departure_ms for v in work.visits):
-            work.samples.append(Sample(_PRESENCE, t, t, 1.0, None, None))
-            n = 1
+            if any(
+                s.signal == _PRESENCE
+                and s.t_device_ms == t
+                and s.t_rx_ms == t
+                and s.value == 1.0
+                for s in work.samples
+            ):
+                details["reason"] = (
+                    "the robot already reports a presence of 1.0 at the instant: nothing to spoof"
+                )
+            else:
+                work.samples.append(Sample(_PRESENCE, t, t, 1.0, None, None))
+                n = 1
             if intake:
                 work.events.append(
                     Event(EventKind.INTAKE, t, t, vocab.SOURCE_ROBOT, {}, None)
                 )
-                n = 2
+                n += 1
         else:
             details["reason"] = (
                 "the robot is not in the room at the instant: the channel is None"
@@ -974,6 +1048,17 @@ def presence_spoof(
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
+
+
+# The presence spoof runs before the forgery: a forgery reads the witness of the stream it is
+# written to, and a spoofed intake is part of that stream (the pair is composed by WS04-T09).
+_RUN_ORDER: Final = (
+    "replay",
+    "injection_naive",
+    "injection_informed",
+    "presence_spoof",
+    "dispense_forgery",
+)
 
 
 def _union_signature(subtype: str, levels: Sequence[str]) -> tuple[str, ...]:
@@ -999,7 +1084,7 @@ def _injector(
         cls=InjectedClass.C3,
         subtype=subtype,
         stage=STAGE_ATTACK,
-        rank=C3_SUBTYPES.index(subtype),
+        rank=_RUN_ORDER.index(subtype),
         shape=shape,
         magnitude=MAGNITUDE_NONE,
         magnitude_unit=None,

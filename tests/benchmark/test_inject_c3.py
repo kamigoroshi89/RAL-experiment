@@ -63,6 +63,7 @@ from ralmon.benchmark.injection import (
     InjectionContextError,
     InjectionDesignError,
     InjectionError,
+    InjectionRecord,
     InjectionResult,
     InjectionSpec,
     InjectionSpecError,
@@ -1326,7 +1327,8 @@ def test_dispense_forgery_numbers_follow_the_fresh_metadata_flag() -> None:
     ]
     assert numbers == [(DOSE_TICKS[0], 3), (14 * HOUR, 1), (DOSE_TICKS[1], 4)]
     assert naive.stream.settings["next_dispenser_seq"] == 5
-    assert {C_SEQ, W_ROBOT, W_INTAKE} == set(naive.records[0].evidence_paths)
+    # 14:00 is between visits: the robot is away, so no witness field reads False
+    assert {C_SEQ} == set(naive.records[0].evidence_paths)
     # a forgery before every genuine dispense takes the first number of the day
     first = run([forge(DAY + HOUR, "informed")])
     assert [e.seq for e in events_of(first, EventKind.DISPENSE)] == [3, 4, 5]
@@ -1434,7 +1436,7 @@ def test_presence_spoof_emits_presence_and_optional_intake() -> None:
     assert (
         visit.arrival_ms <= intake.t_device_ms <= visit.departure_ms
     )  # inside the dwell
-    assert dict(full.records[1].details)["spoof_intake"] is True
+    assert record_of(full, "presence_spoof").details["spoof_intake"] is True
     assert full.records[1].evidence_paths == () and full.records[0].evidence_paths == ()
     # without the option the informed level reports the presence only
     only = run([spoof(SPOOF_AT, "informed")], stream_=NO_EVENING_DOSE)
@@ -1460,7 +1462,10 @@ def test_presence_spoof_needs_a_robot_in_the_room() -> None:
         (visit.arrival_ms, True), (visit.departure_ms, True),
         (visit.arrival_ms - 1, False), (visit.departure_ms + 1, False),
     ):  # fmt: skip
-        assert run([spoof(t)], stream_=NO_EVENING_DOSE).records[0].realised is expect
+        # the informed spoof with an intake: at the arrival the presence sample already exists,
+        # the intake is new, so the dwell alone decides whether it is realised
+        out = run([spoof(t, "informed", intake=True)], stream_=NO_EVENING_DOSE)
+        assert out.records[0].realised is expect
 
 
 def test_presence_spoof_option_needs_the_informed_level() -> None:
@@ -1848,11 +1853,12 @@ def test_realised_flag_and_ground_truth_mapping() -> None:
     )
     # one realised injection beside an unrealised one yields exactly one event
     mixed = run([spoof(DAY + 12 * HOUR + 30 * MIN), forge(FORGED_AT)])
+    # the presence spoof ranks first: a forgery reads the witness the spoof wrote
     assert [r.spec.subtype for r in mixed.records] == [
-        "dispense_forgery",
         "presence_spoof",
+        "dispense_forgery",
     ]
-    assert [r.realised for r in mixed.records] == [True, False]
+    assert [r.realised for r in mixed.records] == [False, True]
     assert len(ground_truth_events(mixed.records)) == 1
 
 
@@ -2396,7 +2402,7 @@ def test_the_attacks_compose_with_built_base_streams_of_two_days(
     out = apply_observation_injections(base1, specs, context)
     assert latent1 == before
     assert [r.spec.subtype for r in out.records] == [
-        "replay", "injection_naive", "dispense_forgery", "presence_spoof",
+        "replay", "injection_naive", "presence_spoof", "dispense_forgery",
     ]  # fmt: skip
     assert all(r.realised for r in out.records)
     day = finalize_observed(out.stream)
@@ -2608,7 +2614,7 @@ def test_level_and_boolean_choices_are_checked_strictly() -> None:
     run([spec3("injection_naive", *WINDOW, "naive")])
     run([spec3("injection_informed", *WINDOW, "informed")])
     # a boolean choice is a bool: an integer, a float or a string with the same meaning is not
-    assert injection_mod.registered_subtypes(C3)[-1] == "presence_spoof"
+    assert injection_mod.registered_subtypes(C3)[-1] == "dispense_forgery"  # runs last
     for ok in (True, False):
         run(
             [spec3("presence_spoof", SPOOF_AT, None, "informed", spoof_intake=ok)],
@@ -3440,3 +3446,184 @@ def test_injector_functions_work_directly_and_check_their_arguments() -> None:
         c3_mod.dispense_forgery(fresh_work(), [forge(FORGED_AT)], object())  # type: ignore[arg-type]
     with pytest.raises(InjectionSpecError):
         c3_mod.dispense_forgery(fresh_work(), [spoof(SPOOF_AT)], ctx())
+
+
+# ---------------------------------------------------------------------------
+# Review round 1 (independent review of 2026-10-07): each test failed before its fix
+# ---------------------------------------------------------------------------
+
+DOSE_WINDOW_AT = (
+    DAY + DOSE_TICKS[1] + 2 * MIN
+)  # 20:02, inside the 20:00 visit [20:00, 20:10]
+
+
+def record_of(out: InjectionResult, subtype: str) -> InjectionRecord:
+    (record,) = [r for r in out.records if r.spec.subtype == subtype]
+    return record
+
+
+def test_the_forgery_tag_follows_what_the_stream_shows_not_the_capability_alone() -> (
+    None
+):
+    # a robot is in the room at the dose tick and nobody takes the dose
+    alone = record_of(
+        run([forge(DOSE_WINDOW_AT, "informed")], stream_=NO_EVENING_DOSE),
+        "dispense_forgery",
+    )
+    assert alone.realised
+    assert set(alone.evidence_paths) == {W_ROBOT, W_INTAKE}
+    assert alone.details[EXPECTED_UNDETECTABLE] is False
+    naive = record_of(
+        run([forge(DOSE_WINDOW_AT, "naive")], stream_=NO_EVENING_DOSE),
+        "dispense_forgery",
+    )
+    assert set(naive.evidence_paths) == {W_ROBOT, W_INTAKE, C_SEQ}
+    # the companion presence spoof with an intake hides it, whatever the order of the specs
+    for order in (0, 1):
+        pair = [
+            forge(DOSE_WINDOW_AT, "informed"),
+            spoof(SPOOF_AT, "informed", intake=True),
+        ]
+        out = run(pair[::-1] if order else pair, stream_=NO_EVENING_DOSE)
+        hidden = record_of(out, "dispense_forgery")
+        assert hidden.realised
+        assert hidden.evidence_paths == ()
+        assert hidden.details[EXPECTED_UNDETECTABLE] is True
+    # a presence without an intake still leaves the intake unobserved
+    out = run(
+        [forge(DOSE_WINDOW_AT, "informed"), spoof(SPOOF_AT, "informed", intake=False)],
+        stream_=NO_EVENING_DOSE,
+    )
+    only = record_of(out, "dispense_forgery")
+    assert set(only.evidence_paths) == {W_ROBOT, W_INTAKE}
+    assert only.details[EXPECTED_UNDETECTABLE] is False
+    # a genuine intake in the dwell already makes the witness read True
+    with_intake = record_of(
+        run([forge(DOSE_WINDOW_AT, "informed")]), "dispense_forgery"
+    )
+    assert with_intake.realised and with_intake.evidence_paths == ()
+    assert with_intake.details[EXPECTED_UNDETECTABLE] is True
+    # the robot away: no witness reading to contradict, even for the naive forger
+    away_naive = record_of(run([forge(FORGED_AT, "naive")]), "dispense_forgery")
+    assert away_naive.evidence_paths == (C_SEQ,)
+    away_informed = record_of(run([forge(FORGED_AT, "informed")]), "dispense_forgery")
+    assert away_informed.evidence_paths == ()
+    assert away_informed.details[EXPECTED_UNDETECTABLE] is True
+
+
+def test_the_two_levels_of_a_standalone_forgery_do_not_differ_in_witness_evidence() -> (
+    None
+):
+    # same stream, same instant: the witness evidence is what the stream holds, for both levels
+    paths = {
+        level: set(
+            record_of(
+                run([forge(DOSE_WINDOW_AT, level)], stream_=NO_EVENING_DOSE),
+                "dispense_forgery",
+            ).evidence_paths
+        )
+        & {W_ROBOT, W_INTAKE}
+        for level in ("naive", "informed")
+    }
+    assert paths["naive"] == paths["informed"] == {W_ROBOT, W_INTAKE}
+
+
+def test_forged_samples_keep_the_order_of_a_genuine_message() -> None:
+    genuine = tuple(
+        s.signal
+        for s in run([]).stream.samples
+        if s.signal in CUFF_SIGNALS and s.t_rx_ms == AT[0]
+    )
+    assert genuine == CUFF_SIGNALS
+    for s in (inj_informed(*WINDOW), inj_naive(*WINDOW)):
+        out = run([s])
+        assert out.records[0].realised
+        for t in AT:
+            order = tuple(
+                x.signal
+                for x in out.stream.samples
+                if x.signal in CUFF_SIGNALS and x.t_rx_ms == t
+            )
+            assert order == tuple(sorted(order, key=CUFF_SIGNALS.index)), (
+                s.subtype,
+                order,
+            )
+            if s.subtype == "injection_informed":
+                assert order == CUFF_SIGNALS
+
+
+def test_a_presence_spoof_where_the_robot_is_genuinely_present_changes_nothing() -> (
+    None
+):
+    # the 08:00 visit arrives at 08:00 and already writes a presence sample of 1.0 there
+    arrival = DAY + TICKS[0]
+    base = run([])
+    out = run([spoof(arrival, "naive")])
+    (record,) = out.records
+    assert not record.realised and record.n_changed == 0
+    assert ground_truth_events(out.records) == []
+    assert (
+        out.stream.samples == base.stream.samples
+        and out.stream.events == base.stream.events
+    )
+    # inside the dwell but away from the arrival the spoof is a new sample
+    later = run([spoof(arrival + MIN, "naive")])
+    assert later.records[0].realised and later.records[0].n_changed == 1
+
+
+def test_a_str_subclass_is_a_valid_param_value_and_a_bool_still_is_not_an_int() -> None:
+    # master accepted any str subclass; the strict check only needs to keep bool apart from int
+    ok = run([forge(FORGED_AT, "naive", target=np.str_("dispenser"))])
+    assert ok.records[0].realised
+    assert run(
+        [spoof(SPOOF_AT, "informed", intake=True)], stream_=NO_EVENING_DOSE
+    ).records
+    with pytest.raises(InjectionSpecError):
+        run([spoof(SPOOF_AT, "informed", intake=1)], stream_=NO_EVENING_DOSE)  # type: ignore[arg-type]
+    # an np.bool_ is already normalised to a bool by the spec: accepted before and after
+    run([spoof(SPOOF_AT, "informed", intake=np.True_)], stream_=NO_EVENING_DOSE)  # type: ignore[arg-type]
+
+
+def test_naive_attacks_of_one_day_keep_one_counter_of_their_own() -> None:
+    start = c3_mod.FORGED_SEQ_START
+    out = run([forge(DAY + h * HOUR, "naive") for h in (9, 10, 11)])
+    forged = [
+        e.seq
+        for e in events_of(out, EventKind.DISPENSE)
+        if e.t_device_ms in {DAY + h * HOUR for h in (9, 10, 11)}
+    ]
+    assert forged == [start, start + 1, start + 2]
+    two = run(
+        [inj_naive(DAY + 6 * HOUR, 3 * HOUR), inj_naive(DAY + 12 * HOUR, 3 * HOUR)],
+        stream_=TODAY_HOURLY,
+    )
+    assert all(r.realised for r in two.records)
+    numbers = [
+        x.seq
+        for x in samples_of(two, "bp")
+        if DAY + 6 * HOUR <= x.t_rx_ms < DAY + 9 * HOUR
+        or DAY + 12 * HOUR <= x.t_rx_ms < DAY + 15 * HOUR
+    ]
+    assert len(numbers) == 6 and len(set(numbers)) == 6
+
+
+def test_the_draw_layout_of_an_injection_is_pinned() -> None:
+    # column 0 is the pressure, column 1 the pulse of the naive forger: a change of the layout
+    # would silently change every benchmark
+    naive = run([inj_naive(*WINDOW)])
+    assert [round(v, 6) for v in values_of(naive, "bp")] == [
+        55.660779,
+        145.927536,
+        69.591823,
+    ]
+    assert [round(v, 6) for v in values_of(naive, "hr_pulse")] == [
+        100.76902,
+        146.923186,
+        54.820218,
+    ]
+    informed = run([inj_informed(*WINDOW)])
+    assert [round(v, 6) for v in values_of(informed, "bp")] == [
+        121.908715,
+        123.379501,
+        121.253681,
+    ]

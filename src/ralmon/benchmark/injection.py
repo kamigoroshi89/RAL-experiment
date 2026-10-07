@@ -590,9 +590,12 @@ class InjectionWork:
     ``unsequenced`` the half-open windows ``(lo, hi)`` of attacker traffic that does not follow
     the sequence of the device (a stale replay, a forger with a counter of its own): an attack
     that renumbers the sequence of the device leaves the items inside them alone.
+    ``attacker_next`` is the next number of the counter of its own that a forger keeps per device
+    for the whole day (a naive attacker has one counter, not one per attack).
     """
 
     __slots__ = (
+        "attacker_next",
         "care_plan_id",
         "context",
         "day_index",
@@ -628,6 +631,7 @@ class InjectionWork:
         self.latent_hold: LatentSbpHold | None = None
         self.genuine: tuple[tuple[Sample, ...], tuple[Event, ...]] | None = None
         self.unsequenced: list[tuple[int, int]] = []
+        self.attacker_next: dict[str, int] = {}
 
     @property
     def day_start_ms(self) -> TimeMs:
@@ -1006,7 +1010,11 @@ def _check_spec_shape(
     for key, value in spec.params.items():
         if key not in allowed:
             raise InjectionSpecError(f"{name} has no param {key!r}")
-        if not any(type(value) is type(a) and value == a for a in allowed[key]):
+        # a bool is not an int (1 == True), but any other equal value is the same choice
+        if not any(
+            isinstance(value, bool) == isinstance(a, bool) and value == a
+            for a in allowed[key]
+        ):
             raise InjectionSpecError(
                 f"{name} param {key!r} must be one of {allowed[key]}, got {value!r}"
             )
