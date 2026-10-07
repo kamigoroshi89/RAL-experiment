@@ -6,19 +6,21 @@ injection (``InjectionSpec``), the record of a realised or unrealised one (``Inj
 the canonical pipeline (``apply_observation_injections``), the conversion to an ``ObservedDay``
 (``finalize_observed``), the mapping to the ground truth (``record_to_ground_truth``), the log
 sidecar (``injection_log``) and the design loader of ``configs/benchmark/injections.yaml``.
-The C2 injectors are in ``ralmon.benchmark.inject_c2`` (they register themselves here); the C3
-step of WS04-T08 registers in the same way.
+The C2 injectors are in ``ralmon.benchmark.inject_c2`` and the C3 attacks of WS04-T08 in
+``ralmon.benchmark.inject_c3`` (they register themselves here).
 
 Pipeline (fixed order, ``docs/models/fault-model.md`` hypothesis 3)
   1. robot faults (``robot`` stage), 2. device faults (``device``), 3. sequence numbering of
   the cuff messages and the dispenser events (``assign_device_seq``, once, with the chaining
   counters of the context), 4. link faults (``link``, removal last: a lost message keeps the
   sequence number it was sent with, so the delivered numbers show the gap), 5. an ``attack``
-  stage after all of that, empty for C2 and reserved for the C3 injectors of WS04-T08 (they
-  register with ``register_injector`` and ``_INJECTOR_MODULES``; their traffic is never
-  renumbered and a dropout of the genuine device cannot remove it). Within a stage
+  stage after all of that, empty for C2 and used by the C3 attacks of WS04-T08 (they register
+  with ``register_injector`` and ``_INJECTOR_MODULES``; their traffic is never renumbered by the
+  pipeline and a dropout of the genuine device cannot remove it; an attack reads the genuine
+  stream through ``InjectionWork.genuine_view``, the snapshot taken when the stage starts, so
+  one attack never sees the traffic of another). Within a stage
   the order is the rank of the injector, then ``canonical_order``: the result does not depend
-  on the order of the specs. Specs that overlap on one subtype and one target are refused
+  on the order of the specs. Specs that overlap on one subtype (or one ``overlap_group``) and one target are refused
   (windows are half open, ``[onset, onset + duration)``; two windows that touch are allowed).
 
 Ground truth and the latent day. Injection is part of the generator. It may read the latent
@@ -124,11 +126,13 @@ __all__ = [
     "apply_observation_injections",
     "canonical_order",
     "check_call",
+    "check_previous_day",
     "finalize_observed",
     "ground_truth_events",
     "injection_log",
     "injection_rng",
     "injection_sub_index",
+    "load_design_mapping",
     "load_injection_design",
     "record_to_ground_truth",
     "register_injector",
@@ -152,8 +156,8 @@ PIPELINE_STAGES: Final = (
     STAGE_ATTACK,
 )
 _INJECTION_STAGES: Final = (STAGE_ROBOT, STAGE_DEVICE, STAGE_LINK, STAGE_ATTACK)
-# Modules that register injectors on first use. WS04-T08 appends ``ralmon.benchmark.inject_c3``.
-_INJECTOR_MODULES: Final = ("ralmon.benchmark.inject_c2",)
+# Modules that register injectors on first use.
+_INJECTOR_MODULES: Final = ("ralmon.benchmark.inject_c2", "ralmon.benchmark.inject_c3")
 
 SHAPE_WINDOW: Final = "window"  # [onset, onset + duration) inside the day
 SHAPE_TICK: Final = "tick"  # one per-tick fault: onset is the tick, end None
@@ -183,7 +187,13 @@ _SEED_BITS: Final = 64  # algorithmic: width of the root seed (rng.stream)
 _DIGEST_BYTES: Final = 4  # algorithmic: bytes of a digest used as a stream sub_index
 _MAX_SEQ: Final = _INT64_MAX // 2  # algorithmic: room for a counter that keeps growing
 _WORD: Final = 1 << 32  # algorithmic: width of a stream key entry
-_FAMILIES: Final = ("device", "link", "robot")
+# The family of a subtype in the design file: the unit class of a fault (C2, fault-model.md) or the
+# capability of an attack (C3, threat-model.md: BLE injection and replay, perception spoofing).
+_FAMILIES_BY_CLASS: Final = {
+    InjectedClass.C2: ("device", "link", "robot"),
+    InjectedClass.C3: ("ble_attack", "perception_attack"),
+}
+_FAMILIES: Final = tuple(sorted({f for fs in _FAMILIES_BY_CLASS.values() for f in fs}))
 _PURPOSES: Final = {
     InjectedClass.C1: StreamPurpose.INJECTION_C1,
     InjectedClass.C2: StreamPurpose.INJECTION_C2,
@@ -228,7 +238,10 @@ def _int(
 ) -> int:
     if not _is_integer(x):
         raise error(f"{name} must be an integer")
-    value = int(x)
+    try:
+        value = int(x)
+    except Exception as exc:  # a number type whose conversion misbehaves
+        raise error(f"{name} is not an integer") from exc
     if not lo <= value <= hi:
         raise error(f"{name} must lie in [{lo}, {hi}]")
     return value
@@ -241,7 +254,7 @@ def _real(
         raise error(f"{name} must be a finite number")
     try:
         value = float(x)
-    except (OverflowError, ValueError, TypeError) as exc:
+    except Exception as exc:  # too large, or a number type whose conversion misbehaves
         raise error(f"{name} is not a finite number") from exc
     if not math.isfinite(value):
         raise error(f"{name} must be a finite number")
@@ -451,6 +464,41 @@ class InjectionRecord:
         object.__setattr__(self, "details", copied)
 
 
+def _bounds(name: str, value: object) -> tuple[float, float] | None:
+    """A pair ``(lower, upper)`` of finite numbers with ``lower <= upper``, or None."""
+    if value is None:
+        return None
+    error = InjectionContextError
+    if not isinstance(value, (tuple, list)):
+        raise error(f"{name} must be a pair (lower, upper) or None")
+    try:
+        items = list(value)
+    except Exception as exc:  # a tuple or list subclass that misbehaves
+        raise error(f"{name} cannot be read: {type(exc).__name__}") from exc
+    if len(items) != 2:
+        raise error(f"{name} must be a pair (lower, upper) or None")
+    lower = _real(f"{name} lower", items[0], error)
+    upper = _real(f"{name} upper", items[1], error)
+    if lower > upper:
+        raise error(f"{name} needs lower <= upper")
+    return (lower, upper)
+
+
+def _devices(name: str, value: object) -> tuple[str, ...]:
+    """The BLE devices of a collection, once each, sorted by name."""
+    error = InjectionContextError
+    if not isinstance(value, (tuple, list, set, frozenset)):
+        raise error(f"{name} must be a tuple, a list or a set of device names")
+    try:
+        items = list(value)
+    except Exception as exc:  # a collection that misbehaves
+        raise error(f"{name} cannot be read: {type(exc).__name__}") from exc
+    for item in items:
+        if not isinstance(item, str) or item not in vocab.BLE_DEVICES:
+            raise error(f"{name} must name devices among {vocab.BLE_DEVICES}")
+    return tuple(sorted(set(items)))
+
+
 @dataclass(frozen=True, slots=True)
 class InjectionContext:
     """What the pipeline needs besides the stream and the specs.
@@ -465,6 +513,17 @@ class InjectionContext:
     a content change (the extra dispense of a bounce then reports 0.0). ``cuff_start`` and
     ``dispenser_start`` are the first sequence numbers of the day (the ``next_*`` of the
     previous day's settings), see ``assign_device_seq``.
+
+    The attack stage (WS04-T08) needs four more. ``previous_day`` is the observed stream of the
+    day before (what a passive observer captured: the source of a replay); it must be the same
+    patient and seed and ``day_index - 1`` (checked by ``check_previous_day``). ``bp_bounds_mmhg``
+    and ``hr_bounds_bpm`` are the population bounds of a naive forger, a pair ``(lower, upper)``
+    that the caller reads from the registry (``bound_bp_lower``, ``bound_bp_upper``) and from the
+    design rows of ``injections.yaml``; the naive injection refuses to run without them.
+    ``authenticating_devices`` lists the BLE devices that authenticate their messages (a
+    deployment property, per device: hypothesis H-DEP of the threat model); a forged or rewritten
+    message of such a device leaves a failed verification in the trace, the message of a device
+    that does not authenticate leaves none (the field is ``None``, never a negative).
     """
 
     patient_index: int
@@ -475,6 +534,10 @@ class InjectionContext:
     dispenser_content_sensing: bool = False
     cuff_start: int = 1
     dispenser_start: int = 1
+    previous_day: ObservedStream | None = None
+    bp_bounds_mmhg: tuple[float, float] | None = None
+    hr_bounds_bpm: tuple[float, float] | None = None
+    authenticating_devices: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         error = InjectionContextError
@@ -495,6 +558,17 @@ class InjectionContext:
             raise error("dispenser_content_sensing must be a bool")
         _int("cuff_start", self.cuff_start, 1, _MAX_SEQ, error)
         _int("dispenser_start", self.dispenser_start, 1, _MAX_SEQ, error)
+        if self.previous_day is not None and not isinstance(
+            self.previous_day, ObservedStream
+        ):
+            raise error("previous_day must be an ObservedStream or None")
+        for name in ("bp_bounds_mmhg", "hr_bounds_bpm"):
+            object.__setattr__(self, name, _bounds(name, getattr(self, name)))
+        object.__setattr__(
+            self,
+            "authenticating_devices",
+            _devices("authenticating_devices", self.authenticating_devices),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -512,22 +586,30 @@ class InjectionWork:
     ``samples`` and ``events`` are lists of immutable items; an injector replaces, removes or
     appends items and the pipeline restores the order after each stage (stable sort by
     ``t_rx_ms``). ``failed_visits`` holds the ``(kind, index)`` of visits whose manipulation
-    failed; ``disabled`` the subtypes an injector could not run (a missing library).
+    failed; ``disabled`` the subtypes an injector could not run (a missing library);
+    ``unsequenced`` the half-open windows ``(lo, hi)`` of attacker traffic that does not follow
+    the sequence of the device (a stale replay, a forger with a counter of its own): an attack
+    that renumbers the sequence of the device leaves the items inside them alone.
+    ``attacker_next`` is the next number of the counter of its own that a forger keeps per device
+    for the whole day (a naive attacker has one counter, not one per attack).
     """
 
     __slots__ = (
+        "attacker_next",
         "care_plan_id",
         "context",
         "day_index",
         "disabled",
         "events",
         "failed_visits",
+        "genuine",
         "latent_hold",
         "measurements",
         "patient_id",
         "samples",
         "seed",
         "settings",
+        "unsequenced",
         "visits",
     )
 
@@ -547,6 +629,9 @@ class InjectionWork:
         self.disabled: set[str] = set()
         self.context: InjectionContext = context
         self.latent_hold: LatentSbpHold | None = None
+        self.genuine: tuple[tuple[Sample, ...], tuple[Event, ...]] | None = None
+        self.unsequenced: list[tuple[int, int]] = []
+        self.attacker_next: dict[str, int] = {}
 
     @property
     def day_start_ms(self) -> TimeMs:
@@ -560,6 +645,22 @@ class InjectionWork:
         """Stable sort by ``t_rx_ms``: an added item follows the existing ones at its instant."""
         self.samples.sort(key=_by_rx)
         self.events.sort(key=_by_rx)
+
+    def freeze_genuine(self) -> None:
+        """Take the snapshot of what the devices delivered (the pipeline does it before the attacks)."""
+        self.genuine = (tuple(self.samples), tuple(self.events))
+
+    def genuine_view(self) -> tuple[tuple[Sample, ...], tuple[Event, ...]]:
+        """The ``(samples, events)`` that the genuine devices and the link delivered.
+
+        After ``freeze_genuine`` it is the snapshot, so that an attack never reads the traffic
+        that another attack wrote; before it (an injector called directly) it is the current
+        content. The tuples are immutable: an attack that edits ``samples`` and ``events`` leaves
+        the view as it was.
+        """
+        if self.genuine is not None:
+            return self.genuine
+        return (tuple(self.samples), tuple(self.events))
 
     def as_stream(self) -> ObservedStream:
         return ObservedStream(
@@ -604,7 +705,14 @@ class Injector:
     mandatory). ``choices`` maps another param to its allowed values (the first is the
     default). ``magnitude`` is one of ``none``, ``real``, ``positive`` and ``ms`` and
     ``magnitude_unit`` the unit that a spec must give; with ``magnitude_optional`` a spec may
-    give neither (the injector then uses its documented default).
+    give neither (the injector then uses its documented default). A choice is a set of strings
+    or a set of booleans (never a mix; a boolean choice only accepts a bool).
+
+    ``levels`` (empty: the level of a spec is a free label that is only recorded, as for C2) are
+    the attacker levels of a C3 subtype: the ``level`` of a spec must be one of them, and
+    ``level_required`` makes it mandatory (otherwise the first is the default).
+    ``overlap_group`` names a group of subtypes whose windows on one target must not overlap
+    each other (the three attacks on the cuff stream), instead of only windows of the same subtype.
     """
 
     cls: InjectedClass
@@ -616,13 +724,16 @@ class Injector:
     magnitude_unit: str | None
     targets: tuple[str, ...]
     target_required: bool
-    choices: Mapping[str, tuple[str, ...]]
+    choices: Mapping[str, tuple[str | bool, ...]]
     signature: tuple[str, ...]
     apply: Callable[
         [InjectionWork, Sequence[InjectionSpec], InjectionContext],
         Sequence[InjectionRecord],
     ]
     magnitude_optional: bool = False
+    levels: tuple[str, ...] = ()
+    level_required: bool = False
+    overlap_group: str | None = None
 
     def __post_init__(self) -> None:
         error = InjectionError
@@ -655,8 +766,27 @@ class Injector:
             _text("a choice key", key, error)
             if not isinstance(values, tuple) or not values:
                 raise error("the values of a choice must be a non-empty tuple")
-            for value in values:
-                _text("a choice value", value, error)
+            if all(isinstance(value, bool) for value in values):
+                pass
+            elif all(isinstance(value, str) for value in values):
+                for value in values:
+                    _text("a choice value", value, error)
+            else:
+                raise error("a choice holds strings or booleans, not a mix")
+            if len(set(values)) != len(values):
+                raise error("a choice lists a value twice")
+        if not isinstance(self.levels, tuple):
+            raise error("levels must be a tuple")
+        for level in self.levels:
+            _text("a level", level, error)
+        if len(set(self.levels)) != len(self.levels):
+            raise error("levels lists a level twice")
+        if not isinstance(self.level_required, bool):
+            raise error("level_required must be a bool")
+        if self.level_required and not self.levels:
+            raise error("level_required needs levels")
+        if self.overlap_group is not None:
+            _text("overlap_group", self.overlap_group, error)
         if not isinstance(self.signature, tuple) or not all(
             isinstance(path, str) and path for path in self.signature
         ):
@@ -864,13 +994,27 @@ def _check_spec_shape(
                 "and the following day"
             )
     _check_magnitude(spec, injector)
-    allowed: dict[str, tuple[str, ...]] = dict(injector.choices)
+    if injector.levels:
+        if spec.level is None:
+            if injector.level_required:
+                raise InjectionSpecError(
+                    f"{name} needs a level, one of {injector.levels}"
+                )
+        elif spec.level not in injector.levels:
+            raise InjectionSpecError(
+                f"{name} level must be one of {injector.levels}, got {spec.level!r}"
+            )
+    allowed: dict[str, tuple[str | bool, ...]] = dict(injector.choices)
     if injector.targets:
         allowed["target"] = injector.targets
     for key, value in spec.params.items():
         if key not in allowed:
             raise InjectionSpecError(f"{name} has no param {key!r}")
-        if value not in allowed[key]:
+        # a bool is not an int (1 == True), but any other equal value is the same choice
+        if not any(
+            isinstance(value, bool) == isinstance(a, bool) and value == a
+            for a in allowed[key]
+        ):
             raise InjectionSpecError(
                 f"{name} param {key!r} must be one of {allowed[key]}, got {value!r}"
             )
@@ -939,7 +1083,8 @@ def _check_overlaps(ordered: Sequence[InjectionSpec]) -> None:
         target = _target_of(spec, injector)
         if injector.shape == SHAPE_WINDOW:
             assert spec.duration_ms is not None
-            windows.setdefault((spec.subtype, target), []).append(
+            group = injector.overlap_group or spec.subtype
+            windows.setdefault((group, target), []).append(
                 (spec.onset_ms, spec.onset_ms + spec.duration_ms)
             )
         else:
@@ -949,12 +1094,12 @@ def _check_overlaps(ordered: Sequence[InjectionSpec]) -> None:
                     f"two {spec.subtype} injections at {spec.onset_ms} on the same unit"
                 )
             points.add(key)
-    for (subtype, target), spans in windows.items():
+    for (group, target), spans in windows.items():
         spans.sort()
         for (_, end), (start, _) in pairwise(spans):
             if start < end:
                 raise InjectionSpecError(
-                    f"two {subtype} windows overlap on {target!r} at {start}"
+                    f"two {group} windows overlap on {target!r} at {start}"
                 )
 
 
@@ -1097,6 +1242,30 @@ def _check_context(context: object) -> InjectionContext:
     return context
 
 
+def check_previous_day(work: object, context: object) -> ObservedStream | None:
+    """The previous day of the context, validated against the day of ``work`` (None if absent).
+
+    It must be a well-formed observed stream of the same patient and seed whose ``day_index`` is
+    one less than the day of ``work``; anything else is an ``InjectionContextError``. The stream
+    is only read: a replay copies from it, nothing writes into it.
+    """
+    if not isinstance(work, InjectionWork):
+        raise InjectionContextError("work must be an InjectionWork")
+    previous = _check_context(context).previous_day
+    if previous is None:
+        return None
+    previous = _check_stream(previous)
+    if not (
+        previous.patient_id == work.patient_id
+        and previous.seed == work.seed
+        and previous.day_index == work.day_index - 1
+    ):
+        raise InjectionContextError(
+            "the previous day must be the day before the stream (same patient and seed)"
+        )
+    return previous
+
+
 # ---------------------------------------------------------------------------
 # The pipeline
 # ---------------------------------------------------------------------------
@@ -1168,12 +1337,14 @@ def apply_observation_injections(
         raise InjectionContextError(
             "the latent day is not the day of the stream (patient, day and seed)"
         )
+    check_previous_day(work, ctx)
     work.check_bounds()
     records: list[InjectionRecord] = []
     records.extend(_run_stage(STAGE_ROBOT, ordered, work, ctx))
     records.extend(_run_stage(STAGE_DEVICE, ordered, work, ctx))
     _number(work, ctx)
     records.extend(_run_stage(STAGE_LINK, ordered, work, ctx))
+    work.freeze_genuine()  # what the devices delivered: the view of every attack
     records.extend(_run_stage(STAGE_ATTACK, ordered, work, ctx))
     work.settings["injection_n_records"] = len(records)
     work.settings["injection_n_realised"] = sum(r.realised for r in records)
@@ -1508,8 +1679,11 @@ def load_injection_design(
         if not isinstance(entry, Mapping):
             raise InjectionDesignError(f"{where} must be a mapping")
         family = entry.get("family")
-        if family not in _FAMILIES:
-            raise InjectionDesignError(f"{where}.family must be one of {_FAMILIES}")
+        families = (
+            _FAMILIES_BY_CLASS.get(cls, _FAMILIES) if cls is not None else _FAMILIES
+        )
+        if family not in families:
+            raise InjectionDesignError(f"{where}.family must be one of {families}")
         targets = entry.get("target")
         if not isinstance(targets, list) or not targets:
             raise InjectionDesignError(f"{where}.target must be a non-empty list")
@@ -1565,6 +1739,22 @@ def load_injection_design(
             rate_source,
         )
     return MappingProxyType(design)
+
+
+def load_design_mapping(path: str | os.PathLike[str], key: str) -> Mapping[str, Any]:
+    """The mapping under the top-level ``key`` of a design file (``InjectionDesignError`` otherwise).
+
+    For the sections that hold no parameter rows and no recursion to walk (the attacker section
+    of ``injections.yaml``): the file is read with the same safe loader that refuses a repeated
+    key, and only the mapping under ``key`` is returned.
+    """
+    target = _design_path(path)
+    if not isinstance(key, str) or not key:
+        raise InjectionDesignError("key must be a non-empty string")
+    section = _read_design(target).get(key)
+    if not isinstance(section, Mapping):
+        raise InjectionDesignError(f"{target}: no {key} mapping")
+    return section
 
 
 def resolve_magnitude(level: LevelRow, reference_value: float, reference: str) -> float:

@@ -3778,7 +3778,7 @@ def test_the_result_keeps_the_numbering_counters_and_the_day_of_the_stream() -> 
 def test_the_attack_stage_runs_after_numbering_and_the_link_stage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """WS04-T08 registers its injectors in the stage after the link: a stand-in proves the order."""
+    """The attack stage is after the link: a stand-in proves the order (WS04-T08 registers in it)."""
 
     def forge(
         work: injection_mod.InjectionWork,
@@ -3827,9 +3827,10 @@ def test_the_attack_stage_runs_after_numbering_and_the_link_stage(
         injection_mod.STAGE_ATTACK == "attack"
         and injection_mod.PIPELINE_STAGES[-1] == "attack"
     )
-    assert registered_subtypes(InjectedClass.C3) == ("fake_attack",)
+    # the five C3 injectors of WS04-T08 are registered too; the stand-in is one more
+    assert "fake_attack" in registered_subtypes(InjectedClass.C3)
     monkeypatch.undo()
-    assert registered_subtypes(InjectedClass.C3) == ()
+    assert "fake_attack" not in registered_subtypes(InjectedClass.C3)
 
 
 def test_the_c1_stream_purpose_is_available_to_the_c1_injectors() -> None:
