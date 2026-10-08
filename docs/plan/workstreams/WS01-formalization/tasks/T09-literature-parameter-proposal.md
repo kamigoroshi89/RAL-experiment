@@ -62,3 +62,7 @@ Verification checks:
 ### In progress in the interactive session (agent, 2026-10-08)
 
 Started on 2026-10-08 in gab's interactive session: three research agents (A: clinical thresholds and care-plan counts; B: patient, drug response and adherence; C: scales, priorities, device and monitor parameters, plus the VitalDB cuff-error estimate). `owner: human`: the autonomous loop does not resume or select this task (it needs network access).
+
+### Proposal written (agent, 2026-10-08)
+
+Steps 1 to 3 done: `docs/formal/parameter-literature-proposal.md` (51 rows: 32 proposed, two of them weak, and 19 `no-literature-value`; a decision table for gab; parts A, B, C with passages, citations and derivations) and `docs/formal/evidence/ws01-t09/` (the VitalDB cuff-against-arterial-line script and its output, reproduced byte for byte by a rerun). Step 4 (decisions of gab) is pending; nothing entered `configs/`. Findings for the formalization (count window against the ISMP dose window, withheld dose against `dose_min_day_end`, one-pair response test, inflation signal, BLE clock skew) are listed in the proposal for WS01-T08.
