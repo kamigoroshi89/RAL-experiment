@@ -232,21 +232,21 @@ Spike result (WS05-T02, closes the spike of ADR-013): outcome C. Tested RTAMT 0.
 - **Consequences.** WS06-T01, WS06-T02, WS01-T08 and WS00-T07 carry a note and stay `blocked` until this ADR is decided; WS00-T07 test 3 and test 4 should count the review-sheet rows as entries plus `unset` names, and bounds once. No signature of `02-interfaces.md` changes in this ADR.
 - **Status.** proposed [DA-CONFERMARE].
 
-## ADR-028 Order key of `rank_alerts`: tie-break and predicted versus violated [DA-CONFERMARE]
+## ADR-028 Order key of `rank_alerts`: tie-break and predicted versus violated
 
 - **Context.** WS01-T04 (`docs/formal/04-normalisation-ranking.md`, open points OP-3, OP-6, OP-15 and OP-16) makes the lexicographic order of `rank_alerts` total and deterministic with the key `K0 = (priority, sigma_tilde, t_ms, instance_key)`, where the contract docstring names only `(priority, sigma_norm)`. It also defines a variant `K1` that places VIOLATED alerts before PREDICTED_VIOLATION alerts inside a priority. WS05-T03 test 7 ("equal `(priority, sigma_norm)` keep input order") and test 9 ("a local dataclass with only those two fields is accepted") conflict with `K0`, which needs `t_ms` and `xi.instance_key`; ADR-024 types `rank_alerts` on `priority` and `sigma_norm` only, and `Alert` carries no patient identifier although `instance_key` is unique only within a care plan.
 - **Decision.** Proposed: adopt `K0` as the reference order (a tie-break that makes the output independent of the input order, refining the docstring without contradicting it), leave `K1` (VIOLATED first) as an open alternative to be settled by WS01-T05 (three-valued semantics), and extend the structural Protocol of ADR-024 with `t_ms` and `instance_key` (and the patient identifier of the care plan where alerts of several patients are ranked together).
 - **Alternatives.** Keep the docstring order and a stable sort (output depends on input order, so two runs can differ; rejected); adopt `K1` now (needs the WS01-T05 decision on how a predicted alert is graded).
 - **Consequences.** WS05-T03 tests 7 and 9 are adapted after confirmation (they stay `blocked` and carry a note); the severity questions of OP-14 (upper end of the interval for a VIOLATED alert) and OP-15 (`predicted_sigma_norm`) are settled by WS01-T05, T06 and T07, not here. No signature of `02-interfaces.md` changes in this ADR beyond the Protocol of ADR-024.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed by gab, 2026-10-08).
 
-## ADR-029 Extensions of the verdict contract adopted by the three-valued semantics [DA-CONFERMARE]
+## ADR-029 Extensions of the verdict contract adopted by the three-valued semantics
 
 - **Context.** WS01-T05 (`docs/formal/05-three-valued-semantics.md`, section 11 and open points CP3, CP6, CP7, CP12, OP-T05-6 and OP-T05-12 to OP-T05-21) states the contract `#verdict` word for word and adopts, meanwhile, the following extensions that the contract text does not contain: (CP3) a tie rule, so that a closed instance with `lo = hi = 0` is SATISFIED, while the residual case `lo = 0 < hi` stays PENDING (a sound refinement `lo >= 0` is recorded but not adopted); (CP6) an instance whose decision window holds a stale-open position stays PENDING with a marker `undecidable: <reason>:<signal>`, with an optional `undecidable` (and `guard_failed`) field proposed for `VerdictRecord`; (CP7) a warm-up prefix counts as a known prefix (hypothesis H-hist) and instances open at the end of the trace are PENDING or decided early by the rule of Lemma 12b when `k_d > K`; (CP12) infinite interval endpoints with a serialisation rule; per-step records and refinement records for the graded lateness of SCHED; the lateness rule `t_rx > t_{k_up(t_dev)} + D` independent of the `advance` calls.
 - **Decision.** Proposed: adopt these extensions as the reference semantics of the verdict layer, to be ratified (or amended) by WS01-T08 at the formalization freeze, and add the optional fields to `VerdictRecord` only then, with the contract version bump.
 - **Alternatives.** Keep the contract wording and reject the extensions (the golden cases V-INT-3, V-LATE-2 and the 12b examples would then have no rule); adopt the sound refinement `lo >= 0` instead of the tie rule.
 - **Consequences.** WS05-T04 (steps 1, 4 and 8, tests 5, 10, 11), WS05-T07 (`update` returns only new or changed alerts), WS05-T08 (prediction once at activation versus per-step instants), WS04-T10 (`pending_until_ms` on every record) and WS09-T03 (a RESP fixture VIOLATED before the deadline) carry a note and stay `blocked` until this ADR and the severity questions OP-14 and OP-15 (WS01-T06, WS01-T07) are decided. No signature of `02-interfaces.md` changes in this ADR.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed by gab, 2026-10-08).
 
 ## ADR-030 Conformal quantiles: lower quantile for the "possible" variant and exact rank rule [DA-CONFERMARE]
 
