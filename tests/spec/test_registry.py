@@ -798,9 +798,11 @@ def test_unreviewed_entries_are_accepted_and_reported_never_dropped(
 def test_unset_names_are_declared_but_have_no_value(tmp_path: Path) -> None:
     doc = f0_doc()
     make_unset(doc, "scale_hold", ("hold", "resp"))
+    make_unset(doc, "bound_bp_upper", ("range",))
     make_unset(doc, "priority_int", ("int",))
     registry = load_doc(tmp_path, doc)
-    assert registry.unset_names() == ("scale_hold", "priority_int")
+    # the order of the file, neither sorted nor reversed
+    assert registry.unset_names() == ("scale_hold", "bound_bp_upper", "priority_int")
     assert registry.is_declared("scale_hold") and not registry.is_set("scale_hold")
     assert registry.is_set("scale_range")
     with pytest.raises(UnsetParameterError) as info:
@@ -904,3 +906,23 @@ def test_casts_refuse_what_is_not_a_duration_or_a_rank(
         as_priority(RegistryEntry("p", 1.5, "1", "r", "s", None))
     with pytest.raises(RegistryError):
         as_priority(None)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(("lower", "upper"), [(10.0, 5.0), (7.0, 7.0)])
+def test_inverted_bounds_are_refused_for_a_signal_name_with_underscores(
+    tmp_path: Path, lower: float, upper: float
+) -> None:
+    doc = f0_doc()
+    for side, value in (("lower", lower), ("upper", upper)):
+        doc["entries"].append(
+            {
+                "name": f"bound_inflation_ms_{side}",
+                "value": value,
+                "unit": "ms",
+                "rationale": "FIXTURE-ONLY test row; illustrative, unverified",
+                "source_ref": "test",
+                "reviewed_by": None,
+            }
+        )
+    with pytest.raises(RegistryError, match="inflation_ms"):
+        load_doc(tmp_path, doc)
