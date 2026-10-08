@@ -106,10 +106,12 @@ From the repository root, inside `.venv`:
 
 Test 7 ("equal `(priority, sigma_norm)` keep input order") conflicts with the tie-break `(t_ms, instance_key)` of `docs/formal/04-normalisation-ranking.md` (K0, OP-6). Test 9 ("a local dataclass with only those two fields is accepted") conflicts with K0, which needs `t_ms` and `xi.instance_key`. Test 1 (golden loader) must handle N-7 (`sigma_norm` as a two-element list over `calls`) and N-8 and N-9 (`expected.error`). Kept `blocked` until ADR-028 (proposed, `[DA-CONFERMARE]`) is decided; then adapt tests 7 and 9.
 
-### Blocking note (orchestrator, 2026-10-05)
+### Blocking note (orchestrator, 2026-10-05) [resolved 2026-10-08]
 
 SKIPPED by the loop (the status is `ready` only because `tools/check_plan.py` rejects `blocked` when every dependency is `done`; the loop skips tasks that carry an unresolved blocking note). All dependencies are done (WS05-T02, WS01-T03, WS01-T04), but the task cannot be executed correctly until the human decides ADR-028 (proposed, `[DA-CONFERMARE]`: order key of `rank_alerts`, tie-break `(t_ms, instance_key)`, Protocol typing): tests 7 and 9 conflict with the tie-break and with the structural Protocol, test 1 (golden loader) must handle the shapes N-7, N-8 and N-9 of `docs/formal/golden/ranking.yaml`, and the fixture registry for runs before the clinician review is ADR-027 (proposed). The flags of the WS01-T04 review above describe the conflicts. Set the blocking note aside (delete this subsection) once ADR-028 and ADR-027 are confirmed or amended.
 
 ### ADR update (agent, 2026-10-08)
 
 ADR-028 (order key `K0 = (priority, sigma_tilde, t_ms, instance_key)`, Protocol extended with `t_ms` and `instance_key`) was accepted by gab on 2026-10-08; adapt tests 7 and 9 to it. ADR-027 (fixture registry) is still proposed: gab asked for an assessment of using the datasets instead before deciding, so the blocking note above stays until ADR-027 is decided.
+
+ADR-027 was accepted by gab later on 2026-10-08 as well: `configs/registry/fixture.yaml` with the F0 rows marked FIXTURE-ONLY, loaded only with `allow_fixture_only`, created by this task. With ADR-027 and ADR-028 accepted, the blocking note above is resolved and the task can run (tests 7 and 9 follow ADR-028; test 1 still handles the golden shapes N-7, N-8 and N-9).
