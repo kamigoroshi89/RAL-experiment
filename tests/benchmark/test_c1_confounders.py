@@ -30,6 +30,7 @@ import inspect
 import itertools
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -936,6 +937,87 @@ def test_rebuilding_events_from_the_log_matches_the_adherence_model() -> None:
         assert forced.behaviour_log == natural.behaviour_log, seed
 
 
+@pytest.mark.parametrize(
+    "state",
+    [AdherenceState.ON_TIME, AdherenceState.OMITTED, AdherenceState.DOUBLE_TAKE],
+)
+def test_rebuilt_events_of_a_forced_day_equal_the_models_events_field_by_field(
+    state: AdherenceState,
+) -> None:
+    """Review F6 (M60): the events rebuilt from the log are compared as whole ``Event`` values
+    (kind, both times, source, payload, sequence number), not as (kind, time, source)."""
+    probabilities = {
+        AdherenceState.ON_TIME: {},
+        AdherenceState.OMITTED: {"p_omission": 1.0},
+        AdherenceState.DOUBLE_TAKE: {"p_double_take": 1.0},
+    }[state]
+    reference = make_adherence(**probabilities).simulate(
+        SCHED_TWO,
+        1,
+        stream(SEED, PATIENT_INDEX, 0, StreamPurpose.ADHERENCE),
+        start_day=0,
+    )
+    forced = (
+        {"specs": [double_take_spec(DOSE)]}
+        if state is AdherenceState.DOUBLE_TAKE
+        else {"forced_slots": [ForcedSlot(0, 0, state)]}
+    )
+    out = assemble(schedule=SCHED_TWO, config=make_config(adherence=NATURAL), **forced)[
+        0
+    ]
+    kinds = (EventKind.DISPENSE, EventKind.INTAKE)
+    rebuilt = [
+        e for e in out.latent.events if e.kind in kinds and e.t_device_ms < 20 * HOUR
+    ]
+    expected = [e for e in reference.events if e.t_device_ms < 20 * HOUR]
+    assert rebuilt == expected  # whole Event values
+    for event in rebuilt:
+        assert (
+            event.payload == {}
+            and event.seq is None
+            and event.t_rx_ms == event.t_device_ms
+        )
+        assert event.source == (
+            "dispenser" if event.kind is EventKind.DISPENSE else "patient"
+        )
+    assert bool(rebuilt) is (state is not AdherenceState.OMITTED)
+
+
+def test_rebuilt_events_of_every_forced_day_equal_the_natural_events_whole() -> None:
+    forced_states: set[AdherenceState] = set()
+    for seed in range(12):
+        natural = assemble(
+            schedule=SCHED_TWO,
+            n_days=2,
+            config=make_config(adherence=NATURAL),
+            seed=seed,
+        )
+        states = [r.behaviour_log[0].state for r in natural]
+        if AdherenceState.DELAYED in states:
+            continue  # a delay needs a draw
+        slots = [
+            ForcedSlot(d, 0, s)
+            for d, s in enumerate(states)
+            if s is not AdherenceState.DOUBLE_TAKE
+        ]
+        specs = [
+            double_take_spec(d * DAY + DOSE)
+            for d, s in enumerate(states)
+            if s is AdherenceState.DOUBLE_TAKE
+        ]
+        forced = assemble(
+            specs, schedule=SCHED_TWO, n_days=2, config=make_config(adherence=NATURAL), seed=seed,
+            forced_slots=slots,
+        )  # fmt: skip
+        kinds = (EventKind.DISPENSE, EventKind.INTAKE)
+        for day in range(2):
+            assert [e for e in forced[day].latent.events if e.kind in kinds] == [
+                e for e in natural[day].latent.events if e.kind in kinds
+            ], (seed, day)
+        forced_states.update(states)
+    assert len(forced_states) >= 2  # the rebuild was exercised with more than one state
+
+
 def test_forcing_a_delayed_dose_is_refused() -> None:
     with pytest.raises(LatentAssemblyError):
         ForcedSlot(0, 0, AdherenceState.DELAYED)
@@ -1072,16 +1154,30 @@ def committed_document() -> dict[str, Any]:
     return copy.deepcopy(_committed_document())
 
 
+FIXTURE_MULTIPLE = {
+    "below": 0.5,
+    "near": 1.0,
+    "above": 2.0,
+}  # FIXTURE-ONLY levels of a pressure magnitude
+
+
+def fixture_value(row: Mapping[str, Any]) -> float:
+    """A FIXTURE-ONLY value for a row: a duration, a multiple spanning the reference, or a scale."""
+    unit = row["unit"]
+    if unit == "ms":
+        return 60_000
+    if unit.startswith("x "):  # below, near and above the reference (review F9)
+        return FIXTURE_MULTIPLE.get(row["parameter"].rsplit("_", 1)[-1], 2.0)
+    return 0.5
+
+
 def rewrite_rows(tmp_path: Path, *, filled: bool, name: str) -> Path:
     """A copy of injections.yaml with every row of the task awaiting a value, or filled."""
     document = committed_document()
     for row in document["parameters"]:
-        unit = row["unit"]
         if filled:
             if row["status"] == "awaiting_human_value":
-                row["value"] = (
-                    60_000 if unit == "ms" else 2.0 if unit.startswith("x ") else 0.5
-                )
+                row["value"] = fixture_value(row)
                 row["status"] = "filled"
                 row["rationale"] = "FIXTURE-ONLY value for a test"
         else:
@@ -1124,6 +1220,84 @@ def test_c1_rows_are_structured_relative_and_valid_in_every_state(
     bad.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
     with pytest.raises((AssertionError, InjectionError)):
         check_c1_design_structure(bad)
+
+
+def test_filled_pressure_levels_must_span_the_reference(tmp_path: Path) -> None:
+    """Review F9: once every level of a pressure magnitude has a value, the multiples span the
+    reference (one below 1, one above 1); a block that still awaits a value is not judged."""
+    filled = rewrite_rows(tmp_path, filled=True, name="span_ok.yaml")
+    load_c1_design(filled)  # below, near and above: 0.5, 1.0, 2.0
+    load_c1_design(rewrite_rows(tmp_path, filled=False, name="span_unfilled.yaml"))
+    for subtype in ("hypertensive_spike", "hypotension_below_hold"):
+        bad_sets = {
+            "all_above": (1.5, 2.0, 3.0),
+            "all_below": (0.2, 0.5, 0.9),
+            "smallest_is_one": (1.0, 1.5, 2.0),
+            "largest_is_one": (0.5, 0.8, 1.0),
+            "all_one": (1.0, 1.0, 1.0),
+        }
+        for label, values in bad_sets.items():
+            document = yaml.safe_load(filled.read_text(encoding="utf-8"))
+            rows = [
+                r
+                for r in document["parameters"]
+                if r["parameter"].startswith(f"{subtype}_magnitude_")
+            ]
+            assert [r["parameter"].rsplit("_", 1)[-1] for r in rows] == [
+                "below",
+                "near",
+                "above",
+            ]
+            for row, value in zip(rows, values, strict=True):
+                row["value"] = value
+            path = tmp_path / f"{subtype}_{label}.yaml"
+            path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            with pytest.raises(InjectionError) as caught:
+                load_c1_design(path)
+            assert named_error(caught.value) and "span" in str(caught.value), (
+                subtype,
+                label,
+            )
+        # spanning values in another order and a partly filled block are accepted
+        document = yaml.safe_load(filled.read_text(encoding="utf-8"))
+        rows = [
+            r
+            for r in document["parameters"]
+            if r["parameter"].startswith(f"{subtype}_magnitude_")
+        ]
+        for row, value in zip(rows, (3.0, 0.1, 1.0), strict=True):
+            row["value"] = value
+        path = tmp_path / f"{subtype}_shuffled.yaml"
+        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+        load_c1_design(path)
+        document = yaml.safe_load(filled.read_text(encoding="utf-8"))
+        rows = [
+            r
+            for r in document["parameters"]
+            if r["parameter"].startswith(f"{subtype}_magnitude_")
+        ]
+        for row, value in zip(
+            rows, (1.5, 2.0, None), strict=True
+        ):  # all above, but one row awaits
+            row.update(
+                {
+                    "value": value,
+                    "status": "filled" if value is not None else "awaiting_human_value",
+                }
+            )
+            if value is None:
+                row.update({"rationale": None, "verified_by": None})
+        path = tmp_path / f"{subtype}_partial.yaml"
+        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+        load_c1_design(path)
+    # the Emax scale is an absolute level in [0, 1]: it has no span rule
+    document = yaml.safe_load(filled.read_text(encoding="utf-8"))
+    for row in document["parameters"]:
+        if row["parameter"].startswith("drug_nonresponse_magnitude_"):
+            row["value"] = 0.25
+    path = tmp_path / "scale_flat.yaml"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    load_c1_design(path)
 
 
 # ---------------------------------------------------------------------------
@@ -1476,6 +1650,62 @@ def test_nonresponse_vs_forgery_grid_separated_by(v: Variant) -> None:
     if "verification" not in v.withheld:
         failed = [e for e in ev.b.observed.events if e.source == "gateway"]
         assert failed and not [e for e in ev.a.observed.events if e.source == "gateway"]
+
+
+NOROBOT_GRID = [v for v in G1_GRID + G2_GRID + G3_GRID if not v.robot_present]
+
+
+@pytest.mark.parametrize("v", NOROBOT_GRID, ids=lambda v: v.variant_id)
+def test_a_withheld_robot_leaves_no_witness_path_in_the_records(v: Variant) -> None:
+    """Review F2: the injectors of a variant without a robot see no visit, so no record names it.
+
+    A forged dispense with the robot away reads the witness as None (never a negative): its
+    evidence signature has no ``witness.*`` path, and the ``expected_undetectable`` tag agrees with
+    the signature and, for the forgery, with the flag computed on the released streams.
+    """
+    ev = evaluated(v)
+    for member in (ev.a, ev.b):
+        for record in member.records:
+            where = (v.variant_id, record.spec.subtype)
+            assert not [p for p in record.evidence_paths if p.startswith("witness.")], (
+                where
+            )
+            tag = record.details.get("expected_undetectable")
+            if tag is not None:
+                assert tag is (not record.evidence_paths), where
+    if v.group == GROUP_NONRESPONSE_VS_FORGERY:
+        [forgery] = [r for r in ev.b.records if r.spec.subtype == "dispense_forgery"]
+        assert (
+            forgery.details["expected_undetectable"]
+            is ev.indistinguishable_by_construction
+        )
+        assert {r.spec.subtype for r in ev.b.records} == {
+            "dispense_forgery"
+        }  # no spoof is made
+    # the hidden visits are an injector view only: the stream still holds the base visits
+    robot = {
+        GROUP_DOUBLE_TAKE_VS_BOUNCE: g1("double_take_gap", True, True),
+        GROUP_NONRESPONSE_VS_FORGERY: g2("naive", True, False),
+        GROUP_REFUSAL_VS_ROBOT_MISSED: G3_REPORTED,
+    }[v.group]
+    assert ev.a.stream.visits == ev.b.stream.visits == evaluated(robot).a.stream.visits
+    assert ev.a.stream.visits
+
+
+@pytest.mark.parametrize("v", G2_GRID, ids=lambda v: v.variant_id)
+def test_the_forgery_tag_agrees_with_the_computed_flag_on_the_whole_grid(
+    v: Variant,
+) -> None:
+    ev = evaluated(v)
+    [forgery] = [r for r in ev.b.records if r.spec.subtype == "dispense_forgery"]
+    assert (
+        forgery.details["expected_undetectable"] is ev.indistinguishable_by_construction
+    )
+    assert (
+        forgery.details["indistinguishable_by_construction"]
+        is ev.indistinguishable_by_construction
+    )
+    assert (forgery.details["expected_undetectable"]) is (not forgery.evidence_paths)
 
 
 def test_refusal_vs_robot_missed_pair() -> None:
@@ -2202,30 +2432,141 @@ def test_spec_list_and_horizon_are_bounded() -> None:
 # Extremes: every public function raises its named error, nothing else
 # ---------------------------------------------------------------------------
 
+
+class HashBomb(str):
+    """A ``str`` whose hash raises (review F5): a dict lookup or a set membership blows up."""
+
+    def __hash__(self) -> int:
+        raise RuntimeError("hash")
+
+
+class EqBomb(str):
+    def __eq__(self, other: object) -> bool:
+        raise RuntimeError("eq")
+
+    def __ne__(self, other: object) -> bool:
+        raise RuntimeError("ne")
+
+    __hash__ = str.__hash__
+
+
+class BoolBomb(str):
+    def __bool__(self) -> bool:
+        raise RuntimeError("bool")
+
+
+class LenBomb(str):
+    def __len__(self) -> int:
+        raise RuntimeError("len")
+
+
+class ReprBomb(str):
+    def __str__(self) -> str:
+        raise RuntimeError("str")
+
+    def __repr__(self) -> str:
+        raise RuntimeError("repr")
+
+
+class IndexBomb(int):
+    def __index__(self) -> int:
+        raise RuntimeError("index")
+
+    def __int__(self) -> int:
+        raise RuntimeError("int")
+
+
+class FloatBomb(float):
+    def __float__(self) -> float:
+        raise RuntimeError("float")
+
+    def __repr__(self) -> str:
+        raise RuntimeError("repr")
+
+
+class CmpBomb(float):
+    """A number that cannot be compared (an ordering or an equality test raises)."""
+
+    def __le__(self, other: object) -> bool:
+        raise RuntimeError("le")
+
+    __lt__ = __ge__ = __gt__ = __le__
+
+    def __eq__(self, other: object) -> bool:
+        raise RuntimeError("eq")
+
+    __hash__ = float.__hash__
+
+
+class IterBomb(tuple):  # type: ignore[type-arg]
+    def __iter__(self) -> Any:
+        raise RuntimeError("iter")
+
+    def __len__(self) -> int:
+        raise RuntimeError("len")
+
+
+class ItemBomb(list):  # type: ignore[type-arg]
+    def __iter__(self) -> Any:
+        raise RuntimeError("iter")
+
+    def __getitem__(self, key: Any) -> Any:
+        raise RuntimeError("getitem")
+
+
+class MapBomb(dict):  # type: ignore[type-arg]
+    def __iter__(self) -> Any:
+        raise RuntimeError("iter")
+
+    def __len__(self) -> int:
+        raise RuntimeError("len")
+
+
+class TruthBomb:
+    def __bool__(self) -> bool:
+        raise RuntimeError("bool")
+
+
+STR_BOMBS = (HashBomb, EqBomb, BoolBomb, LenBomb, ReprBomb)
 JUNK: list[Any] = [
-    None, True, False, "x", "", b"1", 1.5, float("nan"), float("inf"), -float("inf"), -1, 0,
-    10**400, -(10**400), np.int64(3), np.float64(1.5), np.array([1]), np.array(1), [], {}, (),
-    object(), [1, 2], {"a": 1}, {1, 2},
+    None, True, False, "x", "", b"1", 1.5, float("nan"), float("inf"), -float("inf"), -1, 0, 1,
+    10**400, -(10**400), 1e308, np.int64(3), np.float64(1.5), np.bool_(True), np.str_("x"),
+    np.array([1]), np.array(1), np.array([1, 2]), np.array([], dtype=float), [], {}, (),
+    object(), [1, 2], {"a": 1}, {1, 2}, (None,), "a" * 300, complex(1, 1), range(3),
+    HashBomb("witness"), EqBomb("witness"), BoolBomb("witness"), LenBomb("witness"),
+    ReprBomb("witness"), IndexBomb(3), FloatBomb(1.5), CmpBomb(1.5), IterBomb((1,)), ItemBomb([1]),
+    MapBomb({"a": 1}), TruthBomb(),
 ]  # fmt: skip
+
+
+def show(junk: object) -> str:
+    try:
+        return repr(junk)[:60]
+    except Exception:  # noqa: BLE001
+        return f"<{type(junk).__name__}, repr raises>"
 
 
 def fuzz(
     fn: Callable[..., Any], good: Mapping[str, Any], *, skip: Iterable[str] = ()
 ) -> int:
-    """Call ``fn`` with each argument replaced by each junk value; only named errors may escape."""
+    """Call ``fn`` with each argument replaced by each junk value (and by a one-item list or tuple
+    of it where the argument is one); only named errors may escape."""
     skipped = set(skip)
     calls = 0
-    for name in good:
+    for name, value in good.items():
         if name in skipped:
             continue
-        for junk in JUNK:
+        candidates = list(JUNK)
+        if isinstance(value, (list, tuple)):
+            candidates += [[junk] for junk in JUNK] + [(junk,) for junk in JUNK]
+        for junk in candidates:
             args = dict(good)
             args[name] = junk
             calls += 1
             try:
                 fn(**args)
             except Exception as exc:  # noqa: BLE001
-                assert named_error(exc), (fn.__name__, name, repr(junk), type(exc), exc)
+                assert named_error(exc), (fn.__name__, name, show(junk), type(exc), exc)
     return calls
 
 
@@ -2792,6 +3133,413 @@ def test_extreme_inputs_pair_builder() -> None:
         compare_observed(day, ev.b.observed, ev.a.stream.visits, ("nothing",))  # type: ignore[arg-type]
     with pytest.raises(ConfounderError):
         compare_observed(day, ev.b.observed, ev.a.stream.visits, (), ignore_pressure=1)  # type: ignore[arg-type]
+    # the scenario itself is validated (review F5: it had no validation)
+    good_fields = {
+        f.name: getattr(scenario_a, f.name) for f in dataclasses.fields(Scenario)
+    }
+    fuzz(Scenario, good_fields)
+
+
+def scenario_fields(scenario: Scenario) -> dict[str, Any]:
+    return {f.name: getattr(scenario, f.name) for f in dataclasses.fields(Scenario)}
+
+
+def test_scenario_is_validated_by_the_named_error() -> None:
+    """Review F5: ``c1_specs=None`` raised a TypeError and an array flag a ValueError."""
+    a, b = build_confounder_pair(G3_REPORTED.group, G3_REPORTED, BASE)
+    fields = scenario_fields(a)
+    assert Scenario(**fields) == a  # a valid scenario passes untouched
+    cases: list[tuple[str, Any]] = []
+    for name in ("content_sensing", "robot_present", "task_outcomes"):
+        cases += [
+            (name, bad)
+            for bad in (
+                None,
+                1,
+                "yes",
+                np.bool_(True),
+                np.array([1, 2]),
+                np.array([]),
+                TruthBomb(),
+            )
+        ]
+    for name in (
+        "c1_specs",
+        "c2_specs",
+        "c3_specs",
+        "forced_slots",
+        "authenticating_devices",
+        "withheld",
+    ):
+        cases += [
+            (name, bad)
+            for bad in (
+                None,
+                5,
+                "abc",
+                b"ab",
+                {1: 2},
+                iter([1]),
+                object(),
+                np.array(1),
+                IterBomb((1,)),
+                ItemBomb([1]),
+                [None],
+                [5],
+                (TruthBomb(),),
+            )
+        ]
+    cases += [
+        ("group", "no_such_group"),
+        ("group", HashBomb("no_such_group")),
+        ("group", EqBomb("no_such_group")),
+        ("group", None),
+        ("variant_id", ""),
+        ("variant_id", None),
+        ("variant_id", LenBomb(" ")),
+        ("variant_id", 5),
+        ("member", "C"),
+        ("member", None),
+        ("member", EqBomb("C")),
+        ("member", "a"),
+        ("mechanism", "bounce"),
+        ("mechanism", None),
+        ("mechanism", HashBomb("x")),
+        ("mechanism_class", "C1"),
+        ("mechanism_class", None),
+        ("mechanism_class", InjectedClass.C3),
+        (
+            "c1_specs",
+            (spike(HOUR, HOUR, 5.0),) + a.c1_specs,
+        ),  # a spec of another group or class
+        ("c2_specs", a.c1_specs),  # a C1 spec in the C2 slot
+        ("c3_specs", a.c1_specs),
+        ("c1_specs", b.c2_specs),
+        ("forced_slots", ("slot",)),
+        ("withheld", ("nothing",)),
+        ("withheld", ("witness",) * 2),
+        ("authenticating_devices", ("",)),
+        ("authenticating_devices", (5,)),
+    ]
+    for name, bad in cases:
+        with pytest.raises(ConfounderError):
+            Scenario(**{**fields, name: bad})
+        with pytest.raises(ConfounderError):
+            dataclasses.replace(a, **{name: bad})
+    # lists are accepted and stored as tuples
+    listed = Scenario(
+        **{**fields, "c1_specs": list(a.c1_specs), "withheld": list(a.withheld)}
+    )
+    assert isinstance(listed.c1_specs, tuple) and isinstance(listed.withheld, tuple)
+    assert listed == a
+    # the builder's scenarios of every variant of every grid pass their own validation
+    for grid in (G1_GRID, G2_GRID, G3_GRID):
+        for v in grid:
+            for member in build_confounder_pair(v.group, v, BASE):
+                assert Scenario(**scenario_fields(member)) == member
+
+
+@pytest.mark.parametrize(
+    "name", ["baseline", "amplitude", "sd", "phi", "emax", "ec50", "ka", "ke"]
+)
+@pytest.mark.parametrize("huge", [10**400, -(10**400)], ids=["positive", "negative"])
+def test_a_patient_parameter_beyond_the_float_range_is_a_named_error(
+    name: str, huge: int
+) -> None:
+    """Review F5: ``10**400`` in a float field raised a raw OverflowError from the assembly."""
+    patient = make_patient(**{name: huge})
+    # the foreign error is converted with its message (a field of the baseline and noise model), or
+    # reported as the failure of the response model (a field of the drug response)
+    message = (
+        "the response model failed"
+        if name in ("emax", "ec50", "ka", "ke")
+        else "OverflowError: int too large to convert to float"
+    )
+    with pytest.raises(LatentAssemblyError, match=message):
+        assemble(patient=patient)
+    v = g1("double_take_gap", False, False)
+    with pytest.raises(InjectionError) as caught:
+        evaluate_pair(v.group, v, pair_base(patient=patient))
+    assert named_error(caught.value)
+    sa, _ = build_confounder_pair(v.group, v, pair_base(patient=patient))
+    with pytest.raises(LatentAssemblyError):
+        realise_scenario(sa, pair_base(patient=patient))
+
+
+@pytest.mark.parametrize(
+    "name, value",
+    [("baseline", 130.0), ("amplitude", 0.0), ("sd", 0.0), ("phi", 0.0)],
+)
+def test_a_patient_float_that_misbehaves_is_a_named_error(
+    name: str, value: float
+) -> None:
+    """A float subclass that raises from ``__float__`` is read inside the baseline model, which is not
+    this module's code: the assembly reports it as its own failure (review F5)."""
+    patient = make_patient(**{name: FloatBomb(value)})
+    with pytest.raises(LatentAssemblyError, match="the assembly failed: RuntimeError"):
+        assemble(patient=patient)
+
+
+def test_pathological_strings_are_read_as_plain_strings_or_refused() -> None:
+    """A ``str`` subclass whose hash, equality, truth value, length or repr raises is copied to a plain
+    ``str`` before it is used (review F5): valid content gives the plain result, invalid content the
+    named error, and the stored value is an exact ``str``."""
+    for bomb in STR_BOMBS:
+        spec = c1_spec(
+            bomb("hypertensive_spike"),
+            HOUR,
+            duration_ms=HOUR,
+            magnitude=5.0,
+            level=bomb("high"),
+            confounder_group=bomb("g"),
+        )
+        plain = c1_spec(
+            "hypertensive_spike",
+            HOUR,
+            duration_ms=HOUR,
+            magnitude=5.0,
+            level="high",
+            confounder_group="g",
+        )
+        assert spec == plain
+        assert (
+            type(spec.subtype) is str
+            and type(spec.level) is str
+            and type(spec.confounder_group) is str
+        )
+        with pytest.raises(C1InjectionError):
+            c1_spec(bomb("no_such_subtype"), HOUR)
+        with pytest.raises(C1InjectionError):
+            c1_spec(
+                bomb("hypertensive_spike"),
+                HOUR,
+                duration_ms=HOUR,
+                magnitude=5.0,
+                reference=bomb("no_such_reference"),
+                multiple=1.0,
+                reference_value=5.0,
+            )
+        with pytest.raises(C1InjectionError):
+            resolve_c1_magnitude(level_row(2.0), 20.0, bomb("no_such_reference"))
+        assert (
+            resolve_c1_magnitude(level_row(2.0), 20.0, bomb(REFERENCE_SCALE_RANGE))
+            == 40.0
+        )
+        with pytest.raises(ConfounderError):
+            build_confounder_pair(
+                bomb("no_such_group"), g1("nominal", True, True), BASE
+            )
+        v = g1("double_take_gap", False, True)
+        built = Variant(
+            group=bomb(v.group), variant_id=bomb(v.variant_id), withheld=(bomb("content_change"),),
+            bounce_gap=bomb("double_take_gap"), attacker=None, expected_indistinguishable=False,
+            source_type=bomb("design_choice"), source_ref=bomb("r"), rationale=bomb("r"),
+        )  # fmt: skip
+        assert (
+            built.withheld == ("content_change",)
+            and built.bounce_gap == "double_take_gap"
+        )
+        assert all(
+            type(x) is str
+            for x in (
+                built.group,
+                built.variant_id,
+                built.withheld[0],
+                built.bounce_gap,
+                built.source_type,
+                built.source_ref,
+                built.rationale,
+            )
+        )
+        for kwargs in (
+            {"group": bomb("no_such_group")}, {"withheld": (bomb("nothing"),)}, {"bounce_gap": bomb("huge")},
+            {"source_type": bomb("invented")}, {"variant_id": bomb("")},
+        ):  # fmt: skip
+            fields = {
+                f.name: getattr(built, f.name) for f in dataclasses.fields(Variant)
+            }
+            with pytest.raises(ConfounderError):
+                Variant(**{**fields, **kwargs})
+        with pytest.raises(ConfounderError):
+            Variant(
+                **{
+                    **{
+                        f.name: getattr(built, f.name)
+                        for f in dataclasses.fields(Variant)
+                    },
+                    "group": GROUP_NONRESPONSE_VS_FORGERY,
+                    "bounce_gap": None,
+                    "attacker": bomb("expert"),
+                }
+            )
+        ev = evaluated(g1("double_take_gap", False, False))
+        assert compare_observed(
+            ev.a.observed, ev.b.observed, ev.a.stream.visits, [bomb("content_change")]
+        ) == compare_observed(
+            ev.a.observed, ev.b.observed, ev.a.stream.visits, ["content_change"]
+        )
+        with pytest.raises(ConfounderError):
+            compare_observed(
+                ev.a.observed, ev.b.observed, ev.a.stream.visits, [bomb("nothing")]
+            )
+        assert pair_base(care_plan_id=bomb("plan-1")).care_plan_id == "plan-1"
+        assert type(pair_base(care_plan_id=bomb("plan-1")).care_plan_id) is str
+
+
+def test_containers_that_misbehave_are_named_errors() -> None:
+    ev = evaluated(g1("double_take_gap", False, False))
+    day = ev.a.observed
+    for bad in (IterBomb((1,)), ItemBomb([1]), MapBomb({"a": 1})):
+        with pytest.raises(ConfounderError):
+            compare_observed(day, ev.b.observed, bad, ())  # type: ignore[arg-type]
+        with pytest.raises(ConfounderError):
+            compare_observed(day, ev.b.observed, (), bad)  # type: ignore[arg-type]
+        with pytest.raises(ConfounderError):
+            confounder_log(bad)  # type: ignore[arg-type]
+        with pytest.raises(ConfounderError):
+            Variant(
+                GROUP_DOUBLE_TAKE_VS_BOUNCE,
+                "v",
+                bad,
+                "nominal",
+                None,
+                False,
+                "design_choice",
+                "r",
+                "r",
+            )  # type: ignore[arg-type]
+
+
+def test_foreign_objects_with_unreadable_fields_are_named_errors() -> None:
+    """The observed days, visits, streams and records come from other modules and are not validated
+    there: a field that cannot be read is the named error of the module that reads it (review F5)."""
+    ev = evaluated(g1("double_take_gap", False, False))
+    day, other, visits = ev.a.observed, ev.b.observed, ev.a.stream.visits
+    for name in ("samples", "events"):
+        for junk in (
+            None,
+            5,
+            [None],
+            [5],
+            TruthBomb(),
+            IterBomb((1,)),
+            ItemBomb([1]),
+            np.array(1),
+        ):
+            broken = dataclasses.replace(day, **{name: junk})
+            with pytest.raises(ConfounderError):
+                compare_observed(broken, other, visits, ())
+            with pytest.raises(ConfounderError):
+                compare_observed(other, broken, visits, ())
+    robot = evaluated(
+        g2("naive", True, False)
+    )  # a day with presence samples: the visits are read
+    assert [s for s in robot.a.observed.samples if s.signal == "presence"]
+    visit = robot.a.stream.visits[0]
+    for name in ("arrival_ms", "departure_ms"):
+        for junk in (
+            None,
+            "x",
+            [1],
+            np.array([1, 2]),
+            TruthBomb(),
+            CmpBomb(1.0),
+            object(),
+        ):
+            broken_visit = dataclasses.replace(visit, **{name: junk})
+            with pytest.raises(ConfounderError):
+                compare_observed(robot.a.observed, robot.b.observed, [broken_visit], ())
+    scenario, _ = build_confounder_pair(G3_REPORTED.group, G3_REPORTED, BASE)
+    realised = realise_scenario(scenario, BASE)
+    for name in ("events", "visits"):
+        for junk in (
+            None,
+            5,
+            [None],
+            [5],
+            TruthBomb(),
+            IterBomb((1,)),
+            ItemBomb([1]),
+            np.array(1),
+        ):
+            broken_stream = dataclasses.replace(realised.stream, **{name: junk})
+            with pytest.raises(C1InjectionError):
+                observe_refusals(broken_stream, realised.records)
+    # a level, a spec, a device error model and a patient whose fields cannot be read
+    row = level_row(2.0)
+    for name, junk in (
+        ("unit", None), ("unit", CmpBomb(1.0)), ("value", [1]), ("value", 10**400), ("value", 1j),
+        ("quantity_unit", np.array([1, 2])), ("quantity_unit", EqBomb(UNIT_MMHG)),
+    ):  # fmt: skip
+        broken_row = dataclasses.replace(row, **{name: junk})
+        with pytest.raises(C1InjectionError):
+            c1_spec_from_level(
+                "hypertensive_spike", HOUR, broken_row, 20.0, duration_ms=HOUR
+            )
+        with pytest.raises(C1InjectionError):
+            resolve_c1_magnitude(broken_row, 20.0, REFERENCE_SCALE_RANGE)
+    plain_spec = spike(HOUR, HOUR, 5.0)
+    for name, junk in (
+        ("level", BoolBomb("high")), ("confounder_group", BoolBomb("g")),
+        ("subtype", HashBomb("hypertensive_spike")), ("subtype", EqBomb("hypertensive_spike")),
+    ):  # fmt: skip
+        broken_spec = dataclasses.replace(plain_spec, **{name: junk})
+        with pytest.raises(C1InjectionError):
+            check_c1_specs([broken_spec])
+        with pytest.raises(C1InjectionError):
+            c1_stream(SEED, 0, 0, broken_spec)
+    quiet = g1("double_take_gap", False, False)
+    for name in ("cuff_bias_mmhg", "cuff_error_sd_mmhg"):
+        errors = dataclasses.replace(NOISY_ERRORS, **{name: FloatBomb(1.0)})
+        with pytest.raises(ConfounderError):
+            evaluate_pair(quiet.group, quiet, pair_base(device_errors=errors))
+    for bomb in (LenBomb, EqBomb):
+        with pytest.raises(ConfounderError):
+            evaluate_pair(
+                quiet.group,
+                quiet,
+                pair_base(patient=make_patient(patient_id=bomb("p0003"))),
+            )
+    # a design file given as a path that misbehaves
+    for bomb in (*STR_BOMBS, TruthBomb, IterBomb):
+        path = bomb("no/such/file.yaml") if bomb in STR_BOMBS else bomb()
+        for loader in (load_confounder_design, load_c1_design):
+            with pytest.raises(InjectionError) as caught:
+                loader(path)  # type: ignore[arg-type]
+            assert named_error(caught.value)
+
+    class PathBomb(os.PathLike):  # type: ignore[type-arg]
+        def __fspath__(self) -> str:
+            raise RuntimeError("fspath")
+
+    for loader in (load_confounder_design, load_c1_design):
+        with pytest.raises(InjectionError) as caught:
+            loader(PathBomb())  # type: ignore[arg-type]
+        assert named_error(caught.value)
+    # a path that is a misbehaving str with a valid content is read as the plain path
+    for bomb in STR_BOMBS:
+        assert load_confounder_design(
+            bomb(str(INJECTIONS_FILE))
+        ) == load_confounder_design(INJECTIONS_FILE)
+        assert load_c1_design(bomb(str(INJECTIONS_FILE))) == load_c1_design(
+            INJECTIONS_FILE
+        )
+
+    # a record that was valid when it was built and cannot be read any more
+    class Unreadable(Mapping):  # type: ignore[type-arg]
+        def __getitem__(self, key: Any) -> Any:
+            raise RuntimeError("getitem")
+
+        def __iter__(self) -> Any:
+            return iter(("a",))
+
+        def __len__(self) -> int:
+            return 1
+
+    broken_record = dataclasses.replace(ev.a.records[0])
+    object.__setattr__(broken_record, "details", Unreadable())
+    with pytest.raises(ConfounderError):
+        confounder_log([broken_record])
 
 
 # ---------------------------------------------------------------------------
@@ -3010,6 +3758,25 @@ def test_latent_work_validates_its_grid_and_ticks() -> None:
             LatentWork(0, grid, **{**good, "dose_ticks_ms": bad_ticks})
     with pytest.raises(C1InjectionError):
         LatentWork(1, grid, **good)  # day 1 needs a grid inside day 1
+    for bad_gap in (
+        0,
+        -1,
+        DAY + 1,
+        10**400,
+        1.5,
+        True,
+        None,
+        "2",
+    ):  # review F6 (E24): both bounds
+        with pytest.raises(C1InjectionError):
+            LatentWork(0, grid, **{**good, "double_take_gap_ms": bad_gap})
+    for edge_gap in (1, DAY):
+        assert (
+            LatentWork(
+                0, grid, **{**good, "double_take_gap_ms": edge_gap}
+            ).double_take_gap_ms
+            == edge_gap
+        )
     work = LatentWork(0, grid, **good)
     assert work.has_pulses is False and not work.pulse_mmhg.any()
     assert work.dose_ticks_ms == (DOSE,) and work.day_end_ms == DAY
@@ -3582,6 +4349,103 @@ def test_the_committed_grid_lists_every_discriminator_it_withholds_consistently(
     )
 
 
+def check_variant_names_match_withheld(path: Path) -> None:
+    """Review F6 (Y03): the flags in a variant id and the channels it withholds say the same."""
+    design = load_confounder_design(path)
+    first, second, third = GROUPS
+    robot_pair = {"witness", "robot_task_outcome"}
+    expected_ids = {
+        first: {
+            f"{g}_{c}_{r}"
+            for g in ("nominal", "stress")
+            for c in ("content", "nocontent")
+            for r in ("robot", "norobot")
+        },
+        second: {
+            f"{a}_{r}_{u}"
+            for a in ("naive", "informed")
+            for r in ("robot", "norobot")
+            for u in ("noauth", "auth")
+        },
+        third: {"outcome_reported", "outcome_withheld", "robot_absent"},
+    }
+    for group, variants in design.items():
+        assert {v.variant_id for v in variants} == expected_ids[group], (
+            group
+        )  # the whole grid, once
+    for v in design[first]:
+        gap, content, robot = v.variant_id.split("_")
+        assert (
+            v.bounce_gap == {"nominal": "nominal", "stress": "double_take_gap"}[gap]
+        ), v.variant_id
+        expected = ({"content_change"} if content == "nocontent" else set()) | (
+            robot_pair if robot == "norobot" else set()
+        )
+        assert set(v.withheld) == expected and len(v.withheld) == len(expected), (
+            v.variant_id
+        )
+    for v in design[second]:
+        attacker, robot, auth = v.variant_id.split("_")
+        assert v.attacker == attacker, v.variant_id
+        expected = (robot_pair if robot == "norobot" else set()) | (
+            {"verification"} if auth == "noauth" else set()
+        )
+        assert set(v.withheld) == expected and len(v.withheld) == len(expected), (
+            v.variant_id
+        )
+    named = {
+        "outcome_reported": set(), "outcome_withheld": {"robot_task_outcome"}, "robot_absent": robot_pair,
+    }  # fmt: skip
+    for v in design[third]:
+        assert set(v.withheld) == named[v.variant_id] and len(v.withheld) == len(
+            named[v.variant_id]
+        ), v.variant_id
+
+
+def test_variant_ids_match_the_channels_they_withhold_in_every_state_of_the_file(
+    tmp_path: Path,
+) -> None:
+    for path in (
+        INJECTIONS_FILE,  # whatever its state
+        rewrite_rows(tmp_path, filled=False, name="ids_unfilled.yaml"),
+        rewrite_rows(tmp_path, filled=True, name="ids_filled.yaml"),
+    ):
+        check_variant_names_match_withheld(path)
+    # the check catches a variant whose id and withheld channels disagree (a mutated filled copy)
+    mutations: dict[str, Callable[[dict[str, Any]], None]] = {
+        "content_flag": lambda groups: groups[GROUPS[0]]["variants"][
+            "nominal_content_robot"
+        ].update({"withheld": ["content_change"]}),
+        "robot_flag": lambda groups: groups[GROUPS[0]]["variants"][
+            "stress_nocontent_robot"
+        ].update({"withheld": ["content_change", "witness", "robot_task_outcome"]}),
+        "gap": lambda groups: groups[GROUPS[0]]["variants"][
+            "stress_content_robot"
+        ].update({"bounce_gap": "nominal"}),
+        "auth_flag": lambda groups: groups[GROUPS[1]]["variants"][
+            "naive_robot_auth"
+        ].update({"withheld": ["verification"]}),
+        "attacker": lambda groups: groups[GROUPS[1]]["variants"][
+            "informed_robot_auth"
+        ].update({"attacker": "naive"}),
+        "outcome": lambda groups: groups[GROUPS[2]]["variants"][
+            "outcome_withheld"
+        ].update({"withheld": []}),
+        "absent": lambda groups: groups[GROUPS[2]]["variants"]["robot_absent"].update(
+            {"withheld": ["witness", "robot_task_outcome", "verification"]}
+        ),
+    }
+    for name, mutate in mutations.items():
+        document = yaml.safe_load(
+            (tmp_path / "ids_filled.yaml").read_text(encoding="utf-8")
+        )
+        mutate(document["confounders"]["groups"])
+        path = tmp_path / f"ids_{name}.yaml"
+        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+        with pytest.raises(AssertionError):
+            check_variant_names_match_withheld(path)
+
+
 def test_measurement_refusal_design_has_no_numbers_and_double_take_names_the_gap_row() -> (
     None
 ):
@@ -3634,6 +4498,47 @@ def test_latent_vitals_equal_the_observed_vitals_of_the_same_key() -> None:
         assert [s.value for s in stream_.samples if s.signal == "hr_ecg"] == [
             s.value for s in result.latent.samples if s.signal == "hr_ecg"
         ], day
+
+
+def test_latent_vitals_use_the_key_of_their_own_day_with_several_segments() -> None:
+    """Review F6 (M46): with one segment per kind every day draws the same values, so a latent
+    vitals key that used day 0 went unseen. Here eight segments with distinct levels make the days
+    differ, and each day is compared with a draw computed from its own stream key."""
+    n = DAY // MIN
+    library = SegmentLibrary.from_memory(
+        [
+            InlineSegment(f"hr-{i}", "hr_clean", [60.0 + i] * n, MIN, "bpm")
+            for i in range(8)
+        ]
+        + [
+            InlineSegment(f"sp-{i}", "spo2_clean", [90.0 + i] * n, MIN, "%")
+            for i in range(8)
+        ]
+    )
+    seed = SEED + 5
+    days = assemble(schedule=SCHED_TWO, n_days=4, library=library, seed=seed)
+    levels: dict[str, list[float]] = {"hr_ecg": [], "spo2": []}
+    for day, result in enumerate(days):
+        for signal, kind, sub in (("hr_ecg", "hr_clean", 0), ("spo2", "spo2_clean", 1)):
+            drawn = library.draw(
+                kind, n, stream(seed, PATIENT_INDEX, day, StreamPurpose.SEGMENTS, sub)
+            )
+            got = [s.value for s in result.latent.samples if s.signal == signal]
+            assert got == [drawn.values[j] for j in range(n)], (day, signal)
+            levels[signal].append(got[0])
+        stream_ = build_observed_base(
+            result.latent, SCHED_TWO, "plan-1", ZERO_ERRORS, DESIGN, NoJitter(), library, seed, PATIENT_INDEX,
+        )  # fmt: skip
+        for signal in ("hr_ecg", "spo2"):
+            assert [s.value for s in stream_.samples if s.signal == signal] == [
+                s.value for s in result.latent.samples if s.signal == signal
+            ], (day, signal)
+    # the days really do draw different segments: a key of the wrong day would be seen
+    assert len(set(levels["hr_ecg"])) >= 3 and len(set(levels["spo2"])) >= 3
+    assert (
+        levels["hr_ecg"][1] != levels["hr_ecg"][0]
+        and levels["spo2"][1] != levels["spo2"][0]
+    )
 
 
 def test_an_intake_after_midnight_belongs_to_the_day_of_its_slot_and_acts_on_the_next_day() -> (

@@ -78,3 +78,11 @@ Checks are numbered V1 to V12 in the report. Statuses: `PASS`, `WARN`, `FAIL`, `
 ### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
 
 Same as WS04-T11: `fixture_only`, `n_unfilled` and `n_unverified` are not on the `PriorSource` Protocol (ADR-038 G10); the provenance table counts 0 of 17 rows verified until the human completes WS00-T10 and fills the rows.
+
+### Hand-over from the WS04-T09 review (orchestrator, 2026-10-07)
+
+- V3 (prior fidelity) must not estimate the baseline, the noise or the circadian amplitude from the latent `bp`: it carries the drug effect and the pulses. Use the sidecar `baseline_sbp_mmhg`.
+- V6 uses the computed `indistinguishable_by_construction` flag of each record, never the `expected_indistinguishable` of the YAML grid (they differ under arrival jitter: 18, 17 and 21 of 40 realisations for three variants). The flag is a property of the trace, not of the evidence vector.
+- V2 "the latent day is independent of the injections" cannot hold for C1: a refusal removes a latent MEASUREMENT, a double take adds events and a spike changes `bp`. Restrict V2 to the C2 and C3 injections. "Baseline, events and vitals are bit-identical" holds only for the baseline sidecar and the vitals.
+- `informed_robot_noauth`: the two members are equal only up to the presence level. A spoof can add one extra `presence` sample at tick plus lag (about 15 of 40 realisations), so a strict "equal observed streams" check (test 14 of the task) does not hold; do not count presence samples.
+- Groups 1 and 2 ignore `bp` in the comparison; the observed `bp` differs in about 29 of 40 multi-dose realisations (`PairEvaluation.pressure_response_differs` reports it): report both flags.

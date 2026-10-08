@@ -37,6 +37,13 @@ or the double-take gap) and the attacker level. The committed grid is the sectio
 of ``configs/benchmark/injections.yaml`` (design choices awaiting confirmation, H3); nothing here
 reads it except ``load_confounder_design``.
 
+A variant without a robot (``witness`` withheld) is a deployment with no robot in the room: for the
+groups 1 and 2 the injectors read the stream without its robot visits, so a forged dispense reads the
+witness as None and its record carries no ``witness.*`` evidence path, and its ``expected_undetectable``
+tag agrees with the flag computed below. Group 3 injects its fault at a robot visit, so its
+``robot_absent`` variant withholds what the robot reports, not the robot. The visits stay in the
+generator-side ``stream`` (they are the base shared by the pair).
+
 ``indistinguishable_by_construction``. It is computed, not asserted: ``compare_observed`` compares
 the OBSERVED days of the two members, field by field, over the declared discriminating fields
 (``DISCRIMINATORS``) minus the withheld ones, plus everything else that the observed day holds
@@ -65,7 +72,7 @@ import numbers
 import os
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, TypeGuard
+from typing import Any, Final, TypeGuard, TypeVar
 
 import numpy as np
 
@@ -170,6 +177,9 @@ MAX_VARIANTS: Final[int] = 1_000  # algorithmic: variants of a design file
 _MAX_TEXT: Final = 256  # algorithmic: longest identifier or label
 _MAX_PROSE: Final = 2_000  # algorithmic: longest rationale or source reference
 _MAX_WALK: Final = 100_000  # algorithmic: nodes walked in a design section
+_MAX_ITEMS: Final = (
+    256  # algorithmic: entries of a short list (withheld channels, devices, specs)
+)
 _MEMBER_KEYS: Final = ("class", "subtype")
 _VARIANT_KEYS: Final = frozenset(
     {
@@ -236,20 +246,43 @@ def _int(name: str, x: object, lo: int, hi: int) -> int:
     return value
 
 
+_T = TypeVar("_T")
+
+
+def _plain(x: _T) -> _T:
+    """A ``str`` subclass copied to an exact ``str`` (anything else is returned as it is).
+
+    A subclass may override its hash, equality, truth value, length or repr and raise from them
+    (review F5); the copy is what the validation reads and what is stored, so none of those is ever
+    called.
+    """
+    return str.__str__(x) if isinstance(x, str) else x  # type: ignore[return-value]
+
+
 def _text(name: str, x: object) -> str:
-    if not isinstance(x, str) or not x.strip() or len(x) > _MAX_TEXT:
+    if not isinstance(x, str):
         raise ConfounderError(
             f"{name} must be a non-empty string of at most {_MAX_TEXT} characters"
         )
-    return x
+    plain = str.__str__(x)
+    if not plain.strip() or len(plain) > _MAX_TEXT:
+        raise ConfounderError(
+            f"{name} must be a non-empty string of at most {_MAX_TEXT} characters"
+        )
+    return plain
 
 
 def _prose(name: str, x: object) -> str:
-    if not isinstance(x, str) or not x.strip() or len(x) > _MAX_PROSE:
+    if not isinstance(x, str):
         raise ConfounderError(
             f"{name} must be a non-empty string of at most {_MAX_PROSE} characters"
         )
-    return x
+    plain = str.__str__(x)
+    if not plain.strip() or len(plain) > _MAX_PROSE:
+        raise ConfounderError(
+            f"{name} must be a non-empty string of at most {_MAX_PROSE} characters"
+        )
+    return plain
 
 
 def _bool(name: str, x: object) -> bool:
@@ -258,10 +291,41 @@ def _bool(name: str, x: object) -> bool:
     return x
 
 
+def _choice(name: str, x: object, allowed: Sequence[str]) -> str:
+    """``x`` as an exact ``str`` that is one of ``allowed`` (a plain copy: see ``_plain``)."""
+    if not isinstance(x, str):
+        raise ConfounderError(f"{name} must be one of {tuple(allowed)}")
+    plain = str.__str__(x)
+    if plain not in allowed:
+        raise ConfounderError(f"{name} must be one of {tuple(allowed)}")
+    return plain
+
+
+def _optional_choice(name: str, x: object, allowed: Sequence[str]) -> str | None:
+    return None if x is None else _choice(name, x, allowed)
+
+
+def _unreadable(what: str, exc: Exception) -> ConfounderError:
+    """The named error for an argument or a foreign object that misbehaves when it is read."""
+    return ConfounderError(f"{what} cannot be read: {type(exc).__name__}")
+
+
+def _sequence(name: str, items: object, limit: int) -> tuple[Any, ...]:
+    """A list or tuple of at most ``limit`` items (never a string, a generator or a mapping)."""
+    if isinstance(items, (str, bytes)) or not isinstance(items, (list, tuple)):
+        raise ConfounderError(f"{name} must be a list or a tuple")
+    try:
+        if len(items) > limit:
+            raise ConfounderError(f"{name} has more than {limit} entries")
+        return tuple(items)
+    except ConfounderError:
+        raise
+    except Exception as exc:  # a list or tuple subclass whose methods misbehave
+        raise _unreadable(name, exc) from exc
+
+
 def _group(group: object) -> str:
-    if not isinstance(group, str) or group not in GROUPS:
-        raise ConfounderError(f"group must be one of {GROUPS}")
-    return group
+    return _choice("group", group, GROUPS)
 
 
 # ---------------------------------------------------------------------------
@@ -294,15 +358,12 @@ class Variant:
 
     def __post_init__(self) -> None:
         group = _group(self.group)
-        _text("variant_id", self.variant_id)
-        if isinstance(self.withheld, (str, bytes)) or not isinstance(
-            self.withheld, (list, tuple)
-        ):
-            raise ConfounderError("withheld must be a list or a tuple of channel names")
-        withheld = tuple(self.withheld)
-        for item in withheld:
-            if not isinstance(item, str) or item not in WITHHOLDABLE:
-                raise ConfounderError(f"a withheld channel is one of {WITHHOLDABLE}")
+        object.__setattr__(self, "group", group)
+        object.__setattr__(self, "variant_id", _text("variant_id", self.variant_id))
+        withheld = tuple(
+            _choice("a withheld channel", item, WITHHOLDABLE)
+            for item in _sequence("withheld", self.withheld, _MAX_ITEMS)
+        )
         if len(set(withheld)) != len(withheld):
             raise ConfounderError("withheld lists a channel twice")
         if FIELD_WITNESS in withheld and FIELD_OUTCOME not in withheld:
@@ -311,26 +372,28 @@ class Variant:
                 "robot_task_outcome together"
             )
         object.__setattr__(self, "withheld", withheld)
+        gap = _optional_choice("bounce_gap", self.bounce_gap, _GAPS)
+        attacker = _optional_choice("attacker", self.attacker, _ATTACKERS)
         if group == GROUP_DOUBLE_TAKE_VS_BOUNCE:
-            if self.bounce_gap not in _GAPS or self.attacker is not None:
+            if gap is None or attacker is not None:
                 raise ConfounderError(
                     f"group 1 takes bounce_gap in {_GAPS} and no attacker"
                 )
         elif group == GROUP_NONRESPONSE_VS_FORGERY:
-            if self.attacker not in _ATTACKERS or self.bounce_gap is not None:
+            if attacker is None or gap is not None:
                 raise ConfounderError(
                     f"group 2 takes attacker in {_ATTACKERS} and no bounce_gap"
                 )
-        elif self.bounce_gap is not None or self.attacker is not None:
+        elif gap is not None or attacker is not None:
             raise ConfounderError("group 3 has no bounce_gap and no attacker")
+        object.__setattr__(self, "bounce_gap", gap)
+        object.__setattr__(self, "attacker", attacker)
         _bool("expected_indistinguishable", self.expected_indistinguishable)
-        if (
-            not isinstance(self.source_type, str)
-            or self.source_type not in SOURCE_TYPES
-        ):
-            raise ConfounderError(f"source_type must be one of {SOURCE_TYPES}")
-        _prose("source_ref", self.source_ref)
-        _prose("rationale", self.rationale)
+        object.__setattr__(
+            self, "source_type", _choice("source_type", self.source_type, SOURCE_TYPES)
+        )
+        object.__setattr__(self, "source_ref", _prose("source_ref", self.source_ref))
+        object.__setattr__(self, "rationale", _prose("rationale", self.rationale))
 
     @property
     def content_sensing(self) -> bool:
@@ -405,7 +468,16 @@ def load_confounder_design(
     ``rationale``). The section holds no number (numbers are rows of ``parameters:``). Raises
     ``InjectionError`` for an invalid file.
     """
-    section = load_design_mapping(path, "confounders")
+    try:
+        section = load_design_mapping(_plain(path), "confounders")
+    except InjectionError:
+        raise
+    except MemoryError:
+        raise
+    except Exception as exc:  # a path object that misbehaves
+        raise InjectionDesignError(
+            f"the design file cannot be read: {type(exc).__name__}"
+        ) from exc
     if _has_number(section):
         raise InjectionDesignError(
             "confounders holds a number: numbers are rows of parameters:"
@@ -535,7 +607,9 @@ class PairBase:
             raise ConfounderError("jitter must have a delay_ms method and a descriptor")
         if not isinstance(self.library, SegmentLibrary):
             raise ConfounderError("library must be a SegmentLibrary")
-        _text("care_plan_id", self.care_plan_id)
+        object.__setattr__(
+            self, "care_plan_id", _text("care_plan_id", self.care_plan_id)
+        )
         _int("seed", self.seed, 0, _SEED_LIMIT - 1)
         _int("patient_index", self.patient_index, 0, _WORD_LIMIT - 1)
         _int("dose_index", self.dose_index, 0, T_DAY_MS)
@@ -555,7 +629,10 @@ class Scenario:
     (scenario controls, not injections: they have no record). ``content_sensing``, ``robot_present``
     and ``task_outcomes`` are the capabilities that the variant keeps (a withheld channel is
     absent from the released day) and ``authenticating_devices`` the devices whose messages are
-    verified.
+    verified. The scenario is validated when it is built (``ConfounderError``, review F5): the group,
+    the member (``A`` or ``B``) with its mechanism and class, the class and group of every spec,
+    the forced slots, the flags (``bool``) and the withheld channels; lists become tuples and a
+    ``str`` subclass an exact ``str``.
     """
 
     group: str
@@ -572,6 +649,59 @@ class Scenario:
     task_outcomes: bool
     authenticating_devices: tuple[str, ...]
     withheld: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        group = _group(self.group)
+        object.__setattr__(self, "group", group)
+        object.__setattr__(self, "variant_id", _text("variant_id", self.variant_id))
+        member = _choice("member", self.member, ("A", "B"))
+        object.__setattr__(self, "member", member)
+        info = _GROUP_INFO[group]
+        cls, mechanism = info.member_a if member == "A" else info.member_b
+        if _text("mechanism", self.mechanism) != mechanism or (
+            self.mechanism_class is not cls
+        ):
+            raise ConfounderError(
+                f"member {member} of {group} is the {cls.value} mechanism {mechanism!r}"
+            )
+        object.__setattr__(self, "mechanism", mechanism)
+        for name, spec_cls in (
+            ("c1_specs", InjectedClass.C1),
+            ("c2_specs", InjectedClass.C2),
+            ("c3_specs", InjectedClass.C3),
+        ):
+            specs = _sequence(name, getattr(self, name), _MAX_ITEMS)
+            for spec in specs:
+                if not isinstance(spec, InjectionSpec) or spec.cls is not spec_cls:
+                    raise ConfounderError(f"{name} holds {spec_cls.value} specs only")
+                if (
+                    spec.confounder_group is None
+                    or _plain(spec.confounder_group) != group
+                ):
+                    raise ConfounderError(
+                        f"every spec of {name} carries the group {group!r}"
+                    )
+            object.__setattr__(self, name, specs)
+        slots = _sequence("forced_slots", self.forced_slots, _MAX_ITEMS)
+        if not all(isinstance(slot, ForcedSlot) for slot in slots):
+            raise ConfounderError("every forced slot must be a ForcedSlot")
+        object.__setattr__(self, "forced_slots", slots)
+        for flag in ("content_sensing", "robot_present", "task_outcomes"):
+            _bool(flag, getattr(self, flag))
+        devices = tuple(
+            _text("an authenticating device", device)
+            for device in _sequence(
+                "authenticating_devices", self.authenticating_devices, _MAX_ITEMS
+            )
+        )
+        object.__setattr__(self, "authenticating_devices", devices)
+        withheld = tuple(
+            _choice("a withheld channel", item, WITHHOLDABLE)
+            for item in _sequence("withheld", self.withheld, _MAX_ITEMS)
+        )
+        if len(set(withheld)) != len(withheld):
+            raise ConfounderError("withheld lists a channel twice")
+        object.__setattr__(self, "withheld", withheld)
 
 
 def _spec(
@@ -738,7 +868,8 @@ class RealisedScenario:
     ``observed`` the released ``ObservedDay`` (withheld channels removed), ``records`` every
     injection record of the member (C1, C2, C3) tagged with the variant and the flag, ``log`` their
     sidecar entries and ``ground_truth`` the events of the C2 and C3 records (the C1 truth is the
-    labeller's).
+    labeller's). The ``stream`` keeps the robot visits of the base even when the variant has no robot:
+    only the injectors are shown none (module docstring).
     """
 
     scenario: Scenario
@@ -774,6 +905,19 @@ def realise_scenario(scenario: Scenario, base_context: PairBase) -> RealisedScen
     if not isinstance(scenario, Scenario):
         raise ConfounderError("scenario must be a Scenario")
     base = _checked_base(base_context)
+    try:
+        return _realise(scenario, base)
+    except InjectionError:
+        raise
+    except MemoryError:
+        raise
+    except Exception as exc:
+        # the errors of the measurement and segment modules, or an argument
+        # of another module (a device error model, a patient) that misbehaves when it is read
+        raise ConfounderError(f"{type(exc).__name__}: {exc}") from exc
+
+
+def _realise(scenario: Scenario, base: PairBase) -> RealisedScenario:
     [latent] = assemble_latent_days(
         base.patient,
         base.schedule,
@@ -786,25 +930,20 @@ def realise_scenario(scenario: Scenario, base_context: PairBase) -> RealisedScen
         config=base.config,
         forced_slots=scenario.forced_slots,
     )
-    try:
-        observed_base = build_observed_base(
-            latent.latent,
-            base.schedule,
-            base.care_plan_id,
-            base.device_errors,
-            base.design,
-            base.jitter,
-            base.library,
-            base.seed,
-            base.patient_index,
-            allow_no_segments=base.config.allow_no_segments,
-            skip_measurement_ticks_ms=latent.refused_ticks_ms,
-            dispenser_content_sensing=scenario.content_sensing,
-        )
-    except ValueError as exc:  # the errors of the measurement and segment modules
-        if isinstance(exc, InjectionError):
-            raise
-        raise ConfounderError(f"{type(exc).__name__}: {exc}") from exc
+    observed_base = build_observed_base(
+        latent.latent,
+        base.schedule,
+        base.care_plan_id,
+        base.device_errors,
+        base.design,
+        base.jitter,
+        base.library,
+        base.seed,
+        base.patient_index,
+        allow_no_segments=base.config.allow_no_segments,
+        skip_measurement_ticks_ms=latent.refused_ticks_ms,
+        dispenser_content_sensing=scenario.content_sensing,
+    )
     stream = observe_refusals(observed_base, latent.c1_records)
     context = InjectionContext(
         base.patient_index,
@@ -814,9 +953,22 @@ def realise_scenario(scenario: Scenario, base_context: PairBase) -> RealisedScen
         dispenser_content_sensing=scenario.content_sensing,
         authenticating_devices=scenario.authenticating_devices,
     )
-    result = apply_observation_injections(
-        stream, [*scenario.c2_specs, *scenario.c3_specs], context
+    # A deployment without a robot has no robot in the room: the injectors read the stream without
+    # its visits, so a forged dispense reads the witness as None (never a negative) and its record
+    # carries no witness path (review F2). Group 3 injects a fault at a robot visit (its
+    # ``robot_absent`` variant withholds what the robot reports, not the robot), so it keeps them.
+    # The visits are restored afterwards: they are the base of the pair, shared by both members.
+    hide_visits = (
+        not scenario.robot_present and scenario.group != GROUP_REFUSAL_VS_ROBOT_MISSED
     )
+    seen = dataclasses.replace(stream, visits=()) if hide_visits else stream
+    result = apply_observation_injections(
+        seen, [*scenario.c2_specs, *scenario.c3_specs], context
+    )
+    if hide_visits:
+        result = dataclasses.replace(
+            result, stream=dataclasses.replace(result.stream, visits=stream.visits)
+        )
     released = _withhold(finalize_observed(result.stream), scenario)
     records = (*latent.c1_records, *result.records)
     return RealisedScenario(
@@ -926,20 +1078,24 @@ def compare_observed(
     for name, day in (("a", a), ("b", b)):
         if not isinstance(day, ObservedDay):
             raise ConfounderError(f"{name} must be an ObservedDay")
-    if isinstance(visits, (str, bytes)) or not isinstance(visits, (list, tuple)):
-        raise ConfounderError("visits must be a list or a tuple of RobotVisit")
-    if not all(isinstance(v, RobotVisit) for v in visits):
+    seen = _sequence("visits", visits, _MAX_WALK)
+    if not all(isinstance(v, RobotVisit) for v in seen):
         raise ConfounderError("every visit must be a RobotVisit")
-    if isinstance(masked, (str, bytes)) or not isinstance(masked, (list, tuple)):
-        raise ConfounderError("masked must be a list or a tuple of field names")
-    for field in masked:
-        if not isinstance(field, str) or field not in DISCRIMINATORS:
-            raise ConfounderError(f"a masked field is one of {DISCRIMINATORS}")
+    hidden = tuple(
+        _choice("a masked field", field, DISCRIMINATORS)
+        for field in _sequence("masked", masked, _MAX_ITEMS)
+    )
     ignore = _bool("ignore_pressure", ignore_pressure)
-    first, second = _views(a, visits, ignore), _views(b, visits, ignore)
-    different = [f for f in DISCRIMINATORS if f not in masked and first[f] != second[f]]
-    if first[FIELD_OTHER] != second[FIELD_OTHER]:
-        different.append(FIELD_OTHER)
+    try:
+        first, second = _views(a, seen, ignore), _views(b, seen, ignore)
+        different = [
+            f for f in DISCRIMINATORS if f not in hidden and first[f] != second[f]
+        ]
+        if first[FIELD_OTHER] != second[FIELD_OTHER]:
+            different.append(FIELD_OTHER)
+    except Exception as exc:
+        # a day or a visit of another module whose fields misbehave
+        raise _unreadable("an observed day or a visit", exc) from exc
     return tuple(different)
 
 
@@ -956,16 +1112,17 @@ def confounder_log(records: Sequence[InjectionRecord]) -> list[dict[str, Any]]:
     ``injection.injection_log`` entries plus, for a record tagged by ``evaluate_pair``,
     ``variant_id`` and ``indistinguishable_by_construction`` (also kept in ``details``).
     """
-    if isinstance(records, (str, bytes)) or not isinstance(records, (list, tuple)):
-        raise ConfounderError("records must be a list or a tuple of InjectionRecord")
+    checked = _sequence("records", records, _MAX_WALK)
     try:
-        entries = injection_log(list(records))
+        entries = injection_log(list(checked))
+        for entry, record in zip(entries, checked, strict=True):
+            for key in _TAG_KEYS:
+                if key in record.details:
+                    entry[key] = record.details[key]
     except InjectionError as exc:
         raise ConfounderError(str(exc)) from exc
-    for entry, record in zip(entries, records, strict=True):
-        for key in _TAG_KEYS:
-            if key in record.details:
-                entry[key] = record.details[key]
+    except Exception as exc:  # a record of another module whose fields misbehave
+        raise _unreadable("a record", exc) from exc
     return entries
 
 

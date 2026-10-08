@@ -152,8 +152,10 @@ _BP: Final = SignalId.BP.value
 _HR_ECG: Final = SignalId.HR_ECG.value
 _SPO2: Final = SignalId.SPO2.value
 _FORCEABLE: Final = (AdherenceState.ON_TIME, AdherenceState.OMITTED)
-# Errors of the other benchmark modules, converted into LatentAssemblyError.
+# Errors of the other benchmark modules, converted into LatentAssemblyError with their message
+# (any other error of a collaborator is converted by ``assemble_latent_days`` without it).
 _FOREIGN: Final = (
+    ArithmeticError,  # OverflowError: a float field of the patient beyond the float range
     AdherenceConfigError,
     LatentModelError,
     MeasurementConfigError,
@@ -513,8 +515,17 @@ def assemble_latent_days(
             patient, schedule, n_days, c1_specs, response_model, library, seed,
             patient_index, config, start_day, state, forced_slots,
         )  # fmt: skip
+    except InjectionError:
+        raise
     except _FOREIGN as exc:
         raise LatentAssemblyError(f"{type(exc).__name__}: {exc}") from exc
+    except MemoryError:
+        raise
+    except Exception as exc:
+        # An argument of another module that misbehaves when it is read: a patient with a field
+        # beyond the float range (``OverflowError``), a float or a string subclass that raises
+        # from its methods, a model or a library that breaks (review F5).
+        raise LatentAssemblyError(f"the assembly failed: {type(exc).__name__}") from exc
 
 
 def _check_forced(

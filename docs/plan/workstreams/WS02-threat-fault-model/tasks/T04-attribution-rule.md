@@ -78,3 +78,7 @@ All of the following, from the repository root:
 ### Flag from the WS02-T03 review (orchestrator, 2026-10-04)
 
 See `docs/models/evidence-channels.md`: step 4 wants "robot liveliness denied ... removed by A4" while the document has an aggregated scalar field `system.liveliness_ok` (EC-OP-17); decision D-12 and the worked check EX-12 record the integrity-first hazard of the fault model CAS-5 (a violated INT with the robot co-located, `witness.robot_present` and `witness.intake_observed` both False, and the BLE-only `crypto_temporal.*` fields denied) and leave the attribution rule to this task with three options (accept the false-C3 hazard, read the pair as UNDETERMINED, widen the scope to the robot presence stream); the same pattern arises with a lagging availability mask (FM hypothesis 9, OP-10). Provenance alone is never sufficient (line 40). `None` for `crypto_temporal.*` when a device of the scope is silent in the window (D-9). Kept `blocked`.
+
+### Hand-over from the WS04-T09 review (orchestrator, 2026-10-07)
+
+- The refusal against the missed robot task (group `refusal_vs_robot_missed`) is separated only by the outcome `declined` against `failed`, and `declined` has no evidence field (ADR-040, proposed): the rule for this pair depends on that ADR.

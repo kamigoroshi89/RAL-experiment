@@ -72,7 +72,7 @@ import numbers
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, TypeGuard
+from typing import Any, Final, TypeGuard, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -157,6 +157,8 @@ _TIME_LIMIT: Final = int(np.iinfo(np.int64).max) // _HEADROOM
 _SEED_LIMIT: Final = 1 << 64  # algorithmic: the root seed of rng.stream is below 2**64
 _WORD_LIMIT: Final = 1 << 32  # algorithmic: a stream key entry is below 2**32
 
+_T = TypeVar("_T")
+
 _MMHG_REFERENCES: Final = {
     SPIKE: REFERENCE_SCALE_RANGE,
     HYPOTENSION: REFERENCE_HOLD_DISTANCE,
@@ -216,12 +218,32 @@ def _real(name: str, x: object) -> float:
     return value
 
 
+def _plain(x: _T) -> _T:
+    """A ``str`` subclass copied to an exact ``str`` (anything else is returned as it is).
+
+    A subclass may override its hash, equality, truth value, length or repr and raise from them
+    (review F5); the copy is read by the validation and stored in its place, so none of those is
+    ever called.
+    """
+    return str.__str__(x) if isinstance(x, str) else x  # type: ignore[return-value]
+
+
 def _text(name: str, x: object) -> str:
-    if not isinstance(x, str) or not x.strip() or len(x) > _MAX_TEXT:
+    if not isinstance(x, str):
         raise C1InjectionError(
             f"{name} must be a non-empty string of at most {_MAX_TEXT} characters"
         )
-    return x
+    plain = str.__str__(x)
+    if not plain.strip() or len(plain) > _MAX_TEXT:
+        raise C1InjectionError(
+            f"{name} must be a non-empty string of at most {_MAX_TEXT} characters"
+        )
+    return plain
+
+
+def _unreadable(what: str, exc: Exception) -> C1InjectionError:
+    """The named error for an argument or a foreign object that misbehaves when it is read."""
+    return C1InjectionError(f"{what} cannot be read: {type(exc).__name__}")
 
 
 def _wrap(exc: InjectionError) -> C1InjectionError:
@@ -281,9 +303,12 @@ def resolve_c1_magnitude(
     if value <= _MIN_REFERENCE:
         raise C1InjectionError("reference_value must be above zero")
     try:
-        return resolve_magnitude(level, value, reference)
+        return resolve_magnitude(level, value, _plain(reference))
     except InjectionError as exc:
         raise _wrap(exc) from exc
+    except Exception as exc:
+        # a level of another module whose fields misbehave when they are read
+        raise _unreadable("the level", exc) from exc
 
 
 def c1_spec(
@@ -315,7 +340,9 @@ def c1_spec(
         ("reference_value", reference_value),
     ):
         if value is not None:
-            params[key] = value if isinstance(value, str) else _real(key, value)
+            params[key] = (
+                str.__str__(value) if isinstance(value, str) else _real(key, value)
+            )
     try:
         spec = InjectionSpec(
             InjectedClass.C1,
@@ -325,8 +352,8 @@ def c1_spec(
             magnitude,
             None if magnitude is None else shape.unit,
             params,
-            level,
-            confounder_group,
+            _plain(level),
+            _plain(confounder_group),
         )
     except InjectionError as exc:
         raise _wrap(exc) from exc
@@ -352,9 +379,32 @@ def c1_spec_from_level(
     if not isinstance(level, LevelRow):
         raise C1InjectionError("level must be a LevelRow")
     name = _text("subtype", subtype)
+    confounder_group = _plain(confounder_group)
     shape = _SHAPES.get(name)
     if shape is None or shape.unit is None:
         raise C1InjectionError(f"{name} has no magnitude level")
+    try:
+        return _spec_from_level(
+            name, shape, onset_ms, level, reference_value, duration_ms, confounder_group
+        )
+    except InjectionError:
+        raise
+    except MemoryError:
+        raise
+    except Exception as exc:
+        # a level of another module whose fields misbehave when read
+        raise _unreadable("the level", exc) from exc
+
+
+def _spec_from_level(
+    name: str,
+    shape: _Shape,
+    onset_ms: int,
+    level: LevelRow,
+    reference_value: float | None,
+    duration_ms: int | None,
+    confounder_group: str | None,
+) -> InjectionSpec:
     if level.quantity_unit != shape.unit:
         raise C1InjectionError(
             f"{name} takes a magnitude in {shape.unit!r}, the level is in {level.quantity_unit!r}"
@@ -507,11 +557,18 @@ def check_c1_specs(specs: Sequence[InjectionSpec]) -> tuple[InjectionSpec, ...]:
     windows lie inside their day and do not overlap within a subtype; a per-tick or per-slot spec
     is not repeated. At most ``MAX_C1_SPECS`` specs. Raises ``C1InjectionError``.
     """
-    checked = tuple(
-        _check_spec(item) for item in _sequence("specs", specs, MAX_C1_SPECS)
-    )
-    ordered = tuple(sorted(checked, key=_sort_key))
-    _check_overlaps(ordered)
+    items = _sequence("specs", specs, MAX_C1_SPECS)
+    try:
+        checked = tuple(_check_spec(item) for item in items)
+        ordered = tuple(sorted(checked, key=_sort_key))
+        _check_overlaps(ordered)
+    except InjectionError:
+        raise
+    except MemoryError:
+        raise
+    except Exception as exc:
+        # a spec of another module whose fields misbehave when they are read
+        raise _unreadable("a spec", exc) from exc
     return ordered
 
 
@@ -530,7 +587,7 @@ def c1_stream(
     other injections. The current injectors draw nothing; the stream is for the plan and for a
     randomised subtype added later.
     """
-    _check_spec(spec)
+    check_c1_specs([spec])
     day = _int("day_index", day_index, 0, _TIME_LIMIT // T_DAY_MS)
     try:
         return stream(
@@ -843,8 +900,23 @@ def observe_refusals(
     """
     if not isinstance(stream_, ObservedStream):
         raise C1InjectionError("stream_ must be an ObservedStream")
+    checked = _sequence("records", records, MAX_C1_SPECS)
+    try:
+        return _observe_refusals(stream_, checked)
+    except InjectionError:
+        raise
+    except MemoryError:
+        raise
+    except Exception as exc:
+        # a stream or record of another module whose fields misbehave
+        raise _unreadable("the stream or a record", exc) from exc
+
+
+def _observe_refusals(
+    stream_: ObservedStream, records: Sequence[Any]
+) -> ObservedStream:
     added: list[Event] = []
-    for record in _sequence("records", records, MAX_C1_SPECS):
+    for record in records:
         if not isinstance(record, InjectionRecord):
             raise C1InjectionError("every record must be an InjectionRecord")
         spec = record.spec
@@ -912,9 +984,20 @@ def load_c1_design(path: str | os.PathLike[str]) -> Mapping[str, SubtypeDesign]:
     for the hypotension; the unit of a level row is ``"x <reference>"``, never an absolute mmHg), the
     Emax scale is an absolute dimensionless level, and every magnitude has at least three levels
     (below, near and above the reference). A row that is still ``awaiting_human_value`` gives a
-    level with ``value`` None. Raises ``InjectionError`` for an invalid file.
+    level with ``value`` None; once every level of a pressure magnitude has a value, the values
+    must span the reference (the smallest multiple below 1, the largest above 1). Raises
+    ``InjectionError`` for an invalid file.
     """
-    design = load_injection_design(path, section="c1")
+    try:
+        design = load_injection_design(_plain(path), section="c1")
+    except InjectionError:
+        raise
+    except MemoryError:
+        raise
+    except Exception as exc:  # a path object that misbehaves
+        raise _design_error(
+            f"the design file cannot be read: {type(exc).__name__}"
+        ) from exc
     if set(design) != set(C1_SUBTYPES):
         raise _design_error(f"must list exactly {sorted(C1_SUBTYPES)}")
     for subtype, entry in design.items():
@@ -947,6 +1030,15 @@ def load_c1_design(path: str | os.PathLike[str]) -> Mapping[str, SubtypeDesign]:
                         f"{where}: row {row.name!r} must be in 'x {reference}', "
                         "never an absolute pressure"
                     )
+            # Once every level has a value they must span the reference: a multiple below 1 and
+            # one above it (review F9). A block that still awaits a value is not judged.
+            multiples = [row.value for row in magnitude.levels]
+            filled = [m for m in multiples if m is not None]
+            if len(filled) == len(multiples) and not min(filled) < 1.0 < max(filled):
+                raise _design_error(
+                    f"{where}: the filled levels must span below and above the reference "
+                    f"{reference} (a multiple under 1 and one over 1), got {sorted(filled)}"
+                )
         else:
             if magnitude.reference is not None:
                 raise _design_error(f"{where}: the Emax scale has no reference")
