@@ -240,6 +240,8 @@ The analysis (analisi §4.9 item 7) asks that the "patient-specific calibration"
 
 The first version is `0.1.0`. The version chosen when a clinician review is applied follows this rule and is recorded in the review log of WS00-T07.
 
+Version `0.2.0` (2026-10-08, WS01-T09, ADR-043): values replaced or added from the literature-anchored proposals and design choices accepted by gab (`docs/formal/parameter-literature-proposal.md`); fourteen unset names moved into `entries` (minor bump); `priority_sys`, `priority_int` and `bound_dose_count_upper` stay unset; `review_status` stays `unreviewed` because no clinician has reviewed the file. The WS01-T03 check that no promoted name is an entry describes version 0.1.0 only. The AST scan of rule 2 reads the values of the current registry file (version 0.1.0: 50, 100, 110, 140 and 250), except monitor-configuration names such as `clock_skew_max_ms`.
+
 ### 5.2 Pinning and verification
 
 A `CarePlan` pins `registry_version` (`02-interfaces.md#template`). The monitor rejects a plan whose `registry_version` is not the version of the loaded registry (WS05-T03, `verify_plan`, and `MonitorConfig.registry_version`); the match is exact string equality in 0.1.0, so every bump, including a patch, requires the plans to be issued again. A range of compatible versions is not defined (section 7, OP-9). The registry version and the SHA-256 digest of the registry file are proposed as fields of every run manifest so that a reported number can be tied to the exact file (proposal to WS04, WS05 and WS08 through WS01-T08; not a contract change of this task).

@@ -111,3 +111,7 @@ The cross-document check that greps every formula symbol in `configs/registry/hy
 ### Hand-over from ADR-043 (agent, 2026-10-08)
 
 WS00-T07 is no longer a dependency (decision of gab, ADR-043): run the freeze with `clinician_review: pending` in `docs/formal/README.md`. In `PROGRESS.md` M1 may be called reached with the review pending (this supersedes the last clause of check 9). Values of the registry are not part of the freeze: literature-anchored proposals come from WS01-T09 and are checked by gab.
+
+### Hand-over from WS01-T09 (agent, 2026-10-08)
+
+The registry is now version **0.2.0** (literature-anchored values and design choices accepted by gab, still `unreviewed`); record that version in the freeze marker. Five findings of the WS01-T09 research are formalization questions, not values (`docs/formal/parameter-literature-proposal.md`, section "Findings for the formalization"): (1) `dose_count` is a trailing 24 h window while a dose may be given 1 h early or late, so three on-time doses can fall within 22 h and violate `dose_max_24h = 2`; (2) a dose withheld by the hold rule, or refused, violates `dose_min_day_end`; (3) a single pre/post pair of readings has a difference SD of about 16.8 mmHg against `delta_resp = 7.5` mmHg; (4) the `sys` template reads the inflation duration while device manuals give the whole cycle; (5) the BLE clock-skew bound with a daily resynchronisation (about 44 s) is close to the 60 s step. Decide or list them as open points of the freeze.

@@ -1,6 +1,6 @@
 # Literature-anchored parameter proposal (WS01-T09)
 
-Status: **proposal awaiting the decisions of gab.** Produced on 2026-10-08 by three research agents in gab's interactive session (ADR-043) and assembled by the agent. This is not a clinical review and nothing in it is clinically validated: every value is a proposal anchored in a published source (or marked `no-literature-value`), to be accepted, changed or rejected by gab before it enters `configs/`. Accepted values keep `reviewed_by: null` and the rationale "literature-anchored proposal (WS01-T09), not clinically reviewed" (ADR-020, ADR-043). Every source was opened on 2026-10-08; quotes that came through a page extractor instead of the original PDF are flagged in their rows and should be spot-checked. Standards that were not opened directly (ISO 81060-2, IEC 80601-2-30, IEC 60601-1-8 Amendment 2, Bluetooth Core 5.2) need their edition and clause confirmed.
+Status: **decided by gab on 2026-10-08** (drug carvedilol twice daily; every proposed row accepted; design candidates accepted where the agents gave one; `ec50` normalised to a unit dose of 12.5 mg). Values entered in registry 0.2.0 and in the literature prior file. Produced on 2026-10-08 by three research agents in gab's interactive session (ADR-043) and assembled by the agent. This is not a clinical review and nothing in it is clinically validated: every value is a proposal anchored in a published source (or marked `no-literature-value`), to be accepted, changed or rejected by gab before it enters `configs/`. Accepted values keep `reviewed_by: null` and the rationale "literature-anchored proposal (WS01-T09), not clinically reviewed" (ADR-020, ADR-043). Every source was opened on 2026-10-08; quotes that came through a page extractor instead of the original PDF are flagged in their rows and should be spot-checked. Standards that were not opened directly (ISO 81060-2, IEC 80601-2-30, IEC 60601-1-8 Amendment 2, Bluetooth Core 5.2) need their edition and clause confirmed.
 
 ## How to decide
 
@@ -28,57 +28,57 @@ These are handed to WS01-T08 (freeze) as open points.
 
 | # | name | part | file | current | proposed | status | decision_gab |
 |---|---|---|---|---|---|---|---|
-| 1 | `bp_band_low` | A | registry entry | 110 | - | no-literature-value |  |
-| 2 | `bp_band_high` | A | registry entry | 140 | 140 | proposed |  |
-| 3 | `bp_hold_threshold` | A | registry entry | 100 | 100 | proposed |  |
-| 4 | `hold_lookback` | A | registry entry | 3600000 (60 min) | - | no-literature-value |  |
-| 5 | `dose_max_24h` | A | registry entry | 2 | 2 (only if gab confirms a twice-daily drug) | proposed |  |
-| 6 | `dose_min_day_end` | A | registry entry | 2 | 2 (only if gab confirms a twice-daily drug) | proposed |  |
-| 7 | `bound_bp_lower` | A | registry entry | 50 | 30 | proposed |  |
-| 8 | `bound_bp_upper` | A | registry entry | 250 | 260 | proposed |  |
-| 9 | `sched_window` | A | registry unset | unset | 3600000 | proposed |  |
-| 10 | `bound_dose_count_lower` | A | registry unset | unset | - | no-literature-value |  |
-| 11 | `bound_dose_count_upper` | A | registry unset | unset | - | no-literature-value |  |
-| 12 | `baseline_sbp_mmhg` | B | prior | awaiting_human_value | dist normal(mean 149.3, sd 9.0); truncation left to gab (design choice, e.g. ±3 SD = [1... | proposed |  |
-| 13 | `circadian_amplitude_mmhg` | B | prior | awaiting_human_value | dist normal(mean 13.2, sd 6.1), truncate lo 0 (the truncation is a design choice) | proposed |  |
-| 14 | `ar_noise_sd_mmhg` | B | prior | awaiting_human_value | upper bound 11.9; latent value = sqrt(11.9² − σ_cuff²) | proposed |  |
-| 15 | `ar_noise_phi` | B | prior | awaiting_human_value | 0.22, reference_step_ms: 1800000 | proposed |  |
-| 16 | `emax_mmhg` | B | prior | awaiting_human_value | 17.3 (sensitivity 15.1-19.9, see notes) | proposed (weak) |  |
-| 17 | `ec50` | B | prior | awaiting_human_value | 0.38 if the unit dose is 25 mg (range 0.35-0.41 over the PK ranges); 0.76 if the unit d... | proposed (weak) |  |
-| 18 | `absorption_rate_per_h` | B | prior | awaiting_human_value | 2.3 (range 1.4-4.2) | proposed |  |
-| 19 | `elimination_rate_per_h` | B | prior | awaiting_human_value | 0.0815 (range 0.0693-0.0990) | proposed |  |
-| 20 | `onset_delay_range_ms` | B | prior | awaiting_human_value | {lower_ms: 1800000, upper_ms: 7200000} | proposed |  |
-| 21 | `p_delay` | B | prior | awaiting_human_value (declared_assumptio | 0.081 | proposed |  |
-| 22 | `p_omission` | B | prior | awaiting_human_value (declared_assumptio | 0.057 (inpatient); alternative 0.10 (outpatient self-administration) | proposed |  |
-| 23 | `p_double_take` | B | prior | awaiting_human_value (declared_assumptio | 0.0031 | proposed |  |
-| 24 | `mean_delay_ms` | B | prior | awaiting_human_value (declared_assumptio | - | no-literature-value |  |
-| 25 | `delta1` | B | registry entry | 3600000 (illustrative, unverified) | 3600000 (confirm current) | proposed |  |
-| 26 | `delta2` | B | registry entry | 10800000 (illustrative, unverified) | 7200000 (literal label range); keeping 10800000 is a design margin | proposed |  |
-| 27 | `delta_resp` | B | registry unset | unset | 7.5 | proposed |  |
-| 28 | `scale_range` | C | registry entry | 20 | 20 (alternative 10) | proposed |  |
-| 29 | `scale_hold` | C | registry unset | unset | 10 | proposed |  |
-| 30 | `scale_resp` | C | registry unset | unset | 10 | proposed |  |
-| 31 | `scale_sched` | C | registry entry | 1800000 | 1800000 | proposed |  |
-| 32 | `scale_count` | C | registry entry | 1 | - | no-literature-value |  |
-| 33 | `scale_sys` | C | registry unset | unset | - | no-literature-value |  |
-| 34 | `scale_int` | C | registry unset | unset | - | no-literature-value |  |
-| 35 | `priority_hold` | C | registry entry | 1 | - | no-literature-value |  |
-| 36 | `priority_range` | C | registry entry | 2 | - | no-literature-value |  |
-| 37 | `priority_sched` | C | registry entry | 3 | - | no-literature-value |  |
-| 38 | `priority_count` | C | registry unset | unset | - | no-literature-value |  |
-| 39 | `priority_resp` | C | registry unset | unset | - | no-literature-value |  |
-| 40 | `priority_sys` | C | registry unset | unset | - | no-literature-value |  |
-| 41 | `priority_int` | C | registry unset | unset | - | no-literature-value |  |
-| 42 | `int_window` | C | registry entry | 300000 | - | no-literature-value |  |
-| 43 | `cuff_inflation_min` | C | registry unset | unset | - (candidate 15000) | no-literature-value |  |
-| 44 | `bound_inflation_ms_lower` | C | registry unset | unset | - (suggested 0) | no-literature-value |  |
-| 45 | `bound_inflation_ms_upper` | C | registry unset | unset | 180000 | proposed |  |
-| 46 | `cuff_error_sd` | C | registry unset | unset | 8 | proposed |  |
-| 47 | `clock_skew_max_ms` | C | registry unset | unset | 1000 for synchronised nodes; for BLE devices see the bound below | proposed |  |
-| 48 | `cuff_error_sd_mmhg` | C | prior | awaiting_human_value | 8 | proposed |  |
-| 49 | `cuff_bias_mmhg` | C | prior | awaiting_human_value | 0 (stress 4 and 5) | proposed |  |
-| 50 | `dispenser_bounce_prob` | C | prior | awaiting_human_value | 0.001 (range 0-0.005) | proposed |  |
-| 51 | `ble_dropout_rate_per_h` | C | prior | awaiting_human_value | - | no-literature-value |  |
+| 1 | `bp_band_low` | A | registry entry | 110 | - | no-literature-value || reject (no candidate): keeps 110, illustrative |
+| 2 | `bp_band_high` | A | registry entry | 140 | 140 | proposed || accept |
+| 3 | `bp_hold_threshold` | A | registry entry | 100 | 100 | proposed || accept |
+| 4 | `hold_lookback` | A | registry entry | 3600000 (60 min) | - | no-literature-value || design candidate accepted: 3600000 |
+| 5 | `dose_max_24h` | A | registry entry | 2 | 2 (only if gab confirms a twice-daily drug) | proposed || accept: 2 (carvedilol twice daily) |
+| 6 | `dose_min_day_end` | A | registry entry | 2 | 2 (only if gab confirms a twice-daily drug) | proposed || accept: 2 (carvedilol twice daily) |
+| 7 | `bound_bp_lower` | A | registry entry | 50 | 30 | proposed || accept |
+| 8 | `bound_bp_upper` | A | registry entry | 250 | 260 | proposed || accept |
+| 9 | `sched_window` | A | registry unset | unset | 3600000 | proposed || accept |
+| 10 | `bound_dose_count_lower` | A | registry unset | unset | - | no-literature-value || design candidate accepted: 0 |
+| 11 | `bound_dose_count_upper` | A | registry unset | unset | - | no-literature-value || no candidate: stays unset |
+| 12 | `baseline_sbp_mmhg` | B | prior | awaiting_human_value | dist normal(mean 149.3, sd 9.0); truncation left to gab (design choice, e.g. ±3 SD = [1... | proposed || accept; truncation at mean ± 3 SD [122.3, 176.3] as design choice |
+| 13 | `circadian_amplitude_mmhg` | B | prior | awaiting_human_value | dist normal(mean 13.2, sd 6.1), truncate lo 0 (the truncation is a design choice) | proposed || accept; truncation at 0 |
+| 14 | `ar_noise_sd_mmhg` | B | prior | awaiting_human_value | upper bound 11.9; latent value = sqrt(11.9² − σ_cuff²) | proposed || accept: 8.8 (11.9 corrected for cuff SD 8) |
+| 15 | `ar_noise_phi` | B | prior | awaiting_human_value | 0.22, reference_step_ms: 1800000 | proposed || accept |
+| 16 | `emax_mmhg` | B | prior | awaiting_human_value | 17.3 (sensitivity 15.1-19.9, see notes) | proposed (weak) || accept (weak) |
+| 17 | `ec50` | B | prior | awaiting_human_value | 0.38 if the unit dose is 25 mg (range 0.35-0.41 over the PK ranges); 0.76 if the unit d... | proposed (weak) || accept: 0.76 (unit dose 12.5 mg, decision of gab) |
+| 18 | `absorption_rate_per_h` | B | prior | awaiting_human_value | 2.3 (range 1.4-4.2) | proposed || accept |
+| 19 | `elimination_rate_per_h` | B | prior | awaiting_human_value | 0.0815 (range 0.0693-0.0990) | proposed || accept |
+| 20 | `onset_delay_range_ms` | B | prior | awaiting_human_value | {lower_ms: 1800000, upper_ms: 7200000} | proposed || accept |
+| 21 | `p_delay` | B | prior | awaiting_human_value (declared_assumptio | 0.081 | proposed || accept |
+| 22 | `p_omission` | B | prior | awaiting_human_value (declared_assumptio | 0.057 (inpatient); alternative 0.10 (outpatient self-administration) | proposed || accept: 0.057 (inpatient) |
+| 23 | `p_double_take` | B | prior | awaiting_human_value (declared_assumptio | 0.0031 | proposed || accept |
+| 24 | `mean_delay_ms` | B | prior | awaiting_human_value (declared_assumptio | - | no-literature-value || no candidate: stays awaiting_human_value |
+| 25 | `delta1` | B | registry entry | 3600000 (illustrative, unverified) | 3600000 (confirm current) | proposed || accept |
+| 26 | `delta2` | B | registry entry | 10800000 (illustrative, unverified) | 7200000 (literal label range); keeping 10800000 is a design margin | proposed || accept: 7200000 |
+| 27 | `delta_resp` | B | registry unset | unset | 7.5 | proposed || accept |
+| 28 | `scale_range` | C | registry entry | 20 | 20 (alternative 10) | proposed || accept: 20 |
+| 29 | `scale_hold` | C | registry unset | unset | 10 | proposed || accept |
+| 30 | `scale_resp` | C | registry unset | unset | 10 | proposed || accept |
+| 31 | `scale_sched` | C | registry entry | 1800000 | 1800000 | proposed || accept |
+| 32 | `scale_count` | C | registry entry | 1 | - | no-literature-value || design candidate accepted: 1 |
+| 33 | `scale_sys` | C | registry unset | unset | - | no-literature-value || design candidate accepted: 15000 |
+| 34 | `scale_int` | C | registry unset | unset | - | no-literature-value || design candidate accepted: 300000 (= int_window) |
+| 35 | `priority_hold` | C | registry entry | 1 | - | no-literature-value || design candidate accepted: 1 (strawman) |
+| 36 | `priority_range` | C | registry entry | 2 | - | no-literature-value || design candidate accepted: 2 (strawman) |
+| 37 | `priority_sched` | C | registry entry | 3 | - | no-literature-value || design candidate accepted: 3 (strawman) |
+| 38 | `priority_count` | C | registry unset | unset | - | no-literature-value || design candidate accepted: 1 (strawman) |
+| 39 | `priority_resp` | C | registry unset | unset | - | no-literature-value || design candidate accepted: 3 (strawman) |
+| 40 | `priority_sys` | C | registry unset | unset | - | no-literature-value || no candidate: stays unset |
+| 41 | `priority_int` | C | registry unset | unset | - | no-literature-value || no candidate: stays unset |
+| 42 | `int_window` | C | registry entry | 300000 | - | no-literature-value || reject (no candidate): keeps 300000, illustrative |
+| 43 | `cuff_inflation_min` | C | registry unset | unset | - (candidate 15000) | no-literature-value || design candidate accepted: 15000 |
+| 44 | `bound_inflation_ms_lower` | C | registry unset | unset | - (suggested 0) | no-literature-value || design candidate accepted: 0 |
+| 45 | `bound_inflation_ms_upper` | C | registry unset | unset | 180000 | proposed || accept |
+| 46 | `cuff_error_sd` | C | registry unset | unset | 8 | proposed || accept |
+| 47 | `clock_skew_max_ms` | C | registry unset | unset | 1000 for synchronised nodes; for BLE devices see the bound below | proposed || accept: 1000 (synchronised nodes) |
+| 48 | `cuff_error_sd_mmhg` | C | prior | awaiting_human_value | 8 | proposed || accept |
+| 49 | `cuff_bias_mmhg` | C | prior | awaiting_human_value | 0 (stress 4 and 5) | proposed || accept: 0 |
+| 50 | `dispenser_bounce_prob` | C | prior | awaiting_human_value | 0.001 (range 0-0.005) | proposed || accept |
+| 51 | `ble_dropout_rate_per_h` | C | prior | awaiting_human_value | - | no-literature-value || no candidate (sweep suggested): stays awaiting_human_value |
 
 ## WS01-T09 part A: clinical thresholds and care-plan counts (literature-anchored proposal, not clinically reviewed)
 

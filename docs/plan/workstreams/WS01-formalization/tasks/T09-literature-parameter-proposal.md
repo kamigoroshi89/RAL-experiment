@@ -3,7 +3,7 @@ id: WS01-T09
 title: Literature-anchored proposal of registry and prior values (agent-assisted, human-checked)
 workstream: WS01-formalization
 owner: human
-status: in_progress
+status: done
 depends_on: ["WS01-T03", "WS04-T02"]
 critical_path: false
 non_negotiable: true
@@ -66,3 +66,11 @@ Started on 2026-10-08 in gab's interactive session: three research agents (A: cl
 ### Proposal written (agent, 2026-10-08)
 
 Steps 1 to 3 done: `docs/formal/parameter-literature-proposal.md` (51 rows: 32 proposed, two of them weak, and 19 `no-literature-value`; a decision table for gab; parts A, B, C with passages, citations and derivations) and `docs/formal/evidence/ws01-t09/` (the VitalDB cuff-against-arterial-line script and its output, reproduced byte for byte by a rerun). Step 4 (decisions of gab) is pending; nothing entered `configs/`. Findings for the formalization (count window against the ISMP dose window, withheld dose against `dose_min_day_end`, one-pair response test, inflation signal, BLE clock skew) are listed in the proposal for WS01-T08.
+
+### Completion note (agent, 2026-10-08)
+
+Decisions of gab (2026-10-08): drug carvedilol twice daily; every `proposed` row accepted; design candidates accepted where the agents gave one; `ec50` normalised to a unit dose of 12.5 mg. Applied: `configs/registry/hypertension.yaml` 0.1.0 to **0.2.0** (31 entries, 14 names promoted from `unset`; `priority_sys`, `priority_int`, `bound_dose_count_upper` stay unset; `review_status: unreviewed`; every rationale says literature or design choice and ends with "illustrative, unverified" as the schema requires for unreviewed entries); `configs/priors/literature_hypertension.yaml` 15 of 17 rows filled (`mean_delay_ms`, `ble_dropout_rate_per_h` stay `awaiting_human_value`; `verified_by` null everywhere: gab accepted the proposals but did not open the sources); provenance table regenerated; `docs/formal/03-parameter-registry.md` and `docs/benchmark/parameter-provenance.md` carry a version note. Changed values with respect to 0.1.0: `bound_bp_lower` 50 to 30, `bound_bp_upper` 250 to 260, `delta2` 10800000 to 7200000.
+
+Tests touched (maintenance forced by the new registry values, no behaviour change): `tests/benchmark/test_priorsource.py` (pinned subset of registry values updated; `clock_skew_max_ms` excluded as monitor configuration; three motivated exemptions for algorithmic constants 8 and 10 that coincide with registry values) and `tests/benchmark/test_c1_confounders.py` (same exclusion).
+
+Verification (2026-10-08): in a fresh environment bound to this worktree (`uv venv`, `pip install -e .[dev]`), `pytest -q` 2357 passed, `mypy src/ralmon` clean; `ruff check src tests` and `ruff format --check src tests` clean; `python -m ralmon.benchmark.priors --check-table` exit 0; every row of the decision table has `decision_gab`; `python3 tools/check_plan.py` exit 0. With the shared `.venv` (editable install of the main checkout) `test_protocol_is_satisfied_for_mypy` fails from any worktree, including clean `master`: an environment artefact, not a regression.
