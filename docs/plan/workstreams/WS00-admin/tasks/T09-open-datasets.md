@@ -56,3 +56,7 @@ Verification checks:
 ### Status update (user attestation)
 
 Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T09.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report. `data/raw/` does not exist in the repository, so any task that reads the open datasets (VitalDB, NSTDB, BIDMC, CinC 2015) cannot run until they are downloaded.
+
+### Artefact recorded (agent, 2026-10-08)
+
+`outputs/WS00-T09.md` was written by the agent from the answers of gab and from the files under `data/raw/` (download by gab on 2026-10-05). The `SHA256SUMS` manifests were created on 2026-10-08 as copies of the checksum lists shipped with the downloads (VitalDB: the 36 entries of the downloaded subset). Licences were read on the PhysioNet pages on 2026-10-08; VitalDB is not redistributed (decision of gab, prudent reading of the conflicting licence statements). The `.gitignore` rule `outputs/` matched every directory of that name, including `docs/plan/workstreams/*/outputs/`; it is now anchored to the repository root (`/outputs/`), as `01-conventions.md` section 1 intends. Done-when checks run on 2026-10-08: the file exists with four dataset sections, `sha256sum -c SHA256SUMS` passes in the four directories, `git status --short data/raw` prints nothing.
