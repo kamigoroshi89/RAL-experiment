@@ -38,7 +38,7 @@ All twelve contracts that the formalization reads are at version 0.1.0 and are u
 | `#template` | 0.1.0 | `02`, `03`, `04` |
 | `#signals` | 0.1.0 | `01` |
 | `#verdict` | 0.1.0 | `05`, `06` |
-| `#forecaster` | 0.1.0 | `05`, `08` (review only: the contract has no carrier for an arrival time, NP-18) |
+| `#forecaster` | 0.1.0 | `05`, `08` (review only: the contract has no robot-state signal for the arrival forecast, NP-18) |
 | `#conformal-calibrator` | 0.1.0 | `06` |
 | `#monitor` | 0.1.0 | `01`, `05`, `07` |
 | `#alert` | 0.1.0 | `07` |
