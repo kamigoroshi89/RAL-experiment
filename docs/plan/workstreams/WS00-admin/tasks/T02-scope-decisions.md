@@ -80,3 +80,7 @@ From the repository root:
 ### Status update (user attestation)
 
 Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T02.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report. `docs/plan/03-decisions.md` still carries `[DA-CONFERMARE]` on ADR-011 to ADR-017 (and 021 to 025), so the Done-when checks on those tags do not hold; the agent did not edit any ADR.
+
+### Artefact recorded (agent, 2026-10-08)
+
+`outputs/WS00-T02.md` was written by the agent from the answers of gab (2026-10-08): ADR-001, ADR-002, ADR-003, ADR-012, ADR-013, ADR-014 (as amended by ADR-037), ADR-015 and ADR-017 confirmed; ADR-011 and ADR-016 superseded by ADR-042 (ROS 2 Humble with Gazebo Classic, Python floor 3.10). The decisions were given in a conversation, not a meeting with the co-authors; check 9 (an author of the workshop paper among the decision-makers) is left as an open point for gab. Done-when checks run on 2026-10-08: the file exists, seven headings, no `[DA-` tag on the ADR-012 to ADR-017 headings, nine `(WS00-T02, 2026-10-08)` notes.

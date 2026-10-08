@@ -12,7 +12,7 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 - **Decision.** The main pathology is hypertension (antihypertensive dosing with blood-pressure response). Validation is semi-synthetic plus ROS 2 simulation plus an optional mock-ward demo. No real patients. This is stated in the abstract, introduction and limitations (analisi §10 objection 1).
 - **Alternatives.** Two pathologies from the start (diabetes with the simglucose simulator is the analysis' optional second case, §5.8); a clinical pilot (out of reach and out of scope).
 - **Consequences.** WS04 targets hypertension only; the second pathology is an optional task (ADR-019). Human confirmation of scope is task WS00-T02.
-- **Status.** accepted (analisi §9 item 0.2).
+- **Status.** accepted (analisi §9 item 0.2) (confirmed (WS00-T02, 2026-10-08)).
 
 ## ADR-002 C3 reduced to integrity violations with a threat model
 
@@ -20,7 +20,7 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 - **Decision.** Class C3 is renamed and claimed as "integrity or plausibility violations" against declared attack classes (BLE injection and replay without keys, physical access to the dispenser, perception spoofing). Out of scope: compromised robot, RSM or specification. The diagnosability matrix reports the undetectable cases as a result.
 - **Alternatives.** Keep "tampering" and claim general adversarial detection (rejected: not defensible).
 - **Consequences.** WS02 owns the threat model and matrix; WS04 injects C3 at two attacker-knowledge levels (naive and informed); WS08 reports the non-detectable rows.
-- **Status.** accepted (analisi §3.6, §9 item 0.2).
+- **Status.** accepted (analisi §3.6, §9 item 0.2) (confirmed (WS00-T02, 2026-10-08)).
 
 ## ADR-003 Distributed architecture: ward node plus robot
 
@@ -28,7 +28,7 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 - **Decision.** A fixed ward node (BLE gateway plus RSM for continuous φ_CP monitoring) supervises the robot with a heartbeat. The robot runs the embodied specifications (task deadlines, presence and intake witness) and provides evidence. If the robot is unavailable, the fallback escalates to the nurse. The auditability claim is kept ("single auditable verification path") with a watchdog added.
 - **Alternatives.** Robot-only RSM (rejected: R3 fatal); ward-only RSM (rejected: robot loses its role and A4 has nothing to measure).
 - **Consequences.** Contract `#ros-2-interfaces` encodes placement. The robot's contribution stays central because it executes the obligations induced by the specification (φ_resp, φ_sched) and is the only witness channel.
-- **Status.** accepted (analisi §4.9 item 1, §9 item 0.2).
+- **Status.** accepted (analisi §4.9 item 1, §9 item 0.2) (confirmed (WS00-T02, 2026-10-08)).
 
 ## ADR-004 DISPENSE is distinct from INTAKE
 
@@ -86,63 +86,63 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 - **Consequences.** UNDETERMINED is a valid, scored output; the diagnosability matrix is a machine-readable artefact; A4 removes the witness channel.
 - **Status.** accepted.
 
-## ADR-011 ROS 2 distribution [DA-CONFERMARE]
+## ADR-011 ROS 2 distribution
 
 - **Context.** The analysis says "Humble or Jazzy, depending on available TIAGo packages" and asks to verify whether a TIAGo Pro model exists for ROS 2 (analisi §5.2). At bootstrap the user chose Jazzy with Gazebo Harmonic.
 - **Decision.** Target ROS 2 Jazzy with Gazebo Harmonic. If WS00-T05 finds that the needed TIAGo or hospital-world packages exist only for Humble or Gazebo Classic, this ADR is superseded by one selecting Humble. The `ralmon` core is unaffected because it is ROS-independent.
 - **Alternatives.** Humble; ROS-native from the start.
 - **Consequences.** WS07 begins with a package availability check.
-- **Status.** proposed [DA-CONFERMARE] (confirmation pending WS00-T05).
+- **Status.** superseded by ADR-042 (WS00-T05, 2026-10-08).
 
-## ADR-012 Source files in `docs/source/` [DA-CONFERMARE]
+## ADR-012 Source files in `docs/source/`
 
 - **Context.** PROMPT.md expects `docs/source/analisi.md` and `docs/source/review.md`. The repository held `analisi_RAL_clinical_pathways.md` (which contains the reviewer simulation in its §2) and the workshop PDF. No separate review file existed. The prompt says a missing source leads to a blocked state, but also forbids questions and asks for the most conservative choice.
 - **Decision.** `docs/source/analisi.md` is a byte-identical copy of the original; `docs/source/review.md` is a verbatim extract of lines 32-153 of the original (its §2: R1, R2, R3, AE meta-review), with a short header. Originals are left in the repository root, not moved. Files in `docs/source/` are read-only. The header of `review.md` states that it is an extract. Finding ids used for traceability are defined in `04-review-traceability.md`.
 - **Alternatives.** Write `BLOCKED.md` and stop (rejected: the required content exists verbatim in the analysis; stopping would lose no information but block all progress).
 - **Consequences.** If a separate authoritative review document exists, replace `review.md` and rerun the verifier.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed (WS00-T02, 2026-10-08)).
 
-## ADR-013 RTAMT as reference STL tool [DA-CONFERMARE]
+## ADR-013 RTAMT as reference STL tool
 
 - **Context.** The analysis lists RTAMT, Breach and S-TaLiRo and says "RTAMT o custom" for the monitor (analisi §3.1, §9 item 5, B3 uses RTAMT).
 - **Decision.** Original proposal: RTAMT is the reference implementation wrapped behind `ralmon.spec` and `ralmon.monitor`; a custom monitor may replace it if RTAMT cannot express robustness intervals or sparse sampling. Updated by WS05-T02 after the spike: the evaluator is custom and RTAMT is not a dependency of the monitor (outcome C, see below).
 - **Alternatives.** Custom monitor from the start; Breach or S-TaLiRo (MATLAB dependence); outcome B (custom evaluator, RTAMT kept as test oracle and as the engine of baseline B3), not adopted for the reasons in the record.
 - **Consequences.** The spike result is recorded in `docs/plan/workstreams/WS05-monitor/rtamt-spike.md`. `ralmon.spec` and `ralmon.monitor` do not import RTAMT; no `rtamt` extra is added to `pyproject.toml`; WS06-T04 builds baseline B3 on `make_point_evaluator` and the paper says that its point-robustness evaluator is the project's own (the wording "same templates with RTAMT" of analisi §5.4 is not used).
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed (WS00-T02, 2026-10-08)).
 
 Spike result (WS05-T02, closes the spike of ADR-013): outcome C. Tested RTAMT 0.4.10 on Python 3.12.8 (host throwaway venv) and 3.12.15 (`ralmon-dev` container, same report); on Python 3.14.4, the Python of the repository, `import rtamt` fails (`No module named 'typing.io'`). Q1 FAIL (4 of 7 templates translate mechanically and equal the goldens; `sched` and `int` contain `age`, `sys` uses an equality atom that RTAMT evaluates as `-abs(a - b)`), Q2 PASS, Q3 NOT-SUPPORTED (`update` returns a point value; the endpoint rule is unsound for `range`, `count` and `sys`), Q4 FAIL (no guard rule, no unknown value), Q5 FAIL (8 of 10 time-margin goldens only with hand rewrites), Q6 PASS (operator updates linear in the instances, but each timed `once` or `historically` scans its window at every step). Outcome C is forced by the Q1 failure (rule of WS05-T02 check 9). Entry point that WS06-T04 must call for raw robustness: `make_point_evaluator` of `ralmon.monitor`, created by WS05-T04. Evidence and the reasons for not adopting outcome B: `docs/plan/workstreams/WS05-monitor/rtamt-spike.md`. This remains `[DA-CONFERMARE]` until a human confirms it.
 
-## ADR-014 Placement of §9 items in workstreams [DA-CONFERMARE]
+## ADR-014 Placement of §9 items in workstreams
 
 - **Context.** PROMPT.md lists WS00 as human-only tasks and workstreams WS01-WS13; roadmap §9 has phase-0 items 0.1-0.7 and items 1-13. Prompt and §9 agree on 14 workstreams (WS00-WS13, with WS06 baselines and WS12 paper). Two items do not fit a human-only WS00.
 - **Decision.** Phase-0 items 0.4 (title) and 0.5 (abstract without numbers) are agent-doable and are placed in WS12 as tasks (owner agent), not in WS00. Item 0.7 also covers verifying the TIAGo simulation packages. WS00 holds 0.1, 0.2, 0.3, 0.6, 0.7 (human). The ROS 2 node realisation of §9 item 5 is delivered in WS05 (thin wrappers), while WS07 owns the simulation environment, robot faults and latency measurement.
 - **Alternatives.** Put 0.4 and 0.5 in WS00 as human tasks.
 - **Consequences.** M0 (commitment letter) depends on WS00 and two WS12 tasks.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed (WS00-T02, 2026-10-08)), as amended by ADR-037 (items 0.4 and 0.5 are owned by the human).
 
-## ADR-015 Run location of the loop script [DA-CONFERMARE]
+## ADR-015 Run location of the loop script
 
 - **Context.** `prompt/run-plan.sh` starts with `cd "$(dirname "$0")"`, which sets the working directory to `prompt/`, while PROMPT.md and the design assume the repository root (`docs/`, `tools/`, `CLAUDE.md`).
 - **Decision.** This bootstrap ran with the repository root as working directory. To use the script unchanged it must be copied or symlinked to the repository root, together with `PROMPT.md` and `.claude/settings.json`. `prompt/` is committed as delivered.
 - **Alternatives.** Edit the script (rejected: not asked; part of user-provided input).
 - **Consequences.** None for the plan content.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed (WS00-T02, 2026-10-08)).
 
-## ADR-016 Python toolchain [DA-CONFERMARE]
+## ADR-016 Python toolchain
 
 - **Context.** The sources fix neither Python version nor tools.
 - **Decision.** Python 3.11+, pytest, Hypothesis for property tests, ruff (format and lint), mypy strict on `src/ralmon`, `numpy` random Generators with explicit seeds.
 - **Alternatives.** unittest; black and flake8; pyright.
 - **Consequences.** WS05-T01 creates `pyproject.toml` with these settings.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** superseded by ADR-042 (WS00-T02, 2026-10-08).
 
-## ADR-017 Time unit: integer milliseconds [DA-CONFERMARE]
+## ADR-017 Time unit: integer milliseconds
 
 - **Context.** Sparse, irregular sampling, event impulses and windows in minutes and hours need one unit (analisi §4.1 item 2).
 - **Decision.** Integer milliseconds since trace start; conversion helpers in `ralmon.signals`.
 - **Alternatives.** Float seconds (accumulates drift and equality problems); datetime objects.
 - **Consequences.** Contracts use `TimeMs` and `DurationMs`.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed (WS00-T02, 2026-10-08)).
 
 ## ADR-018 Reference verification is a human step
 
@@ -224,29 +224,29 @@ Spike result (WS05-T02, closes the spike of ADR-013): outcome C. Tested RTAMT 0.
 - **Consequences.** Until confirmed, WS07-T04 and WS04-T10 stay `blocked` and carry a note. No signature of `02-interfaces.md` changes in this ADR; adopting the alternative would need CP9.
 - **Status.** proposed [DA-CONFERMARE].
 
-## ADR-027 Fixture registry for runs before the clinician review [DA-CONFERMARE]
+## ADR-027 Fixture registry for runs before the clinician review
 
 - **Context.** WS01-T03 (`docs/formal/03-parameter-registry.md`, section 7 open point OP-11) seeds `configs/registry/hypertension.yaml` with the 17 illustrative values that analisi gives and leaves 17 names `unset` (among them `sched_window`, `delta_resp`, `cuff_inflation_min`, the scales `scale_hold`, `scale_resp`, `scale_sys`, `scale_int`, the priorities `priority_count`, `priority_resp`, `priority_sys`, `priority_int`, and `cuff_error_sd`) until the clinician review WS00-T07, which comes after the formalization freeze. Tasks that run before that review need a value for those names: WS05-T03 (test 15 copies fixture F0 into the WS01-T03 schema), WS06-T01 (test 21, stub registry) and WS06-T02 (step 2: "if a role has no entry, stop and report it"), WS04 (README working names) and any benchmark run. No task owns the creation of a fixture registry, and the number of registry rows the review sheet holds (34: entries plus unset names) differs from what WS00-T07 test 3 expects (the number of entries, 17).
 - **Decision.** Proposed: a separate file `configs/registry/fixture.yaml` holding the fixture F0 rows, every entry marked FIXTURE-ONLY, `reviewed_by: null`, rationale ending "illustrative, unverified", loaded only through an explicit `allow_fixture_only` option and never used for a reported result; created by WS05-T03 (owner of the registry loader), not by WS01. `hypertension.yaml` stays the single source of clinical parameters and keeps its `unset` names until WS00-T07.
 - **Alternatives.** Seed the unset names in `hypertension.yaml` with the F0 numbers (rejected: puts fixture values in the clinical registry, against ADR-020); let each task carry its own stub registry (rejected: duplicates values and hides the dependency).
 - **Consequences.** WS06-T01, WS06-T02, WS01-T08 and WS00-T07 carry a note and stay `blocked` until this ADR is decided; WS00-T07 test 3 and test 4 should count the review-sheet rows as entries plus `unset` names, and bounds once. No signature of `02-interfaces.md` changes in this ADR.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed by gab, 2026-10-08, after an assessment of the open datasets as an alternative: the datasets supply at most the cuff error, so they complement the literature values of WS01-T09 and do not replace the test fixture).
 
-## ADR-028 Order key of `rank_alerts`: tie-break and predicted versus violated [DA-CONFERMARE]
+## ADR-028 Order key of `rank_alerts`: tie-break and predicted versus violated
 
 - **Context.** WS01-T04 (`docs/formal/04-normalisation-ranking.md`, open points OP-3, OP-6, OP-15 and OP-16) makes the lexicographic order of `rank_alerts` total and deterministic with the key `K0 = (priority, sigma_tilde, t_ms, instance_key)`, where the contract docstring names only `(priority, sigma_norm)`. It also defines a variant `K1` that places VIOLATED alerts before PREDICTED_VIOLATION alerts inside a priority. WS05-T03 test 7 ("equal `(priority, sigma_norm)` keep input order") and test 9 ("a local dataclass with only those two fields is accepted") conflict with `K0`, which needs `t_ms` and `xi.instance_key`; ADR-024 types `rank_alerts` on `priority` and `sigma_norm` only, and `Alert` carries no patient identifier although `instance_key` is unique only within a care plan.
 - **Decision.** Proposed: adopt `K0` as the reference order (a tie-break that makes the output independent of the input order, refining the docstring without contradicting it), leave `K1` (VIOLATED first) as an open alternative to be settled by WS01-T05 (three-valued semantics), and extend the structural Protocol of ADR-024 with `t_ms` and `instance_key` (and the patient identifier of the care plan where alerts of several patients are ranked together).
 - **Alternatives.** Keep the docstring order and a stable sort (output depends on input order, so two runs can differ; rejected); adopt `K1` now (needs the WS01-T05 decision on how a predicted alert is graded).
 - **Consequences.** WS05-T03 tests 7 and 9 are adapted after confirmation (they stay `blocked` and carry a note); the severity questions of OP-14 (upper end of the interval for a VIOLATED alert) and OP-15 (`predicted_sigma_norm`) are settled by WS01-T05, T06 and T07, not here. No signature of `02-interfaces.md` changes in this ADR beyond the Protocol of ADR-024.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed by gab, 2026-10-08).
 
-## ADR-029 Extensions of the verdict contract adopted by the three-valued semantics [DA-CONFERMARE]
+## ADR-029 Extensions of the verdict contract adopted by the three-valued semantics
 
 - **Context.** WS01-T05 (`docs/formal/05-three-valued-semantics.md`, section 11 and open points CP3, CP6, CP7, CP12, OP-T05-6 and OP-T05-12 to OP-T05-21) states the contract `#verdict` word for word and adopts, meanwhile, the following extensions that the contract text does not contain: (CP3) a tie rule, so that a closed instance with `lo = hi = 0` is SATISFIED, while the residual case `lo = 0 < hi` stays PENDING (a sound refinement `lo >= 0` is recorded but not adopted); (CP6) an instance whose decision window holds a stale-open position stays PENDING with a marker `undecidable: <reason>:<signal>`, with an optional `undecidable` (and `guard_failed`) field proposed for `VerdictRecord`; (CP7) a warm-up prefix counts as a known prefix (hypothesis H-hist) and instances open at the end of the trace are PENDING or decided early by the rule of Lemma 12b when `k_d > K`; (CP12) infinite interval endpoints with a serialisation rule; per-step records and refinement records for the graded lateness of SCHED; the lateness rule `t_rx > t_{k_up(t_dev)} + D` independent of the `advance` calls.
 - **Decision.** Proposed: adopt these extensions as the reference semantics of the verdict layer, to be ratified (or amended) by WS01-T08 at the formalization freeze, and add the optional fields to `VerdictRecord` only then, with the contract version bump.
 - **Alternatives.** Keep the contract wording and reject the extensions (the golden cases V-INT-3, V-LATE-2 and the 12b examples would then have no rule); adopt the sound refinement `lo >= 0` instead of the tie rule.
 - **Consequences.** WS05-T04 (steps 1, 4 and 8, tests 5, 10, 11), WS05-T07 (`update` returns only new or changed alerts), WS05-T08 (prediction once at activation versus per-step instants), WS04-T10 (`pending_until_ms` on every record) and WS09-T03 (a RESP fixture VIOLATED before the deadline) carry a note and stay `blocked` until this ADR and the severity questions OP-14 and OP-15 (WS01-T06, WS01-T07) are decided. No signature of `02-interfaces.md` changes in this ADR.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed by gab, 2026-10-08).
 
 ## ADR-030 Conformal quantiles: lower quantile for the "possible" variant and exact rank rule [DA-CONFERMARE]
 
@@ -343,6 +343,22 @@ Spike result (WS05-T02, closes the spike of ADR-013): outcome C. Tested RTAMT 0.
 - **Alternatives.** The point forecast `clip(sigma_hat, -1, 1)` as the severity of a predicted alert (range `[-1, 1]`, CP5 left open); `-1` with a guard marker as the severity of a SCHED violation (asserts a full scale that no lemma certifies); re-issuing the violated alert at each refinement (moves a shown alert in the ranked list); a provisional kappa for a predicted alert from the same rule, or restricted to C2 and C3 (unsound for the case of a late robot, whose evidence is stamped at the deadline); a separate alert type for early warnings (a new contract).
 - **Consequences.** Affected tasks: WS02-T04 (check 8 and step 5: the section on predicted violations), WS05-T07 (tests 3, 5, 18, 20), WS05-T04 step 8 (the carrier fields `predicted_sigma_norm` and `subformula_path`), WS05-T08 (the log of `sigma_hat`, `q`, `alpha`, `n` and the variant), WS08-T01 and the WS08 README E3 and E4 (scoring of attribution), WS11-T02 (the rendering), WS01-T08 (the ranking fixtures RK-1 and RK-4 of `ranking.yaml` hold the refined value -0.7 and are to be relabelled or regenerated). By ADR-021 (c) these tasks carry a note and no implementation task that consumes the rules starts before the ADR is accepted. Migration: none for data; the golden fixtures RK-1 and RK-4 change label only. The open points that the ADR does not settle are listed in section 9 of the document (the carrier fields, the closure of a predicted alert, the contract wording of "violated records").
 - **Status.** proposed [DA-CONFERMARE].
+
+## ADR-042 ROS 2 Humble with Gazebo Classic, and Python 3.10 as the floor of `ralmon`
+
+- **Context.** WS00-T05 (`docs/plan/workstreams/WS00-admin/outputs/WS00-T05.md`, desk research of 2026-10-08 with sources) found that PAL supports the TIAGo and TIAGo Pro simulations only on ROS 2 Humble (`tiago_simulation` and `tiago_pro_simulation` have `humble-devel` and no Jazzy branch; a PAL maintainer: "There is still no official support for Jazzy yet"), with Gazebo Classic as the Humble default; that the group's real TIAGo and TIAGo Pro run ROS 2 Humble (gab); that mixing nodes of different distributions is not supported; that the AWS hospital world named in analisi §5.2 is archived and Gazebo Classic only; and that Nav2, ros2_tracing (with LTTng and a source build of `tracetools`), lifecycle nodes and the deadline and liveliness QoS policies exist for Humble. Humble targets Ubuntu 22.04 with Python 3.10, while ADR-016 sets Python 3.11 or newer and the ROS 2 wrappers import `ralmon`.
+- **Decision.** (1) ROS 2 Humble on the ward node, in simulation and on the robot, with Gazebo Classic (the PAL default on Humble and the only generation of the AWS hospital world); Gazebo Fortress through PAL's new-Gazebo option is the fallback if Classic blocks a needed feature. Supersedes ADR-011. (2) The floor of `ralmon` becomes Python 3.10 (old: `requires-python = ">=3.11"`, ADR-016; new: `">=3.10"`); pytest, Hypothesis, ruff, mypy strict on `src/ralmon` and seeded `numpy` Generators are unchanged. Supersedes ADR-016. Decided by gab on 2026-10-08 (WS00-T02 and WS00-T05).
+- **Alternatives.** Jazzy with Gazebo Harmonic (rejected: TIAGo only through the unofficial `Tiago-Harmonic` port, no TIAGo Pro model, the hospital world needs porting, and the real robots run Humble); Jazzy in simulation and Humble on the robot (rejected: mixing distributions is not supported and the simulation results would not transfer to the demo); keeping Python 3.11 and running `ralmon` outside the ROS 2 process (rejected: the wrappers of WS05 import `ralmon` in the node process).
+- **Consequences.** The `ralmon` core stays ROS-independent; no signature of `02-interfaces.md` changes and no contract version is bumped (the Python floor is not part of a contract). Migration, owned by WS07-T01 as its first step: `pyproject.toml` `requires-python = ">=3.10"`, `tests/test_toolchain.py` (it pins `>=3.11`), a run of `pytest`, `ruff` and `mypy` under Python 3.10 (a Humble container), and the replacement of the image `ralmon-ros2:jazzy` (ADR-031) by a Humble image with Gazebo Classic and the PAL packages. A search of `src/ralmon` on 2026-10-08 found no feature that needs Python 3.11 (`Self`, `StrEnum`, `tomllib`, `ExceptionGroup`, `datetime.UTC`, `Never`, `assert_never`); the migration must confirm it by running the suite. Affected tasks: WS07-T01 (verdict `supersede_adr_011`, target Humble and Classic, Python check against 3.10), WS07-T02 (hospital world on Classic; `rmf_demos` clinic world as alternative), WS07-T07 (tracing on Humble needs LTTng and `tracetools` built from source; measurement on the robot's onboard computer), WS10 (the demo robot runs Humble). `CLAUDE.md` and `01-conventions.md` section 2 are updated to name Humble, Gazebo Classic and Python 3.10. Gazebo Classic reached end of life in January 2025: a known risk for reproducibility, recorded in the release notes (WS13).
+- **Status.** accepted (decision of gab, WS00-T05, 2026-10-08).
+
+## ADR-043 Formalization freeze without the clinician review; parameter values proposed from the literature
+
+- **Context.** The plan made the clinician review WS00-T07 the gate of M1: WS01-T08 (formalization freeze) depended on it, and WS00-T07 depends on WS00-T03 (recruiting a clinician), which has not started. On 2026-10-08 gab decided not to involve a clinician now and asked that the parameter work be handled with specialised agents. The registry holds 17 illustrative entries from analisi and 17 `unset` names; the prior and design files hold rows awaiting a human value, none verified by a human. Agents cannot perform a clinical review, and writing one would be a fabricated human artefact and an implied clinical validation, which the project excludes. WS01-T08 already foresees a freeze with `clinician_review: pending` (its check 9).
+- **Decision.** (1) WS01-T08 no longer depends on WS00-T07: the freeze runs with `clinician_review: pending`, and M1 counts as reached with the review pending; the wording of WS01-T08 check 9 ("M1 is not called complete") is superseded by this ADR. (2) WS00-T07 stays `owner: human`, leaves the critical path and becomes a pre-submission item (before M5); a clinician review is still wanted. (3) A new task WS01-T09 (`owner: human`, because it needs network access that the autonomous loop does not have; it is run from gab's interactive session with research agents) proposes, for every registry name and every literature prior row, a value anchored in a published source (verbatim passage, citation with URL or DOI, derivation) or the reason why none exists; gab accepts, changes or rejects each row before it enters `configs/`. (4) Accepted values keep the labels of ADR-020 (`reviewed_by: null`; rationale "literature-anchored proposal (WS01-T09), not clinically reviewed") and the paper states that parameters come from the literature without a clinician's review. Decided by gab on 2026-10-08.
+- **Alternatives.** Keep M1 blocked until a clinician is found (rejected by gab); let agents write values into the registry without a human check (rejected: no invented numbers, ADR-020); have agents write the clinician review (rejected: fabricated human artefact, implied clinical validation).
+- **Consequences.** WS01-T08 becomes `ready`; INDEX, `00-master-plan.md` (M1 row) and the task files of WS00-T07, WS01-T08 and WS00-T03 carry the change. The defence of analisi §10 objection 1 that relies on a clinician ("farli rivedere a un clinico") is not available until WS00-T07 runs; together with the postponed MIMIC access (WS00-T04) this is the main residual weakness of the evaluation and must be stated as a limitation. WS12-T03 and WS12-T04 still depend on WS00-T07 (gab decides at writing time whether to wait or to state its absence). WS11 (vignette study) stays blocked behind WS00-T03. ADR-027 (fixture registry for tests) is unaffected: fixtures and literature values are separate files. No signature of `02-interfaces.md` changes.
+- **Status.** accepted (decision of gab, 2026-10-08).
 
 ## ADR-044 Attribution: declared channels for the C1 exclusion, and the scope of the sequence and time evidence to the robot's presence stream [DA-CONFERMARE]
 

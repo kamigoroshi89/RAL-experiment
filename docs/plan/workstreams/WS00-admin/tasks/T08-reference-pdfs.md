@@ -55,3 +55,7 @@ Verification checks:
 ### Status update (user attestation)
 
 Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T08.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report. `data/raw/papers/` does not exist in the repository, so reference verification (WS03-T06) and any task that reads the papers cannot rely on the PDFs being present.
+
+### Artefact recorded (agent, 2026-10-08)
+
+At the request of gab ("cercalo e scaricalo tu"), the agent downloaded the author preprint arXiv:2211.01539v2 to `data/raw/papers/lindemann2023-conformal-stl.pdf` and wrote `outputs/WS00-T08.md`. The title page matches the citation (title, the four authors, arXiv identifier); it is the preprint, not the ACM typeset version. The optional papers of check 2 are not obtained. Done-when checks run on 2026-10-08: the artefact exists, one `file: data/raw/papers/` line, the PDF exists, `git status --short data/raw` prints nothing.

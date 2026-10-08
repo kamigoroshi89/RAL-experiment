@@ -11,7 +11,7 @@ venv/
 
 # Data and outputs
 data/raw/
-outputs/
+/outputs/
 
 # Agent tooling
 .claude/logs/

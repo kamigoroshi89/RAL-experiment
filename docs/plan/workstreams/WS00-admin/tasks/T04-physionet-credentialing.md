@@ -3,7 +3,7 @@ id: WS00-T04
 title: "Start PhysioNet credentialing for MIMIC-IV and eICU"
 workstream: WS00-admin
 owner: human
-status: done
+status: ready
 depends_on: []
 critical_path: true
 non_negotiable: false
@@ -65,3 +65,7 @@ From the repository root:
 ### Status update (user attestation)
 
 Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T04.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report. No `access_status` line exists in the repository, so the credentialed datasets (MIMIC-IV, eICU-CRD) are not usable by agent tasks until the artefact is recorded.
+
+### Status correction (agent, 2026-10-08)
+
+Asked on 2026-10-08, gab clarified that the attestation of 2026-09-30 referred to the open-access datasets (WS00-T09), not to PhysioNet credentialing: no CITI course, no application and no DUA exist for MIMIC-IV, MIMIC-IV-ED or eICU-CRD, and no credentialed data is on the machine. Status set back from `done` to `ready`; the decision whether to start credentialing is postponed by gab. No artefact is created: by step 3 it is created at submission. The licences of the four open-access datasets are recorded in `outputs/WS00-T09.md` (PhysioNet pages read on 2026-10-08). Consequence: WS04-T13 goes back to `blocked`; until this task closes, results stay labelled "literature priors" (ADR-005) and the defence of analisi §10 objection 1 that relies on MIMIC is not available.

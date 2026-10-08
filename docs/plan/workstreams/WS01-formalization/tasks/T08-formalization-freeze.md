@@ -3,8 +3,8 @@ id: WS01-T08
 title: "Formalization freeze: consistency review and hand-worked patient-day (M1)"
 workstream: WS01-formalization
 owner: agent
-status: blocked
-depends_on: ["WS01-T03", "WS01-T04", "WS01-T05", "WS01-T06", "WS01-T07", "WS00-T07"]
+status: ready
+depends_on: ["WS01-T03", "WS01-T04", "WS01-T05", "WS01-T06", "WS01-T07"]
 critical_path: true
 non_negotiable: true
 estimate_pd: 2
@@ -107,3 +107,11 @@ grep -rn 'ensures' docs/formal | grep -v ':| "'                                 
 ### Flag from the WS01-T03 review (orchestrator, 2026-09-30)
 
 The cross-document check that greps every formula symbol in `configs/registry/hypertension.yaml` now prints `not in registry:` for `meas_min_day` (deliberately not registered: WS01-T02 adopted no measurement-count obligation), `priority_param` and `scale_param` (field names picked up by the regex, not registry entries). WS01 README item 3 ("every parameter name used in a docs/formal document is an entry, a derived bound or a declared unset name") is likewise not literally met for `meas_min_day`, `step_ms` and `reorder_delay_ms`. Adapt the check when this task runs. Also decide the open points of `docs/formal/03-parameter-registry.md` section 7 (OP-5 `window_parameters` as a required top-level key, OP-2 and OP-4 marked "ADR: yes") and ADR-027 (proposed).
+
+### Hand-over from ADR-043 (agent, 2026-10-08)
+
+WS00-T07 is no longer a dependency (decision of gab, ADR-043): run the freeze with `clinician_review: pending` in `docs/formal/README.md`. In `PROGRESS.md` M1 may be called reached with the review pending (this supersedes the last clause of check 9). Values of the registry are not part of the freeze: literature-anchored proposals come from WS01-T09 and are checked by gab.
+
+### Hand-over from WS01-T09 (agent, 2026-10-08)
+
+The registry is now version **0.2.0** (literature-anchored values and design choices accepted by gab, still `unreviewed`); record that version in the freeze marker. Five findings of the WS01-T09 research are formalization questions, not values (`docs/formal/parameter-literature-proposal.md`, section "Findings for the formalization"): (1) `dose_count` is a trailing 24 h window while a dose may be given 1 h early or late, so three on-time doses can fall within 22 h and violate `dose_max_24h = 2`; (2) a dose withheld by the hold rule, or refused, violates `dose_min_day_end`; (3) a single pre/post pair of readings has a difference SD of about 16.8 mmHg against `delta_resp = 7.5` mmHg; (4) the `sys` template reads the inflation duration while device manuals give the whole cycle; (5) the BLE clock-skew bound with a daily resynchronisation (about 44 s) is close to the 60 s step. Decide or list them as open points of the freeze.

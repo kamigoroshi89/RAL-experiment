@@ -38,7 +38,7 @@ Rules:
 
 ## 2. Python style
 
-- Python 3.11 or newer (ADR-016). Type hints on all public functions; `mypy --strict` clean on `src/ralmon`.
+- Python 3.10 or newer (ADR-042, superseding ADR-016: ROS 2 Humble ships Python 3.10; the migration of `pyproject.toml` and of the toolchain test is the first step of WS07-T01). Type hints on all public functions; `mypy --strict` clean on `src/ralmon`.
 - Formatting and lint: `ruff format` and `ruff check` with the default rule set plus `I` (isort) and `B` (bugbear).
 - Data containers: `@dataclass(frozen=True, slots=True)` or `typing.Protocol` for interfaces, as shown in `02-interfaces.md`. No mutable module-level state.
 - Time: all timestamps are integer milliseconds since the start of the patient-day trace unless a contract says otherwise (ADR-017). Durations are integer milliseconds. Never mix minutes and milliseconds in one API; conversion helpers live in `ralmon.signals`.

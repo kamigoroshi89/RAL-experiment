@@ -1425,19 +1425,33 @@ def test_the_literal_scan_covers_every_benchmark_module() -> None:
     assert {"priors.py", "trace.py", "__init__.py", "_stubs.py"} <= names
 
 
+# Registry entries that are monitor configuration, not clinical parameters (registry note of
+# clock_skew_max_ms); their values (for example 1000 ms) are not scanned for.
+NON_CLINICAL_REGISTRY_NAMES = frozenset({"clock_skew_max_ms"})
+
+
 def _registry_values() -> set[float]:
     document = yaml.safe_load(
         (ROOT / "configs" / "registry" / "hypertension.yaml").read_text(
             encoding="utf-8"
         )
     )
-    values = {float(entry["value"]) for entry in document["entries"]}
+    values = {
+        float(entry["value"])
+        for entry in document["entries"]
+        if entry["name"] not in NON_CLINICAL_REGISTRY_NAMES
+    }
     return {v for v in values if abs(v) > 3.0}
 
 
 # Unit-conversion constants of the time helpers, not clinical parameters.
 CLINICAL_LITERAL_EXEMPT: dict[tuple[str, float], str] = {
     ("signals/units.py", 3_600_000.0): "MS_PER_HOUR",
+    # Algorithmic constants that coincide with small values of registry 0.2.0 (WS01-T09:
+    # cuff_error_sd 8 mmHg, scale_hold and scale_resp 10 mmHg); annotated "algorithmic" at the source.
+    ("benchmark/rng.py", 8.0): "frozen stream id INJECTION_C1",
+    ("benchmark/rng.py", 10.0): "frozen stream id INJECTION_C3",
+    ("benchmark/segments.py", 8.0): "_CACHE_SEGMENTS and the 8 MiB segment file limit",
 }
 REGISTRY_LOADER_MODULES = {"spec/registry.py"}
 
@@ -1458,9 +1472,9 @@ def test_no_clinical_registry_value_appears_in_src_outside_the_loader() -> None:
         110.0,
         140.0,
         100.0,
-        50.0,
-        250.0,
-    } <= clinical  # the illustrative band values
+        30.0,
+        260.0,
+    } <= clinical  # the band, hold and plausibility values of registry 0.2.0 (WS01-T09)
     offenders = []
     for path in sorted((SRC / "ralmon").rglob("*.py")):
         rel = path.relative_to(SRC / "ralmon").as_posix()

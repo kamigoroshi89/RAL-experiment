@@ -79,3 +79,7 @@ Write these first. Fixtures use the `stub_registry` and builders from WS06-T01. 
 ### Flag from the WS01-T03 review (orchestrator, 2026-09-30)
 
 Step 2 asks which registry entry plays the schedule-window role and says to stop if a role has no entry. `sched_window` is `unset` in `configs/registry/hypertension.yaml` (WS01-T03) until the clinician review, so this step would stop. Kept `blocked` until ADR-027 (proposed, fixture registry for runs before the clinician review) is decided. Test 14 ("exists in hypertension.yaml") is ambiguous for an unset name.
+
+### ADR-027 accepted (agent, 2026-10-08)
+
+ADR-027 (fixture registry `configs/registry/fixture.yaml`, FIXTURE-ONLY rows, created by WS05-T03) was accepted by gab on 2026-10-08; the flag above is settled in that sense. Literature-anchored values for the clinical registry come from WS01-T09 (ADR-043).

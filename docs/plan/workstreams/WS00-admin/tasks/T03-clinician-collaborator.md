@@ -61,3 +61,9 @@ From the repository root:
 - `grep -cE '^## (Candidate log|Clinician|Agreed involvement|Authorship and acknowledgement|RV or STL collaborator|Partner hospital access|Open points)$' docs/plan/workstreams/WS00-admin/outputs/WS00-T03.md` prints `7`.
 - `grep -c '^completed_by: .\+' docs/plan/workstreams/WS00-admin/outputs/WS00-T03.md` prints `1`.
 - Inspection: check 2 holds (a named clinician), and check 8 prints `0`.
+
+## Notes
+
+### Deferred (agent, 2026-10-08)
+
+gab decided on 2026-10-08 not to involve a clinician now (ADR-043). The task stays `ready` and unstarted; no candidate was contacted. Parameter values are proposed from the literature in WS01-T09 and checked by gab; the clinician review WS00-T07 becomes a pre-submission item. Before promising authorship later, check the author-change rule, which RA-L and the organisers have not stated (`outputs/WS00-T01.md`).

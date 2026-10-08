@@ -1,0 +1,2 @@
+main all: n=38 mean=-10.04 sd=17.29
+post-hoc |d|<=50: n=37 mean=-12.39 sd=9.54 dropped=[77.]

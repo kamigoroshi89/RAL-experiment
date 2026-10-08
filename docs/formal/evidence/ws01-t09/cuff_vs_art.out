@@ -1,0 +1,124 @@
+cases with both tracks: 14 -> ['0001', '0005', '0010', '0012', '0016', '0017', '0019', '0020', '0022', '0024', '0025', '0027', '0028', '0029']
+
+== main: +-30 s, span<=40: cuff readings in paired cases=147, exclusions={'cuff_out_of_range': 0, 'art_insufficient': 74, 'art_span': 35}
+  n_pairs: 38
+  n_cases: 9
+  mean: -10.04
+  sd: 17.29
+  median: -13.0
+  robust_sd_1.4826MAD: 9.27
+  p2.5: -26.45
+  p97.5: 15.02
+  frac_abs_le5: 0.16
+  frac_abs_le10: 0.32
+  boot_mean_95: (-12.723797409805735, -5.777777777777778)
+  boot_sd_95: (5.778915041636995, 27.841524717831273)
+  within_case_sd: 18.88
+  sd_of_case_means: 6.81
+  largest |diff| pairs: [np.float64(-26.0), np.float64(-32.0), np.float64(77.0)]
+  per case (id: n, mean, sd):
+    0005: 12, -14.1, 4.8
+    0010: 1, -6.0, nan
+    0012: 11, -7.3, 10.7
+    0019: 1, 7.0, nan
+    0020: 9, -11.2, 33.5
+    0022: 1, -4.0, nan
+    0025: 1, -13.0, nan
+    0028: 1, -13.0, nan
+    0029: 1, -2.0, nan
+
+== +-15 s, span<=40: cuff readings in paired cases=147, exclusions={'cuff_out_of_range': 0, 'art_insufficient': 73, 'art_span': 22}
+  n_pairs: 52
+  n_cases: 10
+  mean: -8.88
+  sd: 15.85
+  median: -11.25
+  robust_sd_1.4826MAD: 10.38
+  p2.5: -25.73
+  p97.5: 16.08
+  frac_abs_le5: 0.17
+  frac_abs_le10: 0.37
+  boot_mean_95: (-12.340234375, -3.7637432795698933)
+  boot_sd_95: (7.23417635745221, 23.937384696770764)
+  within_case_sd: 16.38
+  sd_of_case_means: 6.15
+
+== +-60 s, span<=40: cuff readings in paired cases=147, exclusions={'cuff_out_of_range': 0, 'art_insufficient': 71, 'art_span': 40}
+  n_pairs: 36
+  n_cases: 8
+  mean: -10.43
+  sd: 17.48
+  median: -13.0
+  robust_sd_1.4826MAD: 7.41
+  p2.5: -25.88
+  p97.5: 17.62
+  frac_abs_le5: 0.11
+  frac_abs_le10: 0.28
+  boot_mean_95: (-13.327620967741936, -7.19120370370371)
+  boot_sd_95: (4.394260325643419, 29.585045069678223)
+  within_case_sd: 19.11
+  sd_of_case_means: 5.02
+
+== [t-60 s, t], span<=40: cuff readings in paired cases=147, exclusions={'cuff_out_of_range': 0, 'art_insufficient': 73, 'art_span': 36}
+  n_pairs: 38
+  n_cases: 7
+  mean: -11.53
+  sd: 18.75
+  median: -14.75
+  robust_sd_1.4826MAD: 8.52
+  p2.5: -32.0
+  p97.5: 13.31
+  frac_abs_le5: 0.11
+  frac_abs_le10: 0.24
+  boot_mean_95: (-15.593023255813954, -8.096774193548388)
+  boot_sd_95: (6.115500669377631, 32.399129177009854)
+  within_case_sd: 20.03
+  sd_of_case_means: 4.37
+
+== +-30 s, no span filter: cuff readings in paired cases=147, exclusions={'cuff_out_of_range': 0, 'art_insufficient': 74, 'art_span': 0}
+  n_pairs: 73
+  n_cases: 12
+  mean: -9.36
+  sd: 14.81
+  median: -11.0
+  robust_sd_1.4826MAD: 10.38
+  p2.5: -30.4
+  p97.5: 12.2
+  frac_abs_le5: 0.23
+  frac_abs_le10: 0.44
+  boot_mean_95: (-13.116947674418604, -5.446749614197538)
+  boot_sd_95: (8.745918411834165, 21.142741972530168)
+  within_case_sd: 14.51
+  sd_of_case_means: 7.84
+
+== +-30 s, span<=20: cuff readings in paired cases=147, exclusions={'cuff_out_of_range': 0, 'art_insufficient': 74, 'art_span': 40}
+  n_pairs: 33
+  n_cases: 6
+  mean: -10.15
+  sd: 18.19
+  median: -13.0
+  robust_sd_1.4826MAD: 8.9
+  p2.5: -27.2
+  p97.5: 23.4
+  frac_abs_le5: 0.15
+  frac_abs_le10: 0.3
+  boot_mean_95: (-13.0, -6.0)
+  boot_sd_95: (4.979959839195493, 29.296809217097863)
+  within_case_sd: 19.41
+  sd_of_case_means: 4.69
+
+== +-30 s, span<=40, first reading of each case dropped: cuff readings in paired cases=133, exclusions={'cuff_out_of_range': 0, 'art_insufficient': 61, 'art_span': 34}
+  n_pairs: 38
+  n_cases: 9
+  mean: -10.04
+  sd: 17.29
+  median: -13.0
+  robust_sd_1.4826MAD: 9.27
+  p2.5: -26.45
+  p97.5: 15.02
+  frac_abs_le5: 0.16
+  frac_abs_le10: 0.32
+  boot_mean_95: (-12.723797409805735, -5.777777777777778)
+  boot_sd_95: (5.778915041636995, 27.841524717831273)
+  within_case_sd: 18.88
+  sd_of_case_means: 6.81

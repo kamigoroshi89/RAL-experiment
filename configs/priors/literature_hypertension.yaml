@@ -33,135 +33,135 @@ parameters:
   - parameter: baseline_sbp_mmhg
     unit: "mmHg"
     value: null
-    dist: null
-    source_ref: null
-    source_type: null
+    dist: {family: normal, mean: 149.3, sd: 9.0, truncate: {lo: 122.3, hi: 176.3}}
+    source_ref: "Cornelissen G, Watanabe Y, Beaty LA, Otsuka K, 2025 (7-day ABPM of 47 outpatients); inpatient cross-checks Xu et al. BMC Cardiovasc Disord 2013;13:37 and Pikilidou et al. Hypertens Res 2010;33:995-999 (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T03
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; outpatients, not inpatients; the truncation at mean +/- 3 SD is a design choice."
     note: "Baseline systolic pressure of the latent patient. Supply a value or a distribution (dist) and its source_ref; analisi §5.1 item 1 expects distributions estimated on a cohort, which WS04-T13 provides once credentialing exists. No value has been chosen by an agent."
   - parameter: circadian_amplitude_mmhg
     unit: "mmHg"
     value: null
-    dist: null
-    source_ref: null
-    source_type: null
+    dist: {family: normal, mean: 13.2, sd: 6.1, truncate: {lo: 0.0}}
+    source_ref: "Madden JM, Browne LD, Li X, Kearney PM, Fitzgerald AP, 2018 (cosinor amplitude of ambulatory systolic pressure) (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T03
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; a cosinor amplitude is already half the peak-to-trough difference; hospital patients show a blunted night-time dip; truncation at 0 is a design choice."
     note: "Amplitude A of the circadian component of the latent pressure (analisi §5.1 item 1). CONVENTION: A is HALF the peak-to-trough difference (the curve runs from baseline - A to baseline + A), so a source that reports a peak-to-trough dip D must be entered as A = D / 2. Circadian phase has no contract field: see the contract gaps in ADR-038."
   - parameter: ar_noise_sd_mmhg
     unit: "mmHg"
-    value: null
+    value: 8.8
     dist: null
-    source_ref: null
-    source_type: null
+    source_ref: "Madden et al. 2018 (residual SD 11.9 mmHg net of two harmonics) (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T03
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; latent value sqrt(11.9^2 - 8^2) = 8.8 mmHg, removing the cuff error SD of 8 mmHg (cuff_error_sd_mmhg) from a residual measured with a cuff."
     note: "Standard deviation of the autoregressive pressure noise (analisi §5.1 item 1), in mmHg."
   - parameter: ar_noise_phi
     unit: "1"
-    value: null
+    value: 0.22
     dist: null
-    source_ref: null
-    source_type: null
+    source_ref: "Madden et al. 2018 (lag-1 autocorrelation of 30-min ambulatory readings) (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T03
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; coefficient at a 30-min step; general cohort, not inpatients."
     note: "Autoregressive coefficient of the pressure noise. It is meaningless without its sampling step: the human supplies reference_step_ms (integer ms) with the value, and WS04-T03 rescales to the generator step as phi_s = phi ** (step / reference_step_ms). ASSUMPTION: this rescaling holds only if the continuous-time autocorrelation is exponentially decaying (the same process sampled at another step); a source with another autocorrelation structure does not justify it. NEGATIVE PHI: a negative coefficient has a real rescaled value only when the generator step is an integer multiple of reference_step_ms (phi ** n); any other ratio, for example a 1-minute grid with a 5-minute reference, is refused at build time (when the grid is built), not when the prior is loaded."
-    reference_step_ms: null
+    reference_step_ms: 1800000
   - parameter: emax_mmhg
     unit: "mmHg"
-    value: null
+    value: 17.3
     dist: null
-    source_ref: null
-    source_type: null
+    source_ref: "FDA COREG (carvedilol) label, rev. 07/2023, section 14.3 (dose-response figures) (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T04
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; WEAK: two-point fit of the label's dose-response figures (label rounding moves it over 15.1 to 19.9 mmHg); no dedicated Emax study was opened; drug confirmed by gab."
     note: "Maximal drug effect of the Emax model (analisi §5.1 item 1). Drug anchor: none yet. configs/registry/hypertension.yaml anchors no drug or guideline (its delta1 and delta2 are labelled illustrative, unverified, and nothing in it is reviewed); this row must carry the anchor chosen at the clinical review of the registry (WS00-T07) and cite the same drug. No agent names a drug. The sign convention of the effect (a reduction as a positive magnitude or a signed value) is a contract gap, see ADR-038."
   - parameter: ec50
     unit: "1"
-    value: null
+    value: 0.76
     dist: null
-    source_ref: null
-    source_type: null
+    source_ref: "FDA COREG (carvedilol) label, rev. 07/2023, sections 12.3 and 14.3 (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T04
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; WEAK: derived, not a measured EC50; normalised to a unit dose of 12.5 mg (decision of gab, ADR-038 gap), which gives a trough-to-peak ratio of 0.63 to 0.72 against the label's about 65%."
     note: "Concentration giving half of the maximal effect, read as dimensionless on a concentration normalised to the unit dose (the contract gives no unit; the dose normalisation convention is a gap, see ADR-038). Drug anchor: none yet, as for emax_mmhg: the anchor is the registry's, set at WS00-T07."
   - parameter: absorption_rate_per_h
     unit: "1/h"
-    value: null
+    value: 2.3
     dist: null
-    source_ref: null
-    source_type: null
+    source_ref: "FDA COREG (carvedilol) label, rev. 07/2023, sections 12.3 and 14.3 (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T04
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; back-computed from the time of peak effect (1 to 2 h; range 1.4 to 4.2 per h), valid because the effect depends directly on concentration (ADR-039)."
     note: "First-order oral absorption rate of the one-compartment model (analisi §5.1 item 1), per hour. Drug anchor: none yet, as for emax_mmhg: the anchor is the registry's, set at WS00-T07."
   - parameter: elimination_rate_per_h
     unit: "1/h"
-    value: null
+    value: 0.0815
     dist: null
-    source_ref: null
-    source_type: null
+    source_ref: "FDA COREG (carvedilol) label, rev. 07/2023, section 12.3 (half-life 7 to 10 h) (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T04
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; k = ln 2 / half-life (range 0.0693 to 0.0990 per h)."
     note: "First-order elimination rate of the one-compartment model, per hour. Drug anchor: none yet, as for emax_mmhg: the anchor is the registry's, set at WS00-T07."
   - parameter: onset_delay_range_ms
     unit: "ms"
-    value: null
+    value: {lower_ms: 1800000, upper_ms: 7200000}
     dist: null
-    source_ref: null
-    source_type: null
+    source_ref: "FDA COREG (carvedilol) label, rev. 07/2023, sections 12.2 and 14.3 (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T04
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; effect within 30 min, peak 1 to 2 h after a dose."
     note: "Lower and upper bound of the onset window of the response, as value: {lower_ms, upper_ms} in integer ms, equal for every patient. It informs the clinician's choice of delta1 and delta2 in the registry (docs/formal/03-parameter-registry.md section 1.2 rule 6); the numbers are not copied between the files. Drug anchor: none yet in the registry; set at WS00-T07."
   - parameter: p_delay
     unit: "1"
-    value: null
+    value: 0.081
     dist: null
-    source_ref: "analisi §5.1: adherence is declared as an assumption (no public smart-dispenser dataset known)"
-    source_type: declared_assumption
+    source_ref: "Barker KN, Flynn EA, Pepper GA, Bates DW, Mikeal RL, Arch Intern Med 2002;162:1897-1903 (doses given more than 60 min off schedule) (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T05
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; nurse-administered, directly observed doses in hospitals, not a patient taking pills from a dispenser."
     note: "Probability that a dose is taken late (Markov adherence model, analisi §5.1). The sum of the three probabilities must not exceed 1; persistence between doses is a contract gap, see ADR-038."
   - parameter: p_omission
     unit: "1"
-    value: null
+    value: 0.057
     dist: null
-    source_ref: "analisi §5.1: adherence is declared as an assumption (no public smart-dispenser dataset known)"
-    source_type: declared_assumption
+    source_ref: "Barker et al. 2002 (omission errors); outpatient alternative 0.10 in Vrijens B et al., BMJ 2008 (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T05
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; inpatient, nurse-administered doses; missed doses cluster in outpatients (drug holidays), which a Markov chain without persistence does not reproduce."
     note: "Probability that a dose is omitted (Markov adherence model, analisi §5.1)."
   - parameter: p_double_take
     unit: "1"
-    value: null
+    value: 0.0031
     dist: null
-    source_ref: "analisi §5.1: adherence is declared as an assumption (no public smart-dispenser dataset known)"
-    source_type: declared_assumption
+    source_ref: "Barker et al. 2002 (extra-dose errors) (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T05
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; nurse-administered doses, used for a patient's double take by analogy."
     note: "Probability of a double take (Markov adherence model, analisi §5.1). The double-take gap in time has no contract field, see ADR-038."
   - parameter: mean_delay_ms
     unit: "ms"
@@ -176,36 +176,36 @@ parameters:
     note: "Mean delay of a late dose, in integer ms."
   - parameter: cuff_error_sd_mmhg
     unit: "mmHg"
-    value: null
+    value: 8.0
     dist: null
-    source_ref: "ISO 81060-2 (edition and clause to be confirmed by the human); named in analisi §5.1"
+    source_ref: "Stergiou GS et al., AAMI/ESH/ISO collaboration statement, Hypertension 2018;71:368-374 (ISO 81060-2 criterion 1: SD of differences at most 8 mmHg; edition and clause to be confirmed) (detail: docs/formal/parameter-literature-proposal.md)"
     source_type: standard
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T06
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; the acceptance limit used as a conservative device model; validated devices report about 7 to 7.7 mmHg; VitalDB supplementary estimate (38 pairs, 9 cases) in docs/formal/evidence/ws01-t09."
     note: "Standard deviation of the cuff error. ISO 81060-2 gives acceptance limits for a device under validation, not the error of one particular device: the human must declare whether the benchmark uses the limits as a conservative device model or a typical performance from a validation study, and states the choice in rationale. The edition and the clause are to be confirmed by the human (analisi §5.1: the values are to be verified). The registry has the same quantity as cuff_error_sd (unset): keep one source of truth. For the monitor: its rho computation reads its own copy of the device error, the registry entry cuff_error_sd (WS01); in the matched case the same source value feeds both that copy and this row, and WS08 may hand the monitor a perturbed copy as a mismatch stress."
   - parameter: cuff_bias_mmhg
     unit: "mmHg"
-    value: null
+    value: 0.0
     dist: null
-    source_ref: "ISO 81060-2 (edition and clause to be confirmed by the human); named in analisi §5.1"
+    source_ref: "Stergiou et al. 2018 (ISO 81060-2 criterion 1: mean difference at most 5 mmHg) (detail: docs/formal/parameter-literature-proposal.md)"
     source_type: standard
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T06
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; an accurate device; 4 and 5 mmHg are stress values for the experiments."
     note: "Systematic cuff error (bias). ISO 81060-2 gives acceptance limits for a device under validation, not the error of one particular device: the human must declare whether the benchmark uses the limits as a conservative device model or a typical performance from a validation study, and states the choice in rationale. The edition and the clause are to be confirmed by the human. For the monitor: its rho computation reads its own copy of the device error, the registry entry cuff_error_sd (WS01); in the matched case the same source value feeds both that copy and this row, and WS08 may hand the monitor a perturbed copy as a mismatch stress."
   - parameter: dispenser_bounce_prob
     unit: "1"
-    value: null
+    value: 0.001
     dist: null
-    source_ref: null
-    source_type: null
+    source_ref: "De Bleser L et al. 2010 (3 spurious events in 3150 handlings of electronic adherence monitors) (detail: docs/formal/parameter-literature-proposal.md)"
+    source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
+    rationale: "Literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), not clinically reviewed and not verified by a human against the source; by analogy: the monitors tested suppress repeat events within 15 min; range 0 to 0.005."
     note: "Probability that a dispenser sensor bounce produces a spurious DISPENSE event (C2 fault, analisi §5.1 item 3). The human supplies the value and its source_ref."
   - parameter: ble_dropout_rate_per_h
     unit: "1/h"
