@@ -1,0 +1,205 @@
+# Fixture registry F0 in the WS01-T03 schema (test-only copy, WS05-T03).
+# Every row is FIXTURE-ONLY in the sense of ADR-027: arithmetic test numbers, never a reported result.
+# Values are those of the fixture_registry section of docs/formal/golden/templates.yaml and of the F0 table
+# in docs/plan/workstreams/WS01-formalization/README.md; the F0 origin of each row is kept in `rationale`.
+# meas_min_day, step_ms and reorder_delay_ms are F0 rows that are not registry names
+# (docs/formal/03-parameter-registry.md section 3.3) and are therefore absent.
+registry_version: "0.0.0"
+pathology: hypertension
+review_status: unreviewed
+
+window_parameters:
+  - sched_window
+  - hold_lookback
+  - int_window
+  - delta1
+  - delta2
+
+entries:
+  - name: bp_band_low
+    value: 110.0
+    unit: mmHg
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.1; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row bp_band_low'
+    reviewed_by: null
+  - name: bp_band_high
+    value: 140.0
+    unit: mmHg
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.1; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row bp_band_high'
+    reviewed_by: null
+  - name: bp_hold_threshold
+    value: 100.0
+    unit: mmHg
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.1; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row bp_hold_threshold'
+    reviewed_by: null
+  - name: hold_lookback
+    value: 3600000.0
+    unit: ms
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.1, 60 min; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row hold_lookback'
+    reviewed_by: null
+  - name: dose_max_24h
+    value: 2.0
+    unit: dose
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.1; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row dose_max_24h'
+    reviewed_by: null
+  - name: dose_min_day_end
+    value: 2.0
+    unit: dose
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.1; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row dose_min_day_end'
+    reviewed_by: null
+  - name: int_window
+    value: 300000.0
+    unit: ms
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.1, 5 min; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row int_window'
+    reviewed_by: null
+  - name: delta1
+    value: 3600000.0
+    unit: ms
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.6 window [08:00, 10:00] of a 07:00 dispense; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row delta1'
+    reviewed_by: null
+  - name: delta2
+    value: 10800000.0
+    unit: ms
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin same source; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row delta2'
+    reviewed_by: null
+  - name: bound_bp_lower
+    value: 50.0
+    unit: mmHg
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.7 example; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row bound_bp_lower'
+    reviewed_by: null
+  - name: bound_bp_upper
+    value: 250.0
+    unit: mmHg
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.7 example; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row bound_bp_upper'
+    reviewed_by: null
+  - name: scale_range
+    value: 20.0
+    unit: mmHg
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.2 example; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row scale_range'
+    reviewed_by: null
+  - name: scale_sched
+    value: 1800000.0
+    unit: ms
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.2 example, 30 min; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row scale_sched'
+    reviewed_by: null
+  - name: scale_count
+    value: 1.0
+    unit: dose
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.2 example; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row scale_count'
+    reviewed_by: null
+  - name: priority_hold
+    value: 1.0
+    unit: "1"
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.2 order example (hold > range > sched); illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row priority_hold'
+    reviewed_by: null
+  - name: priority_range
+    value: 2.0
+    unit: "1"
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.2 order example (hold > range > sched); illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row priority_range'
+    reviewed_by: null
+  - name: priority_sched
+    value: 3.0
+    unit: "1"
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); F0 origin analisi §4.2 order example (hold > range > sched); illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row priority_sched'
+    reviewed_by: null
+  - name: sched_window
+    value: 1800000.0
+    unit: ms
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row sched_window'
+    reviewed_by: null
+  - name: delta_resp
+    value: 10.0
+    unit: mmHg
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row delta_resp'
+    reviewed_by: null
+  - name: cuff_inflation_min
+    value: 30000.0
+    unit: ms
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row cuff_inflation_min'
+    reviewed_by: null
+  - name: scale_hold
+    value: 20.0
+    unit: mmHg
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row scale_hold'
+    reviewed_by: null
+  - name: scale_resp
+    value: 20.0
+    unit: mmHg
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row scale_resp'
+    reviewed_by: null
+  - name: scale_sys
+    value: 30000.0
+    unit: ms
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row scale_sys'
+    reviewed_by: null
+  - name: scale_int
+    value: 300000.0
+    unit: ms
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row scale_int'
+    reviewed_by: null
+  - name: priority_count
+    value: 2.0
+    unit: "1"
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row priority_count'
+    reviewed_by: null
+  - name: priority_resp
+    value: 2.0
+    unit: "1"
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row priority_resp'
+    reviewed_by: null
+  - name: priority_sys
+    value: 3.0
+    unit: "1"
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row priority_sys'
+    reviewed_by: null
+  - name: priority_int
+    value: 3.0
+    unit: "1"
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row priority_int'
+    reviewed_by: null
+  - name: cuff_error_sd
+    value: 6.0
+    unit: mmHg
+    rationale: 'FIXTURE-ONLY (fixture registry F0, ADR-027); chosen for hand arithmetic, no clinical meaning; illustrative, unverified'
+    source_ref: 'docs/plan/workstreams/WS01-formalization/README.md fixture registry F0, row cuff_error_sd'
+    reviewed_by: null
+
+derived:
+  - {name: max_latency_range, unit: ms, formula: "step_ms", template: range}
+  - {name: max_latency_sched, unit: ms, formula: "sched_window + step_ms", template: sched}
+  - {name: max_latency_hold, unit: ms, formula: "step_ms", template: hold}
+  - {name: max_latency_count, unit: ms, formula: "step_ms", template: count}
+  - {name: max_latency_resp, unit: ms, formula: "delta2 + step_ms", template: resp}
+  - {name: max_latency_sys, unit: ms, formula: "step_ms", template: sys}
+  - {name: max_latency_int, unit: ms, formula: "step_ms", template: int}
+
+unset: []
+
+overrides: []

@@ -1,0 +1,231 @@
+# Golden examples of normalised robustness and lexicographic alert ranking (WS01-T04).
+# 10 normalisation cases (N-1 to N-10) and 6 ranking cases (RK-1 to RK-6), each hand-computed.
+# Normative description: docs/formal/04-normalisation-ranking.md.
+#
+# Every scale and priority below is a value of the fixture registry F0 (test-only, WS01 README; NOT the
+# clinical registry, never to be copied into configs/registry/hypertension.yaml). The rows used, copied
+# from the F0 table (name | value | unit | origin):
+#   scale_range     | 20      | mmHg              | analisi §4.2 example
+#   scale_sched     | 1800000 | ms                | analisi §4.2 example, 30 min
+#   scale_count     | 1       | dose              | analisi §4.2 example
+#   scale_hold      | 20      | mmHg              | FIXTURE-ONLY (same as scale_range)
+#   scale_resp      | 20      | mmHg              | FIXTURE-ONLY (same as scale_range)
+#   priority_hold   | 1       | rank, 1 = highest | analisi §4.2 order example (hold > range > sched)
+#   priority_range  | 2       | rank, 1 = highest | analisi §4.2 order example (hold > range > sched)
+#   priority_sched  | 3       | rank, 1 = highest | analisi §4.2 order example (hold > range > sched)
+#   priority_resp   | 2       | rank              | FIXTURE-ONLY
+# FIXTURE-ONLY means: chosen for hand arithmetic, no clinical meaning, no claim about any device or guideline.
+# Values that look like clinical numbers are illustrative and unverified (analisi §4.1, §4.2, ADR-020).
+#
+# Times are integer milliseconds; the hh:mm label is in a comment (t_ms = (60 * hh + mm) * 60000).
+# Infinite values are written -.inf and .inf; NaN is written .nan.
+#
+# Keys in the order of the WS01 README format: id, contract, source, fixture, inputs, eval_at_ms,
+# expected, hand_calculation. Keys added by this file:
+#   fixture.f0_rows: the F0 rows the case uses (name: value);
+#   inputs.call, inputs.calls: the function under test; inputs.sigma_raw, inputs.scale: its arguments;
+#   inputs.alerts (and the variants named in each case): the alerts handed to rank_alerts, in the order
+#     given (deliberately not the expected order). An alert lists only the fields that rank_alerts and the
+#     ablation A3 read: tau, instance_key, priority, sigma_norm, t_ms, verdict; raw and unit (RK-4 only,
+#     from the verdict record) and conformal_half_width (RK-6 only) are extra fields of this file;
+#   expected.order and its variants: instance_key values in the expected output order.
+# eval_at_ms is null: these cases evaluate functions of numbers, not a trace.
+
+- id: N-1
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture; the raw value -12 mmHg is that of G-RANGE-2 (analisi §4.6 row 08:55, arithmetic 140 - 152)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_range: 20}}
+  inputs: {call: normalise, sigma_raw: -12.0, scale: 20.0, unit: mmHg}
+  eval_at_ms: null
+  expected: {sigma_norm: -0.6}
+  hand_calculation: "-12 / 20 = -0.6. Clip: max(-1, min(1, -0.6)) = max(-1, -0.6) = -0.6; the value is inside [-1, 1], so the clip changes nothing (|sigma| = 12 <= s = 20, identity zone)."
+
+- id: N-2
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture; the raw value +15 mmHg is that of G-RANGE-1"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_range: 20}}
+  inputs: {call: normalise, sigma_raw: 15.0, scale: 20.0, unit: mmHg}
+  eval_at_ms: null
+  expected: {sigma_norm: 0.75}
+  hand_calculation: "15 / 20 = 0.75. Clip: max(-1, min(1, 0.75)) = max(-1, 0.75) = 0.75. Identity zone (|sigma| = 15 <= 20). Positive value: satisfied with a margin of three quarters of the scale."
+
+- id: N-3
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture; the raw value -60 mmHg is that of G-RANGE-5 (bp 200 against the upper limit 140)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_range: 20}}
+  inputs: {call: normalise, sigma_raw: -60.0, scale: 20.0, unit: mmHg}
+  eval_at_ms: null
+  expected: {sigma_norm: -1.0}
+  hand_calculation: "-60 / 20 = -3. Clip: min(1, -3) = -3, then max(-1, -3) = -1. The value is clipped: |sigma| = 60 > s = 20 (saturation, sigma <= -s)."
+
+- id: N-4
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture; the tie sigma = 0 of G-RANGE-4 (bp 140 on the upper limit)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_range: 20}}
+  inputs: {call: normalise, sigma_raw: 0.0, scale: 20.0, unit: mmHg}
+  eval_at_ms: null
+  expected: {sigma_norm: 0.0}
+  hand_calculation: "0 / 20 = 0. Clip: max(-1, min(1, 0)) = 0. Sign preserved: sigma = 0 is a tie, satisfied for non-strict atoms (02-templates.md section 1.3), and sigma_norm = 0 is not negative."
+
+- id: N-5
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture; the raw value -1260000 ms is that of G-SCHED-3 (measurement 21 min after a 30 min deadline)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_sched: 1800000}}
+  inputs: {call: normalise, sigma_raw: -1260000.0, scale: 1800000.0, unit: ms}
+  eval_at_ms: null
+  expected: {sigma_norm: -0.7}
+  hand_calculation: "21 min = 21 * 60000 = 1260000 ms; scale 30 min = 30 * 60000 = 1800000 ms. -1260000 / 1800000 = -0.7 (check: 0.7 * 1800000 = 1260000). Clip: max(-1, min(1, -0.7)) = -0.7, identity zone (|sigma| = 1260000 <= 1800000)."
+
+- id: N-6
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture; one dose over the limit, as G-COUNT-1 (counter 3 against the limit 2, margin 2 - 3 = -1 dose)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_count: 1}}
+  inputs: {call: normalise, sigma_raw: -1.0, scale: 1.0, unit: dose}
+  eval_at_ms: null
+  expected: {sigma_norm: -1.0}
+  hand_calculation: "-1 / 1 = -1. Clip: max(-1, min(1, -1)) = max(-1, -1) = -1. Here |sigma| = s exactly: the identity zone and the saturation zone meet, so -1.0 is reached without any value being cut off."
+
+- id: N-7
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture; a failed guard gives sigma = -inf (02-templates.md section 2.5, TG-10); +inf is the vacuous whole-formula value"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_range: 20}}
+  inputs:
+    call: normalise
+    calls:
+      - {sigma_raw: -.inf, scale: 20.0, unit: mmHg}
+      - {sigma_raw: .inf, scale: 20.0, unit: mmHg}
+  eval_at_ms: null
+  expected: {sigma_norm: [-1.0, 1.0]}
+  hand_calculation: "-inf / 20 = -inf (division of an infinity by a positive finite number keeps the infinity and its sign); max(-1, min(1, -inf)) = max(-1, -inf) = -1. +inf / 20 = +inf; max(-1, min(1, +inf)) = max(-1, 1) = 1. No operation subtracts two infinities. The marker guard_failed (not part of the return value) tells a failed guard from a finite clipped value."
+
+- id: N-8
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture; the contract states scale > 0, the registry rule requires a positive finite scale (03-parameter-registry.md section 2.5 rule 10)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {}}
+  inputs: {call: normalise, sigma_raw: 5.0, scale: 0.0, unit: mmHg}
+  eval_at_ms: null
+  expected:
+    error: ValueError
+    reason: "scale must be a positive finite number"
+    also_raises:
+      - {sigma_raw: 5.0, scale: -20.0}
+      - {sigma_raw: 5.0, scale: .nan}
+      - {sigma_raw: 5.0, scale: .inf}
+  hand_calculation: "The scale 0 is not > 0, so the precondition s > 0 fails and the call raises ValueError before any division; 5 / 0 is never evaluated and no default scale is substituted. The same precondition rejects a negative scale (-20, the negated scale_range), a NaN scale and an infinite scale (a finite sigma over an infinite scale would give 0 for every deviation, silently)."
+
+- id: N-9
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture; a NaN raw robustness has no value (an unknown atom is handled by the interval semantics of WS01-T05, never by NaN)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_range: 20}}
+  inputs: {call: normalise, sigma_raw: .nan, scale: 20.0, unit: mmHg}
+  eval_at_ms: null
+  expected: {error: ValueError, reason: "sigma_raw must not be NaN"}
+  hand_calculation: "NaN / 20 = NaN and every comparison with NaN is false, so clip(NaN) would depend on the order of min and max and could return -1, 1 or NaN. The order of evaluation is therefore not relied on: NaN is rejected up front with ValueError. No silent default (-1, 0 or +1) is returned."
+
+- id: N-10
+  contract: ["02-interfaces.md#template"]
+  source: "plan fixture; scale equivariance with N-1 (k = 3)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_range: 20}}
+  inputs: {call: normalise, sigma_raw: -36.0, scale: 60.0, unit: mmHg, equivariance_partner: N-1, k: 3}
+  eval_at_ms: null
+  expected: {sigma_norm: -0.6}
+  hand_calculation: "sigma = -12 * 3 = -36 and s = 20 * 3 = 60. -36 / 60 = -0.6 (the same rational number as -12 / 20, both equal -3/5). Clip leaves it unchanged. normalise(k * sigma, k * s) = normalise(sigma, s) for k = 3, so N-10 = N-1. The same holds for a change of unit: -12 mmHg over 20 mmHg gives the value that any common rescaling of both arguments gives."
+
+- id: RK-1
+  contract: ["02-interfaces.md#template", "02-interfaces.md#alert"]
+  source: "plan fixture; sigma_norm values from G-HOLD-2 (-6 / 20), G-RANGE-2 (-12 / 20) and G-SCHED-3 (-1260000 / 1800000); the alert times are the fixture labels of those cases"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {priority_hold: 1, priority_range: 2, priority_sched: 3}}
+  inputs:
+    call: rank_alerts
+    alerts:   # given in a shuffled order
+      - {tau: range, instance_key: "range@09:05", priority: 2, sigma_norm: -0.6, t_ms: 32700000, verdict: violated}   # 09:05
+      - {tau: sched, instance_key: "sched@09:00", priority: 3, sigma_norm: -0.7, t_ms: 35460000, verdict: violated}   # emitted 09:51, graded lateness of G-SCHED-3
+      - {tau: hold, instance_key: "hold@07:00", priority: 1, sigma_norm: -0.3, t_ms: 25200000, verdict: violated}   # 07:00
+  eval_at_ms: null
+  expected:
+    order: ["hold@07:00", "range@09:05", "sched@09:00"]
+  hand_calculation: "Keys (priority, sigma_norm, t_ms, instance_key): hold (1, -0.3, 25200000, hold@07:00); range (2, -0.6, 32700000, range@09:05); sched (3, -0.7, 35460000, sched@09:00). The first components differ, 1 < 2 < 3, so the order is decided there and sigma_norm is not compared: hold, range, sched. The sched alert has the most negative sigma_norm (-0.7 < -0.6 < -0.3) but the lowest priority, so it is last; ordering by sigma_norm alone would give the exact reverse (sched, range, hold), which compares a timing margin with a pressure margin as if equivalent."
+
+- id: RK-2
+  contract: ["02-interfaces.md#template", "02-interfaces.md#alert"]
+  source: "plan fixture; two range alerts of the same priority (F0 priority_range = 2); range@09:05 as G-RANGE-2 (-12 / 20), range@12:24 as a -6 mmHg violation (-6 / 20, as G-RANGE-3)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {priority_range: 2}}
+  inputs:
+    call: rank_alerts
+    alerts:
+      - {tau: range, instance_key: "range@12:24", priority: 2, sigma_norm: -0.3, t_ms: 44640000, verdict: violated}   # 12:24
+      - {tau: range, instance_key: "range@09:05", priority: 2, sigma_norm: -0.6, t_ms: 32700000, verdict: violated}   # 09:05
+    alerts_swapped_times:   # same sigma_norm values with the times swapped: sigma_norm outranks t_ms
+      - {tau: range, instance_key: "range@09:05", priority: 2, sigma_norm: -0.3, t_ms: 32700000, verdict: violated}   # 09:05
+      - {tau: range, instance_key: "range@12:24", priority: 2, sigma_norm: -0.6, t_ms: 44640000, verdict: violated}   # 12:24
+  eval_at_ms: null
+  expected:
+    order: ["range@09:05", "range@12:24"]
+    order_swapped_times: ["range@12:24", "range@09:05"]
+  hand_calculation: "Main case: both priority 2, so the first component ties. Second component: -0.6 < -0.3, so range@09:05 (-0.6) precedes range@12:24 (-0.3); t_ms is not reached (it also favours 09:05 here: 32700000 < 44640000, so the case does not separate the two criteria). Swapped case: with -0.3 at 09:05 and -0.6 at 12:24, the second component still decides: -0.6 < -0.3, so range@12:24 is first although it is later in time; t_ms is only a tie-break (equal priority and equal sigma_norm, case RK-3)."
+
+- id: RK-3
+  contract: ["02-interfaces.md#template", "02-interfaces.md#alert"]
+  source: "plan fixture; small integer t_ms values (not on the 60000 ms grid) isolate the tie-break; rank_alerts never reads the grid"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {priority_range: 2}}
+  inputs:
+    call: rank_alerts
+    call_1:   # same priority 2 and sigma_norm -0.6; t_ms 100 versus 50; the key order opposes the time order
+      - {tau: range, instance_key: "a", priority: 2, sigma_norm: -0.6, t_ms: 100, verdict: violated}
+      - {tau: range, instance_key: "b", priority: 2, sigma_norm: -0.6, t_ms: 50, verdict: violated}
+    call_2:   # same priority, sigma_norm and t_ms; only the instance_key differs
+      - {tau: range, instance_key: "b", priority: 2, sigma_norm: -0.6, t_ms: 100, verdict: violated}
+      - {tau: range, instance_key: "a", priority: 2, sigma_norm: -0.6, t_ms: 100, verdict: violated}
+  eval_at_ms: null
+  expected:
+    call_1: ["b", "a"]
+    call_2: ["a", "b"]
+  hand_calculation: "call_1: keys (2, -0.6, 100, a) and (2, -0.6, 50, b); the first two components tie; third component 50 < 100, so b (t_ms 50) precedes a (t_ms 100) although the string 'b' is greater than 'a': t_ms is compared before instance_key. call_2: keys (2, -0.6, 100, b) and (2, -0.6, 100, a); the first three components tie; the fourth compares the strings by code point, 'a' < 'b', so a precedes b whatever the input order. The result does not depend on the order in which the alerts are handed over."
+
+- id: RK-4
+  contract: ["02-interfaces.md#template", "02-interfaces.md#alert", "02-interfaces.md#verdict"]
+  source: "plan fixture; raw values -6 mmHg (G-HOLD-2), -12 mmHg (G-RANGE-2), -1260000 ms (G-SCHED-3); raw is the sigma_interval value of the verdict record, which the Alert type does not carry (ablation A3 joins on instance_key, 04-normalisation-ranking.md section 7)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_hold: 20, scale_range: 20, scale_sched: 1800000, priority_hold: 1, priority_range: 2, priority_sched: 3}}
+  inputs:
+    call: rank_alerts
+    alerts:
+      - {tau: hold, instance_key: "hold@07:00", priority: 1, sigma_norm: -0.3, t_ms: 25200000, verdict: violated, raw: -6.0, unit: mmHg, scale: 20.0}   # 07:00
+      - {tau: range, instance_key: "range@09:05", priority: 2, sigma_norm: -0.6, t_ms: 32700000, verdict: violated, raw: -12.0, unit: mmHg, scale: 20.0}   # 09:05
+      - {tau: sched, instance_key: "sched@09:00", priority: 3, sigma_norm: -0.7, t_ms: 35460000, verdict: violated, raw: -1260000.0, unit: ms, scale: 1800000.0}   # 09:51
+  eval_at_ms: null
+  expected:
+    lexicographic: ["hold@07:00", "range@09:05", "sched@09:00"]
+    a3_null: ["sched@09:00", "range@09:05", "hold@07:00"]
+  hand_calculation: "Normalised values: hold -6 / 20 = -0.3; range -12 / 20 = -0.6; sched -1260000 / 1800000 = -0.7. Lexicographic keys (priority, sigma_norm, t_ms, key): (1, -0.3, ...), (2, -0.6, ...), (3, -0.7, ...): order hold, range, sched (priority decides). A3 null ranking: key (raw sigma, t_ms, instance_key), native units, priorities and scales ignored: -1260000 < -12 < -6, so sched, range, hold. The A3 order is the exact reverse of the lexicographic order. The comparison -1260000 < -12 compares milliseconds with millimetres of mercury and depends on the unit written (in hours the sched value is -1260000 / 3600000 = -0.35 and the A3 order becomes range -12, hold -6, sched -0.35)."
+
+- id: RK-5
+  contract: ["02-interfaces.md#template", "02-interfaces.md#alert", "02-interfaces.md#verdict"]
+  source: "plan fixture; same priority 2 (F0 priority_range and priority_resp); violated range alert -4 / 20 = -0.2; predicted resp alert with normalised sigma-hat -0.5 (equivalently -10 mmHg over scale_resp 20)"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_range: 20, scale_resp: 20, priority_range: 2, priority_resp: 2}}
+  inputs:
+    call: rank_alerts
+    alerts:
+      - {tau: range, instance_key: "range@09:05", priority: 2, sigma_norm: -0.2, t_ms: 32700000, verdict: violated}   # 09:05
+      - {tau: resp, instance_key: "resp@07:00", priority: 2, sigma_norm: -0.5, t_ms: 30600000, verdict: predicted_violation}   # 08:30
+  eval_at_ms: null
+  expected:
+    literal_contract: ["resp@07:00", "range@09:05"]
+    recommended_extension: ["range@09:05", "resp@07:00"]
+    adr_to_confirm: "recommended_extension: VIOLATED before PREDICTED_VIOLATION within a priority; it extends the docstring of rank_alerts and needs an ADR proposed by WS01-T08; until it is accepted, rank_alerts implements literal_contract"
+  hand_calculation: "Literal contract (docstring: priority first, then sigma_norm ascending; tie-break t_ms, instance_key): keys (2, -0.2, 32700000, range@09:05) and (2, -0.5, 30600000, resp@07:00); priorities tie; -0.5 < -0.2, so the predicted alert resp@07:00 comes first. Recommended extension: key (priority, verdict class, sigma_norm, t_ms, instance_key) with verdict class 0 for VIOLATED and 1 for PREDICTED_VIOLATION: (2, 0, -0.2, ...) < (2, 1, -0.5, ...) since 0 < 1, so the violated alert range@09:05 comes first; the two orders are the reverse of each other. Both are recorded; the ADR of WS01-T08 must confirm the recommended one."
+
+- id: RK-6
+  contract: ["02-interfaces.md#template", "02-interfaces.md#alert", "02-interfaces.md#conformal-calibrator"]
+  source: "plan fixture; counterexample to normalisation by the width of the conformal interval (forbidden, analisi §4.2 last paragraph, ADR-009); half-widths are in normalised units and illustrative"
+  fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, f0_rows: {scale_resp: 20, priority_resp: 2}}
+  inputs:
+    call: rank_alerts
+    alerts:
+      - {tau: resp, instance_key: "resp@12:00", priority: 2, sigma_norm: -0.5, t_ms: 48600000, verdict: predicted_violation, conformal_half_width: 0.05}   # emitted 13:30
+      - {tau: resp, instance_key: "resp@07:00", priority: 2, sigma_norm: -0.5, t_ms: 30600000, verdict: predicted_violation, conformal_half_width: 0.4}   # emitted 08:30
+  eval_at_ms: null
+  expected:
+    order: ["resp@07:00", "resp@12:00"]
+    forbidden_width_normalised: {"resp@07:00": -1.25, "resp@12:00": -10.0}
+    forbidden_order: ["resp@12:00", "resp@07:00"]
+  hand_calculation: "Both alerts have sigma-hat -0.5, so sigma_norm = -0.5 and the severity keys (2, -0.5) are equal; the tie-break t_ms decides: 30600000 < 48600000, so resp@07:00 (half-width 0.4) is first. Forbidden variant, severity divided by the half-width: -0.5 / 0.4 = -1.25 for resp@07:00 and -0.5 / 0.05 = -10 for resp@12:00; -10 < -1.25 puts resp@12:00 first, the opposite order, and only because its interval is narrower, although both predictions have the same severity. Clipping the forbidden values to [-1, 1] gives -1 and -1, which discards the severity altogether. The width belongs to rho (confidence), not to sigma_norm (severity)."

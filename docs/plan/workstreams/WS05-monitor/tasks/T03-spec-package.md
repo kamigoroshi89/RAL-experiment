@@ -3,7 +3,7 @@ id: WS05-T03
 title: "spec package: registry and template loaders, normalisation, ranking, plan signature check"
 workstream: WS05-monitor
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS05-T02", "WS01-T03", "WS01-T04"]
 critical_path: true
 non_negotiable: false
