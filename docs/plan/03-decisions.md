@@ -12,7 +12,7 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 - **Decision.** The main pathology is hypertension (antihypertensive dosing with blood-pressure response). Validation is semi-synthetic plus ROS 2 simulation plus an optional mock-ward demo. No real patients. This is stated in the abstract, introduction and limitations (analisi §10 objection 1).
 - **Alternatives.** Two pathologies from the start (diabetes with the simglucose simulator is the analysis' optional second case, §5.8); a clinical pilot (out of reach and out of scope).
 - **Consequences.** WS04 targets hypertension only; the second pathology is an optional task (ADR-019). Human confirmation of scope is task WS00-T02.
-- **Status.** accepted (analisi §9 item 0.2).
+- **Status.** accepted (analisi §9 item 0.2) (confirmed (WS00-T02, 2026-10-08)).
 
 ## ADR-002 C3 reduced to integrity violations with a threat model
 
@@ -20,7 +20,7 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 - **Decision.** Class C3 is renamed and claimed as "integrity or plausibility violations" against declared attack classes (BLE injection and replay without keys, physical access to the dispenser, perception spoofing). Out of scope: compromised robot, RSM or specification. The diagnosability matrix reports the undetectable cases as a result.
 - **Alternatives.** Keep "tampering" and claim general adversarial detection (rejected: not defensible).
 - **Consequences.** WS02 owns the threat model and matrix; WS04 injects C3 at two attacker-knowledge levels (naive and informed); WS08 reports the non-detectable rows.
-- **Status.** accepted (analisi §3.6, §9 item 0.2).
+- **Status.** accepted (analisi §3.6, §9 item 0.2) (confirmed (WS00-T02, 2026-10-08)).
 
 ## ADR-003 Distributed architecture: ward node plus robot
 
@@ -28,7 +28,7 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 - **Decision.** A fixed ward node (BLE gateway plus RSM for continuous φ_CP monitoring) supervises the robot with a heartbeat. The robot runs the embodied specifications (task deadlines, presence and intake witness) and provides evidence. If the robot is unavailable, the fallback escalates to the nurse. The auditability claim is kept ("single auditable verification path") with a watchdog added.
 - **Alternatives.** Robot-only RSM (rejected: R3 fatal); ward-only RSM (rejected: robot loses its role and A4 has nothing to measure).
 - **Consequences.** Contract `#ros-2-interfaces` encodes placement. The robot's contribution stays central because it executes the obligations induced by the specification (φ_resp, φ_sched) and is the only witness channel.
-- **Status.** accepted (analisi §4.9 item 1, §9 item 0.2).
+- **Status.** accepted (analisi §4.9 item 1, §9 item 0.2) (confirmed (WS00-T02, 2026-10-08)).
 
 ## ADR-004 DISPENSE is distinct from INTAKE
 
@@ -94,55 +94,55 @@ Index: ADR-001 scope; 002 C3 as integrity; 003 distributed architecture; 004 DIS
 - **Consequences.** WS07 begins with a package availability check.
 - **Status.** superseded by ADR-042 (WS00-T05, 2026-10-08).
 
-## ADR-012 Source files in `docs/source/` [DA-CONFERMARE]
+## ADR-012 Source files in `docs/source/`
 
 - **Context.** PROMPT.md expects `docs/source/analisi.md` and `docs/source/review.md`. The repository held `analisi_RAL_clinical_pathways.md` (which contains the reviewer simulation in its §2) and the workshop PDF. No separate review file existed. The prompt says a missing source leads to a blocked state, but also forbids questions and asks for the most conservative choice.
 - **Decision.** `docs/source/analisi.md` is a byte-identical copy of the original; `docs/source/review.md` is a verbatim extract of lines 32-153 of the original (its §2: R1, R2, R3, AE meta-review), with a short header. Originals are left in the repository root, not moved. Files in `docs/source/` are read-only. The header of `review.md` states that it is an extract. Finding ids used for traceability are defined in `04-review-traceability.md`.
 - **Alternatives.** Write `BLOCKED.md` and stop (rejected: the required content exists verbatim in the analysis; stopping would lose no information but block all progress).
 - **Consequences.** If a separate authoritative review document exists, replace `review.md` and rerun the verifier.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed (WS00-T02, 2026-10-08)).
 
-## ADR-013 RTAMT as reference STL tool [DA-CONFERMARE]
+## ADR-013 RTAMT as reference STL tool
 
 - **Context.** The analysis lists RTAMT, Breach and S-TaLiRo and says "RTAMT o custom" for the monitor (analisi §3.1, §9 item 5, B3 uses RTAMT).
 - **Decision.** Original proposal: RTAMT is the reference implementation wrapped behind `ralmon.spec` and `ralmon.monitor`; a custom monitor may replace it if RTAMT cannot express robustness intervals or sparse sampling. Updated by WS05-T02 after the spike: the evaluator is custom and RTAMT is not a dependency of the monitor (outcome C, see below).
 - **Alternatives.** Custom monitor from the start; Breach or S-TaLiRo (MATLAB dependence); outcome B (custom evaluator, RTAMT kept as test oracle and as the engine of baseline B3), not adopted for the reasons in the record.
 - **Consequences.** The spike result is recorded in `docs/plan/workstreams/WS05-monitor/rtamt-spike.md`. `ralmon.spec` and `ralmon.monitor` do not import RTAMT; no `rtamt` extra is added to `pyproject.toml`; WS06-T04 builds baseline B3 on `make_point_evaluator` and the paper says that its point-robustness evaluator is the project's own (the wording "same templates with RTAMT" of analisi §5.4 is not used).
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed (WS00-T02, 2026-10-08)).
 
 Spike result (WS05-T02, closes the spike of ADR-013): outcome C. Tested RTAMT 0.4.10 on Python 3.12.8 (host throwaway venv) and 3.12.15 (`ralmon-dev` container, same report); on Python 3.14.4, the Python of the repository, `import rtamt` fails (`No module named 'typing.io'`). Q1 FAIL (4 of 7 templates translate mechanically and equal the goldens; `sched` and `int` contain `age`, `sys` uses an equality atom that RTAMT evaluates as `-abs(a - b)`), Q2 PASS, Q3 NOT-SUPPORTED (`update` returns a point value; the endpoint rule is unsound for `range`, `count` and `sys`), Q4 FAIL (no guard rule, no unknown value), Q5 FAIL (8 of 10 time-margin goldens only with hand rewrites), Q6 PASS (operator updates linear in the instances, but each timed `once` or `historically` scans its window at every step). Outcome C is forced by the Q1 failure (rule of WS05-T02 check 9). Entry point that WS06-T04 must call for raw robustness: `make_point_evaluator` of `ralmon.monitor`, created by WS05-T04. Evidence and the reasons for not adopting outcome B: `docs/plan/workstreams/WS05-monitor/rtamt-spike.md`. This remains `[DA-CONFERMARE]` until a human confirms it.
 
-## ADR-014 Placement of §9 items in workstreams [DA-CONFERMARE]
+## ADR-014 Placement of §9 items in workstreams
 
 - **Context.** PROMPT.md lists WS00 as human-only tasks and workstreams WS01-WS13; roadmap §9 has phase-0 items 0.1-0.7 and items 1-13. Prompt and §9 agree on 14 workstreams (WS00-WS13, with WS06 baselines and WS12 paper). Two items do not fit a human-only WS00.
 - **Decision.** Phase-0 items 0.4 (title) and 0.5 (abstract without numbers) are agent-doable and are placed in WS12 as tasks (owner agent), not in WS00. Item 0.7 also covers verifying the TIAGo simulation packages. WS00 holds 0.1, 0.2, 0.3, 0.6, 0.7 (human). The ROS 2 node realisation of §9 item 5 is delivered in WS05 (thin wrappers), while WS07 owns the simulation environment, robot faults and latency measurement.
 - **Alternatives.** Put 0.4 and 0.5 in WS00 as human tasks.
 - **Consequences.** M0 (commitment letter) depends on WS00 and two WS12 tasks.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed (WS00-T02, 2026-10-08)), as amended by ADR-037 (items 0.4 and 0.5 are owned by the human).
 
-## ADR-015 Run location of the loop script [DA-CONFERMARE]
+## ADR-015 Run location of the loop script
 
 - **Context.** `prompt/run-plan.sh` starts with `cd "$(dirname "$0")"`, which sets the working directory to `prompt/`, while PROMPT.md and the design assume the repository root (`docs/`, `tools/`, `CLAUDE.md`).
 - **Decision.** This bootstrap ran with the repository root as working directory. To use the script unchanged it must be copied or symlinked to the repository root, together with `PROMPT.md` and `.claude/settings.json`. `prompt/` is committed as delivered.
 - **Alternatives.** Edit the script (rejected: not asked; part of user-provided input).
 - **Consequences.** None for the plan content.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed (WS00-T02, 2026-10-08)).
 
-## ADR-016 Python toolchain [DA-CONFERMARE]
+## ADR-016 Python toolchain
 
 - **Context.** The sources fix neither Python version nor tools.
 - **Decision.** Python 3.11+, pytest, Hypothesis for property tests, ruff (format and lint), mypy strict on `src/ralmon`, `numpy` random Generators with explicit seeds.
 - **Alternatives.** unittest; black and flake8; pyright.
 - **Consequences.** WS05-T01 creates `pyproject.toml` with these settings.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** superseded by ADR-042 (WS00-T02, 2026-10-08).
 
-## ADR-017 Time unit: integer milliseconds [DA-CONFERMARE]
+## ADR-017 Time unit: integer milliseconds
 
 - **Context.** Sparse, irregular sampling, event impulses and windows in minutes and hours need one unit (analisi §4.1 item 2).
 - **Decision.** Integer milliseconds since trace start; conversion helpers in `ralmon.signals`.
 - **Alternatives.** Float seconds (accumulates drift and equality problems); datetime objects.
 - **Consequences.** Contracts use `TimeMs` and `DurationMs`.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed (WS00-T02, 2026-10-08)).
 
 ## ADR-018 Reference verification is a human step
 
