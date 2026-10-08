@@ -3,7 +3,7 @@ id: WS07-T01
 title: "Package availability check and simulation workspace"
 workstream: WS07-ros2-sim
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS00-T05"]
 critical_path: true
 non_negotiable: false
@@ -138,3 +138,10 @@ Status stays `in_progress`; no new ADR; `pyproject.toml` untouched in this round
 - **Scratch containers.** `docker rm -f t07simrev-1 t07simrev-5` failed with `permission denied` (could not kill the container); left in place.
 
 Re-run after the edits (real exit codes): availability test 30 passed exit 0 in the Humble container, 29 passed and 1 skipped exit 0 on the host `.venv` and in `ralmon-dev`; `ruff check ros2/ralmon_sim` and `ruff format --check ros2/ralmon_sim` exit 0 (host and container); `colcon build --packages-select ralmon_sim` exit 0 and `ros2 pkg prefix ralmon_sim` exit 0; `check_sim_env.sh` host exit 2, container exit 0; heading count 9; the import and forbidden-word greps print nothing; `python3 tools/check_plan.py` exit 0; core suites: host Python 3.14.4 2357 passed, ralmon-dev Python 3.12 2357 passed, Humble Python 3.10.12 2357 passed, with `ruff check`, `ruff format --check` and `mypy src/ralmon` exit 0 in all three.
+
+### Post-task review (orchestrator, 2026-10-09)
+
+Produced: `ros2/ralmon_sim/` (colcon package skeleton with the eight console scripts of the README module map), `config/package_availability.yaml` (verdict `supersede_adr_011`: ROS 2 Humble with Gazebo Classic, Fortress as fallback; ADR-042 already carries the decision, so no ADR was appended), `doc/availability.md` (nine headings), `scripts/check_sim_env.sh`, `scripts/netem_probe.py`, `ros2/sim.repos` (two pinned sources), the Humble image `ralmon-ros2:humble` (Dockerfile, compose service, README), and the ADR-042 Python migration (`requires-python = ">=3.10"`, `tomli` fallback in `tests/test_toolchain.py`). Independent review: PASS, no blocker (fact check of every component against the primary sources: all OK; PAL smoke tests reproduced under Xvfb; 44 mutants on the record with 2 survivors by design; core suite green under Python 3.10, 3.12, 3.14); one fix round closed the `check_sim_env.sh` exit semantics, the malformed-record traceback, the unsourced GPU statement and wording. Orchestrator verification: availability test 23/30 passed in the Humble container, host 29 passed 1 skipped, ruff and mypy exit 0, `colcon build` and `ros2 pkg prefix` exit 0, `check_sim_env.sh` exit 2 on the host and 0 in the container, heading count 9, `check_plan` OK.
+Honest limits: no robot motion, navigation goal, Fortress run, HuNavSim build or kernel tracing was run; Nav2 and the PAL packages are `available` on install, launch and active lifecycle nodes only; the Fast DDS message-loss results varied between two runs while CycloneDDS was stable (the compose service pins CycloneDDS); `tc netem` works only in a container with `NET_ADMIN`.
+Impact on dependents: WS07-T02 (hospital world) is now `ready`; WS05-T09 and WS07-T03 wait on other dependencies. For a human (Open items in `doc/availability.md`): numpy floor of about 1.25 for the core on the ward node (not declared in `pyproject.toml`), `tomli` in the dev extras, a compose service with `NET_ADMIN` for netem, the exact onboard computer of the group's TIAGo Pro, the hospital-world licence inconsistency (LICENSE text versus package.xml) and the Fuel model licences before any release, the RMW of the real robot, and plan documents still describing Jazzy (`WS07-ros2-sim/README.md` line 20, `T02-hospital-world.md` line 17, ADR-031 text).
+Open MINOR: none beyond the open items. Two idle scratch containers of the reviewer (`t07simrev-1`, `t07simrev-5`) remain and exit on their own.
