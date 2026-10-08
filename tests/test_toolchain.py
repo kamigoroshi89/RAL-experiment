@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import re
-import tomllib
 from pathlib import Path
 
 import numpy as np
 from hypothesis import settings
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 has no tomllib (ADR-042)
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -25,7 +29,7 @@ def test_pyproject_declares_toolchain() -> None:
     data = _pyproject()
     project = data["project"]
     tool = data["tool"]
-    assert project["requires-python"].startswith(">=3.11")
+    assert project["requires-python"].startswith(">=3.10")
     assert tool["mypy"]["strict"] is True
     assert "src/ralmon" in tool["mypy"]["files"]
     assert {"I", "B"} <= set(tool["ruff"]["lint"]["extend-select"])

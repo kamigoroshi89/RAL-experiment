@@ -1,0 +1,262 @@
+# Package availability record of the simulation stack (WS07-T01).
+#
+# Every status, version and source below was read from the source named next to it, or observed by
+# a command whose output is saved in doc/availability.md (section Reproduction), on `checked_on`.
+# The machine-checked schema is ros2/ralmon_sim/test/test_package_availability.py.
+#
+# status: available | partial | unavailable | unverified | not_evaluated
+#   available   the component exists for the target and was observed in the image of `host.route`
+#   partial     it exists but part of what a later task needs was not shown (see notes)
+#   unverified  not checked; `human_action` says what a human has to do
+# `version` is only filled from a source (`source_url`); `evidence` lists URLs and commands.
+schema_version: 1
+task: WS07-T01
+checked_on: "2026-10-08"
+checked_by: agent
+
+host:
+  os_release: "Ubuntu 26.04.1 LTS (Resolute Raccoon)"
+  kernel: "Linux 7.0.0-38-generic"
+  architecture: x86_64
+  cpu_model: "AMD Ryzen 9 8940HX with Radeon Graphics"
+  cores: 16
+  threads: 32
+  ram_gb: 29.9
+  gpu: >-
+    NVIDIA GeForce RTX 5070 Laptop GPU (driver 580.178.04, 8151 MiB) and an AMD Raphael iGPU.
+    Not used: the simulation renders on the CPU (Xvfb with Mesa llvmpipe), so a machine without a
+    GPU runs the same route.
+  supported_platform: false
+  supported_platform_source: "https://raw.githubusercontent.com/ros-infrastructure/rep/master/rep-2000.rst (Humble Hawksbill targets Ubuntu Jammy 22.04 amd64, Tier 1; this host is Ubuntu 26.04)"
+  sudo: "none (sudo asks for a password); unprivileged user namespaces are restricted (kernel.apparmor_restrict_unprivileged_userns = 1)"
+  docker: "Docker client 29.5.0, server 29.8.0, Compose v5.1.1; data root under /var/snap/docker (bind mounts of /tmp showed an empty directory, so scratch files lived under outputs/)"
+  route: >-
+    Container for every step: docker compose --profile ros2 run --rm ros2 (image ralmon-ros2:humble,
+    docker/Dockerfile.ros2, base image ros:humble-ros-base, Ubuntu 22.04.5, Python 3.10.12).
+    The repository is mounted at /work and the container runs as the host user.
+  base_image: "ros:humble-ros-base, digest sha256:860e53793ccf575e5369b5e9a19939de2bfcfb46a299954d06f54f2af54fed19 (docker pull on 2026-10-08)"
+
+target:
+  ros_distro: humble
+  gazebo: classic
+  gazebo_fallback: fortress
+  python_floor: "3.10"
+
+verdict: supersede_adr_011
+superseding_adr: ADR-042
+verdict_reasons:
+  - "ADR-042 (accepted 2026-10-08) already supersedes ADR-011 and ADR-016; no new ADR is needed."
+  - "The four gate components (ros2_distro, gazebo, ros_gz_bridge, nav2) are available for Humble with Gazebo Classic, observed in the image."
+  - "The PAL TIAGo and TIAGo Pro simulation packages exist as ROS apt binaries for Humble only (no Jazzy branch in tiago_simulation), and both launched with Nav2 in the image."
+  - "What is new compared with ADR-042: the PAL packages install and launch outside the PAL developer Docker image; the new-Gazebo option on Humble is Fortress; ros_gz_bridge on Humble binaries serves Fortress, not Classic (Classic uses gazebo_ros_pkgs); system numpy 1.21.5 is too old for the ralmon core (see doc/availability.md, Proposed ADR)."
+
+components:
+  ros2_distro:
+    status: available
+    version: "Humble Hawksbill (REP 2000: Ubuntu Jammy 22.04, Python 3.10.4)"
+    source_url: https://raw.githubusercontent.com/ros-infrastructure/rep/master/rep-2000.rst
+    evidence:
+      - "REP 2000, section Humble Hawksbill: Ubuntu Jammy (22.04) amd64 Tier 1; dependency table rows Python 3.10.4, NumPy 1.21.5, Gazebo Classic 11.x.x, Gazebo (Ignition) Fortress."
+      - "command in ralmon-ros2:humble: python3 --version prints Python 3.10.12 and echo $ROS_DISTRO prints humble (doc/availability.md, Reproduction step 1)."
+      - "docker pull ros:humble-ros-base succeeded; digest in host.base_image."
+    python_in_image: "3.10.12"
+    python_vs_floor: "satisfies the Python 3.10 floor of ADR-042; would not satisfy the retired 3.11 floor of ADR-016"
+    verified_on: "2026-10-08"
+    verified_by: agent
+
+  gazebo:
+    status: available
+    version: "Gazebo Classic 11.10.2+dfsg-1 (Ubuntu jammy package gazebo)"
+    source_url: https://packages.ubuntu.com/jammy/gazebo
+    evidence:
+      - "command in ralmon-ros2:humble: gazebo --version prints 'Gazebo multi-robot simulator, version 11.10.2'."
+      - "REP 2000 Humble dependency table: Gazebo Classic 11.x.x for Ubuntu Jammy."
+      - "headless gzserver with gazebo_ros_init loaded the AWS hospital world: /clock published 2 s after start, /spawn_entity and /get_model_list present (doc/availability.md, Reproduction step 7)."
+      - "the PAL launch files of tiago_gazebo and tiago_pro_gazebo offer gazebo_version in ['gazebo', 'classic'] with default 'classic' (ros2 launch --show-args)."
+    fallback: >-
+      Fortress is the new-Gazebo option on Humble. Observed: ign gazebo --versions prints 6.18.0
+      (libignition-gazebo6, pulled in by ros-humble-ros-gz-sim); gazebo-tooling collection-fortress.yaml
+      lists gz-sim at ign-gazebo6 and gz-sensors at ign-sensors6, the library that tiago_gazebo and
+      tiago_pro_gazebo depend on (gz-sensors6). No Fortress simulation was launched.
+    notes: >-
+      Gazebo Classic is end of life since January 2025 (the notice printed by gazebo_ros_init at
+      start-up says so); a known reproducibility risk recorded by ADR-042. In the TIAGo smoke test the laser
+      scan topics appeared only when an X display was present: Xvfb with Mesa software rendering
+      worked (Xvfb is not part of the image).
+    verified_on: "2026-10-08"
+    verified_by: agent
+
+  ros_gz_bridge:
+    status: available
+    version: "ros_gz_bridge 0.244.26-1 (Humble, Fortress); gazebo_ros_pkgs 3.9.0-1 (Humble, Classic)"
+    source_url: https://raw.githubusercontent.com/ros/rosdistro/master/humble/distribution.yaml
+    evidence:
+      - "rosdistro humble/distribution.yaml: ros_gz release 0.244.26-1 (packages ros_gz_bridge, ros_gz_sim, ros_gz_interfaces) and gazebo_ros_pkgs release 3.9.0-1 (packages gazebo_ros, gazebo_plugins, gazebo_msgs, gazebo_dev)."
+      - "ros_gz README (branch humble): table row 'Humble | Fortress | humble | https://packages.ros.org'; Garden and Harmonic on Humble come from packages.osrfoundation.org; Classic is not listed."
+      - "command in ralmon-ros2:humble: dpkg-query prints ros-humble-ros-gz-bridge 0.244.26-1jammy and ros-humble-gazebo-ros-pkgs 3.9.0-1jammy; ros2 pkg prefix finds gazebo_ros, ros_gz_bridge and ros_gz_sim under /opt/ros/humble."
+    items:
+      - name: gazebo_ros_pkgs
+        role: "ROS 2 to Gazebo Classic integration (target of ADR-042)"
+        version: "3.9.0-1"
+        source_url: https://raw.githubusercontent.com/ros/rosdistro/master/humble/distribution.yaml
+      - name: ros_gz_bridge
+        role: "ROS 2 to Gazebo bridge for the Fortress fallback (it does not serve Classic)"
+        version: "0.244.26-1"
+        source_url: https://raw.githubusercontent.com/gazebosim/ros_gz/humble/README.md
+    notes: >-
+      The hand-over text of WS07-T01 says the bridge pairs Humble with Classic or Fortress. The
+      README says Humble binaries pair with Fortress only. For the Classic target the integration
+      is gazebo_ros_pkgs (gazebo_ros), so the component is recorded as both and check_sim_env.sh
+      observes both packages.
+    verified_on: "2026-10-08"
+    verified_by: agent
+
+  nav2:
+    status: available
+    version: "1.1.20-1"
+    source_url: https://raw.githubusercontent.com/ros/rosdistro/master/humble/distribution.yaml
+    evidence:
+      - "rosdistro humble/distribution.yaml: navigation2 release 1.1.20-1, source branch humble, packages include nav2_bringup, nav2_msgs, nav2_bt_navigator, nav2_simple_commander."
+      - "command in ralmon-ros2:humble: dpkg-query prints ros-humble-navigation2 1.1.20-1jammy and ros-humble-nav2-bringup 1.1.20-1jammy."
+      - "ros2 launch tiago_pro_gazebo tiago_pro_gazebo.launch.py navigation:=True under Xvfb: /amcl, /controller_server, /planner_server and /bt_navigator were in the active state when queried 100 s after the launch (doc/availability.md, Reproduction step 8); the same launch for tiago_gazebo listed the Nav2 lifecycle nodes."
+    verified_on: "2026-10-08"
+    verified_by: agent
+
+  robot_sim_pal:
+    status: available
+    variant: tiago_pro
+    version: "tiago_pro_simulation 1.19.0-1 (tiago_pro_gazebo 1.19.0); tiago_simulation 4.13.0-1 (tiago_gazebo 4.13.0)"
+    source_url: https://raw.githubusercontent.com/ros/rosdistro/master/humble/distribution.yaml
+    evidence:
+      - "rosdistro humble/distribution.yaml: tiago_pro_simulation 1.19.0-1 (packages tiago_pro_gazebo, tiago_pro_mujoco, tiago_pro_simulation) and tiago_simulation 4.13.0-1 (tiago_gazebo, tiago_simulation), both from branch humble-devel."
+      - "git ls-remote --heads: tiago_simulation has alum-devel, foxy-devel, galactic-devel, humble-devel and older ROS 1 branches, none named jazzy; tiago_pro_simulation has alum-devel, humble-devel and master (the ROS distribution that alum-devel and master target was not checked)."
+      - "command in ralmon-ros2:humble: dpkg-query prints ros-humble-tiago-pro-gazebo 1.19.0-1jammy, ros-humble-tiago-gazebo 4.13.0-1jammy; the packages come from the ROS apt repository, so the PAL developer Docker image is not needed."
+      - "TIAGo Pro smoke test (Xvfb, Mesa llvmpipe, Gazebo Classic): ros2 launch tiago_pro_gazebo tiago_pro_gazebo.launch.py is_public_sim:=True gzclient:=False navigation:=True gave 7 active ros2_control controllers (arm_left, arm_right, grippers, head, torso, joint_state_broadcaster) and active Nav2 nodes; /scan_front_raw and /scan_rear_raw exist; the omnidirectional base is driven by gazebo_ros_planar_move on /mobile_base_controller/cmd_vel_unstamped."
+      - "TIAGo smoke test, same options: 7 active controllers including mobile_base_controller, a /scan_raw message with frame base_laser_link, Nav2 lifecycle nodes listed."
+    arm_simulated: >-
+      yes. tiago_pro_gazebo declares arm_type_right and arm_type_left (choices tiago-pro, tiago-pro-s,
+      no-arm) and the smoke test listed arm_left_controller and arm_right_controller as active;
+      tiago_gazebo declares arm_type with choices tiago-arm and no-arm.
+    distributions: "Humble only for the released packages (rosdistro Humble lists both; the index shows no Jazzy release)"
+    gazebo_generations: "classic (default) and gazebo (Fortress on Humble) through the launch argument gazebo_version"
+    not_shown: "no robot motion, no navigation goal and no hospital world with the robot were run; that belongs to WS07-T02 and WS07-T04"
+    notes: >-
+      Variant chosen by the preference order tiago_pro, tiago, stand_in: the TIAGo Pro simulation
+      installs and launches with Nav2 on the target stack. The open point of WS00-T05 (does it build
+      outside the PAL developer image) is closed by the binary route: the packages install from the
+      ROS apt repository on the stock ros:humble-ros-base image. The group's real TIAGo and TIAGo
+      Pro run Humble (WS00-T05, answer of gab).
+    verified_on: "2026-10-08"
+    verified_by: agent
+
+  hospital_world:
+    status: available
+    decision: use_ros2_branch
+    version: "aws_robomaker_hospital_world 1.0.0 (branch ros2, commit 7161eb8448f5cba6a469da7a79ae5d660b0b7f58, 2021-07-29)"
+    source_url: https://github.com/aws-robotics/aws-robomaker-hospital-world/tree/ros2
+    license: >-
+      LICENSE file of the repository: "Copyright 2019 Amazon.com, Inc. or its affiliates", a permission
+      notice that grants use, copy, modify, merge, publish, distribute, sublicense and sell without
+      a condition to keep the notice (the text matches the MIT No Attribution licence; that
+      identification is the agent's). package.xml declares "Apache 2.0", which differs; GitHub
+      detects no licence. The 44 models fetched from Gazebo Fuel carry their own licences, not checked.
+    evidence:
+      - "GitHub API: archived true, default branch archive, pushed_at 2026-07-21, size 65871 KB; branch ros2 last commit 2021-07-29 'Use floor friction value from Gazebo empty world (#13)'."
+      - "package.xml (ros2): ament_cmake, exec_depend gazebo_ros, gazebo, gazebo_plugins; CMakeLists.txt downloads 44 models from https://fuel.ignitionrobotics.org/1.0/OpenRobotics/models with fuel_utility.py; README: supported versions of Gazebo '7.14.0+ | 9.16.0+' (Gazebo Classic)."
+      - "built in the image from the pinned commit (colcon, 6 min, network needed for Fuel): installed size 132 MB, 3 worlds (hospital.world, hospital_two_floors.world, hospital_three_floors.world), 37 local models, 44 Fuel model directories; hospital.world is SDF 1.6 with 183 includes."
+      - "gzserver headless with gazebo_ros_init loaded hospital.world on Gazebo Classic 11.10.2 without porting: /clock after 2 s, services /spawn_entity and /get_model_list (doc/availability.md, Reproduction step 7)."
+    gazebo_generation: "Gazebo Classic (SDF 1.6, ODE physics, gazebo_ros plugins); no port to the new Gazebo exists in the repository"
+    repository_state: "archived; no maintenance; the notice 'AWS RoboMaker reached end of support on September 10, 2025' is in the README of the default branch (WS00-T05)"
+    notes: >-
+      Decision use_ros2_branch: the ros2 branch runs on Humble with Classic as it is. The overlay
+      package does not add its models to GAZEBO_MODEL_PATH by itself (the variable held only
+      pal_gazebo_worlds/models in the sourced image), so the launch file of WS07-T02 must set it.
+      The rmf_demos clinic world (Humble support not checked) stays an alternative for WS07-T02.
+    verified_on: "2026-10-08"
+    verified_by: agent
+
+  human_sim:
+    status: partial
+    version: null
+    source_url: https://github.com/robotics-upo/hunav_sim
+    evidence:
+      - "README of hunav_sim (branches v1.0-humble and v2.0): 'Tested in ROS2 Humble'; wrappers for Gazebo Classic v11 (hunav_gazebo_wrapper), Gazebo Fortress (hunav_gazebo_fortress_wrapper) and Webots."
+      - "git ls-remote --heads robotics-upo/hunav_sim: foxy, v1.0-humble, v2.0 and others; the GitHub API reports default branch v2.0, licence MIT, not archived, pushed 2026-09-08."
+      - "rosdistro humble/distribution.yaml has no hunav_sim entry and apt-cache policy ros-humble-hunav-sim prints nothing: there is no binary package."
+      - "ros2 pkg prefix hunav_agent_manager prints 'Package not found' in ralmon-ros2:humble."
+    notes: >-
+      Optional (analisi section 5.2, marked unverified there). Humble and Gazebo Classic are
+      documented by the README. The README lists dependencies to build from source (lightsfm,
+      people_msgs, BehaviorTree.CPP 4.6 and BehaviorTree.ROS2); no build was attempted and the repository is
+      not in sim.repos. WS07-T02 decides whether moving humans are worth the build.
+    verified_on: "2026-10-08"
+    verified_by: agent
+
+  ros2_tracing:
+    status: available
+    version: "4.1.2-1 (ros2_tracing, Humble); tracetools built from commit 3c159b382d2d565e26eaa91e39c9ec06a5c6fe88"
+    source_url: https://raw.githubusercontent.com/ros/rosdistro/master/humble/distribution.yaml
+    evidence:
+      - "rosdistro humble/distribution.yaml: ros2_tracing 4.1.2-1 (ros2trace, tracetools, tracetools_launch, tracetools_read, tracetools_test, tracetools_trace) and tracetools_analysis 3.0.0-4."
+      - "README of ros2_tracing (branch humble): the Debian packages 'will not work out-of-the-box'; LTTng must be installed and tracetools built from source; kernel tracing needs lttng-modules and the tracing group."
+      - "command in ralmon-ros2:humble as the non-root host user (uid 1000): ros2 run tracetools status prints 'Tracing enabled' (source build in /opt/ralmon_overlay); lttng --version prints 2.13.4; import lttng and babeltrace works."
+      - "ros2 trace -s ws07probe -u 'ros2:*' with a ros2 topic pub, as uid 1000: 240 events read back with tracetools_read.trace.get_trace_events (114 ros2:rmw_publish, 106 ros2:rcl_publish, 8 ros2:rmw_take, 4 ros2:rmw_publisher_init, 3 ros2:rcl_publisher_init, 2 ros2:rcl_timer_init); an earlier run in the previous build of the image read 242 events; no root is needed for user-space tracing."
+      - "tracetools_analysis 3.0.0-4 installs from the ROS apt repository and imports (it uses the apt pandas 1.3.5)."
+    analysis_tool: "tracetools_analysis 3.0.0-4 (apt) and tracetools_read (CTF reader)"
+    not_shown: "kernel tracing (needs root and lttng-modules-dkms on the host kernel) was not tried"
+    verified_on: "2026-10-08"
+    verified_by: agent
+
+  tc_netem:
+    status: partial
+    version: "iproute2 5.15.0-1ubuntu2 (tc 5.15.0 in the image)"
+    source_url: https://packages.ubuntu.com/jammy/iproute2
+    evidence:
+      - "host: /usr/sbin/tc exists (iproute2 6.19.0); module sch_netem.ko.zst exists for kernel 7.0.0-38-generic; the host user has no sudo and unprivileged user namespaces are restricted, so netem cannot be configured on the host without a human."
+      - "throw-away container as root with docker run --cap-add NET_ADMIN (own network namespace): tc qdisc add dev lo root netem loss 30% exit 0; tc qdisc show prints 'qdisc netem 8001: root refcnt 2 limit 1000 loss 30%'; deleted afterwards."
+      - "message-count probe (scripts/netem_probe.py: 1000 best-effort messages at 100 Hz, publisher and subscriber as two processes of the same container; two runs, received messages out of 1000, first run / second run): CycloneDDS without netem 1000 / 1000, netem 30% on lo 698 / 704, netem 30% on eth0 1000 / 1000; Fast DDS default transports without netem 1000 / 1000, netem 30% on lo 941 / 1000, netem 30% on eth0 1000 / 1000; Fast DDS with a UDP-only transport profile and netem 30% on lo 233 / 715."
+    privilege: "CAP_NET_ADMIN (root in a container started with --cap-add NET_ADMIN, or root on the host); the compose service ros2 runs as the host user without the capability"
+    same_host_dds: >-
+      Same-host DDS traffic reached the subscriber through the loopback interface: netem on lo
+      dropped messages and netem on eth0 dropped none. CycloneDDS delivered 69.8 % and 70.4 % of
+      the messages at a nominal packet loss of 30 % (two runs), so a drop probability on lo acts
+      as expected. Fast DDS with its default transports delivered 94.1 % and 100 %: netem on lo
+      had little or no effect. Fast DDS with a UDP-only transport profile (useBuiltinTransports
+      false, one UDPv4 descriptor; the XML is in Reproduction step 9 of doc/availability.md)
+      delivered 23.3 % and 71.5 %, a threefold spread between two runs. The causes of the Fast
+      DDS behaviour were not isolated. To use netem as a fault, run CycloneDDS or repeat the
+      probe with the RMW and profile of the experiment.
+    notes: >-
+      Partial: netem works inside a container with NET_ADMIN, which proves the tool and the kernel
+      module on this host kernel and the effect on a same-host stream. It does not prove that the
+      host user can configure the host network, and it was run twice per row (two runs, no statistics). WS07-T05
+      needs a compose service with cap_add NET_ADMIN (not added here) and has to repeat the probe
+      with the RMW it uses.
+    human_action: "If netem is wanted outside a container, a human with root runs the commands of doc/availability.md section Reproduction step 9 on the host, or approves a compose service with cap_add NET_ADMIN."
+    verified_on: "2026-10-08"
+    verified_by: agent
+
+  onboard_computer:
+    status: partial
+    version: null
+    cpu_model: "Intel i5 (base configuration of the TIAGo Pro; generation and model number not stated in the datasheet); optional upgrade Intel i7"
+    cores: "not stated in 2025-Datasheet-TIAGo-Pro.pdf"
+    ram_gb: 16
+    ram_gb_upgrade: 32
+    storage: "512 GB SSD (upgrade 1 TB SSD)"
+    gpu: "none in the base configuration; upgrade 'NVIDIA Jetson PC' (datasheet wording)"
+    os: "Ubuntu LTS 64-bits | PREEMPT-RT, ROS 2 (datasheet wording; the release is not stated)"
+    source_ref: "https://pal-robotics.com/wp-content/uploads/2025/05/2025-Datasheet-TIAGo-Pro.pdf, page 2, blocks ROBOT PC, SOFTWARE & DEVELOPMENT and UPGRADES AND ACCESORIES"
+    other_variant_ref: "TIAGo: https://pal-robotics.com/wp-content/uploads/2024/04/Datasheet-TIAGo.pdf, block COMPUTER: CPU 'Intel i5 / i7', RAM '8 GB / 16 GB', SSD '250 GB / 500 GB'; cores not stated"
+    evidence:
+      - "datasheet of the TIAGo Pro downloaded and read with pdftotext and as an image on 2026-10-08: ROBOT PC row 'CPU: Intel i5, RAM 16 GB, 512GB SSD'; upgrades row 'CPU: Intel i7, 32 GB RAM, 1 TB SSD' and 'GPU: NVIDIA Jetson PC'."
+      - "datasheet of the TIAGo downloaded and read the same way (block COMPUTER)."
+    equivalent_hardware: "not stated in docs/plan/workstreams/WS00-admin/outputs/WS00-T05.md (equivalent hardware for the WS07-T07 measurement is an open point there)"
+    human_action: "State the exact CPU model, core count, RAM and GPU option of the group's TIAGo Pro (and whether WS07-T07 may run on its onboard computer); until then the CPU and memory figures of WS07-T07 are reported with the host description of this record."
+    verified_on: "2026-10-08"
+    verified_by: agent
+
+  isaac_sim:
+    status: not_evaluated
+    version: null
+    notes: "Not evaluated by design: analisi section 5.2 calls Isaac Sim optional, GPU-expensive and advises against it for a small group."

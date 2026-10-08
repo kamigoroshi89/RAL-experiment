@@ -1,27 +1,53 @@
-# ROS 2 + Gazebo base image for WS07 and WS10 (simulation and robot-side nodes).
-# Distribution and simulator follow CLAUDE.md ("Jazzy and Gazebo Harmonic unless ADR-011 is
-# superseded"); ADR-011 is still [DA-CONFERMARE]. This image contains no TIAGo packages: the
-# robot description, controllers and worlds belong to WS07-T01 and depend on WS00-T05.
-FROM ros:jazzy-ros-base
+# ROS 2 Humble + Gazebo Classic simulation image for WS07 and WS10 (ADR-042, which supersedes
+# ADR-011). Ubuntu 22.04, Python 3.10: this image is also the proof that the ROS-independent core
+# runs under Python 3.10, the floor of `ralmon` (see docker/README.md).
+#
+# Contents: Gazebo Classic 11 with gazebo_ros_pkgs, the ROS-Gazebo bridge for the Fortress
+# fallback, Nav2, the PAL TIAGo and TIAGo Pro simulation packages (binary packages of the ROS
+# apt repository), LTTng, and an overlay built from ros2/sim.repos: `tracetools` compiled with
+# LTTng (required on Humble) and the AWS RoboMaker hospital world. Package versions are not
+# pinned here; the resolved ones are recorded by ros2/ralmon_sim/doc/availability.md.
+FROM ros:humble-ros-base
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_BREAK_SYSTEM_PACKAGES=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/work/src \
     HOME=/tmp
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      python3-pip python3-yaml python3-numpy git make \
-      ros-jazzy-ros-gz-sim ros-jazzy-ros-gz-bridge \
-      ros-jazzy-rmw-cyclonedds-cpp \
+      python3-pip python3-yaml python3-numpy git make iproute2 \
+      ros-humble-gazebo-ros-pkgs \
+      ros-humble-ros-gz-bridge ros-humble-ros-gz-sim \
+      ros-humble-navigation2 ros-humble-nav2-bringup \
+      ros-humble-tiago-simulation ros-humble-tiago-pro-simulation \
+      ros-humble-rmw-cyclonedds-cpp \
+      lttng-tools liblttng-ust-dev python3-lttng python3-babeltrace \
+      ros-humble-ros2trace ros-humble-tracetools-launch ros-humble-tracetools-analysis \
  && rm -rf /var/lib/apt/lists/* \
  && git config --system --add safe.directory /work
 
-# Python development tools for the ROS-independent core, installed next to the system ROS Python.
-RUN python3 -m pip install pytest hypothesis ruff mypy types-PyYAML
+# Overlay: third-party sources pinned in ros2/sim.repos. The hospital world downloads its Gazebo
+# Fuel models during the build (its CMakeLists runs fuel_utility.py), so this layer needs network.
+COPY ros2/sim.repos /tmp/sim.repos
+RUN mkdir -p /opt/ralmon_overlay/src \
+ && cd /opt/ralmon_overlay \
+ && vcs import --input /tmp/sim.repos src \
+ && . /opt/ros/humble/setup.sh \
+ && colcon build --merge-install --packages-select tracetools aws_robomaker_hospital_world \
+ && rm -rf build log src /tmp/sim.repos
+
+# Python development tools for the ROS-independent core, installed next to the system ROS Python
+# (placed after the overlay so that changing them does not repeat the Fuel downloads).
+# - pytest stays the apt version (6.2.5): pytest 9 (pip) breaks the pytest plugins of ROS 2 Humble
+#   (launch_testing, launch_testing_ros) at start-up. apt gives `pytest-3`; `pytest` is linked.
+# - numpy is limited to 1.x (pip gives 1.26.4 on Python 3.10): the apt pandas of tracetools_analysis
+#   is built against numpy 1 and numpy 2 breaks its import. The system numpy (1.21.5, REP 2000)
+#   is too old for the core: one test fails and mypy reports 5 errors on it (docker/README.md).
+RUN python3 -m pip install --upgrade "numpy<2" hypothesis ruff mypy types-PyYAML \
+ && ln -s /usr/bin/pytest-3 /usr/local/bin/pytest
 
 COPY docker/ros-entrypoint.sh /ros-entrypoint.sh
 RUN chmod +x /ros-entrypoint.sh

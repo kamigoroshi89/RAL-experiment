@@ -1,0 +1,6 @@
+# colcon output
+build/
+install/
+log/
+# third-party sources imported with vcstool from sim.repos (never committed)
+third_party/

@@ -33,7 +33,15 @@ SCRIPT = PACKAGE_DIR / "scripts" / "check_sim_env.sh"
 SETUP_PY = PACKAGE_DIR / "setup.py"
 PACKAGE_XML = PACKAGE_DIR / "package.xml"
 README = REPO_ROOT / "docs" / "plan" / "workstreams" / "WS07-ros2-sim" / "README.md"
-WS00_T05 = REPO_ROOT / "docs" / "plan" / "workstreams" / "WS00-admin" / "outputs" / "WS00-T05.md"
+WS00_T05 = (
+    REPO_ROOT
+    / "docs"
+    / "plan"
+    / "workstreams"
+    / "WS00-admin"
+    / "outputs"
+    / "WS00-T05.md"
+)
 DECISIONS = REPO_ROOT / "docs" / "plan" / "03-decisions.md"
 
 REQUIRED_COMPONENTS = [
@@ -122,7 +130,9 @@ def _readme_module_map() -> dict[str, tuple[str, str]]:
     entry = re.compile(r"`([a-z_]+) = ([a-z_.]+):([a-z_]+)`")
     found: dict[str, tuple[str, str]] = {}
     for row in section.splitlines():
-        if row.startswith("|"):
+        if row.startswith("|") and not row.startswith(
+            "| Module"
+        ):  # skip the header row
             for name, module, function in entry.findall(row):
                 found[name] = (module, function)
     return found
@@ -159,16 +169,22 @@ def test_component_ids_complete() -> None:
 def test_status_values_valid() -> None:
     components = _components()
     for name, component in components.items():
-        assert component.get("status") in STATUSES, f"{name}: status {component.get('status')!r}"
+        assert component.get("status") in STATUSES, (
+            f"{name}: status {component.get('status')!r}"
+        )
     isaac = components["isaac_sim"]
     assert isaac["status"] == "not_evaluated"
     notes = str(isaac.get("notes", ""))
-    assert "analisi" in notes and "5.2" in notes, "isaac_sim notes must cite analisi section 5.2"
+    assert "analisi" in notes and "5.2" in notes, (
+        "isaac_sim notes must cite analisi section 5.2"
+    )
 
 
 def test_evidence_required_unless_unverified() -> None:
     allowed = {"agent", "WS00-T05"}
-    match = re.search(r"^completed_by:\s*(\S+)", WS00_T05.read_text(encoding="utf-8"), re.M)
+    match = re.search(
+        r"^completed_by:\s*(\S+)", WS00_T05.read_text(encoding="utf-8"), re.MULTILINE
+    )
     assert match, "WS00-T05 artefact names no completed_by"
     allowed.add(match.group(1))
     for name, component in _components().items():
@@ -190,7 +206,9 @@ def test_version_requires_source_url() -> None:
     def walk(name: str, node: object) -> None:
         if isinstance(node, dict):
             if node.get("version") is not None:
-                assert _nonempty(node.get("source_url")), f"{name}: version without source_url"
+                assert _nonempty(node.get("source_url")), (
+                    f"{name}: version without source_url"
+                )
             for key, value in node.items():
                 walk(f"{name}.{key}", value)
         elif isinstance(node, list):
@@ -263,7 +281,16 @@ def test_target_and_record_header_declared() -> None:
     assert target["gazebo"] in {"classic", "fortress", "harmonic"}
     assert re.fullmatch(r"\d+\.\d+", str(target["python_floor"]))
     host = record["host"]
-    for field in ("os_release", "kernel", "architecture", "cpu_model", "cores", "ram_gb", "gpu", "route"):
+    for field in (
+        "os_release",
+        "kernel",
+        "architecture",
+        "cpu_model",
+        "cores",
+        "ram_gb",
+        "gpu",
+        "route",
+    ):
         assert _nonempty(host.get(field)), f"host.{field}"
     _iso_date(record.get("checked_on"))
 
@@ -274,7 +301,9 @@ def test_target_and_record_header_declared() -> None:
 
 
 def test_conftest_makes_package_importable() -> None:
-    for name in [m for m in sys.modules if m == "ralmon_sim" or m.startswith("ralmon_sim.")]:
+    for name in [
+        m for m in sys.modules if m == "ralmon_sim" or m.startswith("ralmon_sim.")
+    ]:
         del sys.modules[name]
     module = importlib.import_module("ralmon_sim")
     resolved = Path(module.__file__ or "").resolve()
@@ -288,7 +317,9 @@ def test_ros_marker_skips_without_rclpy(tmp_path: Path) -> None:
     (stubs / "rclpy.py").write_text('raise ImportError("rclpy hidden for this test")\n')
     suite = tmp_path / "suite"
     suite.mkdir()
-    (suite / "conftest.py").write_text((PACKAGE_DIR / "test" / "conftest.py").read_text())
+    (suite / "conftest.py").write_text(
+        (PACKAGE_DIR / "test" / "conftest.py").read_text()
+    )
     (suite / "test_inner.py").write_text(
         textwrap.dedent(
             """
@@ -304,10 +335,21 @@ def test_ros_marker_skips_without_rclpy(tmp_path: Path) -> None:
         )
     )
     env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(stubs), env.get("PYTHONPATH", "")]))
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [str(stubs), env.get("PYTHONPATH", "")])
+    )
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-rs", "-p", "no:cacheprovider", str(suite)],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-rs",
+            "-p",
+            "no:cacheprovider",
+            str(suite),
+        ],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -347,12 +389,16 @@ def test_launch_process_fixture_kills_the_process_group(
         if not _alive(child_pid):
             break
         time.sleep(0.05)
-    assert not _alive(child_pid), "the grandchild survived the kill of the process group"
+    assert not _alive(child_pid), (
+        "the grandchild survived the kill of the process group"
+    )
 
 
 def test_setup_py_declares_module_map_entry_points() -> None:
     module_map = _readme_module_map()
-    assert set(module_map) == EXPECTED_SCRIPTS, "the README module map changed: update this test"
+    assert set(module_map) == EXPECTED_SCRIPTS, (
+        "the README module map changed: update this test"
+    )
     entry_points = ast.literal_eval(_setup_keyword("entry_points"))
     declared = {
         match.group(1): (match.group(2), match.group(3))
@@ -365,7 +411,13 @@ def test_setup_py_declares_module_map_entry_points() -> None:
 
 def test_setup_py_installs_the_resource_directories() -> None:
     source = SETUP_PY.read_text(encoding="utf-8")
-    for fragment in ("launch", "config", "config/experiments", "config/fault_schedules", "worlds"):
+    for fragment in (
+        "launch",
+        "config",
+        "config/experiments",
+        "config/fault_schedules",
+        "worlds",
+    ):
         assert f'"{fragment}' in source or f"'{fragment}" in source, fragment
     assert "glob" in source
     assert "resource/" in source and "package.xml" in source
@@ -388,7 +440,13 @@ def test_package_xml_declares_runtime_dependencies() -> None:
     assert build_type is not None and build_type.text == "ament_python"
     declared = {
         (e.text or "").strip()
-        for tag in ("depend", "build_depend", "exec_depend", "buildtool_depend", "test_depend")
+        for tag in (
+            "depend",
+            "build_depend",
+            "exec_depend",
+            "buildtool_depend",
+            "test_depend",
+        )
         for e in root.findall(tag)
     }
     assert "ralmon" not in declared, "T01 stays independent of the ralmon core"
@@ -411,7 +469,9 @@ def test_no_ralmon_import_in_skeleton() -> None:
                     names = [alias.name for alias in node.names]
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     names = [node.module]
-                if any(name == "ralmon" or name.startswith("ralmon.") for name in names):
+                if any(
+                    name == "ralmon" or name.startswith("ralmon.") for name in names
+                ):
                     offenders.append(f"{path}:{node.lineno}")
     assert not offenders, offenders
 
@@ -425,7 +485,9 @@ def test_gitignore_and_sim_repos() -> None:
     for name, repo in (repos["repositories"] or {}).items():
         assert repo["type"] == "git", name
         assert str(repo["url"]).startswith("https://"), name
-        assert re.fullmatch(r"[0-9a-f]{40}", str(repo["version"])), f"{name}: not a commit"
+        assert re.fullmatch(r"[0-9a-f]{40}", str(repo["version"])), (
+            f"{name}: not a commit"
+        )
 
 
 # --------------------------------------------------------------------------------------------
@@ -435,7 +497,7 @@ def test_gitignore_and_sim_repos() -> None:
 
 def test_availability_doc_has_exactly_the_required_headings() -> None:
     text = DOC.read_text(encoding="utf-8")
-    h2 = re.findall(r"^## (.+)$", text, re.M)
+    h2 = re.findall(r"^## (.+)$", text, re.MULTILINE)
     assert h2 == HEADINGS
 
 
@@ -464,11 +526,17 @@ def test_check_script_exit_code_matches_observed_components() -> None:
     result = subprocess.run(
         ["bash", str(SCRIPT)], capture_output=True, text=True, timeout=300, check=False
     )
-    rows = [line.split() for line in result.stdout.splitlines() if len(line.split()) == 3]
+    rows = [
+        line.split() for line in result.stdout.splitlines() if len(line.split()) == 3
+    ]
     rows = [row for row in rows if row[2] in {"yes", "no", "n/a"}]
     components = _components()
     assert {row[0] for row in rows} == set(components), result.stdout
     for row in rows:
         assert row[1] == components[row[0]]["status"], row
-    missing = [r[0] for r in rows if components[r[0]]["status"] == "available" and r[2] != "yes"]
+    missing = [
+        r[0]
+        for r in rows
+        if components[r[0]]["status"] == "available" and r[2] != "yes"
+    ]
     assert result.returncode == (1 if missing else 0), result.stdout
