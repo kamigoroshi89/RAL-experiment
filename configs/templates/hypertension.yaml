@@ -1,0 +1,93 @@
+# Template library for hypertension (WS05-T03): the machine-readable form of the seven-row table of
+# docs/formal/02-templates.md section 3.1 (WS01-T02, frozen at version 1.0). No machine-readable table
+# existed in docs/formal/golden/ or configs/registry/, so this file is the transcription; each row carries
+# its locator in `source`. tests/spec compares every cell with the markdown table of the document.
+#
+# One row is one `Template` of docs/plan/02-interfaces.md#template: `kind` and `unit` are the enum VALUES
+# (phi_cp, phi_sys, phi_int; mmHg, ms, dose), `signals` are SignalId values, `params` are the registry
+# names that occur in the string, and the three metadata names follow scale_<id>, priority_<id> and
+# max_latency_<id>. The string is the grammar of docs/formal/02-templates.md section 1.2: `age` is an
+# instance term and `step_ms` monitor configuration, so neither is listed. The file holds no value;
+# every value is read from the registry. `creates_robot_obligation` is True for SCHED, RESP and INT
+# (section 5.5, CP1), which is wider than the older comment of the contract (RESP and SCHED).
+library_version: "0.1.0"
+pathology: hypertension
+
+templates:
+  - id: range
+    kind: phi_cp
+    formula_past_time: "historically(meas -> (bp >= bp_band_low and bp <= bp_band_high))"
+    signals: [meas, bp]
+    params: [bp_band_low, bp_band_high]
+    unit: mmHg
+    scale_param: scale_range
+    priority_param: priority_range
+    max_verdict_latency_param: max_latency_range
+    creates_robot_obligation: false
+    source: "docs/formal/02-templates.md section 3.1, row RANGE"
+  - id: sched
+    kind: phi_cp
+    formula_past_time: "historically(once[sched_window, sched_window + step_ms] sched_tick -> once[0, sched_window] (meas and age >= 0))"
+    signals: [sched_tick, meas]
+    params: [sched_window]
+    unit: ms
+    scale_param: scale_sched
+    priority_param: priority_sched
+    max_verdict_latency_param: max_latency_sched
+    creates_robot_obligation: true
+    source: "docs/formal/02-templates.md section 3.1, row SCHED"
+  - id: hold
+    kind: phi_cp
+    formula_past_time: "historically(dispense -> (once[0, hold_lookback] meas and bp >= bp_hold_threshold))"
+    signals: [dispense, meas, bp]
+    params: [bp_hold_threshold, hold_lookback]
+    unit: mmHg
+    scale_param: scale_hold
+    priority_param: priority_hold
+    max_verdict_latency_param: max_latency_hold
+    creates_robot_obligation: false
+    source: "docs/formal/02-templates.md section 3.1, row HOLD"
+  - id: count
+    kind: phi_cp
+    formula_past_time: "historically(dispense -> dose_count <= dose_max_24h) and historically(day_end -> dose_count >= dose_min_day_end)"
+    signals: [dispense, dose_count, day_end]
+    params: [dose_max_24h, dose_min_day_end]
+    unit: dose
+    scale_param: scale_count
+    priority_param: priority_count
+    max_verdict_latency_param: max_latency_count
+    creates_robot_obligation: false
+    source: "docs/formal/02-templates.md section 3.1, row COUNT"
+  - id: resp
+    kind: phi_cp
+    formula_past_time: "historically(once[delta2, delta2 + step_ms] dispense -> once[0, delta2 - delta1] (meas and bp_drop >= delta_resp))"
+    signals: [dispense, meas, bp_drop]
+    params: [delta1, delta2, delta_resp]
+    unit: mmHg
+    scale_param: scale_resp
+    priority_param: priority_resp
+    max_verdict_latency_param: max_latency_resp
+    creates_robot_obligation: true
+    source: "docs/formal/02-templates.md section 3.1, row RESP"
+  - id: sys
+    kind: phi_sys
+    formula_past_time: "historically(meas -> (cuff_health == 1 and inflation_ms >= cuff_inflation_min))"
+    signals: [meas, cuff_health, inflation_ms]
+    params: [cuff_inflation_min]
+    unit: ms
+    scale_param: scale_sys
+    priority_param: priority_sys
+    max_verdict_latency_param: max_latency_sys
+    creates_robot_obligation: false
+    source: "docs/formal/02-templates.md section 3.1, row SYS"
+  - id: int
+    kind: phi_int
+    formula_past_time: "historically(dispense -> once[0, inf] ((presence or intake or auth) and age <= int_window))"
+    signals: [dispense, presence, intake, auth]
+    params: [int_window]
+    unit: ms
+    scale_param: scale_int
+    priority_param: priority_int
+    max_verdict_latency_param: max_latency_int
+    creates_robot_obligation: true
+    source: "docs/formal/02-templates.md section 3.1, row INT"

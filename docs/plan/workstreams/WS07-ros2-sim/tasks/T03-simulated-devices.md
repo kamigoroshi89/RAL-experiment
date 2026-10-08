@@ -101,3 +101,9 @@ Nodes (`ros` marker):
 - `ruff check ros2/ralmon_sim` and `ruff format --check ros2/ralmon_sim` exit 0.
 - `grep -rnE '^(import|from) rclpy' ros2/ralmon_sim/ralmon_sim/replay.py` prints nothing, and `grep -c "MESSAGE_MAPPING" ros2/ralmon_sim/ralmon_sim/replay.py` prints at least 1.
 - `grep -nE 'TO''DO|TB''D|lo''rem|[?][?][?]' ros2/ralmon_sim_msgs/msg/BleBloodPressureMeasurement.msg` prints nothing and the file header names the SIG source and date.
+
+## Notes
+
+### Hand-over from the WS05-T03 review (orchestrator, 2026-10-09)
+
+A compressed registry that this task writes for `ralmon.spec.load_registry` (test `test_compressed_registry_loads_with_load_registry`) must carry every top-level key (`registry_version`, `pathology`, `review_status`, `window_parameters`, `entries`, `derived`, `unset`), the `window_parameters` list, integral non-negative values for every unit `ms` entry, unit strings `mmHg`, `ms`, `dose` or `"1"`, the suffix `illustrative, unverified` in the `rationale` of every entry whose `reviewed_by` is null, and a `review_status` that agrees with the reviewers; a row whose `rationale` or `source_ref` starts with `FIXTURE-ONLY` needs `allow_fixture_only=True`. The loader refuses anything else with a `RegistryError`.

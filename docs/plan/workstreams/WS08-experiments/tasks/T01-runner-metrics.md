@@ -126,3 +126,7 @@ Write these first; `pytest tests/eval -q` must fail on imports before any implem
 ### Hand-over from the WS01-T07 review (orchestrator, 2026-10-08)
 
 Read `docs/formal/07-alert-tuple-mapping.md` section 1 (sigma_norm of VIOLATED and predicted alerts, CP13: kappa of a PREDICTED_VIOLATION alert is UNDETERMINED and the alert is superseded by the VIOLATED alert with the same `xi.instance_key`) and section 9 (open points OP-T07-1..17) and proposed ADR-041 before starting. Where this task text assumes a provisional kappa for predicted alerts (WS02-T04 check 8 and step 5; WS05-T07 tests 18, 20, 25) or counts a pair matched by a predicted alert (WS08 E3/E4), follow OP-T07-10 and ADR-041 and record any deviation here. `attribute` stays pure (kappa independent of `state`, test 5 scoped to the rule); the state check sits in `attribute_all`.
+
+### Hand-over from the WS05-T03 review (orchestrator, 2026-10-09)
+
+Step 6 assumes a YAML reader that `load_registry` already uses and that this task can reuse. WS05-T03 implements that reader as a private module (`ralmon.spec._yaml`: bounded read of a regular file, safe loader, no anchors, aliases, merge keys or duplicate keys), and `tests/test_layering.py` forbids a deep import (`ralmon.spec._yaml`) from `ralmon.eval`. Either an ADR exports a reader through `ralmon.spec` or this task keeps its own strict reader; do not import the private module.

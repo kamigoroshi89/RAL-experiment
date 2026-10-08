@@ -1,0 +1,85 @@
+# Transcription of the template table of docs/formal/02-templates.md section 3.1 (WS01-T02, frozen 1.0),
+# written for the tests of WS05-T03. Cells are kept as in the document: `kind` and `unit` are enum member
+# names (CARE_PLAN, MMHG ...), lists are the comma-separated cells. The tests compare this transcription
+# with the markdown table of the document itself and with configs/templates/hypertension.yaml.
+# creates_robot_obligation follows the table (True for SCHED, RESP and INT: CP1, docs/formal/02-templates.md
+# section 5.5), not the older comment of the contract (RESP and SCHED).
+locator: "docs/formal/02-templates.md section 3.1 'The seven templates', table"
+rows:
+  - id: RANGE
+    locator: "docs/formal/02-templates.md section 3.1, row RANGE"
+    kind: CARE_PLAN
+    formula_past_time: "historically(meas -> (bp >= bp_band_low and bp <= bp_band_high))"
+    signals: [meas, bp]
+    params: [bp_band_low, bp_band_high]
+    unit: MMHG
+    scale_param: scale_range
+    priority_param: priority_range
+    max_verdict_latency_param: max_latency_range
+    creates_robot_obligation: false
+  - id: SCHED
+    locator: "docs/formal/02-templates.md section 3.1, row SCHED"
+    kind: CARE_PLAN
+    formula_past_time: "historically(once[sched_window, sched_window + step_ms] sched_tick -> once[0, sched_window] (meas and age >= 0))"
+    signals: [sched_tick, meas]
+    params: [sched_window]
+    unit: MS
+    scale_param: scale_sched
+    priority_param: priority_sched
+    max_verdict_latency_param: max_latency_sched
+    creates_robot_obligation: true
+  - id: HOLD
+    locator: "docs/formal/02-templates.md section 3.1, row HOLD"
+    kind: CARE_PLAN
+    formula_past_time: "historically(dispense -> (once[0, hold_lookback] meas and bp >= bp_hold_threshold))"
+    signals: [dispense, meas, bp]
+    params: [bp_hold_threshold, hold_lookback]
+    unit: MMHG
+    scale_param: scale_hold
+    priority_param: priority_hold
+    max_verdict_latency_param: max_latency_hold
+    creates_robot_obligation: false
+  - id: COUNT
+    locator: "docs/formal/02-templates.md section 3.1, row COUNT"
+    kind: CARE_PLAN
+    formula_past_time: "historically(dispense -> dose_count <= dose_max_24h) and historically(day_end -> dose_count >= dose_min_day_end)"
+    signals: [dispense, dose_count, day_end]
+    params: [dose_max_24h, dose_min_day_end]
+    unit: DOSE
+    scale_param: scale_count
+    priority_param: priority_count
+    max_verdict_latency_param: max_latency_count
+    creates_robot_obligation: false
+  - id: RESP
+    locator: "docs/formal/02-templates.md section 3.1, row RESP"
+    kind: CARE_PLAN
+    formula_past_time: "historically(once[delta2, delta2 + step_ms] dispense -> once[0, delta2 - delta1] (meas and bp_drop >= delta_resp))"
+    signals: [dispense, meas, bp_drop]
+    params: [delta1, delta2, delta_resp]
+    unit: MMHG
+    scale_param: scale_resp
+    priority_param: priority_resp
+    max_verdict_latency_param: max_latency_resp
+    creates_robot_obligation: true
+  - id: SYS
+    locator: "docs/formal/02-templates.md section 3.1, row SYS"
+    kind: SYSTEM
+    formula_past_time: "historically(meas -> (cuff_health == 1 and inflation_ms >= cuff_inflation_min))"
+    signals: [meas, cuff_health, inflation_ms]
+    params: [cuff_inflation_min]
+    unit: MS
+    scale_param: scale_sys
+    priority_param: priority_sys
+    max_verdict_latency_param: max_latency_sys
+    creates_robot_obligation: false
+  - id: INT
+    locator: "docs/formal/02-templates.md section 3.1, row INT"
+    kind: INTEGRITY
+    formula_past_time: "historically(dispense -> once[0, inf] ((presence or intake or auth) and age <= int_window))"
+    signals: [dispense, presence, intake, auth]
+    params: [int_window]
+    unit: MS
+    scale_param: scale_int
+    priority_param: priority_int
+    max_verdict_latency_param: max_latency_int
+    creates_robot_obligation: true

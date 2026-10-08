@@ -3,7 +3,7 @@ id: WS05-T04
 title: "Monitor core: past-time evaluation, robustness intervals, verdicts, reorder buffer, latency bounds"
 workstream: WS05-monitor
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS05-T03", "WS01-T05"]
 critical_path: true
 non_negotiable: false
@@ -123,3 +123,7 @@ See OP-T05-16 to OP-T05-21 of `docs/formal/05-three-valued-semantics.md`. Step 1
 ### Hand-over from the WS05-T02 review (orchestrator, 2026-10-05)
 
 Three things to take on from `ralmon.signals` (WS05-T02, see its Notes): (1) the derived signals `dose_count` and `meas_count` expire entries and reset at the day boundary only when some sample reaches `update`; they emit no sample until their first event, so `hold_last` reads an absent counter as NaN and the monitor must read it as 0; the monitor must forward a clock sample at every grid step (docs/formal/05 line ~440 describes that per-step loop) and must not route only the declared inputs (`inputs=(DISPENSE,)`, `inputs=(MEAS,)`); (2) `impulses_on_grid` is not consistent under grid restriction (an event before `grid[0]` is dropped, CG-11): do not call it on sub-grids or warm-up traces; (3) the RTAMT spike ended in outcome C (ADR-013, `proposed [DA-CONFERMARE]`): test 30 (the RTAMT oracle) is conditional on outcome A or B and is therefore skipped; the entry point is `make_point_evaluator`. Also: `meas_count` day `d` covers `(d*T_day, (d+1)*T_day]` (choice M7, "for review").
+
+### Hand-over from the WS05-T03 review (orchestrator, 2026-10-09)
+
+WS05-T03 (`ralmon.spec`, branch `ws05-t03-spec-package`, status `in_progress` when this note was written) is implemented. (1) Where this task says to load the F0 copy or the fixture registry, `load_registry(path, step_ms=..., allow_fixture_only=True)` is required: without the flag the first run raises a `RegistryError` that names the FIXTURE-ONLY rows (ADR-027); the shared file is `configs/registry/fixture.yaml` (version 0.0.0) and the test-owned copy is `tests/fixtures/spec/registry_f0.yaml`. (2) The real registry (0.2.0) has three unset names (`priority_sys`, `priority_int`, `bound_dose_count_upper`): `get()` raises `UnsetParameterError` (a `RegistryError`) for them while `load_templates` still succeeds, so ranking SYS and INT alerts, or reading the dose-count bound, must be handled explicitly or done with the fixture registry. (3) `LoadedRegistry.step_ms` can silently differ from `MonitorConfig.step_ms`: assert equality, or build the registry from the config. (4) `verify_plan(plan, verifier, registry_version=...)` skips the version check when the argument is omitted: pass `registry.version()` (or `config.registry_version`). (5) The rule of ADR-047 (g), that a key of `param_values` that differs from the registry value must lie in an approved range, is not implemented in `spec`: apply it with `registry.overrides()`. (6) `verify_plan` does not serialise an unsigned plan (a malformed unsigned plan passes); the feasibility checks and the non-decreasing `plan_version` are this task's.
