@@ -84,3 +84,7 @@ Write these first. Values are fixtures, not results.
 ### Flag from the WS02-T03 review (orchestrator, 2026-10-04)
 
 See `docs/models/evidence-channels.md` section "Ablation A4 mask" and EC-OP-5: the mask has 6 fields forced to `None` (the three `witness` fields, `nav_task_failed`, `manip_task_failed`, `battery_low`), 4 to recompute without the robot component (`node_lifecycle`, `diagnostics_ok`, `liveliness_ok`, `qos_deadline_missed`) and 10 unchanged; a pure path mask is only a partial A4 (a robot crash stays visible through `liveliness_ok`; `mask_evidence` as a path set cannot do the recompute class). Decide here. Kept `blocked`.
+
+### Hand-over from the WS01-T07 review (orchestrator, 2026-10-08)
+
+Read `docs/formal/07-alert-tuple-mapping.md` section 1 (sigma_norm of VIOLATED and predicted alerts, CP13: kappa of a PREDICTED_VIOLATION alert is UNDETERMINED and the alert is superseded by the VIOLATED alert with the same `xi.instance_key`) and section 9 (open points OP-T07-1..17) and proposed ADR-041 before starting. Where this task text assumes a provisional kappa for predicted alerts (WS02-T04 check 8 and step 5; WS05-T07 tests 18, 20, 25) or counts a pair matched by a predicted alert (WS08 E3/E4), follow OP-T07-10 and ADR-041 and record any deviation here. `attribute` stays pure (kappa independent of `state`, test 5 scoped to the rule); the state check sits in `attribute_all`.

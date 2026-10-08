@@ -120,3 +120,9 @@ Write these first; `pytest tests/eval -q` must fail on imports before any implem
 - `python -m ralmon.eval.runner --config tests/fixtures/eval/smoke.yaml --output "$(mktemp -d)"` exits 0.
 - `grep -rnE 'np\.random\.(seed|rand|randn|randint)|default_rng\(\)|time\.time|datetime\.now' src/ralmon/eval` prints nothing.
 - `grep -rnE 'LatentDay|GroundTruthEvent' src/ralmon/eval/ours.py` prints nothing.
+
+## Notes
+
+### Hand-over from the WS01-T07 review (orchestrator, 2026-10-08)
+
+Read `docs/formal/07-alert-tuple-mapping.md` section 1 (sigma_norm of VIOLATED and predicted alerts, CP13: kappa of a PREDICTED_VIOLATION alert is UNDETERMINED and the alert is superseded by the VIOLATED alert with the same `xi.instance_key`) and section 9 (open points OP-T07-1..17) and proposed ADR-041 before starting. Where this task text assumes a provisional kappa for predicted alerts (WS02-T04 check 8 and step 5; WS05-T07 tests 18, 20, 25) or counts a pair matched by a predicted alert (WS08 E3/E4), follow OP-T07-10 and ADR-041 and record any deviation here. `attribute` stays pure (kappa independent of `state`, test 5 scoped to the rule); the state check sits in `attribute_all`.
