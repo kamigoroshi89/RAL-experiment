@@ -33,4 +33,4 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 
 ## M1 formalization freeze (WS01-T08, 2026-10-08)
 
-- M1 is reached with the clinician review pending, as ADR-043 decides: `docs/formal/README.md` carries `FROZEN: yes (M1 formalization freeze)` and `clinician_review: pending` (no `WS00-T07.md` output exists). Documents `01` to `09` and the five golden files are frozen at version 1.0; registry 0.2.0 (unreviewed) is outside the freeze; the contracts are unchanged and the changes they need are proposed as ADR-045 to ADR-050 (all `[DA-CONFERMARE]`); the open points carried are OPF-1 to OPF-16 of `docs/formal/08-consistency-review.md` section 5.4.
+- M1 documents frozen (`docs/formal/README.md`: `FROZEN: yes`, `clinician_review: pending`, ADR-043); the M1 gate of `00-master-plan.md` (contract amendments decided by ADR, `02-interfaces.md` versions agreed) closes when the proposed contract-amending ADRs (ADR-045 to ADR-050 and those listed in `docs/formal/08-consistency-review.md` section 4.2) are decided by gab; open points OPF-1 to OPF-17 in `docs/formal/08-consistency-review.md` section 5.4.

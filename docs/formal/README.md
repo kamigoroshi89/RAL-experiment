@@ -8,9 +8,9 @@ FROZEN: yes (M1 formalization freeze)
 
 clinician_review: pending
 
-The field `clinician_review` is `pending` because `docs/plan/workstreams/WS00-admin/outputs/WS00-T07.md` does not exist (the task WS00-T07 is blocked). By ADR-043 (accepted, gab, 2026-10-08) the freeze runs without the review and M1 counts as reached with the review pending. The values of the registry are not part of the freeze.
+The field `clinician_review` is `pending` because `docs/plan/workstreams/WS00-admin/outputs/WS00-T07.md` does not exist (the task WS00-T07 is blocked). By ADR-043 (accepted, gab, 2026-10-08) the freeze runs without the review and the missing review does not hold M1. The M1 row of `docs/plan/00-master-plan.md` also needs the contract amendments decided by ADR and the versions of `02-interfaces.md` agreed: that gate stays open until gab decides the proposed ADRs listed below. The values of the registry are not part of the freeze.
 
-What is frozen: documents `01` to `09` at version 1.0 as they stand at the commit that carries this file, the five golden files, the fixture registry F0 and the contract versions listed below. What is not frozen: the registry values (version 0.2.0, `review_status: unreviewed`, every `reviewed_by` null), the clinical review, the contract text that the proposed ADRs would change, the open points OPF-1 to OPF-16 of `08-consistency-review.md` section 5.4 and everything about devices, ROS 2, the benchmark, the baselines and the paper. The exact statement, the readings fixed by the review (R1 to R7) and the precedence rule between documents are in `08-consistency-review.md` section 5.
+What is frozen: documents `01` to `09` at version 1.0 as they stand at the commit that carries this file, the five golden files, the fixture registry F0 and the contract versions listed below. What is not frozen: the registry values (version 0.2.0, `review_status: unreviewed`, every `reviewed_by` null), the clinical review, the contract text that the proposed ADRs would change, the open points OPF-1 to OPF-17 of `08-consistency-review.md` section 5.4 and everything about devices, ROS 2, the benchmark, the baselines and the paper. The exact statement, the readings fixed by the review (R1 to R7) and the precedence rule between documents are in `08-consistency-review.md` section 5.
 
 ## Index of documents
 
@@ -28,7 +28,7 @@ What is frozen: documents `01` to `09` at version 1.0 as they stand at the commi
 
 ## Contract versions consumed
 
-All eleven contracts that the formalization reads are at version 0.1.0 and are unchanged by the freeze (`docs/plan/02-interfaces.md`; `git diff --quiet -- docs/plan/02-interfaces.md` exits 0).
+All twelve contracts that the formalization reads are at version 0.1.0 and are unchanged by the freeze (`docs/plan/02-interfaces.md`; `git diff --quiet -- docs/plan/02-interfaces.md` exits 0).
 
 | Contract | Version | Read by |
 |---|---|---|
@@ -38,6 +38,7 @@ All eleven contracts that the formalization reads are at version 0.1.0 and are u
 | `#template` | 0.1.0 | `02`, `03`, `04` |
 | `#signals` | 0.1.0 | `01` |
 | `#verdict` | 0.1.0 | `05`, `06` |
+| `#forecaster` | 0.1.0 | `05`, `08` (review only: the contract has no carrier for an arrival time, NP-18) |
 | `#conformal-calibrator` | 0.1.0 | `06` |
 | `#monitor` | 0.1.0 | `01`, `05`, `07` |
 | `#alert` | 0.1.0 | `07` |
@@ -46,7 +47,7 @@ All eleven contracts that the formalization reads are at version 0.1.0 and are u
 
 ## Registry
 
-`configs/registry/hypertension.yaml` version **0.2.0** (2026-10-08, WS01-T09, ADR-043): 31 entries, 7 derived latency names, 3 unset names (`priority_sys`, `priority_int`, `bound_dose_count_upper`), `review_status: unreviewed`. The values are literature-anchored proposals and design choices accepted by gab, none reviewed by a clinician. The documents `03` to `07` describe the registry of version 0.1.0 in places (see `08` section 3.10, D1 to D5); the file is authoritative for the state of the registry. The worked day uses F0 only.
+`configs/registry/hypertension.yaml` version **0.2.0** (2026-10-08, WS01-T09, ADR-043): 31 entries, 7 derived latency names, 3 unset names (`priority_sys`, `priority_int`, `bound_dose_count_upper`), `review_status: unreviewed`. The values are literature-anchored proposals and design choices accepted by gab, none reviewed by a clinician. The documents `03` to `07` describe the registry of version 0.1.0 in places (see `08` section 3.10, D1 to D5); the file is authoritative for the state of the registry. The worked day uses F0 only. Names used by the documents or the golden that are in no registry entry, no F0 row and no unset list: `evidence_margin_ms`, `evidence_grace_ms` (used as the fixture value 0), `hr_coherence_tolerance`, `ecg_sqi_floor` and `ppg_sqi_floor` (used only as relations to a reading); `docs/models/evidence-channels.md` requests nine such names and only `clock_skew_max_ms` is registered (`08` section 3.1, OPF-6). `meas_min_day`, `step_ms` and `reorder_delay_ms` are not registry names by design.
 
 ## Golden files
 

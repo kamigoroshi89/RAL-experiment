@@ -20,6 +20,16 @@
 # under hypothesis H-W6; every field not listed is null (unavailable). `xi.text` of an alert is rendered by WS05-T07 from the fields
 # (docs/formal/07-alert-tuple-mapping.md section 3.4) and is not fixed here: `text_must_contain` lists what the text must state.
 #
+# Limits for an end-to-end test (WS05-T08, WS02-T04). (1) The golden supports tests of the monitor (trace to VerdictRecord) and of the
+# attribution rule (evidence vector to kappa); it does not support tests of the evidence extractor (trace to evidence vector): the
+# observed day has no NODE_STATE, liveliness, heartbeat, hr_ecg, hr_pulse, spo2 or error-code input, and the readings under `evidence` are
+# given (hypothesis H-W15). (2) `Rho.guarantee` and `Rho.assumptions` are the exact strings of docs/formal/06-rho-proposition1.md section 2.2
+# (the same strings as conformal.yaml), with `alpha` the configured level for PREDICTED and null otherwise. (3) `xi.text` is rendered by
+# WS05-T07 and is not fixed: `text_must_contain` lists what it must state; `xi.subformula_path` is a description, not the final syntax of
+# WS05-T04 step 8. (4) The names evidence_grace_ms, evidence_margin_ms, ecg_sqi_floor, ppg_sqi_floor and hr_coherence_tolerance are requested
+# by evidence-channels.md and have no registry entry and no F0 row (OPF-6): the day uses evidence_grace_ms = 0 as a fixture value outside
+# the F0 table and gives the three float thresholds only by their relation to the reading.
+#
 # Keys added to the README format: hypotheses, plan, observed_day.channels_unavailable, scenario_description, calibrator, forecast,
 # evidence, records[*].instance_key, records[*].expected.{template, unit, guard_failed, marker, tie_rule, previous_state,
 # false_predictive_alarm, refinement_note}, alerts, ranking, coverage.
@@ -30,7 +40,7 @@
 id: PD-1
 contract: ["02-interfaces.md#template", "02-interfaces.md#verdict", "02-interfaces.md#alert", "02-interfaces.md#attribution"]
 source: "WS01-T08 scenario table R1 to R10, corrected where the formal documents decide otherwise (08-consistency-review.md section 3.5)"
-fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, evidence_grace_ms: 0, day_length_ms: 86400000, closing_step: 1440}
+fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, evidence_grace_ms: 0, day_length_ms: 86400000, closing_step: 1440}   # evidence_grace_ms is a fixture value with no F0 row and no registry entry (OPF-6)
 
 f0_rows:
   bp_band_low: 110
@@ -65,17 +75,20 @@ f0_rows:
 
 hypotheses:
   - {id: H-W1, text: "Inputs arrive on time: t_rx_ms equals t_device_ms, reorder_delay_ms is 0, no late input, no future stamp, no jitter."}
-  - {id: H-W2, text: "The plan passes the feasibility checks F1 to F7 of 02-templates.md section 5.4 (09 section 1.3 lists them)."}
+  - {id: H-W2, text: "The plan passes the feasibility checks F1 to F7 of 02-templates.md section 5.4, with F4 read as: a robot visit overlaps the INT window and observes the patient inside it (the INT predicate needs one witness whose age is at most int_window, 02-templates.md section 4.7). The literal wording of F4, a visit that covers [a - int_window, a], is stricter and is not met for the 07:00 dose (the visit starts at 06:58, the window at 06:55): NP-24 of 08-consistency-review.md."}
   - {id: H-W3, text: "First day of the patient: no dispense in the 24 h before 00:00 (empty history, H-hist of 05 section 2.1; 01 section 5.5)."}
   - {id: H-W4, text: "At most one measurement event and one sample of each of bp, cuff_health, inflation_ms per grid bin (A0), and each measurement event carries its own samples (H-pair); no standalone pressure sample."}
   - {id: H-W5, text: "The doses of 21:00 and 21:02 overlap in their response windows; both capture pre_i = 152 (the sample of 20:32), so the global bp_pre stream and the per-instance value agree (A3 of 02-templates.md section 1.5 holds in value)."}
   - {id: H-W6, text: "Authenticated deployment with every device capability declared: message authentication, seq, diagnostics, a data-stream deadline, independent clocks, signal quality, pulse and ECG heart rate available and coherent at every measurement; the dispenser has no content sensing and reports no interval (CP8). With the reference profile S6 of evidence-channels.md the kappa C1 of record PD-ALT-04 would be UNDETERMINED (OP-AR-1)."}
-  - {id: H-W7, text: "The evidence window of the 12:24 instance does not reach the cuff outage of 08:56 to 11:20 (evidence_margin_ms is smaller than 64 min); the cuff keeps its sequence counter across the restart; evidence_grace_ms is 0."}
+  - {id: H-W7, text: "The evidence window of the 12:24 instance does not reach the cuff outage of 08:56 to 11:20 (evidence_margin_ms is smaller than 64 min); the cuff keeps its sequence counter across the restart; evidence_grace_ms is 0. evidence_margin_ms and evidence_grace_ms are parameter names requested by evidence-channels.md that have no registry entry (OPF-6)."}
   - {id: H-W8, text: "The robot is co-located from 06:58 to 07:05 only; the presence stream is sampled as in golden G-INT-1 (1.0 at 06:58, an explicit 0.0 at 06:59), so the witness age at 07:00 is 2 min; the robot channels presence and intake are unavailable at all other times."}
-  - {id: H-W9, text: "The 20:32 sample is an informed replay (threat-model.md class replay, level informed, fresh_metadata): t_device_ms fresh, seq continues (no repeat, no gap), the verification of the message fails; the genuine 20:32 message does not reach the gateway (H-SUPP). Hypothesis NP-1 (08 section 2.3): a duplicate (source, seq) is not used by this day."}
+  - {id: H-W9, text: "The 20:32 sample is an informed replay (threat-model.md class replay, level informed, fresh_metadata): t_device_ms fresh, seq continues (no repeat, no gap), the verification of the message fails; the genuine 20:32 message does not reach the gateway (H-SUPP). By the rule of 01-signals-sampling.md section 3.4 and of the table of repeated seq of threat-model.md, a replay that repeated the seq of the 12:24 message would be a duplicate: flagged and not counted, so it could not produce the RANGE instance of the scenario row R6 (08-consistency-review.md NP-1, rule R8)."}
   - {id: H-W10, text: "Cuff health 1.0 and inflation 45000 ms at every measurement (fixture); hr_pulse and hr_ecg are not templates inputs and are not listed."}
   - {id: H-W11, text: "Prediction: one designated instant (20 min before the deadline, 12:10), variant likely, calibrator fixture C-1 (n 9, alpha 0.2, q 0.09); the forecast is a stub (arrival 12:40)."}
   - {id: H-W12, text: "Scales and priorities are the F0 rows (priority_count 2 and priority_resp 2 are FIXTURE-ONLY); the registry 0.2.0 values are not used."}
+  - {id: H-W13, text: "Forecaster: prediction is evaluated only for a record that is PENDING at its designated instant (20 min before the deadline). sched@24600000, sched@73800000 and sched@81000000 are decided (06:52, 20:32, 22:35) before their instants (07:00, 20:40, 22:40), so no test occurs; at the instant of sched@32400000 (09:10) the record is PENDING and the forecaster emits nothing (the cuff is down and no arrival is forecast); only sched@43200000 (12:10) has a forecast, a stub with arrival 12:40."}
+  - {id: H-W14, text: "Alpha allocation: alpha = 0.2 is the per-test level of the calibrator fixture C-1 (n = 9, which cannot support a smaller level: alpha 0.05 needs n >= 19, 06 section 4.7). With five SCHED tests in the day, AlphaAllocation.per_test(alpha_total, n_tests) = alpha_total / n_tests (06 section 6.2) would correspond to alpha_total = 5 * 0.2 = 1.0, a vacuous day-level bound; alpha_total is not stated by this fixture and the day makes no claim about the probability of a false predictive alert in a patient-day."}
+  - {id: H-W15, text: "Evidence readings are given, not derived: the observed day has no NODE_STATE, liveliness, heartbeat, hr_ecg, hr_pulse, spo2 or error-code input; the readings under evidence are those of the worked cases W-01, W-06, W-08 and W-11 of attribution-rule.md. The golden supports tests of the monitor and of the attribution rule, not tests of the evidence extractor."}
 
 plan:
   care_plan_id: PD-1-plan
@@ -104,7 +117,7 @@ plan:
     F1_alignment: {sched_window_steps: 30, hold_lookback_steps: 60, int_window_steps: 5, delta1_steps: 60, delta2_steps: 180, delta2_minus_delta1_steps: 120}
     F2_hold: [{dispense_tick: 25200000, measurement_tick_in_lookback: 24600000}, {dispense_tick: 75600000, measurement_tick_in_lookback: 73800000}]
     F3_resp: [{dispense_tick: 25200000, measurement_tick_in_window: 32400000}, {dispense_tick: 75600000, measurement_tick_in_window: 81000000}]
-    F4_int: [{dispense_tick: 25200000, cover: "robot visit 06:58 to 07:05 covers [06:55, 07:00]"}, {dispense_tick: 75600000, cover: "the dispense is authenticated (auth)"}]
+    F4_int: [{dispense_tick: 25200000, cover: "the robot visit 06:58 to 07:05 overlaps [06:55, 07:00] and observes the patient at 06:58 (age 2 min, at most int_window); the literal wording of F4 (a visit that covers the window) is not met (NP-24)"}, {dispense_tick: 75600000, cover: "the dispense is authenticated (auth)"}]
     F5_count: {dispense_ticks_in_24h: 2, limit: 2, minimum: 2}
 
 observed_day:
@@ -392,7 +405,7 @@ records:
       state: violated
       sigma_interval: [-.inf, -60000.0]
       sigma_norm_interval: [-1.0, -0.03333333333333333]
-      rho: {kind: deterministic, value: 1.0}
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
       decided_at_ms: 34200000
       pending_until_ms: 34200000
       guard_failed: no_measurement_after_tick
@@ -411,7 +424,7 @@ records:
       state: violated
       sigma_interval: [-.inf, -.inf]
       sigma_norm_interval: [-1.0, -1.0]
-      rho: {kind: deterministic, value: 1.0}
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
       decided_at_ms: 36000000
       pending_until_ms: 36000000
       guard_failed: obligation_unmet
@@ -430,7 +443,7 @@ records:
       state: predicted_violation
       sigma_interval: [-.inf, 1140000.0]
       sigma_norm_interval: [-1.0, 0.6333333333333333]
-      rho: {kind: predicted, value: 0.9, alpha: 0.2, alpha_star: 0.1, guarantee: "marginal over patient episodes under exchangeability"}
+      rho: {kind: predicted, value: 0.9, alpha: 0.2, alpha_star: 0.1, guarantee: "marginal over patient episodes under exchangeability", assumptions: ["calibration unit is the patient episode; calibration and test episodes are exchangeable", "forecaster and normalisation are fixed before calibration and independent of the calibration and test episodes", "one designated prediction instant per episode, with the same rule for calibration and test episodes", "calibrator fitted on the current model version"]}
       decided_at_ms: null
       pending_until_ms: 45000000   # 12:30
       predicted_sigma_norm: -0.2433333333333333
@@ -467,7 +480,7 @@ records:
       state: violated
       sigma_interval: [-12.0, -12.0]
       sigma_norm_interval: [-0.6, -0.6]
-      rho: {kind: measured, value: 0.97724986805, value_4dp: "0.9772"}
+      rho: {kind: measured, value: 0.97724986805, value_4dp: "0.9772", alpha: null, guarantee: "conditional on the adequacy of the declared device error model", assumptions: ["measured value equals the true value plus an independent Gaussian error with standard deviation cuff_error_sd", "zero bias after correction (a silent bias is not seen by rho)", "flat prior on the true value", "errors of distinct measurements are independent"]}
       decided_at_ms: 44640000
       pending_until_ms: 44640000
     hand_calculation: "bp_744 = 152. min(152 - 110, 140 - 152) = min(42, -12) = -12 mmHg. -12 / 20 = -0.6. rho MEASURED, band formula Phi((110 - 152)/6) + Phi((152 - 140)/6) = Phi(-7) + Phi(2) = 1.3e-12 + 0.97725 = 0.9772 (cuff_error_sd 6, FIXTURE-ONLY)."
@@ -519,7 +532,7 @@ records:
       state: violated
       sigma_interval: [-12.0, -12.0]
       sigma_norm_interval: [-0.6, -0.6]
-      rho: {kind: measured, value: 0.97724986805, value_4dp: "0.9772"}
+      rho: {kind: measured, value: 0.97724986805, value_4dp: "0.9772", alpha: null, guarantee: "conditional on the adequacy of the declared device error model", assumptions: ["measured value equals the true value plus an independent Gaussian error with standard deviation cuff_error_sd", "zero bias after correction (a silent bias is not seen by rho)", "flat prior on the true value", "errors of distinct measurements are independent"]}
       decided_at_ms: 73920000
       pending_until_ms: 73920000
     hand_calculation: "Same arithmetic as PD-REC-13: min(152 - 110, 140 - 152) = -12 mmHg, -12 / 20 = -0.6, rho MEASURED Phi(-7) + Phi(2) = 0.9772, a model-based value conditional on the adequacy of the device error model and not covering authenticity (06 section 2.2)."
@@ -641,7 +654,7 @@ records:
       state: violated
       sigma_interval: [-1.0, -1.0]
       sigma_norm_interval: [-1.0, -1.0]
-      rho: {kind: deterministic, value: 1.0}
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
       decided_at_ms: 75720000
       pending_until_ms: 75720000
     hand_calculation: "dose_count over (75720000 - 86400000, 75720000] = dispenses at steps 420, 1260, 1262: c_d = 3. Margin 2 - 3 = -1 dose. -1 / 1 = -1.0 (equal to the scale, not clipped). hi < 0: VIOLATED at once. Rho DETERMINISTIC 1.0: a count over the event log."
@@ -816,7 +829,7 @@ alerts:
       tau: sched
       kappa: C2
       sigma_norm: -0.03333333333333333
-      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log"}
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
       xi:
         template: sched
         instance_key: "sched@32400000"
@@ -844,7 +857,7 @@ alerts:
       tau: resp
       kappa: C2
       sigma_norm: -1.0
-      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log"}
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
       xi:
         template: resp
         instance_key: "resp@25200000"
@@ -871,7 +884,7 @@ alerts:
       tau: sched
       kappa: UNDETERMINED
       sigma_norm: -0.2433333333333333
-      rho: {kind: predicted, value: 0.9, alpha: 0.2, guarantee: "marginal over patient episodes under exchangeability"}
+      rho: {kind: predicted, value: 0.9, alpha: 0.2, guarantee: "marginal over patient episodes under exchangeability", assumptions: ["calibration unit is the patient episode; calibration and test episodes are exchangeable", "forecaster and normalisation are fixed before calibration and independent of the calibration and test episodes", "one designated prediction instant per episode, with the same rule for calibration and test episodes", "calibrator fitted on the current model version"]}
       xi:
         template: sched
         instance_key: "sched@43200000"
@@ -903,7 +916,7 @@ alerts:
       tau: range
       kappa: C1
       sigma_norm: -0.6
-      rho: {kind: measured, value: 0.97724986805, alpha: null, guarantee: "conditional on the adequacy of the declared device error model"}
+      rho: {kind: measured, value: 0.97724986805, alpha: null, guarantee: "conditional on the adequacy of the declared device error model", assumptions: ["measured value equals the true value plus an independent Gaussian error with standard deviation cuff_error_sd", "zero bias after correction (a silent bias is not seen by rho)", "flat prior on the true value", "errors of distinct measurements are independent"]}
       xi:
         template: range
         instance_key: "range@44640000"
@@ -930,7 +943,7 @@ alerts:
       tau: range
       kappa: C3
       sigma_norm: -0.6
-      rho: {kind: measured, value: 0.97724986805, alpha: null, guarantee: "conditional on the adequacy of the declared device error model"}
+      rho: {kind: measured, value: 0.97724986805, alpha: null, guarantee: "conditional on the adequacy of the declared device error model", assumptions: ["measured value equals the true value plus an independent Gaussian error with standard deviation cuff_error_sd", "zero bias after correction (a silent bias is not seen by rho)", "flat prior on the true value", "errors of distinct measurements are independent"]}
       xi:
         template: range
         instance_key: "range@73920000"
@@ -957,7 +970,7 @@ alerts:
       tau: count
       kappa: UNDETERMINED
       sigma_norm: -1.0
-      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log"}
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
       xi:
         template: count
         instance_key: "count@75720000"
