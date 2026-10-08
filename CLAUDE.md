@@ -71,7 +71,7 @@ Workstreams: WS00 admin (humans), WS01 formalization, WS02 threat-fault-model, W
 
 - Plan consistency: `python3 tools/check_plan.py` (standard library only; must exit 0 before any commit that touches `docs/plan/`).
 - After WS05-T01: `pytest -q`, `ruff check src tests`, `ruff format --check src tests`, `mypy src/ralmon`.
-- ROS 2 (from WS07): Jazzy and Gazebo Harmonic unless ADR-011 is superseded.
+- ROS 2 (from WS07): Humble and Gazebo Classic (ADR-042, superseding ADR-011); Python 3.10 or newer for `ralmon`.
 
 ## Milestones (details in the master plan)
 
