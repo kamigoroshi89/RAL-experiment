@@ -6,16 +6,19 @@ aliases, python tags, multiple documents, deep nesting), bad shapes and bad valu
 
 from __future__ import annotations
 
+import contextlib
 import os
+from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from ralmon.spec.registry import RegistryError
 
 from ralmon.spec import _yaml as yaml_io
 from ralmon.spec import load_registry
 from ralmon.spec import registry as registry_module
+from ralmon.spec.registry import RegistryError
 
 from .helpers import F0_PATH, dump_yaml, entry_of, f0_doc, write_yaml
 
@@ -505,3 +508,50 @@ def test_a_huge_but_valid_registry_loads_in_bounded_time(tmp_path: Path) -> None
 def test_the_loader_module_has_the_documented_constants() -> None:
     assert registry_module.FIXTURE_ONLY_MARKER == "FIXTURE-ONLY"
     assert yaml_io.MAX_FILE_BYTES == 1_048_576
+
+
+def test_the_file_is_read_with_a_bounded_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The size limit is enforced while reading, not after: a huge or endless file is never slurped."""
+    calls: list[int] = []
+
+    def read(size: int = -1) -> bytes:
+        calls.append(size)
+        return F0_TEXT.encode("utf-8")
+
+    @contextlib.contextmanager
+    def fake_open(*args: object, **kwargs: object) -> Iterator[SimpleNamespace]:
+        yield SimpleNamespace(read=read)
+
+    monkeypatch.setattr(yaml_io, "open", fake_open, raising=False)
+    assert load_registry(F0_PATH, allow_fixture_only=True).version() == "0.0.0"
+    assert calls == [yaml_io.MAX_FILE_BYTES + 1]
+
+
+def test_invalid_utf8_anywhere_in_the_file_is_refused_not_replaced(
+    tmp_path: Path,
+) -> None:
+    """Even in a comment: a lossy decode would let a corrupted file load."""
+    payload = F0_TEXT.encode("utf-8") + b"\n# corrupted \xff\xfe bytes\n"
+    with pytest.raises(RegistryError, match="UTF-8"):
+        load_text(tmp_path, payload)
+
+
+def test_an_inline_merge_key_is_refused(tmp_path: Path) -> None:
+    """``<<`` merges without an alias; it could override a checked key silently."""
+    text = F0_TEXT + "\n<<: {pathology: injected}\n"
+    with pytest.raises(RegistryError, match="merge"):
+        load_text(tmp_path, text)
+
+
+def test_python_tags_are_never_constructed(tmp_path: Path) -> None:
+    """Only the safe loader: a ``!!python/object/apply`` tag must not run anything."""
+    marker = tmp_path / "pwned"
+    text = F0_TEXT.replace(
+        'registry_version: "0.0.0"',
+        f'registry_version: !!python/object/apply:os.mkdir ["{marker}"]',
+        1,
+    )
+    assert text != F0_TEXT
+    with pytest.raises(RegistryError):
+        load_text(tmp_path, text)
+    assert not marker.exists()

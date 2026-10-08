@@ -604,8 +604,18 @@ def test_a_verifier_that_raises_is_reported_as_plan_integrity_error() -> None:
     "bad", [5, "verifier", b"v", object(), True, [HmacSha256PlanVerifier(KEY)]]
 )
 def test_a_verifier_without_verify_is_refused(bad: Any) -> None:
-    with pytest.raises(PlanIntegrityError, match="verifier"):
+    with pytest.raises(PlanIntegrityError, match="no verify method"):
         verify_plan(plan_a(signature="anything"), bad)
+
+
+@pytest.mark.parametrize("bad", [5, 5.5, b"ab" * 32, ["ab"], True, object()])
+def test_a_non_text_signature_never_reaches_a_permissive_verifier(bad: Any) -> None:
+    class AlwaysYes:
+        def verify(self, payload: bytes, signature: str) -> bool:
+            return True
+
+    with pytest.raises(PlanIntegrityError, match="must be a str"):
+        verify_plan(plan_a(signature=bad), AlwaysYes())
 
 
 # --- robust plan inputs ------------------------------------------------------------------

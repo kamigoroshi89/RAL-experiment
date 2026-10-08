@@ -14,8 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from ralmon.spec.registry import LoadedRegistry, RegistryError
-from ralmon.spec.templates import TemplateLibraryError
 
 from ralmon.signals import SignalId
 from ralmon.spec import (
@@ -26,6 +24,8 @@ from ralmon.spec import (
     load_registry,
     load_templates,
 )
+from ralmon.spec.registry import LoadedRegistry, RegistryError
+from ralmon.spec.templates import TemplateLibraryError
 
 from .helpers import (
     F0_PATH,
@@ -281,7 +281,7 @@ def test_a_fixture_row_with_an_unknown_signal_raises(
 ) -> None:
     doc = library_doc()
     row_of(doc, "range")["signals"].append(bad)
-    with pytest.raises(TemplateLibraryError, match="range"):
+    with pytest.raises(TemplateLibraryError, match=r"range.*(SignalId|list of names)"):
         load_templates(write_library(tmp_path, doc), f0_registry)
 
 
@@ -505,8 +505,30 @@ def test_a_path_of_the_wrong_type_raises_template_library_error(
 
 @pytest.mark.parametrize("bad", [5, "text", ["a"], {"a": 1}, object(), True, b"x"])
 def test_a_registry_of_the_wrong_type_raises_template_library_error(bad: Any) -> None:
-    with pytest.raises(TemplateLibraryError, match="registry"):
+    with pytest.raises(TemplateLibraryError, match="must be a ParameterRegistry"):
         load_templates(registry=bad)
+
+
+@pytest.mark.parametrize(
+    "bad", [None, "", "1", "1.0", "1.0.0.0", "v1.0.0", "01.0.0", 1, 1.0, ["1.0.0"]]
+)
+def test_library_version_must_be_a_semantic_version_string(
+    tmp_path: Path, f0_registry: LoadedRegistry, bad: Any
+) -> None:
+    doc = library_doc()
+    doc["library_version"] = bad
+    with pytest.raises(TemplateLibraryError, match="library_version"):
+        load_templates(write_library(tmp_path, doc), f0_registry)
+
+
+@pytest.mark.parametrize("bad", [None, "", "  ", 5, ["x"]])
+def test_library_pathology_must_be_a_non_empty_string(
+    tmp_path: Path, f0_registry: LoadedRegistry, bad: Any
+) -> None:
+    doc = library_doc()
+    doc["pathology"] = bad
+    with pytest.raises(TemplateLibraryError, match="pathology"):
+        load_templates(write_library(tmp_path, doc), f0_registry)
 
 
 def test_missing_directory_and_unreadable_template_files(
@@ -559,3 +581,68 @@ def test_the_default_library_path_is_next_to_the_registry_configs() -> None:
 
     assert templates_module.default_templates_path() == TEMPLATES_PATH
     assert F0_PATH.is_file()
+
+
+class _Delegating:
+    """A bare ParameterRegistry (get, bounds, version) over the F0 registry with chosen answers."""
+
+    def __init__(self, base: LoadedRegistry, answers: dict[str, Any]) -> None:
+        self._base = base
+        self._answers = answers
+
+    def get(self, name: str) -> Any:
+        if name in self._answers:
+            answer = self._answers[name]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        return self._base.get(name)
+
+    def bounds(self, signal: str) -> Any:
+        return self._base.bounds(signal)
+
+    def version(self) -> str:
+        return self._base.version()
+
+
+def _entry(name: str, value: float, unit: str) -> Any:
+    from ralmon.spec import RegistryEntry
+
+    return RegistryEntry(name, value, unit, "r; illustrative, unverified", "s", None)
+
+
+def test_a_registry_that_returns_something_else_than_an_entry_is_refused(
+    f0_registry: LoadedRegistry,
+) -> None:
+    registry = _Delegating(f0_registry, {"bp_band_low": "not an entry"})
+    with pytest.raises(TemplateLibraryError, match="RegistryEntry"):
+        load_templates(registry=registry)  # type: ignore[arg-type]
+
+
+def test_a_registry_that_fails_unexpectedly_is_reported_as_template_library_error(
+    f0_registry: LoadedRegistry,
+) -> None:
+    registry = _Delegating(f0_registry, {"bp_band_low": RuntimeError("boom")})
+    with pytest.raises(TemplateLibraryError, match="boom"):
+        load_templates(registry=registry)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("answers", "message"),
+    [
+        ({"scale_range": _entry("scale_range", 0.0, "mmHg")}, "positive"),
+        ({"scale_range": _entry("scale_range", -1.0, "mmHg")}, "positive"),
+        ({"scale_range": _entry("scale_range", 20.0, "ms")}, "unit"),
+        ({"priority_range": _entry("priority_range", 0.0, "1")}, "rank"),
+        ({"priority_range": _entry("priority_range", 1.5, "1")}, "rank"),
+        ({"priority_range": _entry("priority_range", 2.0, "ms")}, "rank"),
+    ],
+)
+def test_the_loader_checks_scale_and_priority_of_a_registry_that_does_not(
+    f0_registry: LoadedRegistry, answers: dict[str, Any], message: str
+) -> None:
+    """A registry other than ``LoadedRegistry`` may not have enforced the rules: the loader does."""
+    with pytest.raises(TemplateLibraryError, match=message):
+        load_templates(registry=_Delegating(f0_registry, answers))  # type: ignore[arg-type]
+    good = {"priority_range": _entry("priority_range", 2.0, "1")}
+    assert len(load_templates(registry=_Delegating(f0_registry, good))) == 7  # type: ignore[arg-type]

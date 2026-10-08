@@ -333,3 +333,16 @@ def test_error_messages_name_the_argument_and_the_rule() -> None:
         normalise(math.nan, 1.0)
     with pytest.raises(ValueError, match=r"sigma_raw.*number"):
         normalise("x", 1.0)
+
+
+def test_the_exact_path_clips_quotients_of_integers_beyond_the_float_range() -> None:
+    """The quotient of an integer above the largest float by a float scale is computed exactly."""
+    above = 2**1024  # larger than the largest float
+    assert normalise(above, 1.7e308) == 1.0  # the exact quotient is about 1.06: clipped
+    assert normalise(-above, 1.7e308) == -1.0
+    assert normalise(above, 1e300) == 1.0
+    assert normalise(-above, 1e300) == -1.0
+    assert (
+        normalise(5.0, above) == 5 / above
+    )  # the correctly rounded quotient of the exact values
+    assert normalise(-5.0, above) == -5 / above

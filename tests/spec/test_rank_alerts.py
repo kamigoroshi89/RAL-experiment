@@ -438,7 +438,7 @@ def test_rank_alerts_rejects_an_invalid_alert_with_value_error(
     ids=["None", "int", "float", "str", "bytes", "dict", "set", "object", "generator"],
 )
 def test_rank_alerts_rejects_a_non_sequence_with_value_error(bad: Any) -> None:
-    with pytest.raises(ValueError, match="alerts"):
+    with pytest.raises(ValueError, match="must be a sequence of alerts"):
         rank_alerts(bad)
 
 

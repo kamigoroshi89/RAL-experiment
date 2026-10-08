@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from ralmon.spec import PhysioBounds, RegistryEntry, load_registry
+from ralmon.spec import registry as registry_module
 from ralmon.spec.registry import (
     FIXTURE_ONLY_MARKER,
     LoadedRegistry,
@@ -21,9 +24,6 @@ from ralmon.spec.registry import (
     as_duration_ms,
     as_priority,
 )
-
-from ralmon.spec import PhysioBounds, RegistryEntry, load_registry
-from ralmon.spec import registry as registry_module
 
 from .helpers import (
     F0_PATH,
@@ -146,11 +146,19 @@ def test_registry_bounds_unset_partner_raises_unset_parameter_error(
         registry.bounds("bp")
 
 
-@pytest.mark.parametrize("signal", ["nope", "", "bp ", "BP", None, 5, ["bp"], b"bp"])
+@pytest.mark.parametrize("signal", ["nope", "", "bp ", "BP"])
 def test_registry_bounds_of_an_undeclared_signal_raises_registry_error(
+    f0_registry: LoadedRegistry, signal: str
+) -> None:
+    with pytest.raises(RegistryError, match="no bounds are declared"):
+        f0_registry.bounds(signal)
+
+
+@pytest.mark.parametrize("signal", [None, 5, ["bp"], b"bp", {}])
+def test_registry_bounds_of_a_non_name_raises_registry_error(
     f0_registry: LoadedRegistry, signal: Any
 ) -> None:
-    with pytest.raises(RegistryError):
+    with pytest.raises(RegistryError, match="signal name must be a str"):
         f0_registry.bounds(signal)
 
 
@@ -293,7 +301,7 @@ def test_window_parameter_names_must_be_declared_and_in_ms(tmp_path: Path) -> No
     doc["window_parameters"].append(
         "max_latency_range"
     )  # a derived name is not a window parameter
-    with pytest.raises(RegistryError, match="max_latency_range"):
+    with pytest.raises(RegistryError, match=r"max_latency_range.*derived name"):
         load_doc(tmp_path, doc)
 
 
@@ -464,6 +472,14 @@ def test_a_derived_unit_must_be_ms_summable(tmp_path: Path) -> None:
     doc = f0_doc()
     doc["derived"][4]["unit"] = "mmHg"
     with pytest.raises(RegistryError, match="max_latency_resp"):
+        load_doc(tmp_path, doc, step_ms=60_000)
+    doc = (
+        f0_doc()
+    )  # step_ms is a duration: a formula that is just step_ms cannot be in mmHg
+    doc["derived"][0]["unit"] = "mmHg"
+    with pytest.raises(
+        RegistryError, match=r"max_latency_range.*step_ms.*duration|step_ms"
+    ):
         load_doc(tmp_path, doc, step_ms=60_000)
 
 
@@ -781,7 +797,7 @@ def test_unreviewed_entries_are_accepted_and_reported_never_dropped(
 
 def test_unset_names_are_declared_but_have_no_value(tmp_path: Path) -> None:
     doc = f0_doc()
-    make_unset(doc, "scale_hold", ("hold",))
+    make_unset(doc, "scale_hold", ("hold", "resp"))
     make_unset(doc, "priority_int", ("int",))
     registry = load_doc(tmp_path, doc)
     assert registry.unset_names() == ("scale_hold", "priority_int")
@@ -790,9 +806,8 @@ def test_unset_names_are_declared_but_have_no_value(tmp_path: Path) -> None:
     with pytest.raises(UnsetParameterError) as info:
         registry.get("scale_hold")
     assert isinstance(info.value, RegistryError)
-    assert "scale_hold" in str(info.value) and "hold" in str(
-        info.value
-    )  # name and required_by
+    assert "scale_hold" in str(info.value)  # the name
+    assert "'hold', 'resp'" in str(info.value)  # and the templates that need it
     with pytest.raises(RegistryError, match="no_such_name"):
         registry.is_set("no_such_name")
     assert registry.is_declared("no_such_name") is False
