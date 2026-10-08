@@ -68,3 +68,7 @@ From the repository root:
 ### Status update (user attestation)
 
 Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T01.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report.
+
+### Artefact recorded (agent, 2026-10-08)
+
+`outputs/WS00-T01.md` was written by the agent from desk research on the RA-L and workshop pages (2026-10-08, every value with its `Source:` line) and from the answers of gab. Findings that change the plan's assumptions: no public CFP of an RA-L special issue exists (the issue appears to be at proposal stage; gab holds an e-mail of the organisers without an official timeline); the workshop's official name is "1st IJCAI Workshop on Safe Physical AI" (SPAI 2026), not the name in analisi line 3; RA-L confirms six pages including references (two extra paid pages) and double-anonymous review; the workshop proceedings are informal and the paper is on arXiv (2607.19827). Four questions for the organisers are listed in `## Impact on plan` and are not yet sent. Done-when checks run on 2026-10-08: the file exists, nine headings, one `completed_by` and one `completed_on` line.
