@@ -3,7 +3,7 @@ id: WS01-T08
 title: "Formalization freeze: consistency review and hand-worked patient-day (M1)"
 workstream: WS01-formalization
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS01-T03", "WS01-T04", "WS01-T05", "WS01-T06", "WS01-T07"]
 critical_path: true
 non_negotiable: true
@@ -115,3 +115,14 @@ WS00-T07 is no longer a dependency (decision of gab, ADR-043): run the freeze wi
 ### Hand-over from WS01-T09 (agent, 2026-10-08)
 
 The registry is now version **0.2.0** (literature-anchored values and design choices accepted by gab, still `unreviewed`); record that version in the freeze marker. Five findings of the WS01-T09 research are formalization questions, not values (`docs/formal/parameter-literature-proposal.md`, section "Findings for the formalization"): (1) `dose_count` is a trailing 24 h window while a dose may be given 1 h early or late, so three on-time doses can fall within 22 h and violate `dose_max_24h = 2`; (2) a dose withheld by the hold rule, or refused, violates `dose_min_day_end`; (3) a single pre/post pair of readings has a difference SD of about 16.8 mmHg against `delta_resp = 7.5` mmHg; (4) the `sys` template reads the inflation duration while device manuals give the whole cycle; (5) the BLE clock-skew bound with a daily resynchronisation (about 44 s) is close to the 60 s step. Decide or list them as open points of the freeze.
+
+### Completion note (agent, 2026-10-08)
+
+Status left `in_progress`: the orchestrator closes the task after the review. Files created: `docs/formal/08-consistency-review.md`, `docs/formal/09-worked-patient-day.md`, `docs/formal/golden/patient-day.yaml`, `docs/formal/README.md`; changed: `docs/plan/03-decisions.md` (ADR-045 to ADR-050 appended and the index line extended; no existing entry changed), `docs/plan/PROGRESS.md` (one note), this file. `docs/plan/02-interfaces.md` is untouched.
+
+- Freeze: `FROZEN: yes (M1 formalization freeze)` and `clinician_review: pending` (ADR-043; `WS00-T07.md` is absent). Registry 0.2.0 recorded and outside the freeze; all contracts consumed are 0.1.0.
+- Defects found in `01` to `07` and in the goldens (08 section 3.10, D1 to D9), none blocking: stale registry inventory and 0.1.0 statements in `03` (WS01-T03), `04` (WS01-T04), `05` (WS01-T05), `06` (WS01-T06), `07` (WS01-T07); `04` sections 4.6, 4.7 and OP-4, OP-9, OP-14, OP-15 superseded by `05` section 3.7, `06` section 2.4, `07` section 1.5; `07` section 1.9 column A and section 3.5 example 1 against the rule document; `01` section 5.5 item 5 against `05` section 7.5 item 2; `01` section 3.4 against `05` section 2.1 on duplicate `(source, seq)` (WS01-T05 and WS01-T01); `ranking.yaml` RK-1 and RK-4 hold a refinement-record value (WS01-T04); `02` is silent on the evaluability of INT (WS01-T02).
+- Flag of the WS01-T03 review: the registry-name check prints `meas_min_day`, `priority_param`, `scale_param` (08 section 3.1, adapted check prints nothing); OP-5 (`window_parameters` required), OP-2 and OP-4 are decided in ADR-047 (proposed); ADR-027 is accepted.
+- Hand-over of ADR-043 and WS01-T09: followed; the five findings are verified and carried as OPF-1 to OPF-5 (08 section 3.9 and 5.4).
+- Worked day: the scenario row R6 is corrected (informed replay in an authenticated deployment, kappa C3 by `crypto_temporal.authenticated`) because `01` section 3.4 and `05` section 2.1 disagree on duplicate `seq`; R11 omitted (CP2); see 09 section 1.5.
+- Independent check: a scratch evaluator under `/tmp` (not committed) reproduces 26 of 26 template cases, 24 of 24 verdict cases, 16 of 16 ranking cases, 7 of 7 conformal cases and the 32 records, 6 alerts and ranking of the day.
