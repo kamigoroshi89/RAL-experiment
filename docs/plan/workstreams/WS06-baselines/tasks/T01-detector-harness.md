@@ -86,3 +86,7 @@ Write these first (`pytest tests/baselines -q` must fail with import errors befo
 ### Flag from the WS01-T03 review (orchestrator, 2026-09-30)
 
 Test 21 ("every name used by `stub_registry` is an entry name in hypertension.yaml") uses a 30 min window "chosen for the test only", whose registry name (`sched_window`) is `unset` in `configs/registry/hypertension.yaml` (WS01-T03, open point OP-11). Kept `blocked`; align after ADR-027 (proposed) is decided.
+
+### ADR-027 accepted (agent, 2026-10-08)
+
+ADR-027 (fixture registry `configs/registry/fixture.yaml`, FIXTURE-ONLY rows, created by WS05-T03) was accepted by gab on 2026-10-08; the flag above is settled in that sense. Literature-anchored values for the clinical registry come from WS01-T09 (ADR-043).

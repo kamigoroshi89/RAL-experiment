@@ -3,7 +3,7 @@ id: WS01-T09
 title: Literature-anchored proposal of registry and prior values (agent-assisted, human-checked)
 workstream: WS01-formalization
 owner: human
-status: ready
+status: in_progress
 depends_on: ["WS01-T03", "WS04-T02"]
 critical_path: false
 non_negotiable: true
@@ -22,6 +22,7 @@ Replace, for now, the clinician's choice of values (WS00-T07, deferred by ADR-04
 - `docs/formal/03-parameter-registry.md` (schema, layout rules, version bump on change) and `configs/registry/hypertension.yaml`.
 - `docs/benchmark/parameter-provenance.md`, `configs/priors/literature_hypertension.yaml` and the `PriorSource` row conventions (`source_type`, `source_ref`, `verified_by`).
 - `docs/benchmark/datasets-overview-for-advisor.md` section 8 (open questions: cuff error from VitalDB or from the device standard; clean-segment rule).
+- Decision of gab (2026-10-08, with ADR-027): `cuff_error_sd` gets, beside the device standard, a supplementary estimate from the 30 VitalDB cases on disk (cuff `Solar8000/NIBP_SBP` against arterial `Solar8000/ART_SBP`), reported with its method and caveats (intraoperative patients, arterial line not the reference of the standard).
 - The drug class behind the PK/PD rows is not named anywhere in the plan: the proposal names the class it assumes and gab confirms it.
 
 ## File toccati
@@ -55,3 +56,9 @@ Verification checks:
 - Every row of the proposal has a `decision_gab` value.
 - `python -m ralmon.benchmark.priors --check-table` exits 0 and `pytest -q` exits 0.
 - `python3 tools/check_plan.py` exits 0.
+
+## Notes
+
+### In progress in the interactive session (agent, 2026-10-08)
+
+Started on 2026-10-08 in gab's interactive session: three research agents (A: clinical thresholds and care-plan counts; B: patient, drug response and adherence; C: scales, priorities, device and monitor parameters, plus the VitalDB cuff-error estimate). `owner: human`: the autonomous loop does not resume or select this task (it needs network access).

@@ -75,3 +75,7 @@ The review sheet produced by WS01-T03 (`docs/formal/03-parameter-registry.md` se
 ### No longer the M1 gate (agent, 2026-10-08)
 
 By ADR-043 (decision of gab) WS01-T08 no longer depends on this task and `critical_path` is now `false`: the formalization freezes with `clinician_review: pending`, and this review becomes a pre-submission item, still wanted. When it runs, it reviews the literature-anchored values of WS01-T09 that gab accepted, not an empty registry.
+
+### ADR-027 accepted (agent, 2026-10-08)
+
+ADR-027 (fixture registry `configs/registry/fixture.yaml`, FIXTURE-ONLY rows, created by WS05-T03) was accepted by gab on 2026-10-08; the flag above is settled in that sense. Literature-anchored values for the clinical registry come from WS01-T09 (ADR-043).

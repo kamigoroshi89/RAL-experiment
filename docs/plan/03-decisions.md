@@ -224,13 +224,13 @@ Spike result (WS05-T02, closes the spike of ADR-013): outcome C. Tested RTAMT 0.
 - **Consequences.** Until confirmed, WS07-T04 and WS04-T10 stay `blocked` and carry a note. No signature of `02-interfaces.md` changes in this ADR; adopting the alternative would need CP9.
 - **Status.** proposed [DA-CONFERMARE].
 
-## ADR-027 Fixture registry for runs before the clinician review [DA-CONFERMARE]
+## ADR-027 Fixture registry for runs before the clinician review
 
 - **Context.** WS01-T03 (`docs/formal/03-parameter-registry.md`, section 7 open point OP-11) seeds `configs/registry/hypertension.yaml` with the 17 illustrative values that analisi gives and leaves 17 names `unset` (among them `sched_window`, `delta_resp`, `cuff_inflation_min`, the scales `scale_hold`, `scale_resp`, `scale_sys`, `scale_int`, the priorities `priority_count`, `priority_resp`, `priority_sys`, `priority_int`, and `cuff_error_sd`) until the clinician review WS00-T07, which comes after the formalization freeze. Tasks that run before that review need a value for those names: WS05-T03 (test 15 copies fixture F0 into the WS01-T03 schema), WS06-T01 (test 21, stub registry) and WS06-T02 (step 2: "if a role has no entry, stop and report it"), WS04 (README working names) and any benchmark run. No task owns the creation of a fixture registry, and the number of registry rows the review sheet holds (34: entries plus unset names) differs from what WS00-T07 test 3 expects (the number of entries, 17).
 - **Decision.** Proposed: a separate file `configs/registry/fixture.yaml` holding the fixture F0 rows, every entry marked FIXTURE-ONLY, `reviewed_by: null`, rationale ending "illustrative, unverified", loaded only through an explicit `allow_fixture_only` option and never used for a reported result; created by WS05-T03 (owner of the registry loader), not by WS01. `hypertension.yaml` stays the single source of clinical parameters and keeps its `unset` names until WS00-T07.
 - **Alternatives.** Seed the unset names in `hypertension.yaml` with the F0 numbers (rejected: puts fixture values in the clinical registry, against ADR-020); let each task carry its own stub registry (rejected: duplicates values and hides the dependency).
 - **Consequences.** WS06-T01, WS06-T02, WS01-T08 and WS00-T07 carry a note and stay `blocked` until this ADR is decided; WS00-T07 test 3 and test 4 should count the review-sheet rows as entries plus `unset` names, and bounds once. No signature of `02-interfaces.md` changes in this ADR.
-- **Status.** proposed [DA-CONFERMARE].
+- **Status.** accepted (confirmed by gab, 2026-10-08, after an assessment of the open datasets as an alternative: the datasets supply at most the cuff error, so they complement the literature values of WS01-T09 and do not replace the test fixture).
 
 ## ADR-028 Order key of `rank_alerts`: tie-break and predicted versus violated
 
