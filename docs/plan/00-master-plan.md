@@ -2,6 +2,8 @@
 
 Everything here derives from `docs/source/analisi.md` (cited as "analisi §x"). Effort is in person-weeks (pw) unless stated. Numbers not present in the analysis are not given.
 
+> **Decisions 2026-10-08 (ADR-042, ADR-043).** ROS 2 Humble with Gazebo Classic and Python 3.10 as the floor of `ralmon` (ADR-042). The clinician review WS00-T07 no longer gates M1: the freeze runs with the review pending, parameter values are proposed from the literature in WS01-T09 and checked by gab, and the review becomes a pre-submission item (ADR-043). MIMIC credentialing (WS00-T04) is postponed; no human-participant activity is planned (WS00-T06).
+
 > **Scope change 2026-10-05 (ADR-037).** The paper (WS12) is written by the human, not by the agent; WS12-T01 to WS12-T08 are `owner: human`. M5 (submission) is a human milestone for its paper part. WS09 (figures and tables) is to be settled when WS08 produces results. Sections 2 to 7 below are otherwise unchanged.
 
 ## 1. Goal
@@ -45,7 +47,7 @@ The plan's task estimates add up to about 201 person-days (about 40 pw) includin
 | Id | Milestone | Gate (verifiable) |
 |---|---|---|
 | M0 | Commitment letter ready (analisi §9, weeks 1-2) | WS00-T01, T02 done; title and abstract without numbers written (WS12) |
-| M1 | Formalization frozen | WS01 done (the freeze WS01-T08 follows the clinician review WS00-T07 of registry, normalisation, verdict semantics and taxonomy); contract amendments decided by ADR (ADR-021); `02-interfaces.md` versions agreed |
+| M1 | Formalization frozen | WS01 done (the freeze WS01-T08 runs with `clinician_review: pending`; the clinician review WS00-T07 is a pre-submission item, ADR-043); contract amendments decided by ADR (ADR-021); `02-interfaces.md` versions agreed |
 | M2 | Core running offline | WS04 generator produces traces with latent ground truth; WS05 monitor emits verdicts and alerts on them; unit and property tests green |
 | M3 | Baselines and main results | WS06 B1-B5 run on the same traces; WS08 main table and A1-A4 produced |
 | M4 | Robot evidence | WS07 latency and robot-fault results; WS10 lab demo (or fallback video, see cut order) |

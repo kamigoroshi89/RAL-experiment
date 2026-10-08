@@ -5,7 +5,7 @@ workstream: WS00-admin
 owner: human
 status: blocked
 depends_on: ["WS00-T03", "WS01-T03", "WS01-T04", "WS01-T05", "WS02-T04"]
-critical_path: true
+critical_path: false
 non_negotiable: false
 estimate_pd: 1
 sources: ["analisi §4.2", "analisi §2 R3 weakness 3", "analisi §2 R3 weakness 4", "analisi §4.5", "analisi §9 (0.3)"]
@@ -71,3 +71,7 @@ From the repository root:
 ### Flag from the WS01-T03 review (orchestrator, 2026-09-30)
 
 The review sheet produced by WS01-T03 (`docs/formal/03-parameter-registry.md` section 6) has 34 rows: 17 seeded entries plus 17 `unset` names, whereas test 3 expects "the number of rows equals the number of entries in the file" (17). Test 4 ("one row for every `PhysioBounds` signal") clashes with bounds stored as entries `bound_<signal>_lower` and `bound_<signal>_upper` (counted twice). This task has no notion of `unset`, and its rule "any structural change goes to Change requests to WS01" conflicts with WS01-T03 section 4.2 step 9, which moves an unset name into `entries:` once the clinician gives a value. Kept `blocked`; reconcile the counting rule (entries plus unset, bounds once) after ADR-027 (proposed) is decided.
+
+### No longer the M1 gate (agent, 2026-10-08)
+
+By ADR-043 (decision of gab) WS01-T08 no longer depends on this task and `critical_path` is now `false`: the formalization freezes with `clinician_review: pending`, and this review becomes a pre-submission item, still wanted. When it runs, it reviews the literature-anchored values of WS01-T09 that gab accepted, not an empty registry.
