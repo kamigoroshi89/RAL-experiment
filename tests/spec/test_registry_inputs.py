@@ -7,7 +7,10 @@ aliases, python tags, multiple documents, deep nesting), bad shapes and bad valu
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,7 +23,7 @@ from ralmon.spec import load_registry
 from ralmon.spec import registry as registry_module
 from ralmon.spec.registry import RegistryError
 
-from .helpers import F0_PATH, dump_yaml, entry_of, f0_doc, write_yaml
+from .helpers import F0_PATH, ROOT, entry_of, f0_doc, write_yaml
 
 
 def load_text(tmp_path: Path, text: str | bytes, name: str = "registry.yaml") -> Any:
@@ -487,7 +490,9 @@ def test_derived_elements_are_validated(tmp_path: Path, change: dict[str, Any]) 
         )
 
 
-def test_a_huge_but_valid_registry_loads_in_bounded_time(tmp_path: Path) -> None:
+def test_a_large_valid_registry_loads_completely_in_one_bounded_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     doc = f0_doc()
     for index in range(2000):
         doc["entries"].append(
@@ -500,9 +505,24 @@ def test_a_huge_but_valid_registry_loads_in_bounded_time(tmp_path: Path) -> None
                 "reviewed_by": None,
             }
         )
-    registry = load_registry(write_yaml(tmp_path, doc), allow_fixture_only=True)
+    path = write_yaml(tmp_path, doc)
+    size = path.stat().st_size
+    assert size < yaml_io.MAX_FILE_BYTES // 2  # a big file, well inside the limit
+    reads: list[int] = []
+    real_read = yaml_io.read_limited_bytes
+
+    def counting(*args: Any, **kwargs: Any) -> bytes:
+        data = real_read(*args, **kwargs)
+        reads.append(len(data))
+        return data
+
+    monkeypatch.setattr(yaml_io, "read_limited_bytes", counting)
+    monkeypatch.setattr(registry_module, "read_limited_bytes", counting)
+    registry = load_registry(path, allow_fixture_only=True)
+    assert reads == [size]  # the file is read once, in full, and nothing else is read
     assert registry.get("extra_1999").value == 1999.0
-    assert len(dump_yaml(doc)) < yaml_io.MAX_FILE_BYTES
+    assert len(registry.unverified_names()) == 29 + 2000  # nothing dropped
+    assert registry.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def test_the_loader_module_has_the_documented_constants() -> None:
@@ -519,8 +539,16 @@ def test_the_file_is_read_with_a_bounded_read(monkeypatch: pytest.MonkeyPatch) -
         return F0_TEXT.encode("utf-8")
 
     @contextlib.contextmanager
-    def fake_open(*args: object, **kwargs: object) -> Iterator[SimpleNamespace]:
-        yield SimpleNamespace(read=read)
+    def fake_open(
+        file: Any, *args: object, **kwargs: object
+    ) -> Iterator[SimpleNamespace]:
+        try:
+            yield SimpleNamespace(read=read)
+        finally:
+            if isinstance(
+                file, int
+            ):  # the descriptor that the loader opened and vetted
+                os.close(file)
 
     monkeypatch.setattr(yaml_io, "open", fake_open, raising=False)
     assert load_registry(F0_PATH, allow_fixture_only=True).version() == "0.0.0"
@@ -555,3 +583,107 @@ def test_python_tags_are_never_constructed(tmp_path: Path) -> None:
     with pytest.raises(RegistryError):
         load_text(tmp_path, text)
     assert not marker.exists()
+
+
+def test_y11_the_python_name_tag_is_refused_whatever_the_loader_base(
+    tmp_path: Path,
+) -> None:
+    """``!!python/name`` must fail as an unknown tag; a weaker base loader would build the object and
+    fail later for another reason, so the message names the tag."""
+    text = F0_TEXT.replace(
+        "pathology: hypertension", "pathology: !!python/name:os.system", 1
+    )
+    assert text != F0_TEXT
+    with pytest.raises(RegistryError, match=r"python/name"):
+        load_text(tmp_path, text)
+
+
+# --- special files must not block the loader ------------------------------------------------
+
+FIFO_PROGRAM = """
+import sys
+from ralmon.spec import load_registry, load_templates
+from ralmon.spec.registry import RegistryError
+from ralmon.spec.templates import TemplateLibraryError
+
+which, path, f0 = sys.argv[1:4]
+try:
+    if which == "registry":
+        load_registry(path)
+    else:
+        load_templates(path, load_registry(f0, allow_fixture_only=True))
+except (RegistryError, TemplateLibraryError) as exc:
+    print(type(exc).__name__ + ": " + str(exc))
+    sys.exit(0)
+print("LOADED")
+sys.exit(1)
+"""
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no named pipes on this platform")
+@pytest.mark.parametrize("with_writer", [False, True])
+@pytest.mark.parametrize("which", ["registry", "templates"])
+def test_a_named_pipe_is_refused_and_never_blocks_the_loader(
+    tmp_path: Path, which: str, with_writer: bool
+) -> None:
+    """A subprocess with a timeout, so that a regression fails the test instead of hanging the suite."""
+    fifo = tmp_path / "pipe.yaml"
+    os.mkfifo(fifo)
+    writer = os.open(fifo, os.O_RDWR | os.O_NONBLOCK) if with_writer else None
+    try:
+        if writer is not None:
+            os.write(writer, F0_TEXT.encode("utf-8")[:4096])
+        env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", FIFO_PROGRAM, which, str(fifo), str(F0_PATH)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"load_{which} blocked on a named pipe")
+    finally:
+        if writer is not None:
+            os.close(writer)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "not a regular file" in result.stdout
+
+
+@pytest.mark.parametrize("device", ["/dev/null", "/dev/zero"])
+def test_a_device_file_is_not_a_registry(device: str) -> None:
+    if not os.path.exists(device):
+        pytest.skip("no such device")
+    with pytest.raises(RegistryError, match="not a regular file"):
+        load_registry(device)
+
+
+def test_a_directory_is_named_as_not_a_regular_file(tmp_path: Path) -> None:
+    with pytest.raises(RegistryError, match="not a regular file"):
+        load_registry(tmp_path)
+
+
+def test_the_file_is_opened_without_blocking_and_checked_on_the_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guards the race between a check of the path and the open: the descriptor is vetted."""
+    flags: list[int] = []
+    real_open = os.open
+
+    def spy(path: Any, flag: int, *args: Any, **kwargs: Any) -> int:
+        flags.append(flag)
+        return real_open(path, flag, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", spy)
+    load_registry(F0_PATH, allow_fixture_only=True)
+    assert len(flags) == 1
+    assert flags[0] & os.O_NONBLOCK
+    assert flags[0] & os.O_ACCMODE == os.O_RDONLY
+
+
+def test_a_symbolic_link_to_a_regular_file_is_followed(tmp_path: Path) -> None:
+    link = tmp_path / "link.yaml"
+    link.symlink_to(F0_PATH)
+    assert load_registry(link, allow_fixture_only=True).version() == "0.0.0"

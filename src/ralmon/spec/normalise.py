@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from fractions import Fraction
 from typing import Protocol, TypeVar
 
-from ralmon.spec._text import show
+from ralmon.spec._text import converting, show
 
 __all__ = ["normalise", "rank_alerts"]
 
@@ -53,6 +53,7 @@ def _clip_exact(sigma: float, scale: float) -> float:
     return float(quotient)
 
 
+@converting(ValueError)
 def normalise(sigma_raw: float, scale: float) -> float:
     """sigma_tilde = clip(sigma_raw / scale, -1.0, 1.0). scale > 0.
 
@@ -138,7 +139,9 @@ def _sort_key(alert: object, index: int) -> tuple[int, int | float, int, str]:
     where = f"alerts[{index}]"
     priority = _integer(_read(alert, "priority", where), "priority", where)
     if priority < 1:
-        raise ValueError(f"{where}: priority must be an integer >= 1, got {priority}")
+        raise ValueError(
+            f"{where}: priority must be an integer >= 1, got {show(priority)}"
+        )
     severity = _read(alert, "sigma_norm", where)
     if isinstance(severity, bool) or not isinstance(severity, numbers.Real):
         raise ValueError(
@@ -161,16 +164,24 @@ def _sort_key(alert: object, index: int) -> tuple[int, int | float, int, str]:
     return (priority, sigma, t_ms, key)
 
 
+@converting(ValueError)
 def rank_alerts(alerts: Sequence[A]) -> list[A]:
     """Lexicographic order: template priority first (clinician-assigned), then sigma_tilde ascending within a priority.
 
     The order key is ``K0 = (priority, sigma_norm, t_ms, instance_key)``, every component ascending
     (ADR-028): priority 1 is the highest, the most negative ``sigma_norm`` comes first inside a
-    priority, then the earlier ``t_ms``, then the smaller ``instance_key``. The sort is stable, so
-    alerts with equal keys keep their input order. The instance key is ``alert.xi.instance_key``, or
-    ``alert.instance_key`` for an object that has no ``xi``. The input is not modified; a new list
-    is returned. Raises ``ValueError`` for an input that is not a sequence, a priority that is not an
-    integer >= 1, a NaN or non-number ``sigma_norm``, a non-integer ``t_ms`` or a non-str key.
+    priority, then the earlier ``t_ms``, then the instance key by code point, as a whole string.
+    The sort is stable, so alerts with equal keys keep their input order. The input is not modified;
+    a new list is returned.
+
+    The instance key is ``alert.xi.instance_key`` (the shape of ``Alert``). A flat
+    ``alert.instance_key`` is a fallback for an object that has no ``xi`` (or whose ``xi`` is
+    ``None``), such as a test double. If both exist, ``xi.instance_key`` wins and the flat attribute is
+    not consulted, even when ``xi`` has no valid key (that is an error, not a fall back).
+
+    Raises ``ValueError`` for an input that is not a sequence, a priority that is not an integer >= 1,
+    a NaN or non-number ``sigma_norm``, a non-integer ``t_ms`` or a non-str key, and for any other
+    failure caused by a hostile element (the original exception type is kept in the message).
     """
     if isinstance(alerts, (str, bytes, bytearray)) or not isinstance(alerts, Sequence):
         raise ValueError(f"alerts must be a sequence of alerts, got {show(alerts)}")

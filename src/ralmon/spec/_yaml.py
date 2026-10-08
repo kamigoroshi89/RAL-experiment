@@ -9,13 +9,14 @@ keys. Every failure is raised as the error class the caller passes, never as a r
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Hashable
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from ralmon.spec._text import show
+from ralmon.spec._text import describe, show, show_path, type_name
 
 # algorithmic: upper bound on a configuration file (1 MiB); the real files are a few kilobytes
 MAX_FILE_BYTES: int = 1_048_576
@@ -65,22 +66,49 @@ def coerce_path(path: object, error: type[Exception], what: str) -> Path:
     try:
         raw = os.fspath(path)
     except Exception as exc:
-        raise error(f"{what}: the path cannot be converted to text: {exc}") from exc
+        raise error(
+            f"{what}: the path cannot be converted to text ({describe(exc)})"
+        ) from exc
     if not isinstance(raw, str):
-        raise error(f"{what}: the path must be text, not {type(raw).__name__}")
+        raise error(f"{what}: the path must be text, not {type_name(raw)}")
     return Path(raw)
 
 
 def read_limited_bytes(path: Path, error: type[Exception], what: str) -> bytes:
-    """The bytes of the file at ``path``, refused if it is larger than ``MAX_FILE_BYTES``."""
+    """The bytes of the regular file at ``path``, refused if it is larger than ``MAX_FILE_BYTES``.
+
+    The file is opened without blocking and the kind of file is checked on the open descriptor, not on
+    the path, so that a named pipe, a device or a directory is refused with ``error`` (a plain
+    ``open`` of a named pipe with no writer blocks for ever) and there is no race between a check of
+    the path and the open.
+    """
     limit = MAX_FILE_BYTES
+    shown = show_path(path)
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
-        with open(path, "rb") as handle:
+        descriptor = os.open(path, flags)
+    except (OSError, ValueError) as exc:
+        reason = (
+            exc.strerror if isinstance(exc, OSError) and exc.strerror else describe(exc)
+        )
+        raise error(f"{what}: cannot read {shown}: {reason}") from exc
+    try:
+        is_regular = stat.S_ISREG(os.fstat(descriptor).st_mode)
+    except OSError as exc:
+        os.close(descriptor)
+        raise error(f"{what}: cannot read {shown}: {describe(exc)}") from exc
+    if not is_regular:
+        os.close(descriptor)
+        raise error(f"{what}: {shown} is not a regular file")
+    try:
+        with open(
+            descriptor, "rb"
+        ) as handle:  # takes over the descriptor and closes it
             data = handle.read(limit + 1)
     except (OSError, ValueError) as exc:
-        raise error(f"{what}: cannot read {path}: {exc}") from exc
+        raise error(f"{what}: cannot read {shown}: {describe(exc)}") from exc
     if len(data) > limit:
-        raise error(f"{what}: {path} is larger than {limit} bytes")
+        raise error(f"{what}: {shown} is larger than {limit} bytes")
     return data
 
 
@@ -89,12 +117,12 @@ def parse_yaml_bytes(data: bytes, error: type[Exception], where: str) -> object:
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise error(f"{where}: the file is not valid UTF-8: {exc}") from exc
+        raise error(f"{where}: the file is not valid UTF-8 ({describe(exc)})") from exc
     try:
         return yaml.load(text, Loader=_StrictLoader)
     except yaml.YAMLError as exc:
-        raise error(f"{where}: invalid YAML: {exc}") from exc
+        raise error(f"{where}: invalid YAML ({describe(exc)})") from exc
     except RecursionError as exc:
         raise error(f"{where}: the YAML is nested too deeply") from exc
     except Exception as exc:  # an impossible date, an oversized number, ...
-        raise error(f"{where}: invalid YAML content: {exc}") from exc
+        raise error(f"{where}: invalid YAML content ({describe(exc)})") from exc

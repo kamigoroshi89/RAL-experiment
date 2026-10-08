@@ -195,8 +195,12 @@ def test_template_library_file_matches_the_document_table() -> None:
         {k: v for k, v in row.items() if k != "source"} for row in library["templates"]
     ]
     assert actual == expected
-    for row in library["templates"]:
-        assert row["source"].startswith("docs/formal/02-templates.md section 3.1")
+    for row in library[
+        "templates"
+    ]:  # the locator names the row it was transcribed from
+        assert row["source"] == (
+            f"docs/formal/02-templates.md section 3.1, row {row['id'].upper()}"
+        )
 
 
 GOLDEN_PLAN_FILES = (
@@ -205,6 +209,8 @@ GOLDEN_PLAN_FILES = (
     "plan_a.hmac_sha256",
     "plan_b.canonical.json",
     "plan_b.hmac_sha256",
+    "plan_c.canonical.json",
+    "plan_c.hmac_sha256",
 )
 
 
@@ -213,7 +219,7 @@ def test_plan_golden_files_are_committed(name: str) -> None:
     assert (FIXTURES / name).is_file()
 
 
-@pytest.mark.parametrize("plan", ["plan_a", "plan_b"])
+@pytest.mark.parametrize("plan", ["plan_a", "plan_b", "plan_c"])
 def test_plan_golden_digest_is_a_lowercase_sha256_hex(plan: str) -> None:
     digest = (FIXTURES / f"{plan}.hmac_sha256").read_text(encoding="ascii").strip()
     assert re.fullmatch(r"[0-9a-f]{64}", digest) is not None

@@ -159,7 +159,7 @@ def test_normalise_infinities_and_nan() -> None:
         Fraction(0),
     ],
 )
-def test_normalise_rejects_nonpositive_or_nonfinite_scale(scale: Any) -> None:
+def test_normalise_rejects_nonpositive_scale(scale: Any) -> None:
     with pytest.raises(ValueError, match="scale"):
         normalise(5.0, scale)
     with pytest.raises(ValueError, match="scale"):
@@ -346,3 +346,15 @@ def test_the_exact_path_clips_quotients_of_integers_beyond_the_float_range() -> 
         normalise(5.0, above) == 5 / above
     )  # the correctly rounded quotient of the exact values
     assert normalise(-5.0, above) == -5 / above
+
+
+def test_a_rational_beyond_the_float_range_is_a_value_error_not_an_overflow() -> None:
+    """``Fraction`` is a real number but ``float(Fraction(10**400))`` overflows: a named ValueError."""
+    huge = Fraction(10**400)
+    with pytest.raises(ValueError, match="sigma_raw.*float"):
+        normalise(huge, 1.0)
+    with pytest.raises(ValueError, match="scale.*float"):
+        normalise(1.0, huge)
+    with pytest.raises(ValueError, match="sigma_raw.*float"):
+        normalise(-huge, 1.0)
+    assert normalise(Fraction(10**400, 10**401), 1.0) == 0.1  # in range once reduced

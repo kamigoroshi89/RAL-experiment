@@ -926,3 +926,92 @@ def test_inverted_bounds_are_refused_for_a_signal_name_with_underscores(
         )
     with pytest.raises(RegistryError, match="inflation_ms"):
         load_doc(tmp_path, doc)
+
+
+# --- gaps found by the independent mutation review ---------------------------------------
+
+
+@pytest.mark.parametrize("offset", [1.0, -1.0, 1000.0, 59_999.0, -59_999.0])
+def test_a_window_one_millisecond_off_the_grid_is_refused(
+    tmp_path: Path, offset: float
+) -> None:
+    for name in WINDOW_NAMES:
+        doc = f0_doc()
+        entry_of(doc, name)["value"] = entry_of(doc, name)["value"] + offset
+        with pytest.raises(RegistryError, match=name):
+            load_doc(tmp_path, doc, step_ms=60_000)
+
+
+def test_the_unit_of_an_unset_term_of_a_derived_name_is_checked(tmp_path: Path) -> None:
+    doc = f0_doc()
+    make_unset(doc, "sched_window", ("sched",))  # an unset name of unit ms
+    doc["derived"][1]["unit"] = "dose"  # max_latency_sched = sched_window + step_ms
+    with pytest.raises(RegistryError, match="max_latency_sched"):
+        load_doc(tmp_path, doc, step_ms=60_000)
+    doc = f0_doc()
+    make_unset(
+        doc, "scale_hold", ("hold",)
+    )  # an unset name of unit mmHg inside an ms formula
+    doc["derived"].append(
+        {
+            "name": "mixed",
+            "unit": "ms",
+            "formula": "delta2 + scale_hold",
+            "template": "hold",
+        }
+    )
+    with pytest.raises(RegistryError, match=r"mixed.*scale_hold"):
+        load_doc(tmp_path, doc, step_ms=60_000)
+
+
+def test_is_set_needs_every_term_of_a_derived_name(tmp_path: Path) -> None:
+    doc = f0_doc()
+    make_unset(doc, "sched_window", ("sched",))
+    doc["derived"].append(
+        {
+            "name": "second_unset",
+            "unit": "ms",
+            "formula": "delta2 + sched_window",
+            "template": "sched",
+        }
+    )
+    doc["derived"].append(
+        {
+            "name": "first_unset",
+            "unit": "ms",
+            "formula": "sched_window + delta2",
+            "template": "sched",
+        }
+    )
+    doc["derived"].append(
+        {
+            "name": "all_set",
+            "unit": "ms",
+            "formula": "delta1 + delta2 + step_ms",
+            "template": "resp",
+        }
+    )
+    registry = load_doc(tmp_path, doc, step_ms=60_000)
+    assert registry.is_set("all_set") is True
+    assert (
+        registry.is_set("second_unset") is False
+    )  # the first term is set, the second is not
+    assert registry.is_set("first_unset") is False
+    with pytest.raises(UnsetParameterError, match="sched_window"):
+        registry.get("second_unset")
+
+
+def test_an_override_range_may_be_a_single_value(tmp_path: Path) -> None:
+    doc = f0_doc()
+    doc["overrides"] = [
+        {
+            "name": "bp_band_low",
+            "min": 110.0,
+            "max": 110.0,
+            "rationale": "a pinned value",
+            "source_ref": "review log",
+            "reviewed_by": None,
+        }
+    ]
+    (override,) = load_doc(tmp_path, doc).overrides()
+    assert override.min == override.max == 110.0

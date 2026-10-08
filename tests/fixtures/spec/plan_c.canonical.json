@@ -1,0 +1,1 @@
+{"care_plan_id":"CP-Fixture-003","instances":[{"anchor_ms":null,"instance_key":"Range@Ünï","param_values":{"BP_Band_Low":110.5,"bp_Band_high":140.25},"template":"range"}],"pathway_template_id":"Pt-患者","patient_id":"Pätient-😀","plan_version":1,"registry_version":"0.0.0","schedule":[0]}

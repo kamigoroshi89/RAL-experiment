@@ -26,7 +26,7 @@ from collections.abc import Callable, Mapping
 from enum import Enum
 from typing import Final, Protocol
 
-from ralmon.spec._text import show
+from ralmon.spec._text import converting, describe, show, type_name
 from ralmon.spec.plan import CarePlan, TemplateInstance
 
 __all__ = [
@@ -151,7 +151,7 @@ def _generic(value: object, where: str) -> object:
             f.name: _generic(getattr(value, f.name), f"{where}.{f.name}")
             for f in dataclasses.fields(value)
         }
-    raise PlanIntegrityError(f"{where}: unsupported type {type(value).__name__}")
+    raise PlanIntegrityError(f"{where}: unsupported type {type_name(value)}")
 
 
 _INSTANCE_FIELDS: Final[Mapping[str, Callable[[object, str], object]]] = {
@@ -192,6 +192,7 @@ _PLAN_FIELDS: Final[Mapping[str, Callable[[object, str], object]]] = {
 }
 
 
+@converting(PlanIntegrityError)
 def canonical_plan_bytes(plan: CarePlan) -> bytes:
     """The canonical bytes of ``plan``: every field except ``signature``, sorted keys, compact
     separators, UTF-8. Raises ``PlanIntegrityError`` for a value that cannot be signed."""
@@ -213,7 +214,9 @@ def canonical_plan_bytes(plan: CarePlan) -> bytes:
         )
         return text.encode("utf-8")
     except (ValueError, TypeError, OverflowError, RecursionError) as exc:
-        raise PlanIntegrityError(f"the plan cannot be serialised: {exc}") from exc
+        raise PlanIntegrityError(
+            f"the plan cannot be serialised ({describe(exc)})"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------------------
@@ -231,10 +234,11 @@ class HmacSha256PlanVerifier:
 
     __slots__ = ("_key",)
 
+    @converting(PlanIntegrityError)
     def __init__(self, key: bytes) -> None:
         if not isinstance(key, (bytes, bytearray)) or not key:
             raise PlanIntegrityError(
-                f"the HMAC key must be non-empty bytes, got {type(key).__name__}"
+                f"the HMAC key must be non-empty bytes, got {type_name(key)}"
             )
         self._key = bytes(key)
 
@@ -244,16 +248,18 @@ class HmacSha256PlanVerifier:
     def _digest(self, payload: bytes) -> str:
         return hmac.new(self._key, payload, hashlib.sha256).hexdigest()
 
+    @converting(PlanIntegrityError)
     def sign(self, plan: CarePlan) -> str:
         """The hex digest of HMAC-SHA256 over the canonical bytes of ``plan``."""
         return self._digest(canonical_plan_bytes(plan))
 
+    @converting(PlanIntegrityError)
     def verify(self, payload: bytes, signature: str) -> bool:
         """Whether ``signature`` is the lowercase hex HMAC-SHA256 of ``payload`` (constant-time
         comparison). A malformed signature is not valid; a ``payload`` that is not bytes raises."""
         if not isinstance(payload, (bytes, bytearray)):
             raise PlanIntegrityError(
-                f"the payload must be bytes, got {type(payload).__name__}"
+                f"the payload must be bytes, got {type_name(payload)}"
             )
         if (
             not isinstance(signature, str)
@@ -270,6 +276,7 @@ class HmacSha256PlanVerifier:
 # ---------------------------------------------------------------------------------------
 
 
+@converting(PlanIntegrityError)
 def verify_plan(
     plan: CarePlan,
     verifier: PlanVerifier | None,
@@ -284,7 +291,11 @@ def verify_plan(
     * a signed plan needs a ``verifier`` (never accepted silently) and its signature must verify
       over ``canonical_plan_bytes(plan)``.
 
-    The rule that ``plan_version`` never decreases is enforced by the monitor, not here.
+    The check is about the signature, not about the well-formedness of the plan: an unsigned plan has
+    nothing to verify and is not serialised, so a malformed unsigned plan passes (ADR-051); a signed
+    plan is serialised first and a plan that cannot be serialised raises. The rule that
+    ``plan_version`` never decreases and the feasibility checks of the plan belong to the monitor
+    that loads it (WS05-T04).
     """
     if not isinstance(require_signature, bool):
         raise PlanIntegrityError(
@@ -322,6 +333,6 @@ def verify_plan(
     except PlanIntegrityError:
         raise
     except Exception as exc:
-        raise PlanIntegrityError(f"the verifier failed: {exc}") from exc
+        raise PlanIntegrityError(f"the verifier failed ({describe(exc)})") from exc
     if valid is not True:
         raise PlanIntegrityError("the plan signature does not verify")

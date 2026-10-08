@@ -27,7 +27,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Protocol
 
-from ralmon.spec._text import show
+from ralmon.spec._text import (
+    MAX_REASON,
+    clip,
+    converting,
+    show,
+    show_names,
+    show_path,
+)
 from ralmon.spec._yaml import coerce_path, parse_yaml_bytes, read_limited_bytes
 
 __all__ = [
@@ -183,6 +190,7 @@ def _integral(value: object) -> int | None:
     return int(number)
 
 
+@converting(RegistryError)
 def as_duration_ms(entry: RegistryEntry) -> int:
     """The value of an entry with unit ``ms`` as an integer number of milliseconds (``DurationMs``).
 
@@ -192,16 +200,17 @@ def as_duration_ms(entry: RegistryEntry) -> int:
         raise RegistryError(f"expected a RegistryEntry, got {show(entry)}")
     if entry.unit != "ms":
         raise RegistryError(
-            f"{entry.name!r} has unit {entry.unit!r}, not 'ms': it is not a duration"
+            f"{show(entry.name)} has unit {show(entry.unit)}, not 'ms': it is not a duration"
         )
     value = _integral(entry.value)
     if value is None or value < 0:
         raise RegistryError(
-            f"{entry.name!r} is {show(entry.value)}, not a non-negative integral duration"
+            f"{show(entry.name)} is {show(entry.value)}, not a non-negative integral duration"
         )
     return value
 
 
+@converting(RegistryError)
 def as_priority(entry: RegistryEntry) -> int:
     """The value of a ``priority_<id>`` entry as an integer rank >= 1 (1 is the highest priority).
 
@@ -212,7 +221,7 @@ def as_priority(entry: RegistryEntry) -> int:
     value = _integral(entry.value)
     if entry.unit != "1" or value is None or value < 1:
         raise RegistryError(
-            f"{entry.name!r} is {show(entry.value)} {entry.unit!r}, not an integral rank >= 1"
+            f"{show(entry.name)} is {show(entry.value)} {show(entry.unit)}, not an integral rank >= 1"
         )
     return value
 
@@ -265,6 +274,7 @@ class LoadedRegistry:
         """The ``registry_version`` of the file (``MAJOR.MINOR.PATCH``)."""
         return self._version
 
+    @converting(RegistryError)
     def get(self, name: str) -> RegistryEntry:
         """The entry ``name``: a stored entry, a computed derived entry, else an error.
 
@@ -282,8 +292,11 @@ class LoadedRegistry:
         unset = self._unset.get(name)
         if unset is not None:
             raise UnsetParameterError(_unset_message(unset))
-        raise RegistryError(f"unknown parameter {name!r} in registry {self._version}")
+        raise RegistryError(
+            f"unknown parameter {show(name)} in registry {show(self._version)}"
+        )
 
+    @converting(RegistryError)
     def bounds(self, signal: str) -> PhysioBounds:
         """The physiological bounds of ``signal``, composed from ``bound_<signal>_lower`` and
         ``bound_<signal>_upper`` (03 section 2.5 rule 5)."""
@@ -292,8 +305,8 @@ class LoadedRegistry:
         lower_name, upper_name = f"bound_{signal}_lower", f"bound_{signal}_upper"
         if not (self.is_declared(lower_name) or self.is_declared(upper_name)):
             raise RegistryError(
-                f"no bounds are declared for signal {signal!r} "
-                f"(expected entries {lower_name!r} and {upper_name!r})"
+                f"no bounds are declared for signal {show(signal)} "
+                f"(expected entries {show(lower_name)} and {show(upper_name)})"
             )
         lower = self._bound_side(lower_name, signal)
         upper = self._bound_side(upper_name, signal)
@@ -307,7 +320,7 @@ class LoadedRegistry:
         if unset is not None:
             raise UnsetParameterError(_unset_message(unset))
         raise RegistryError(
-            f"the bound {name!r} of signal {signal!r} is not an entry of the registry"
+            f"the bound {show(name)} of signal {show(signal)} is not an entry of the registry"
         )
 
     def _compute(self, derived: _Derived) -> RegistryEntry:
@@ -317,14 +330,14 @@ class LoadedRegistry:
             if term == STEP_NAME:
                 if self._step_ms is None:
                     raise RegistryError(
-                        f"derived parameter {derived.name!r} needs step_ms: pass step_ms to load_registry"
+                        f"derived parameter {show(derived.name)} needs step_ms: pass step_ms to load_registry"
                     )
                 total += self._step_ms
                 continue
             unset = self._unset.get(term)
             if unset is not None:
                 raise UnsetParameterError(
-                    f"derived parameter {derived.name!r} needs {term!r}, which is unset "
+                    f"derived parameter {show(derived.name)} needs {show(term)}, which is unset "
                     f"(required by {list(unset.required_by)})"
                 )
             entry = self._entries[term]
@@ -344,12 +357,14 @@ class LoadedRegistry:
 
     # -- extras (not in the protocol) -------------------------------------------------
 
+    @converting(RegistryError)
     def is_declared(self, name: object) -> bool:
         """Whether ``name`` is an entry, a derived name or an unset name."""
         return isinstance(name, str) and (
             name in self._entries or name in self._derived or name in self._unset
         )
 
+    @converting(RegistryError)
     def is_set(self, name: str) -> bool:
         """Whether ``name`` has a value: an entry, or a derived name all of whose terms are set.
 
@@ -357,7 +372,7 @@ class LoadedRegistry:
         """
         if not self.is_declared(name):
             raise RegistryError(
-                f"unknown parameter {show(name)} in registry {self._version}"
+                f"unknown parameter {show(name)} in registry {show(self._version)}"
             )
         if name in self._entries:
             return True
@@ -417,8 +432,8 @@ class LoadedRegistry:
 
 def _unset_message(unset: _Unset) -> str:
     return (
-        f"parameter {unset.name!r} is declared but has no value yet "
-        f"(required by {list(unset.required_by)}; {unset.note})"
+        f"parameter {show(unset.name)} is declared but has no value yet "
+        f"(required by {list(unset.required_by)}; {clip(unset.note, MAX_REASON)})"
     )
 
 
@@ -446,6 +461,7 @@ def default_registry_path() -> Path:
     return root.joinpath(*DEFAULT_REGISTRY_RELPATH)
 
 
+@converting(RegistryError)
 def load_registry(
     path: str | Path | None = None,
     *,
@@ -475,16 +491,16 @@ def load_registry(
         else coerce_path(path, RegistryError, "registry")
     )
     data = read_limited_bytes(resolved, RegistryError, "registry")
-    document = parse_yaml_bytes(data, RegistryError, f"registry {resolved}")
+    document = parse_yaml_bytes(data, RegistryError, f"registry {show_path(resolved)}")
     if not isinstance(document, Mapping):
         raise RegistryError(
-            f"registry {resolved}: the file must hold a mapping at top level"
+            f"registry {show_path(resolved)}: the file must hold a mapping at top level"
         )
     registry = _build(document, resolved, hashlib.sha256(data).hexdigest(), step_ms)
     if registry.fixture_only and not allow_fixture_only:
         raise RegistryError(
-            f"registry {resolved} contains {FIXTURE_ONLY_MARKER} rows "
-            f"{list(registry.fixture_only_names())}: arithmetic test numbers that must not be used "
+            f"registry {show_path(resolved)} contains {FIXTURE_ONLY_MARKER} rows "
+            f"{show_names(registry.fixture_only_names())}: arithmetic test numbers that must not be used "
             "for a reported result (ADR-027); pass allow_fixture_only=True only in tests"
         )
     return registry
@@ -500,7 +516,8 @@ def _check_keys(
     missing = [k for k in required if k not in mapping]
     if unknown or missing:
         raise RegistryError(
-            f"{where}: unknown key(s) {unknown}, missing required key(s) {missing}"
+            f"{where}: unknown key(s) {show_names(unknown)}, missing required key(s) "
+            f"{show_names(missing)}"
         )
 
 
@@ -511,7 +528,7 @@ def _name(value: object, where: str) -> str:
         )
     if value == STEP_NAME:
         raise RegistryError(
-            f"{where}: {STEP_NAME!r} is monitor configuration, not a registry name"
+            f"{where}: {show(STEP_NAME)} is monitor configuration, not a registry name"
         )
     return value
 
@@ -575,7 +592,7 @@ def _label(raw: Mapping[object, object], key: str, index: int, section: str) -> 
     """``section[index] (name)`` for error messages."""
     name = raw.get(key)
     if isinstance(name, str) and _NAME_RE.fullmatch(name) is not None:
-        return f"{section}[{index}] ({name})"
+        return f"{section}[{index}] ({clip(name)})"
     return f"{section}[{index}]"
 
 
@@ -603,21 +620,21 @@ def _check_value_rules(name: str, unit: str, value: float, where: str) -> None:
     template table."""
     if unit == "ms" and (not value.is_integer() or value < 0):
         raise RegistryError(
-            f"{where}: a duration (unit ms) must be a non-negative integer, got {value!r}"
+            f"{where}: a duration (unit ms) must be a non-negative integer, got {show(value)}"
         )
     for template in TEMPLATE_IDS:
         if name == f"scale_{template}":
             if unit not in SCALE_UNITS or not value > 0:
                 raise RegistryError(
                     f"{where}: a scale must be positive with unit mmHg, ms or dose, "
-                    f"got {value!r} {unit!r}"
+                    f"got {show(value)} {show(unit)}"
                 )
         elif name == f"priority_{template}" and (
             unit != "1" or not value.is_integer() or value < 1
         ):
             raise RegistryError(
                 f"{where}: a priority must be an integral rank >= 1 with unit '1', "
-                f"got {value!r} {unit!r}"
+                f"got {show(value)} {show(unit)}"
             )
 
 
@@ -670,11 +687,11 @@ def _parse_override(
     _check_keys(mapping, _OVERRIDE_KEYS, (), where)
     name = _name(mapping["name"], where)
     if name not in entry_names:
-        raise RegistryError(f"{where}: {name!r} is not an entry of the registry")
+        raise RegistryError(f"{where}: {show(name)} is not an entry of the registry")
     low = _finite_float(mapping["min"], "min", where)
     high = _finite_float(mapping["max"], "max", where)
     if low > high:
-        raise RegistryError(f"{where}: min {low!r} is above max {high!r}")
+        raise RegistryError(f"{where}: min {show(low)} is above max {show(high)}")
     return RegistryOverride(
         name,
         low,
@@ -699,7 +716,7 @@ def _check_unique_names(
     for name, section in labelled:
         if name in where_of:
             raise RegistryError(
-                f"duplicate parameter name {name!r} (in {where_of[name]} and in {section})"
+                f"duplicate parameter name {show(name)} (in {where_of[name]} and in {section})"
             )
         where_of[name] = section
 
@@ -710,29 +727,29 @@ def _check_derived_terms(
     unset: Mapping[str, _Unset],
 ) -> None:
     for item in derived:
-        where = f"derived ({item.name})"
+        where = f"derived ({clip(item.name)})"
         for term in item.terms:
             if term == STEP_NAME:
                 if item.unit != "ms":
                     raise RegistryError(
-                        f"{where}: {STEP_NAME} is a duration, but the unit is {item.unit!r}"
+                        f"{where}: {STEP_NAME} is a duration, but the unit is {show(item.unit)}"
                     )
                 continue
             if term in entries:
                 if entries[term].unit != item.unit:
                     raise RegistryError(
-                        f"{where}: term {term!r} has unit {entries[term].unit!r}, "
-                        f"not {item.unit!r}"
+                        f"{where}: term {show(term)} has unit {entries[term].unit!r}, "
+                        f"not {show(item.unit)}"
                     )
             elif term in unset:
                 if unset[term].unit != item.unit:
                     raise RegistryError(
-                        f"{where}: term {term!r} has unit {unset[term].unit!r}, "
-                        f"not {item.unit!r}"
+                        f"{where}: term {show(term)} has unit {unset[term].unit!r}, "
+                        f"not {show(item.unit)}"
                     )
             else:
                 raise RegistryError(
-                    f"{where}: term {term!r} is not an entry or an unset name"
+                    f"{where}: term {show(term)} is not an entry or an unset name"
                 )
 
 
@@ -750,15 +767,15 @@ def _check_windows(
             unit = unset[name].unit
         elif name in derived:
             raise RegistryError(
-                f"window_parameters: {name!r} is a derived name, not a window parameter"
+                f"window_parameters: {show(name)} is a derived name, not a window parameter"
             )
         else:
             raise RegistryError(
-                f"window_parameters: {name!r} is neither an entry nor an unset name"
+                f"window_parameters: {show(name)} is neither an entry nor an unset name"
             )
         if unit != "ms":
             raise RegistryError(
-                f"window_parameters: {name!r} has unit {unit!r}; a window is a duration in ms"
+                f"window_parameters: {show(name)} has unit {show(unit)}; a window is a duration in ms"
             )
     if step_ms is None:
         return
@@ -766,14 +783,14 @@ def _check_windows(
         entry = entries.get(name)
         if entry is not None and int(entry.value) % step_ms != 0:
             raise RegistryError(
-                f"window parameter {name!r} = {entry.value!r} is not a multiple of "
-                f"step_ms {step_ms}"
+                f"window parameter {show(name)} = {show(entry.value)} is not a multiple of "
+                f"step_ms {show(step_ms)}"
             )
     start, end = entries.get(WINDOW_START), entries.get(WINDOW_END)
     if start is not None and end is not None and end.value - start.value < 0:
         raise RegistryError(
             f"{WINDOW_END} - {WINDOW_START} must be a non-negative multiple of step_ms "
-            f"{step_ms}, got {end.value - start.value!r}"
+            f"{show(step_ms)}, got {show(end.value - start.value)}"
         )
 
 
@@ -785,8 +802,8 @@ def _check_bound_pairs(entries: Mapping[str, RegistryEntry]) -> None:
         upper = entries.get(f"bound_{match.group(1)}_upper")
         if upper is not None and not lower.value < upper.value:
             raise RegistryError(
-                f"physiological bounds of signal {match.group(1)!r}: lower {lower.value!r} "
-                f"must be below upper {upper.value!r}"
+                f"physiological bounds of signal {show(match.group(1))}: lower {show(lower.value)} "
+                f"must be below upper {show(upper.value)}"
             )
 
 
@@ -802,14 +819,14 @@ def _check_review_status(
         expected = "partially_reviewed"
     if status != expected:
         raise RegistryError(
-            f"review_status is {status!r} but the entries say {expected!r}"
+            f"review_status is {show(status)} but the entries say {show(expected)}"
         )
 
 
 def _build(
     document: Mapping[object, object], path: Path, digest: str, step_ms: int | None
 ) -> LoadedRegistry:
-    where = f"registry {path}"
+    where = f"registry {show_path(path)}"
     _check_keys(document, _TOP_REQUIRED, _TOP_OPTIONAL, where)
     version = document["registry_version"]
     if not isinstance(version, str) or _VERSION_RE.fullmatch(version) is None:
@@ -832,7 +849,9 @@ def _build(
     )
     repeated = sorted({w for w in windows if windows.count(w) > 1})
     if repeated:
-        raise RegistryError(f"window_parameters must not repeat a name: {repeated}")
+        raise RegistryError(
+            f"window_parameters must not repeat a name: {show_names(repeated)}"
+        )
     entries = [_parse_entry(raw, i) for i, raw in enumerate(_list(document, "entries"))]
     derived = [
         _parse_derived(raw, i) for i, raw in enumerate(_list(document, "derived"))

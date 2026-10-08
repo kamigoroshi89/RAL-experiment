@@ -458,3 +458,103 @@ def test_rank_alerts_infinite_severity_is_accepted_but_not_nan() -> None:
     assert len(rank_alerts([with_field(sigma_norm=math.inf)])) == 1
     with pytest.raises(ValueError, match="NaN"):
         rank_alerts([with_field(sigma_norm=math.nan)])
+
+
+# --- the instance key: code point order of the whole string -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("ab", "b"),  # not the length, not the last character
+        ("a", "aa"),  # a prefix comes first
+        ("a10", "a9"),  # text order, not numeric order
+        ("range@09:05", "range@12:24"),
+        ("A", "a"),  # upper case before lower case (code points), no case folding
+        ("Zebra", "apple"),
+        ("z", "é"),  # code point order outside ASCII
+        ("é", "ü"),
+        ("\uffff", "\U0001f600"),  # a character outside the BMP sorts after U+FFFF
+        ("ab\u00e9", "ab\u00ea"),
+        ("key-1", "key-1x"),
+    ],
+)
+def test_instance_keys_are_compared_as_whole_strings_by_code_point(
+    first: str, second: str
+) -> None:
+    assert first < second  # the expectation is Python's own str order, stated per case
+    low = FlatAlert(2, -0.5, 7, first)
+    high = FlatAlert(2, -0.5, 7, second)
+    assert rank_alerts([high, low]) == [low, high]
+    assert rank_alerts([low, high]) == [low, high]
+
+
+def test_the_instance_key_is_only_the_last_tie_break() -> None:
+    keys_first = FlatAlert(2, -0.5, 9, "a")
+    time_first = FlatAlert(2, -0.5, 1, "zzz")
+    assert rank_alerts([keys_first, time_first]) == [time_first, keys_first]
+
+
+# --- sigma_norm: the exact float decides --------------------------------------------------
+
+
+def test_adjacent_floats_of_sigma_norm_keep_their_order() -> None:
+    base = -0.3
+    just_above = math.nextafter(base, 0.0)
+    just_below = math.nextafter(base, -1.0)
+    assert just_below < base < just_above
+    alerts = [
+        FlatAlert(2, just_above, 1, "above"),
+        FlatAlert(2, base, 1, "base"),
+        FlatAlert(2, just_below, 1, "below"),
+    ]
+    assert [a.instance_key for a in rank_alerts(alerts)] == ["below", "base", "above"]
+    tiny = [
+        FlatAlert(2, 5e-324, 1, "b"),
+        FlatAlert(2, 1e-300, 1, "c"),
+        FlatAlert(2, -5e-324, 1, "a"),
+    ]
+    assert [a.instance_key for a in rank_alerts(tiny)] == ["a", "b", "c"]
+
+
+FINE = st.builds(
+    FlatAlert,
+    priority=st.integers(min_value=1, max_value=2),
+    sigma_norm=st.floats(min_value=-1.0, max_value=1.0, allow_nan=False),
+    t_ms=st.integers(min_value=0, max_value=2),
+    instance_key=st.text(alphabet="ab\u00e9", max_size=3),
+)
+
+
+@settings(max_examples=150)
+@given(alerts=st.lists(FINE, max_size=10))
+def test_rank_alerts_equals_a_sort_by_the_documented_key_for_arbitrary_floats_and_texts(
+    alerts: list[FlatAlert],
+) -> None:
+    assert rank_alerts(alerts) == sorted(alerts, key=key_of)
+
+
+# --- the two shapes of the instance key -----------------------------------------------------
+
+
+def test_xi_wins_over_a_flat_instance_key_even_when_it_has_none() -> None:
+    """Documented: when ``xi`` is present its ``instance_key`` is the key; the flat attribute is a
+    fallback for objects that are not an ``Alert`` and is not consulted if ``xi`` exists."""
+    both_differ = SimpleNamespace(
+        priority=1, sigma_norm=0.0, t_ms=1, instance_key="flat", xi=_Xi("nested")
+    )
+    assert rank_alerts([both_differ]) == [both_differ]
+    xi_without_key = SimpleNamespace(
+        priority=1, sigma_norm=0.0, t_ms=1, instance_key="flat", xi=object()
+    )
+    with pytest.raises(ValueError, match=r"alerts\[0\].*instance_key"):
+        rank_alerts([xi_without_key])
+    xi_none = SimpleNamespace(
+        priority=1, sigma_norm=0.0, t_ms=1, instance_key="flat", xi=None
+    )
+    assert rank_alerts([xi_none]) == [xi_none]  # no xi: the flat key is the fallback
+
+
+def test_the_docstring_states_the_fallback_and_the_precedence() -> None:
+    doc = rank_alerts.__doc__ or ""
+    assert "fallback" in doc and "xi.instance_key" in doc and "wins" in doc

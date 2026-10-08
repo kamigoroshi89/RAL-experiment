@@ -28,7 +28,14 @@ from typing import Final, TypeVar
 
 from ralmon.signals import SignalId
 from ralmon.spec import registry as _registry
-from ralmon.spec._text import show
+from ralmon.spec._text import (
+    clip,
+    converting,
+    describe,
+    show,
+    show_names,
+    show_path,
+)
 from ralmon.spec._yaml import coerce_path, parse_yaml_bytes, read_limited_bytes
 from ralmon.spec.registry import (
     ParameterRegistry,
@@ -153,6 +160,7 @@ def default_templates_path() -> Path:
     return root.joinpath(*DEFAULT_TEMPLATES_RELPATH)
 
 
+@converting(TemplateLibraryError)
 def load_templates(
     path: str | Path | None = None,
     registry: ParameterRegistry | None = None,
@@ -173,7 +181,7 @@ def load_templates(
             registry = load_registry()
         except RegistryError as exc:
             raise TemplateLibraryError(
-                f"default registry cannot be loaded: {exc}"
+                f"default registry cannot be loaded ({describe(exc)})"
             ) from exc
     elif not all(
         callable(getattr(registry, method, None))
@@ -185,9 +193,9 @@ def load_templates(
         )
     data = read_limited_bytes(resolved, TemplateLibraryError, "template library")
     document = parse_yaml_bytes(
-        data, TemplateLibraryError, f"template library {resolved}"
+        data, TemplateLibraryError, f"template library {show_path(resolved)}"
     )
-    where = f"template library {resolved}"
+    where = f"template library {show_path(resolved)}"
     if not isinstance(document, Mapping):
         raise TemplateLibraryError(
             f"{where}: the file must hold a mapping at top level"
@@ -196,7 +204,8 @@ def load_templates(
     missing = [k for k in _TOP_KEYS if k not in document]
     if unknown or missing:
         raise TemplateLibraryError(
-            f"{where}: unknown key(s) {unknown}, missing required key(s) {missing}"
+            f"{where}: unknown key(s) {show_names(unknown)}, missing required key(s) "
+            f"{show_names(missing)}"
         )
     version = document["library_version"]
     if not isinstance(version, str) or _VERSION.fullmatch(version) is None:
@@ -216,7 +225,7 @@ def load_templates(
     for template in parsed:
         if template.id in by_id:
             raise TemplateLibraryError(
-                f"{where}: templates: the id {template.id.value!r} appears twice"
+                f"{where}: templates: the id {show(template.id.value)} appears twice"
             )
         by_id[template.id] = template
     absent = [i.value for i in TemplateId if i not in by_id]
@@ -260,20 +269,21 @@ def _parse_row(raw: object, index: int) -> Template:
         raise TemplateLibraryError(f"{where} must be a mapping, got {show(raw)}")
     ident = raw.get("id")
     if isinstance(ident, str) and _NAME.fullmatch(ident) is not None:
-        where = f"{where} ({ident})"
+        where = f"{where} ({clip(ident)})"
     unknown = sorted(str(k) for k in raw if k not in _ROW_KEYS)
     missing = [k for k in _ROW_KEYS if k not in raw]
     if unknown or missing:
         raise TemplateLibraryError(
-            f"{where}: unknown key(s) {unknown}, missing required field(s) {missing}"
+            f"{where}: unknown key(s) {show_names(unknown)}, missing required field(s) "
+            f"{show_names(missing)}"
         )
     template_id = _enum_member(TemplateId, raw["id"], "id", where)
     kind = _enum_member(TemplateKind, raw["kind"], "kind", where)
     unit = _enum_member(RobustnessUnit, raw["unit"], "unit", where)
     if kind is not _KIND_OF_ID[template_id]:
         raise TemplateLibraryError(
-            f"{where}: kind {kind.value!r} contradicts the decomposition "
-            f"(the kind of {template_id.value!r} is {_KIND_OF_ID[template_id].value!r})"
+            f"{where}: kind {show(kind.value)} contradicts the decomposition "
+            f"(the kind of {show(template_id.value)} is {_KIND_OF_ID[template_id].value!r})"
         )
     formula = raw["formula_past_time"]
     if (
@@ -290,7 +300,7 @@ def _parse_row(raw: object, index: int) -> Template:
     unknown_signals = [s for s in signals if s not in _SIGNAL_VALUES]
     if unknown_signals:
         raise TemplateLibraryError(
-            f"{where}: signals {unknown_signals} are not SignalId values"
+            f"{where}: signals {show_names(unknown_signals)} are not SignalId values"
         )
     _check_formula_names(formula, signals, params, where)
     for field, prefix in (
@@ -301,7 +311,7 @@ def _parse_row(raw: object, index: int) -> Template:
         expected = f"{prefix}_{template_id.value}"
         if raw[field] != expected:
             raise TemplateLibraryError(
-                f"{where}: {field} must be {expected!r}, got {show(raw[field])}"
+                f"{where}: {field} must be {show(expected)}, got {show(raw[field])}"
             )
     obligation = raw["creates_robot_obligation"]
     if not isinstance(obligation, bool):
@@ -336,13 +346,13 @@ def _check_formula_names(
     used_params = words - used_signals
     if set(signals) != used_signals:
         raise TemplateLibraryError(
-            f"{where}: signals {sorted(signals)} differ from the signals of the string "
-            f"{sorted(used_signals)}"
+            f"{where}: signals {show_names(sorted(signals))} differ from the signals of "
+            f"the string {show_names(sorted(used_signals))}"
         )
     if set(params) != used_params:
         raise TemplateLibraryError(
-            f"{where}: params {sorted(params)} differ from the registry names of the string "
-            f"{sorted(used_params)}"
+            f"{where}: params {show_names(sorted(params))} differ from the registry names "
+            f"of the string {show_names(sorted(used_params))}"
         )
 
 
@@ -361,17 +371,17 @@ def _resolve(
         return False, None
     except Exception as exc:
         raise TemplateLibraryError(
-            f"{where}: the registry failed on {name!r}: {exc}"
+            f"{where}: the registry failed on {show(name)}: {exc}"
         ) from exc
     if not isinstance(entry, RegistryEntry):
         raise TemplateLibraryError(
-            f"{where}: the registry returned {show(entry)} for {name!r}, not a RegistryEntry"
+            f"{where}: the registry returned {show(entry)} for {show(name)}, not a RegistryEntry"
         )
     return True, entry
 
 
 def _check_against_registry(template: Template, registry: ParameterRegistry) -> None:
-    where = f"template {template.id.value!r}"
+    where = f"template {show(template.id.value)}"
     for name in (
         *template.params,
         template.scale_param,
@@ -381,23 +391,23 @@ def _check_against_registry(template: Template, registry: ParameterRegistry) -> 
         declared, _entry = _resolve(registry, name, where)
         if not declared:
             raise TemplateLibraryError(
-                f"{where}: {name!r} is not declared in the registry"
+                f"{where}: {show(name)} is not declared in the registry"
             )
     _declared, scale = _resolve(registry, template.scale_param, where)
     if scale is not None:
         if scale.unit != template.unit.value:
             raise TemplateLibraryError(
-                f"{where}: scale_param {template.scale_param!r} has unit {scale.unit!r}, "
-                f"the margin of the template is {template.unit.value!r}"
+                f"{where}: scale_param {show(template.scale_param)} has unit {show(scale.unit)}, "
+                f"the margin of the template is {show(template.unit.value)}"
             )
         if not scale.value > 0:
             raise TemplateLibraryError(
-                f"{where}: scale_param {template.scale_param!r} must be positive, "
-                f"got {scale.value!r}"
+                f"{where}: scale_param {show(template.scale_param)} must be positive, "
+                f"got {show(scale.value)}"
             )
     _declared, priority = _resolve(registry, template.priority_param, where)
     if priority is not None:
         try:
             as_priority(priority)
         except RegistryError as exc:
-            raise TemplateLibraryError(f"{where}: {exc}") from exc
+            raise TemplateLibraryError(f"{where}: {describe(exc)}") from exc

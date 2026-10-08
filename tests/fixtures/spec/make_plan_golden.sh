@@ -17,6 +17,10 @@ printf '%s' '{"care_plan_id":"cp-fixture-001","instances":[{"anchor_ms":32400000
 # Plan B: non-ASCII text (written as UTF-8, not escaped), empty sequences, plan_version 0.
 printf '%s' '{"care_plan_id":"cp-fixture-002","instances":[],"pathway_template_id":"pt-ü","patient_id":"pätient","plan_version":0,"registry_version":"0.0.0","schedule":[]}' > plan_b.canonical.json
 
-for plan in plan_a plan_b; do
+# Plan C: mixed-case text, characters outside Latin-1 (CJK) and outside the BMP (an emoji), a float with a
+# fractional part, keys that sort by code point (upper case before lower case).
+printf '%s' '{"care_plan_id":"CP-Fixture-003","instances":[{"anchor_ms":null,"instance_key":"Range@Ünï","param_values":{"BP_Band_Low":110.5,"bp_Band_high":140.25},"template":"range"}],"pathway_template_id":"Pt-患者","patient_id":"Pätient-😀","plan_version":1,"registry_version":"0.0.0","schedule":[0]}' > plan_c.canonical.json
+
+for plan in plan_a plan_b plan_c; do
     openssl dgst -sha256 -hmac "$KEY" -r "$plan.canonical.json" | cut -d' ' -f1 > "$plan.hmac_sha256"
 done

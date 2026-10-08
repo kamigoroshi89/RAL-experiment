@@ -39,7 +39,7 @@ GOLDEN = {
         (FIXTURES / f"{name}.canonical.json").read_bytes(),
         (FIXTURES / f"{name}.hmac_sha256").read_text(encoding="ascii").strip(),
     )
-    for name in ("plan_a", "plan_b")
+    for name in ("plan_a", "plan_b", "plan_c")
 }
 
 
@@ -83,6 +83,30 @@ def plan_b() -> CarePlan:
     )
 
 
+def plan_c() -> CarePlan:
+    """Mixed-case text, CJK (outside Latin-1) and an emoji (outside the BMP): the golden of plan C."""
+    return CarePlan(
+        care_plan_id="CP-Fixture-003",
+        pathway_template_id="Pt-患者",
+        patient_id="Pätient-😀",
+        registry_version="0.0.0",
+        instances=(
+            TemplateInstance(
+                TemplateId.RANGE,
+                "Range@Ünï",
+                {"bp_Band_high": 140.25, "BP_Band_Low": 110.5},
+                None,
+            ),
+        ),
+        schedule=(0,),
+        plan_version=1,
+        signature=None,
+    )
+
+
+PLANS = {"plan_a": plan_a, "plan_b": plan_b, "plan_c": plan_c}
+
+
 def signed(plan: CarePlan, verifier: HmacSha256PlanVerifier | None = None) -> CarePlan:
     verifier = verifier or HmacSha256PlanVerifier(KEY)
     return dataclasses.replace(plan, signature=verifier.sign(plan))
@@ -123,8 +147,7 @@ def test_canonical_bytes_cover_every_field_except_the_signature() -> None:
 
 @pytest.mark.parametrize("name", sorted(GOLDEN))
 def test_canonical_bytes_equal_the_hand_written_golden(name: str) -> None:
-    plan = plan_a() if name == "plan_a" else plan_b()
-    assert canonical_plan_bytes(plan) == GOLDEN[name][0]
+    assert canonical_plan_bytes(PLANS[name]()) == GOLDEN[name][0]
 
 
 def test_canonical_bytes_are_utf8_and_not_escaped() -> None:
@@ -181,7 +204,7 @@ def test_template_may_be_an_enum_member_or_its_value() -> None:
 
 @pytest.mark.parametrize("name", sorted(GOLDEN))
 def test_hmac_signature_matches_independent_golden(name: str) -> None:
-    plan = plan_a() if name == "plan_a" else plan_b()
+    plan = PLANS[name]()
     expected_digest = GOLDEN[name][1]
     verifier = HmacSha256PlanVerifier(KEY)
     assert verifier.sign(plan) == expected_digest
@@ -790,14 +813,31 @@ def test_the_largest_valid_numbers_are_signed_exactly() -> None:
     verify_plan(signed(plan, verifier), verifier)
 
 
-def test_a_large_plan_is_signed_in_bounded_time() -> None:
+def test_a_large_plan_is_signed_with_one_mac_operation_and_linear_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counts operations and bytes, not seconds: one HMAC per sign and per verify, and a canonical
+    form whose size is linear in the plan."""
     instances = tuple(
         TemplateInstance(TemplateId.RANGE, f"range@{i}", {"a": float(i), "b": 2.0}, i)
         for i in range(2000)
     )
     plan = plan_a(instances=instances, schedule=tuple(range(5000)))
+    calls: list[int] = []
+    real_new = hmac.new
+
+    def counting(key: bytes, msg: bytes, digestmod: Any) -> Any:
+        calls.append(len(msg))
+        return real_new(key, msg, digestmod)
+
+    monkeypatch.setattr(integrity_module.hmac, "new", counting)
     verifier = HmacSha256PlanVerifier(KEY)
-    verify_plan(signed(plan, verifier), verifier)
+    good = signed(plan, verifier)
+    verify_plan(good, verifier)
+    payload = canonical_plan_bytes(plan)
+    assert calls == [len(payload), len(payload)]  # one MAC for sign, one for verify
+    assert len(payload) < 120 * len(instances) + 12 * 5000 + 1000  # linear, no blow-up
+    assert good.signature is not None and len(good.signature) == 64
 
 
 def test_a_signature_can_be_verified_against_a_payload_built_elsewhere() -> None:
@@ -811,3 +851,98 @@ def test_a_signature_can_be_verified_against_a_payload_built_elsewhere() -> None
 def test_canonical_bytes_are_deterministic_across_calls_and_copies() -> None:
     sequences: Sequence[bytes] = [canonical_plan_bytes(plan_a()) for _ in range(5)]
     assert len(set(sequences)) == 1
+
+
+# --- text fields: case, characters outside Latin-1, and the documented unsigned behaviour -----
+
+
+def test_mixed_case_and_non_latin_text_is_written_as_utf8_exactly() -> None:
+    plan = plan_c()
+    data = canonical_plan_bytes(plan)
+    assert "患者".encode() in data and "😀".encode() in data and "Ünï".encode() in data
+    assert b"CP-Fixture-003" in data and b"cp-fixture-003" not in data
+    assert b"BP_Band_Low" in data and b"bp_band_low" not in data
+    assert data.index(b"BP_Band_Low") < data.index(
+        b"bp_Band_high"
+    )  # code point order of the keys
+    assert HmacSha256PlanVerifier(KEY).sign(plan) == GOLDEN["plan_c"][1]
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "care_plan_id",
+        "pathway_template_id",
+        "patient_id",
+        "instance_key",
+        "param key",
+    ],
+)
+def test_a_change_of_case_only_in_a_text_field_invalidates_the_signature(
+    label: str,
+) -> None:
+    verifier = HmacSha256PlanVerifier(KEY)
+    good = signed(plan_c(), verifier)
+    instance = good.instances[0]
+    changes: dict[str, CarePlan] = {
+        "care_plan_id": dataclasses.replace(
+            good, care_plan_id=good.care_plan_id.swapcase()
+        ),
+        "pathway_template_id": dataclasses.replace(good, pathway_template_id="pt-患者"),
+        "patient_id": dataclasses.replace(good, patient_id=good.patient_id.upper()),
+        "instance_key": dataclasses.replace(
+            good,
+            instances=(
+                dataclasses.replace(
+                    instance, instance_key=instance.instance_key.lower()
+                ),
+            ),
+        ),
+        "param key": dataclasses.replace(
+            good,
+            instances=(
+                dataclasses.replace(
+                    instance,
+                    param_values={"bp_band_low": 110.5, "bp_Band_high": 140.25},
+                ),
+            ),
+        ),
+    }
+    tampered = changes[label]
+    assert tampered != good
+    with pytest.raises(PlanIntegrityError):
+        verify_plan(tampered, verifier)
+    verify_plan(good, verifier)
+
+
+def test_registry_version_comparison_is_case_sensitive() -> None:
+    plan = dataclasses.replace(plan_c(), registry_version="0.0.0-RC")
+    with pytest.raises(PlanIntegrityError):
+        verify_plan(plan, None, registry_version="0.0.0-rc")
+    verify_plan(plan, None, registry_version="0.0.0-RC")
+
+
+def test_an_unsigned_plan_is_not_serialised_so_a_malformed_one_passes_verify_plan() -> (
+    None
+):
+    """Documented behaviour (docstring, ADR-051): ``verify_plan`` checks signatures, not well-formedness.
+    An unsigned plan has nothing to verify and is never serialised; the monitor checks the plan itself."""
+    malformed = dataclasses.replace(plan_a(), care_plan_id=None, schedule=5)  # type: ignore[arg-type]
+    assert verify_plan(malformed, None) is None
+    assert verify_plan(malformed, HmacSha256PlanVerifier(KEY)) is None
+    with pytest.raises(PlanIntegrityError, match="unsigned"):
+        verify_plan(malformed, None, require_signature=True)
+    with pytest.raises(PlanIntegrityError):
+        canonical_plan_bytes(malformed)  # serialising it is refused
+    assert "unsigned" in (verify_plan.__doc__ or "") and "serialis" in (
+        verify_plan.__doc__ or ""
+    )
+
+
+def test_a_key_may_be_bytes_or_a_bytearray_which_is_copied() -> None:
+    """ADR-051: the key is ``bytes``; a ``bytearray`` is accepted and copied; anything else is refused."""
+    assert HmacSha256PlanVerifier(bytearray(KEY)).sign(
+        plan_a()
+    ) == HmacSha256PlanVerifier(bytes(KEY)).sign(plan_a())
+    with pytest.raises(PlanIntegrityError):
+        HmacSha256PlanVerifier(memoryview(KEY))  # type: ignore[arg-type]
