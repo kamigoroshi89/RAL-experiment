@@ -3,7 +3,7 @@ id: WS07-T01
 title: "Package availability check and simulation workspace"
 workstream: WS07-ros2-sim
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS00-T05"]
 critical_path: true
 non_negotiable: false
