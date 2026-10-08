@@ -118,3 +118,7 @@ Line 64 says `update` returns only new or changed alerts, but the SCHED refineme
 ### Flag from the WS02-T03 review (orchestrator, 2026-10-04)
 
 See `docs/models/evidence-channels.md` EC-OP-1 to EC-OP-21 and decisions D-3, D-9, D-11, D-14: test 29 needs the robot status, not only presence samples, for `intake_observed` False; test 31 puts the gap-explained-away reading in the extractor whereas D-3 puts it in the rule; test 34 should require only the extractor parameters; test 35 and WS05-T09 (`observe_robot_evidence(t_ms, witness, system)`) merge the robot published field values directly, while the document does not treat a `/ralmon/robot_evidence` snapshot that is not a trace item as an extractor input (EC-OP-15); test 36 says robot fields go `None` "from that time", while facts asserted earlier in the window stay. Kept `blocked`.
+
+### Hand-over from the WS04-T09 review (orchestrator, 2026-10-07)
+
+- Do not count `presence` samples when comparing the observed streams of the pair `informed_robot_noauth`: a spoof can add one extra sample at tick plus lag (about 15 of 40 realisations). The reading of `declined` and of the `colocated` `NODE_STATE` is proposed in ADR-040.

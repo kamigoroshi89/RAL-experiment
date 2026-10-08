@@ -29,6 +29,11 @@ event from the source ``gateway`` with ``verification`` (the value ``failed``) a
 ``error_code`` or the two keys of the gateway, never both kinds. The schema has no event kind for
 a gateway outcome, so the failed verification of one message is logged as this event (the policy
 "flag" of ``docs/models/threat-model.md`` hypothesis H-GW: the message itself stays in the trace).
+
+WS04-T09 adds the outcome ``declined`` of a ``ROBOT_TASK`` (the patient refused the step: the C1
+subtype ``measurement_refusal`` against the C2 ``manipulation_failure``, confounder group
+``refusal_vs_robot_missed``). ``DISPENSE.content_change`` is emitted by the fault-free base when the
+dispenser senses its content (``build_observed_base(..., dispenser_content_sensing=True)``).
 """
 
 from __future__ import annotations
@@ -58,6 +63,7 @@ __all__ = [
     "KIND_DOSE",
     "KIND_MEASUREMENT",
     "OUTCOMES",
+    "OUTCOME_DECLINED",
     "OUTCOME_FAILED",
     "OUTCOME_LATE",
     "OUTCOME_SUCCESS",
@@ -118,7 +124,18 @@ OUTCOME_SUCCESS: Final = "success"
 OUTCOME_LATE: Final = "late"
 OUTCOME_FAILED: Final = "failed"
 OUTCOME_TIMEOUT: Final = "timeout"
-OUTCOMES: Final = (OUTCOME_SUCCESS, OUTCOME_LATE, OUTCOME_FAILED, OUTCOME_TIMEOUT)
+# WS04-T09: the patient declined the manipulation step of a visit (a C1 measurement refusal). It is
+# not a failure of the robot: it is not in the outcome set of the conventions table of
+# ``docs/models/evidence-channels.md`` (success, late, failed, timeout), so no evidence field reads
+# it as a failed task (the contract gap is recorded in the completion note of WS04-T09).
+OUTCOME_DECLINED: Final = "declined"
+OUTCOMES: Final = (
+    OUTCOME_SUCCESS,
+    OUTCOME_LATE,
+    OUTCOME_FAILED,
+    OUTCOME_TIMEOUT,
+    OUTCOME_DECLINED,
+)
 KEY_PATIENT_ID: Final = "patient_id"
 
 # DISPENSE (evidence-channels.md, proposed by EC-GAP-1): after minus before, float.

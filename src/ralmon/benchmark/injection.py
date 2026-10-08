@@ -187,9 +187,12 @@ _SEED_BITS: Final = 64  # algorithmic: width of the root seed (rng.stream)
 _DIGEST_BYTES: Final = 4  # algorithmic: bytes of a digest used as a stream sub_index
 _MAX_SEQ: Final = _INT64_MAX // 2  # algorithmic: room for a counter that keeps growing
 _WORD: Final = 1 << 32  # algorithmic: width of a stream key entry
-# The family of a subtype in the design file: the unit class of a fault (C2, fault-model.md) or the
-# capability of an attack (C3, threat-model.md: BLE injection and replay, perception spoofing).
+# The family of a subtype in the design file: the unit class of a fault (C2, fault-model.md), the
+# capability of an attack (C3, threat-model.md: BLE injection and replay, perception spoofing) or, for
+# a C1 subtype (WS04-T09), what the patient does: a physiological change of the latent day
+# (``physiology``) or a behaviour (``behaviour``: a refusal, a double take).
 _FAMILIES_BY_CLASS: Final = {
+    InjectedClass.C1: ("physiology", "behaviour"),
     InjectedClass.C2: ("device", "link", "robot"),
     InjectedClass.C3: ("ble_attack", "perception_attack"),
 }

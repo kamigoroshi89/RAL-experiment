@@ -83,3 +83,11 @@ Builds use a fixture-only prior, a fixture registry and a small scale (for examp
 ### Hand-over from the WS04-T02 review (orchestrator, 2026-10-05)
 
 The accessors `fixture_only`, `n_unfilled` and `n_unverified` exist only on `LiteraturePriorSource` (`fixture_only`, `unfilled_names()`, `unverified_names()`), not on the `PriorSource` Protocol (ADR-038 G10): use `getattr` and record it in the completion note. `LiteraturePriorSource` has no default path: pass the YAML path (`configs/priors/literature_hypertension.yaml`).
+
+### Hand-over from the WS04-T09 review (orchestrator, 2026-10-07)
+
+- Twin patients for a pair: use `dataclasses.replace(patient, patient_id=...)` with the same `patient_index` and seed (the members of `evaluate_pair` share one `patient_id`). For the days of a pair write `confounder_log(records)` or `member.log` (tagged with `variant_id` and `indistinguishable_by_construction`), not the plain `injection_log`.
+- Set `dispenser_content_sensing` identically in `build_observed_base` and in `InjectionContext` (`Scenario.content_sensing` does both in `realise_scenario`; a builder that does not use it must do the same).
+- The `expected_indistinguishable` values of the YAML grid are fixture expectations (`NoJitter`, a 10-minute dwell, two doses). With arrival jitter the computed `indistinguishable_by_construction` flag of a record differs in many realisations (fresh check of the review: 18 of 40 for `stress_nocontent_robot`, 17 of 40 for `naive_robot_noauth`, 21 of 40 for `naive_norobot_noauth`). Write and use the per-record computed flag, never the YAML value.
+- Decide (and record) the owner of the robot `NODE_STATE` `colocated` report: no module writes it, so under H-INIT the extractor reads the robot as absent in every variant. ADR-040 (proposed) names this task; also decide where `baseline_sbp_mmhg` (a generator-side sidecar of `LatentResult`) is stored.
+- Informational: the README says "robot no-show", but variant B of `refusal_vs_robot_missed` is `manipulation_failure` (the task test prescribes it); no variant realises a true no-show.

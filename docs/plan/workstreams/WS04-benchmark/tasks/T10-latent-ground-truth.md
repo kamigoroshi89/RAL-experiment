@@ -91,3 +91,10 @@ Line 44 expects "records without `pending_until_ms`" for RANGE, HOLD and COUNT-l
 ### Hand-over from the WS04-T03 review (orchestrator, 2026-10-05)
 
 The latent day has `K` points and does not emit the closing step (see WS04-T03 Notes): hold the last value or take step 0 of the next day. Per-day assembly needs the carry of the AR state through `start_day` and `ar_state_mmhg`.
+
+### Hand-over from the WS04-T09 review (orchestrator, 2026-10-07)
+
+- Never pass a C1 record to `record_to_ground_truth` (it returns `injected` True and no template): the C1 truth is computed here, on the latent trace. `LatentResult` has six fields (`latent`, `behaviour_log`, `c1_records`, `refused_ticks_ms`, `baseline_sbp_mmhg`, `end_state`); `assemble_latent_days` needs the keyword `config` (an `AssemblyConfig`).
+- A forced `OMITTED` or `ON_TIME` slot (a scenario control) has no record. In the group `nonresponse_vs_falsified_dispense` the member B has a latent `dose_omission` that is `injected=False` and carries no group; do not read the group from the latent day.
+- `drug_nonresponse` windows select the intakes by their intake time, while the `resp` anchor is the dispense, `lag` earlier. A window that starts between the dispense and the intake would fail a link of the form "the window contains the anchor": link a record to its instances through `details["intake_times_ms"]`, not through the window.
+- The outcome `declined` has no `EvidenceVector` field (ADR-040, proposed): the label of a refusal is the labeller's, from the latent trace.
