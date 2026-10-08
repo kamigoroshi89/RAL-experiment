@@ -18,7 +18,6 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import pytest
-from ralmon.spec.integrity import canonical_plan_bytes
 
 from ralmon.spec import (
     CarePlan,
@@ -30,6 +29,7 @@ from ralmon.spec import (
     verify_plan,
 )
 from ralmon.spec import integrity as integrity_module
+from ralmon.spec.integrity import canonical_plan_bytes
 
 from .helpers import FIXTURES
 
@@ -236,8 +236,10 @@ def _tamper_cases() -> dict[str, Callable[[CarePlan], CarePlan]]:
         "instances reordered": lambda p: dataclasses.replace(
             p, instances=tuple(reversed(p.instances))
         ),
-        "instance removed": lambda p: dataclasses.replace(p, instances=p.instances[:1]),
-        "instance duplicated": lambda p: dataclasses.replace(
+        "instances one removed": lambda p: dataclasses.replace(
+            p, instances=p.instances[:1]
+        ),
+        "instances one duplicated": lambda p: dataclasses.replace(
             p, instances=(*p.instances, p.instances[0])
         ),
         "instance.template": instance(0, template=TemplateId.HOLD),
@@ -733,8 +735,14 @@ def test_a_malformed_plan_raises_plan_integrity_error_never_a_raw_error(
         canonical_plan_bytes(bad)
     with pytest.raises(PlanIntegrityError):
         verifier.sign(bad)
+    # a signed plan is serialised before it is checked; an unsigned plan has nothing to verify
+    marked = (
+        dataclasses.replace(bad, signature="0" * 64)
+        if isinstance(bad, CarePlan)
+        else bad
+    )
     with pytest.raises(PlanIntegrityError):
-        verify_plan(bad, verifier)
+        verify_plan(marked, verifier)
 
 
 def test_a_generator_schedule_is_not_consumed_silently() -> None:
