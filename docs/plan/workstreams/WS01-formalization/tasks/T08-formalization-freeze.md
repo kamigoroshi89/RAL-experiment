@@ -3,7 +3,7 @@ id: WS01-T08
 title: "Formalization freeze: consistency review and hand-worked patient-day (M1)"
 workstream: WS01-formalization
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS01-T03", "WS01-T04", "WS01-T05", "WS01-T06", "WS01-T07"]
 critical_path: true
 non_negotiable: true
@@ -158,3 +158,12 @@ Review result: PASS (no blocker) with 6 MINORs; each was checked against the cit
 - **N6** (ADR-048 and ADR-029): confirmed. ADR-029 decides "to be ratified (or amended) by WS01-T08 at the formalization freeze, and add the optional fields to `VerdictRecord` only then, with the contract version bump"; check 10 of this task requires `02-interfaces.md` unchanged. ADR-048 now quotes that wording in its context, adds item (c) (the addition moves from "at the freeze" to "at acceptance of ADR-048"; ADR-029 is otherwise unchanged and not edited) and repeats it in Consequences; the grouping row (i) of `08` section 4.2 says the same.
 
 Observation, no change made: C-68, C-69, NP-21 and NP-22 (`DerivedSignal.update` multiplicity and the `minutes()`/`hours()` rounding rule) hand follow-ups to WS05-T02, whose status is `done`; the task would have to be reopened (status back to `in_progress`, as in test 4 of this task) or the follow-ups assigned to another open WS05 task. This is for the orchestrator to decide. Open WS05 tasks: T03 `ready`; T04, T05, T06, T07, T08, T09 `blocked`.
+
+### Post-task review (orchestrator, 2026-10-08)
+
+Produced: `docs/formal/08-consistency-review.md` (72 contract clauses reviewed, CP1..CP13 plus NP-1..NP-24, ledger of 125 open-point items, defects D1..D13, open points OPF-1..17, precedence rules R2 and R8), `docs/formal/09-worked-patient-day.md` and `docs/formal/golden/patient-day.yaml` (32 verdict records, 6 alerts, all values computed by hand and reproduced by an independent evaluator), `docs/formal/README.md` (freeze marker `FROZEN: yes`, `clinician_review: pending`, registry 0.2.0 outside the freeze), proposed ADR-045..050 and the extended index, one note in `PROGRESS.md`. Section 6 of 09 holds the single ADR-037 line. Independent review: first pass PASS (12 minors, an independent evaluator agreed with all 32 records and 6 alerts), targeted second pass PASS (6 minors), two small fix rounds applied. Orchestrator verification on the final branch: Done-when script exit 0 (the registry loop prints the three names explained in 08 section 3.1), `check_plan` OK, `02-interfaces.md` untouched, no existing ADR changed except the index line.
+Scope of the freeze (README): documents 01..09 at version 1.0 as they stand, the five golden files, fixture F0 and the contract versions listed. Not frozen: registry 0.2.0 values, the clinical review, the contract text that ADR-045..050 would change, OPF-1..17. The M1 gate of the master plan stays open until gab decides the proposed contract-amending ADRs (045..050, plus the earlier proposed ones that amend contracts).
+Corrections to the target scenario table, forced by the formal documents: R2 (presence sample at 06:59), R3 (-0.0333 holds because the next tick is visible after the deadline), R5 (predicted sigma_norm -0.2433; C1 needs the ten denied channels), R6 (informed replay in an authenticated deployment), R10 (four top-level alerts, five in the current set); R11 omitted (CP2 not adopted).
+Known stale statements in documents 01..07 (D1..D13) are not patched here; precedence rules R2 and R8 in 08 section 5.3 govern until the owning tasks are reopened (human decision). Follow-ups addressed to WS05-T02 (done) in C-68, C-69, NP-21, NP-22 need that task reopened or another WS05 task to carry them.
+Impact on dependents: none became ready (WS05-T08, WS09-T02, WS09-T04 wait on other dependencies; WS12-T03/T04 are human).
+Open MINOR: see the Fix round notes (all addressed); nothing blocking.
