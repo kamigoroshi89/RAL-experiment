@@ -122,3 +122,7 @@ See `docs/models/evidence-channels.md` EC-OP-1 to EC-OP-21 and decisions D-3, D-
 ### Hand-over from the WS04-T09 review (orchestrator, 2026-10-07)
 
 - Do not count `presence` samples when comparing the observed streams of the pair `informed_robot_noauth`: a spoof can add one extra sample at tick plus lag (about 15 of 40 realisations). The reading of `declined` and of the `colocated` `NODE_STATE` is proposed in ADR-040.
+
+### Hand-over from the WS01-T07 review (orchestrator, 2026-10-08)
+
+Read `docs/formal/07-alert-tuple-mapping.md` section 1 (sigma_norm of VIOLATED and predicted alerts, CP13: kappa of a PREDICTED_VIOLATION alert is UNDETERMINED and the alert is superseded by the VIOLATED alert with the same `xi.instance_key`) and section 9 (open points OP-T07-1..17) and proposed ADR-041 before starting. Where this task text assumes a provisional kappa for predicted alerts (WS02-T04 check 8 and step 5; WS05-T07 tests 18, 20, 25) or counts a pair matched by a predicted alert (WS08 E3/E4), follow OP-T07-10 and ADR-041 and record any deviation here. `attribute` stays pure (kappa independent of `state`, test 5 scoped to the rule); the state check sits in `attribute_all`.

@@ -3,7 +3,7 @@ id: WS02-T04
 title: "Attribution rule spec: hierarchy, abstention, cascades, clinician-in-the-loop"
 workstream: WS02-threat-fault-model
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS02-T03", "WS01-T07"]
 critical_path: true
 non_negotiable: false
@@ -82,3 +82,7 @@ See `docs/models/evidence-channels.md`: step 4 wants "robot liveliness denied ..
 ### Hand-over from the WS04-T09 review (orchestrator, 2026-10-07)
 
 - The refusal against the missed robot task (group `refusal_vs_robot_missed`) is separated only by the outcome `declined` against `failed`, and `declined` has no evidence field (ADR-040, proposed): the rule for this pair depends on that ADR.
+
+### Hand-over from the WS01-T07 review (orchestrator, 2026-10-08)
+
+Read `docs/formal/07-alert-tuple-mapping.md` section 1 (sigma_norm of VIOLATED and predicted alerts, CP13: kappa of a PREDICTED_VIOLATION alert is UNDETERMINED and the alert is superseded by the VIOLATED alert with the same `xi.instance_key`) and section 9 (open points OP-T07-1..17) and proposed ADR-041 before starting. Where this task text assumes a provisional kappa for predicted alerts (WS02-T04 check 8 and step 5; WS05-T07 tests 18, 20, 25) or counts a pair matched by a predicted alert (WS08 E3/E4), follow OP-T07-10 and ADR-041 and record any deviation here. `attribute` stays pure (kappa independent of `state`, test 5 scoped to the rule); the state check sits in `attribute_all`.

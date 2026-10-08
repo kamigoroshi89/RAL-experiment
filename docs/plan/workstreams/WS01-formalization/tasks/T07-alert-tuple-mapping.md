@@ -3,7 +3,7 @@ id: WS01-T07
 title: Alert tuple definition, traceability wording and FHIR/BPMN mapping sketch
 workstream: WS01-formalization
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS01-T04", "WS01-T06"]
 critical_path: false
 non_negotiable: true
@@ -134,3 +134,10 @@ Branch `ws01-t07-alert-tuple-mapping`, on top of `269ab3a`. Files changed: `docs
 **Commands run (after the edits).** Done-when block verbatim (`bash /tmp/t07_done_when.sh`): exit 0, no output. Self-review script `/tmp/t07/check_doc.py` extended with the new statements (89 checks, 0 FAIL, exit 0): the `H_i` condition within 400 characters of every `-0.0333` / `-T_s / s`; the lateness wording; AH-1 to AH-23 contiguous and each referenced; OP-T07-1 to 17 defined and referenced; construct names marked in the standard-side cells of sections 6.2 and 7.2; exactly 10 lines starting with `| "` (the claim rows); claim words only in the claim column; table column counts; quotations of WS05-T04, WS02-T04, `ranking.yaml`, `05`, `06`, the workshop PDF found in their sources. Field-name equality with `02-interfaces.md#alert` re-run (code block and tables equal the contract, in order); cross-references to T01 to T06 re-run (none bad). `git diff --quiet -- docs/plan/02-interfaces.md` exit 0. `python3 tools/check_plan.py`: `check_plan: OK (103 tasks, 18 contracts, 31 findings)`, exit 0.
 
 **ADR added:** yes, ADR-041 (proposed). Not verified: unchanged from the first completion note (standard element names, WS02-T04 rule document absent).
+
+### Post-task review (orchestrator, 2026-10-08)
+
+Produced: `docs/formal/07-alert-tuple-mapping.md` (alert tuple field by field, decomposition and traceability wording with the ten claim rows, care plan governance, FHIR and BPMN mapping sketches with every element name marked `[verify: standard text]`, coverage per template, 23 hypotheses AH-1..AH-23, 17 open points), proposed ADR-041 `[DA-CONFERMARE]` "Alert field semantics". Section 8 holds the single ADR-037 line. Independent review: round 1 FAIL (2 blockers: the SCHED `sigma_norm` value holds only when `H_i > k_d`, else -1; a lateness wording error) and 16 minors; round 2 PASS (all 18 findings fixed, no blocker). Orchestrator verification: Done-when block exit 0, `check_plan` OK, contract and paper untouched.
+Resolutions: VIOLATED `sigma_norm` = upper end of the first VIOLATED record, frozen at emission; predicted `sigma_norm` = `clip(sigma_hat + q, -1, 1)`, always negative; CP13: `kappa = UNDETERMINED` for predicted alerts, superseded by the VIOLATED alert with the same `xi.instance_key`. These are conventions, not contract changes; ADR-041 groups them for the human.
+Impact on dependents: WS02-T04 is now `ready` (its check 8 and step 5 proposed a provisional kappa: reconcile with section 1.7 and CP13 of the document); WS05-T07 tests 5, 18, 20, 25 and WS08-T01/T04 (E3/E4 pair matching) need the readings in OP-T07-10; WS01-T08 stays blocked on WS00-T07 (human); WS11-T01 on WS00-T03 and WS00-T06 (human).
+Open MINOR (from review round 2): (1) "ticks closer than sched_window + T_s" is exact only for grid-aligned ticks; (2) "k_d >= K" should read "k_d = K" (for k_d > K the instance stays PENDING, no alert); (3) ADR-041 says "these tasks carry a note": the notes are in the dependents as of this commit; (4) OP-T07-6 should label the joined-string requirement as conditional on acceptance; (5) cosmetic `H_i > k_d` qualifier in the `score` row; (6) some AH entries are not referenced outside their table row.
