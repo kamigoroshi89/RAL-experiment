@@ -539,7 +539,7 @@ def test_invalid_utf8_anywhere_in_the_file_is_refused_not_replaced(
 def test_an_inline_merge_key_is_refused(tmp_path: Path) -> None:
     """``<<`` merges without an alias; it could override a checked key silently."""
     text = F0_TEXT + "\n<<: {pathology: injected}\n"
-    with pytest.raises(RegistryError, match="merge"):
+    with pytest.raises(RegistryError, match="merge keys are not allowed"):
         load_text(tmp_path, text)
 
 

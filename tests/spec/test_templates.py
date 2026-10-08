@@ -646,3 +646,10 @@ def test_the_loader_checks_scale_and_priority_of_a_registry_that_does_not(
         load_templates(registry=_Delegating(f0_registry, answers))  # type: ignore[arg-type]
     good = {"priority_range": _entry("priority_range", 2.0, "1")}
     assert len(load_templates(registry=_Delegating(f0_registry, good))) == 7  # type: ignore[arg-type]
+
+
+def test_the_registry_module_knows_the_same_template_ids() -> None:
+    """``registry.py`` cannot import ``templates.py`` (it imports the registry), so it repeats the ids."""
+    from ralmon.spec import registry as registry_module
+
+    assert registry_module.TEMPLATE_IDS == tuple(t.value for t in TemplateId)
