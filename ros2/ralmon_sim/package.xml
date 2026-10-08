@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ralmon_sim</name>
+  <version>0.0.0</version>
+  <description>Simulation environment of the ralmon technical validation: ward scenario, simulated devices, robot tasks, fault injection and measurements (WS07)</description>
+  <maintainer email="cellomar03@gmail.com">gab</maintainer>
+  <!-- The licence is decided by WS13-T01; NOASSERTION is the SPDX value for "no licence stated". -->
+  <license>NOASSERTION</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <!-- Packages of later tasks (WS07-T03 and WS05-T09). An exec_depend on a package that is not in
+       the workspace does not stop a build of ralmon_sim alone, so the build does not need them. -->
+  <exec_depend>ralmon_sim_msgs</exec_depend>
+  <exec_depend>ralmon_ros</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

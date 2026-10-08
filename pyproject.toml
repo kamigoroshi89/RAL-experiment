@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "ralmon"
 version = "0.0.0"
 description = "Runtime safety monitor for clinical-pathway specifications (ROS-independent core)"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "pyyaml",

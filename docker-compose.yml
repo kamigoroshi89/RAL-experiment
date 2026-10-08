@@ -38,7 +38,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.ros2
-    image: ralmon-ros2:jazzy
+    image: ralmon-ros2:humble
     user: "${UID:-1000}:${GID:-1000}"
     working_dir: /work
     volumes:

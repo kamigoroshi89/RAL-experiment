@@ -1,0 +1,18 @@
+# Third-party sources of the simulation workspace (vcstool format), pinned to commits read with
+# `git ls-remote` on 2026-10-08 (WS07-T01). Import with:
+#   vcs import ros2/third_party < ros2/sim.repos
+# TIAGo, TIAGo Pro, Nav2, Gazebo Classic and the ROS-Gazebo bridge are installed from the ROS apt
+# repository (docker/Dockerfile.ros2) and are not listed here. HuNavSim is optional and is not
+# pinned until a task needs it (see ralmon_sim/doc/availability.md).
+repositories:
+  ros2_tracing:
+    # Humble needs the `tracetools` package built from source with LTTng installed
+    # (https://github.com/ros2/ros2_tracing/blob/humble/README.md).
+    type: git
+    url: https://github.com/ros2/ros2_tracing.git
+    version: 3c159b382d2d565e26eaa91e39c9ec06a5c6fe88  # branch humble
+  aws_robomaker_hospital_world:
+    # Branch `ros2` of the archived AWS RoboMaker hospital world (Gazebo Classic).
+    type: git
+    url: https://github.com/aws-robotics/aws-robomaker-hospital-world.git
+    version: 7161eb8448f5cba6a469da7a79ae5d660b0b7f58  # branch ros2
