@@ -3,7 +3,7 @@ id: WS07-T02
 title: "Gazebo hospital world with 4-8 rooms, staggered care plans, one robot"
 workstream: WS07-ros2-sim
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS07-T01"]
 critical_path: true
 non_negotiable: false
