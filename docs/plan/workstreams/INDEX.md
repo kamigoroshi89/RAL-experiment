@@ -14,7 +14,7 @@ Finding ids (`review_items`) are defined in `04-review-traceability.md`.
 | WS00-T04 | physionet-credentialing | Start PhysioNet credentialing for MIMIC-IV and eICU | human | - | yes | no | 1 | analisi §9 (0.6), §5.1 | #priorsource | - |
 | WS00-T05 | tiago-availability | Check real TIAGo or TIAGo Pro availability and ROS 2 simulation packages | human | - | no | no | 1 | analisi §9 (0.7), §5.2 | #ros-2-interfaces | - |
 | WS00-T06 | ethics-check | Check ethics rules for lab volunteers and the vignette study | human | WS00-T02 | no | no | 0.5 | analisi §5.3, §5.7 | - | - |
-| WS00-T07 | clinician-review-registry | Clinician review of parameter registry, taxonomy and priorities (M1 gate) | human | WS00-T03, WS01-T03, WS01-T04, WS01-T05, WS02-T04 | yes | no | 1 | analisi §4.2, §2 R3, §9 (0.3) | #parameter-registry | R3-W3 R3-W4 |
+| WS00-T07 | clinician-review-registry | Clinician review of parameter registry, taxonomy and priorities (M1 gate) | human | WS00-T03, WS01-T03, WS01-T04, WS01-T05, WS02-T04 | no | no | 1 | analisi §4.2, §2 R3, §9 (0.3) | #parameter-registry | R3-W3 R3-W4 |
 | WS00-T08 | reference-pdfs | Obtain full text of the key reference papers needed by implementers (Lindemann et al. ICCPS 2023 first) | human | - | no | no | 0.25 | analisi §5.4 (B5), §3.2 | - | - |
 | WS00-T09 | open-datasets | Download the open datasets into data/raw/ and record their licences (VitalDB, MIT-BIH noise stress test, BIDMC, CinC 2015) | human | - | yes | no | 0.5 | analisi §5.1 | #priorsource | - |
 | WS00-T10 | verify-provenance | Verify the literature-prior provenance table produced by WS04-T02 | human | WS04-T02 | no | no | 1 | analisi §5.1, §2 R3 weakness 3 | #priorsource #parameter-registry | R3-W3 |
@@ -32,7 +32,8 @@ Total estimate: 9.25 person-days.
 | WS01-T05 | three-valued-semantics | Three-valued online semantics with robustness intervals and latency bounds | agent | WS01-T02 | yes | yes | 3 | analisi §4.3, §4.7 | #verdict | R1-W6 R2-W2 AE-5 |
 | WS01-T06 | rho-proposition1 | Definition of rho per verdict type and Proposition 1 with proof | agent | WS01-T05 | yes | yes | 3 | analisi §4.4, §3.2 | #verdict #conformal-calibrator | R2-W2 R2-W3 R2-W4 |
 | WS01-T07 | alert-tuple-mapping | Alert tuple definition, traceability wording and FHIR/BPMN mapping sketch | agent | WS01-T04, WS01-T06 | no | yes | 2 | analisi §4.8, §3.4, §4.1 (decomposition) | #alert | R1-W8 R1-W9 |
-| WS01-T08 | formalization-freeze | Formalization freeze: consistency review and hand-worked patient-day (M1) | agent | WS01-T03, WS01-T04, WS01-T05, WS01-T06, WS01-T07, WS00-T07 | yes | yes | 2 | analisi §4.1, §4.6, §6 | #template #alert | R1-W1 AE-2 |
+| WS01-T08 | formalization-freeze | Formalization freeze: consistency review and hand-worked patient-day (M1) | agent | WS01-T03, WS01-T04, WS01-T05, WS01-T06, WS01-T07 | yes | yes | 2 | analisi §4.1, §4.6, §6 | #template #alert | R1-W1 AE-2 |
+| WS01-T09 | literature-parameter-proposal | Literature-anchored proposal of registry and prior values (agent-assisted, human-checked) | human | WS01-T03, WS04-T02 | no | yes | 2 | analisi §4.1, §5.1, §10 (1), ADR-043 | #parameter-registry #priorsource | - |
 
 Total estimate: 19 person-days.
 
