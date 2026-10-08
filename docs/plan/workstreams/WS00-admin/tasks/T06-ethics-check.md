@@ -3,7 +3,7 @@ id: WS00-T06
 title: "Check ethics rules for lab volunteers and the vignette study"
 workstream: WS00-admin
 owner: human
-status: ready
+status: done
 depends_on: ["WS00-T02"]
 critical_path: false
 non_negotiable: false
@@ -60,3 +60,9 @@ From the repository root:
 - `grep -cE '^## (Institutions and bodies|Lab demo with volunteers|Lab demo mannequin variant|Vignette study|Data protection for study data|Decision and schedule)$' docs/plan/workstreams/WS00-admin/outputs/WS00-T06.md` prints `6`.
 - `grep -c '^completed_by: .\+' docs/plan/workstreams/WS00-admin/outputs/WS00-T06.md` prints `1`.
 - Inspection: checks 3, 5 and 7 hold, and every lead time carries its `Source:` line.
+
+## Notes
+
+### Artefact recorded (agent, 2026-10-08)
+
+`outputs/WS00-T06.md` records the decision of gab (2026-10-08) that no ethics committee is consulted. No committee statement exists, so checks 1, 3, 5 and 8 hold only in the sense that every `Source:` line names the decision of gab. The agent recorded the scope under which the decision is consistent with the plan: no human participants (lab demo with the mannequin and emulated signals only; no vignette study now). If volunteers or the vignette study are reinstated, this task reopens before any session or recruitment. Done-when checks run on 2026-10-08: the file exists, six headings, one `completed_by` line.
