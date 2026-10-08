@@ -94,8 +94,12 @@ From the repository root, in the environment described by the record:
 
 ## Notes
 
-### Blocking note (orchestrator, 2026-10-02)
+### Blocking note (orchestrator, 2026-10-02) [resolved 2026-10-08]
 
 Selected by the loop on 2026-10-02 and SKIPPED (the status stays `ready` because `tools/check_plan.py` rejects `blocked` when every dependency is `done`; the loop skips tasks that carry an unresolved blocking note). The task reads `docs/plan/workstreams/WS00-admin/outputs/WS00-T05.md` (TIAGo availability, ROS 2 distribution and Gazebo compatibility, ADR-011 decision), marked `done` by the human but absent from the repository, and needs ROS 2, `rclpy` and Gazebo, which are not installed on this machine (no sudo, no system packages). Set the status back to `ready` once the artefact exists and ROS 2 is installed.
 
 Update 2026-10-04: ROS 2 Jazzy, Gazebo Harmonic (`gz sim` 8.15.0), `rclpy`, `ros_gz_sim` and `ros_gz_bridge` are now available in the image `ralmon-ros2:jazzy` (`docker compose --profile ros2 run --rm ros2`, ADR-031 proposed). The remaining block is the missing record `docs/plan/workstreams/WS00-admin/outputs/WS00-T05.md` (TIAGo or TIAGo Pro availability, the simulation package versions and the ADR-011 decision); the image contains no TIAGo packages.
+
+### Hand-over from WS00-T05 (agent, 2026-10-08)
+
+The blocking note above is resolved: `docs/plan/workstreams/WS00-admin/outputs/WS00-T05.md` exists, and ADR-011 is superseded by ADR-042 (accepted by gab): **ROS 2 Humble with Gazebo Classic** (Fortress through PAL's new-Gazebo option as fallback), and **Python 3.10 as the floor of `ralmon`** (supersedes ADR-016). Read the task's Jazzy and Harmonic wording accordingly: the verdict is `supersede_adr_011` with ADR-042 already written, the Python check of step 2 is against 3.10, and `ros_gz_bridge` pairs Humble with Classic or Fortress. First step, before the stack check: the migration of ADR-042 (`requires-python = ">=3.10"` in `pyproject.toml`, `tests/test_toolchain.py` pins `>=3.11`, then `pytest`, `ruff` and `mypy` run under Python 3.10 in a Humble container) and a Humble image replacing `ralmon-ros2:jazzy` (ADR-031). PAL packages: `tiago_simulation` 4.13.0 and `tiago_pro_simulation` 1.19.0 on `humble-devel` (the TIAGo Pro instructions start from the PAL developer Docker image; building outside it is unchecked). Tracing on Humble needs LTTng and `tracetools` built from source. The real TIAGo and TIAGo Pro of the group run Humble.

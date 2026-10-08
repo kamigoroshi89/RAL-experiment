@@ -70,3 +70,7 @@ From the repository root:
 ### Status update (user attestation)
 
 Marked `done` on 2026-09-30 at the user's explicit instruction ("le task umane iniziali sono tutte eseguite"). The artefact named in "Done when" (`docs/plan/workstreams/WS00-admin/outputs/WS00-T05.md`) was not present in the repository at that time; the agent did not create or reconstruct it. Anything downstream that needs its content will stop and report.
+
+### Artefact recorded (agent, 2026-10-08)
+
+`outputs/WS00-T05.md` was written by the agent from desk research (2026-10-08, every value with its `Source:` line) and from the answers of gab: the group has a TIAGo, a TIAGo Pro and a Unitree R1; the real robots run ROS 2 Humble. Decision of gab: ROS 2 Humble with Gazebo Classic everywhere; ADR-011 is superseded by ADR-042, which also supersedes ADR-016 (Python floor 3.10, because Humble ships Python 3.10). `CLAUDE.md` and `01-conventions.md` section 2 updated. Open points (robot location, booking, time window, onboard configuration) are listed in the artefact. Done-when checks run on 2026-10-08: the file exists, six headings, no `[DA-` tag on the ADR-011 heading, one `(WS00-T05, 2026-10-08)` note.
