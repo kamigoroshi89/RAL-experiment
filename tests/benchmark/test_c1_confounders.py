@@ -3651,7 +3651,11 @@ def test_new_modules_have_all_and_no_unannotated_numeric_parameters() -> None:
     # no clinical value of the registry appears in the new modules
     registry = yaml.safe_load(REGISTRY_FILE.read_text(encoding="utf-8"))
     clinical = {
-        float(e["value"]) for e in registry["entries"] if abs(float(e["value"])) > 3.0
+        float(e["value"])
+        for e in registry["entries"]
+        if abs(float(e["value"])) > 3.0
+        # monitor configuration, not a clinical parameter (registry note)
+        and e["name"] != "clock_skew_max_ms"
     }
     for name in NEW_MODULES:
         tree = ast.parse((SRC / f"{name}.py").read_text(encoding="utf-8"))
