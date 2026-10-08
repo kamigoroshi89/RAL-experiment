@@ -1,0 +1,1025 @@
+# Golden hand-worked patient-day (WS01-T08). One scenario, F0 fixture registry, step_ms 60000, reorder_delay_ms 0.
+# Normative description: docs/formal/09-worked-patient-day.md (sections 1 to 4). Consistency review: docs/formal/08-consistency-review.md.
+#
+# FIXTURE-ONLY: every number below is fixture arithmetic (fixture registry F0 of the WS01 README, NOT the clinical registry,
+# never to be copied into configs/registry/hypertension.yaml) or an analisi example labelled "illustrative, unverified"
+# (analisi §4.1, §4.2, §4.6, §4.7; ADR-020). Nothing here is a clinical statement and nothing is clinically validated. The
+# registry 0.2.0 values (WS01-T09) are NOT used by this day; the F0 rows used are listed under `f0_rows`.
+#
+# Shape. The README format is a YAML list of cases; a patient-day is one scenario with shared inputs, so this file is a mapping
+# whose sections `records` and `alerts` are lists of cases in the README case format (id, contract, source, fixture, eval_at_ms,
+# expected, hand_calculation). Times are integer milliseconds since 00:00 of the day (t_ms = (60 * hh + mm) * 60000); the hh:mm
+# label is in a comment. Infinite values are written -.inf and .inf. `null` means "not applicable" or "channel unavailable",
+# never a negative observation. Raw intervals are in the unit of the template (mmHg, ms, dose); normalised intervals use the F0
+# scale of the template with clip(x / s, -1, 1) and +-inf mapped to +-1 (WS01-T04). A record is rec(i, k) of one instance at one
+# finalised step k = eval_at_ms / 60000 (WS01-T05 section 3.1).
+#
+# What the monitor sees is `observed_day` and `plan`. `scenario_description` says what happened in the scenario, for the reader and for
+# scoring tests; it is NOT an input of the monitor and no detector reads it (ground-truth discipline). `evidence` holds the readings
+# of the evidence vector per violated instance, taken from the worked cases of docs/models/attribution-rule.md (W-01, W-06, W-08, W-11)
+# under hypothesis H-W6; every field not listed is null (unavailable). `xi.text` of an alert is rendered by WS05-T07 from the fields
+# (docs/formal/07-alert-tuple-mapping.md section 3.4) and is not fixed here: `text_must_contain` lists what the text must state.
+#
+# Limits for an end-to-end test (WS05-T08, WS02-T04). (1) The golden supports tests of the monitor (trace to VerdictRecord) and of the
+# attribution rule (evidence vector to kappa); it does not support tests of the evidence extractor (trace to evidence vector): the
+# observed day has no NODE_STATE, liveliness, heartbeat, hr_ecg, hr_pulse, spo2 or error-code input, and the readings under `evidence` are
+# given (hypothesis H-W15). (2) `Rho.guarantee` and `Rho.assumptions` are the exact strings of docs/formal/06-rho-proposition1.md section 2.2
+# (conformal.yaml repeats the PREDICTED strings in C-2 and the DETERMINISTIC strings in C-7; its C-6 gives MEASURED values only, so the
+# MEASURED strings come from doc 06 alone), with `alpha` the configured level for PREDICTED and null otherwise. (3) `xi.text` is rendered by
+# WS05-T07 and is not fixed: `text_must_contain` lists what it must state; `xi.subformula_path` is a description, not the final syntax of
+# WS05-T04 step 8. (4) The names evidence_grace_ms, evidence_margin_ms, ecg_sqi_floor, ppg_sqi_floor and hr_coherence_tolerance are requested
+# by evidence-channels.md and have no registry entry and no F0 row (OPF-6): the day uses evidence_grace_ms = 0 as a fixture value outside
+# the F0 table and gives the three float thresholds only by their relation to the reading.
+#
+# Keys added to the README format: hypotheses, plan, observed_day.channels_unavailable, scenario_description, calibrator, forecast,
+# evidence, records[*].instance_key, records[*].expected.{template, unit, guard_failed, marker, tie_rule, previous_state,
+# false_predictive_alarm, refinement_note}, alerts, ranking, coverage.
+#
+# Row tags R1 to R10 are those of the scenario table of WS01-T08. R11 (measurement-count obligation) is omitted: WS01-T02 did not adopt
+# one (02-templates.md section 4.4, CP2).
+
+id: PD-1
+contract: ["02-interfaces.md#template", "02-interfaces.md#verdict", "02-interfaces.md#alert", "02-interfaces.md#attribution"]
+source: "WS01-T08 scenario table R1 to R10, corrected where the formal documents decide otherwise (08-consistency-review.md section 3.5)"
+fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0, evidence_grace_ms: 0, day_length_ms: 86400000, closing_step: 1440}   # evidence_grace_ms is a fixture value with no F0 row and no registry entry (OPF-6)
+
+f0_rows:
+  bp_band_low: 110
+  bp_band_high: 140
+  bp_hold_threshold: 100
+  hold_lookback: 3600000
+  dose_max_24h: 2
+  dose_min_day_end: 2
+  int_window: 300000
+  delta1: 3600000
+  delta2: 10800000
+  delta_resp: 10
+  sched_window: 1800000
+  cuff_inflation_min: 30000
+  bound_bp_lower: 50
+  bound_bp_upper: 250
+  scale_range: 20
+  scale_sched: 1800000
+  scale_count: 1
+  scale_hold: 20
+  scale_resp: 20
+  scale_sys: 30000
+  scale_int: 300000
+  priority_hold: 1
+  priority_range: 2
+  priority_sched: 3
+  priority_count: 2
+  priority_resp: 2
+  priority_sys: 3
+  priority_int: 3
+  cuff_error_sd: 6
+
+hypotheses:
+  - {id: H-W1, text: "Inputs arrive on time: t_rx_ms equals t_device_ms, reorder_delay_ms is 0, no late input, no future stamp, no jitter."}
+  - {id: H-W2, text: "The plan passes the feasibility checks F1 to F7 of 02-templates.md section 5.4, with F4 read as: a robot visit overlaps the INT window and observes the patient inside it (the INT predicate needs one witness whose age is at most int_window, 02-templates.md section 4.7). The literal wording of F4, a visit that covers [a - int_window, a], is stricter and is not met for the 07:00 dose (the visit starts at 06:58, the window at 06:55): NP-24 of 08-consistency-review.md."}
+  - {id: H-W3, text: "First day of the patient: no dispense in the 24 h before 00:00 (empty history, H-hist of 05 section 2.1; 01 section 5.5)."}
+  - {id: H-W4, text: "At most one measurement event and one sample of each of bp, cuff_health, inflation_ms per grid bin (A0), and each measurement event carries its own samples (H-pair); no standalone pressure sample."}
+  - {id: H-W5, text: "The doses of 21:00 and 21:02 overlap in their response windows; both capture pre_i = 152 (the sample of 20:32), so the global bp_pre stream and the per-instance value agree (A3 of 02-templates.md section 1.5 holds in value)."}
+  - {id: H-W6, text: "Authenticated deployment with every device capability declared: message authentication, seq, diagnostics, a data-stream deadline, independent clocks, signal quality, pulse and ECG heart rate available and coherent at every measurement; the dispenser has no content sensing and reports no interval (CP8). With the reference profile S6 of evidence-channels.md the kappa C1 of record PD-ALT-04 would be UNDETERMINED (OP-AR-1)."}
+  - {id: H-W7, text: "The evidence window of the 12:24 instance does not reach the cuff outage of 08:56 to 11:20 (evidence_margin_ms is smaller than 64 min); the cuff keeps its sequence counter across the restart; evidence_grace_ms is 0. evidence_margin_ms and evidence_grace_ms are parameter names requested by evidence-channels.md that have no registry entry (OPF-6)."}
+  - {id: H-W8, text: "The robot is co-located from 06:58 to 07:05 only; the presence stream is sampled as in golden G-INT-1 (1.0 at 06:58, an explicit 0.0 at 06:59), so the witness age at 07:00 is 2 min; the robot channels presence and intake are unavailable at all other times."}
+  - {id: H-W9, text: "The 20:32 sample is an informed replay (threat-model.md class replay, level informed, fresh_metadata): t_device_ms fresh, seq continues (no repeat, no gap), the verification of the message fails; the genuine 20:32 message does not reach the gateway (H-SUPP). By the rule of 01-signals-sampling.md section 3.4 and of the table of repeated seq of threat-model.md, a replay that repeated the seq of the 12:24 message would be a duplicate: flagged and not counted, so it could not produce the RANGE instance of the scenario row R6 (08-consistency-review.md NP-1, rule R8)."}
+  - {id: H-W10, text: "Cuff health 1.0 and inflation 45000 ms at every measurement (fixture); hr_pulse and hr_ecg are not templates inputs and are not listed."}
+  - {id: H-W11, text: "Prediction: one designated instant (20 min before the deadline, 12:10), variant likely, calibrator fixture C-1 (n 9, alpha 0.2, q 0.09); the forecast is a stub (arrival 12:40)."}
+  - {id: H-W12, text: "Scales and priorities are the F0 rows (priority_count 2 and priority_resp 2 are FIXTURE-ONLY); the registry 0.2.0 values are not used."}
+  - {id: H-W13, text: "Forecaster: prediction is evaluated only for a record that is PENDING at its designated instant (20 min before the deadline). sched@24600000, sched@73800000 and sched@81000000 are decided (06:52, 20:32, 22:35) before their instants (07:00, 20:40, 22:40), so no test occurs; at the instant of sched@32400000 (09:10) the record is PENDING and the forecaster emits nothing (the cuff is down and no arrival is forecast); only sched@43200000 (12:10) has a forecast, a stub with arrival 12:40."}
+  - {id: H-W14, text: "Alpha allocation: alpha = 0.2 is the per-test level of the calibrator fixture C-1 (n = 9). With n = 9 the upper quantile is finite only for alpha >= 1/(n + 1) = 0.1 (conformal.yaml C-1: alpha 0.1 gives rank 9 and q = 0.15; alpha 0.05 gives rank 10 > n and q = +infinity, so no predicted alert could be emitted); a level of 0.05 would need n >= 19 (06 section 4.7, conformal.yaml C-5). With five SCHED tests in the day, AlphaAllocation.per_test(alpha_total, n_tests) = alpha_total / n_tests (06 section 6.2) would correspond to alpha_total = 5 * 0.2 = 1.0, a vacuous day-level bound; alpha_total is not stated by this fixture and the day makes no claim about the probability of a false predictive alert in a patient-day."}
+  - {id: H-W15, text: "Evidence readings are given, not derived: the observed day has no NODE_STATE, liveliness, heartbeat, hr_ecg, hr_pulse, spo2 or error-code input; the readings under evidence are those of the worked cases W-01, W-06, W-08 and W-11 of attribution-rule.md. The golden supports tests of the monitor and of the attribution rule, not tests of the evidence extractor."}
+
+plan:
+  care_plan_id: PD-1-plan
+  pathway_template_id: hypertension-fixture
+  patient_id: PD-1-patient
+  registry_version: "F0 (fixture, ADR-027)"
+  plan_version: 1
+  signature: null
+  # CarePlan.schedule with the tick kind that TG-1 / ADR-045 propose; the contract 0.1.0 field is a plain list of TimeMs.
+  schedule:
+    - {t_ms: 24600000, kind: measure}     # 06:50
+    - {t_ms: 25200000, kind: dispense}    # 07:00
+    - {t_ms: 32400000, kind: measure}     # 09:00
+    - {t_ms: 43200000, kind: measure}     # 12:00
+    - {t_ms: 73800000, kind: measure}     # 20:30
+    - {t_ms: 75600000, kind: dispense}    # 21:00
+    - {t_ms: 81000000, kind: measure}     # 22:30
+  static_instances:
+    - {template: sched, instance_key: "sched@24600000", anchor_ms: 24600000}
+    - {template: sched, instance_key: "sched@32400000", anchor_ms: 32400000}
+    - {template: sched, instance_key: "sched@43200000", anchor_ms: 43200000}
+    - {template: sched, instance_key: "sched@73800000", anchor_ms: 73800000}
+    - {template: sched, instance_key: "sched@81000000", anchor_ms: 81000000}
+    - {template: count, instance_key: "count@86400000", anchor_ms: 86400000}   # day-end obligation, active from 00:00
+  feasibility:
+    F1_alignment: {sched_window_steps: 30, hold_lookback_steps: 60, int_window_steps: 5, delta1_steps: 60, delta2_steps: 180, delta2_minus_delta1_steps: 120}
+    F2_hold: [{dispense_tick: 25200000, measurement_tick_in_lookback: 24600000}, {dispense_tick: 75600000, measurement_tick_in_lookback: 73800000}]
+    F3_resp: [{dispense_tick: 25200000, measurement_tick_in_window: 32400000}, {dispense_tick: 75600000, measurement_tick_in_window: 81000000}]
+    F4_int: [{dispense_tick: 25200000, cover: "the robot visit 06:58 to 07:05 overlaps [06:55, 07:00] and observes the patient at 06:58 (age 2 min, at most int_window); the literal wording of F4 (a visit that covers the window) is not met (NP-24)"}, {dispense_tick: 75600000, cover: "the dispense is authenticated (auth)"}]
+    F5_count: {dispense_ticks_in_24h: 2, limit: 2, minimum: 2}
+
+observed_day:
+  patient_id: PD-1-patient
+  day_index: 0
+  seed: null
+  care_plan_id: PD-1-plan
+  samples:
+    - {signal: bp, t_device_ms: 24720000, t_rx_ms: 24720000, value: 138.0, seq: 101, quality: null}      # 06:52
+    - {signal: cuff_health, t_device_ms: 24720000, t_rx_ms: 24720000, value: 1.0, seq: 101, quality: null}
+    - {signal: inflation_ms, t_device_ms: 24720000, t_rx_ms: 24720000, value: 45000.0, seq: 101, quality: null}
+    - {signal: presence, t_device_ms: 25080000, t_rx_ms: 25080000, value: 1.0, seq: null, quality: null}   # 06:58
+    - {signal: presence, t_device_ms: 25140000, t_rx_ms: 25140000, value: 0.0, seq: null, quality: null}   # 06:59
+    - {signal: presence, t_device_ms: 25260000, t_rx_ms: 25260000, value: 1.0, seq: null, quality: null}   # 07:01
+    - {signal: presence, t_device_ms: 25380000, t_rx_ms: 25380000, value: 0.0, seq: null, quality: null}   # 07:03
+    - {signal: bp, t_device_ms: 44640000, t_rx_ms: 44640000, value: 152.0, seq: 102, quality: null}      # 12:24
+    - {signal: cuff_health, t_device_ms: 44640000, t_rx_ms: 44640000, value: 1.0, seq: 102, quality: null}
+    - {signal: inflation_ms, t_device_ms: 44640000, t_rx_ms: 44640000, value: 45000.0, seq: 102, quality: null}
+    - {signal: bp, t_device_ms: 73920000, t_rx_ms: 73920000, value: 152.0, seq: 103, quality: null}      # 20:32 informed replay of the 12:24 reading
+    - {signal: cuff_health, t_device_ms: 73920000, t_rx_ms: 73920000, value: 1.0, seq: 103, quality: null}
+    - {signal: inflation_ms, t_device_ms: 73920000, t_rx_ms: 73920000, value: 45000.0, seq: 103, quality: null}
+    - {signal: auth, t_device_ms: 75600000, t_rx_ms: 75600000, value: 1.0, seq: 201, quality: null}      # 21:00
+    - {signal: auth, t_device_ms: 75720000, t_rx_ms: 75720000, value: 1.0, seq: 202, quality: null}      # 21:02
+    - {signal: bp, t_device_ms: 81300000, t_rx_ms: 81300000, value: 132.0, seq: 104, quality: null}      # 22:35
+    - {signal: cuff_health, t_device_ms: 81300000, t_rx_ms: 81300000, value: 1.0, seq: 104, quality: null}
+    - {signal: inflation_ms, t_device_ms: 81300000, t_rx_ms: 81300000, value: 45000.0, seq: 104, quality: null}
+  events:
+    - {kind: schedule_tick, t_device_ms: 24600000, t_rx_ms: 24600000, source: care_plan, payload: {tick_kind: measure}, seq: null}   # 06:50
+    - {kind: measurement, t_device_ms: 24720000, t_rx_ms: 24720000, source: cuff, payload: {}, seq: 101}                           # 06:52
+    - {kind: robot_task, t_device_ms: 25080000, t_rx_ms: 25080000, source: robot, payload: {task: observe, outcome: success, identity_confirmed: true}, seq: null}   # 06:58 provisional keys, ADR-035
+    - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: 200}                         # 07:00 DISPENSE, no auth sample
+    - {kind: intake, t_device_ms: 25260000, t_rx_ms: 25260000, source: robot, payload: {}, seq: null}                              # 07:01 INTAKE, a separate event
+    - {kind: schedule_tick, t_device_ms: 32400000, t_rx_ms: 32400000, source: care_plan, payload: {tick_kind: measure}, seq: null}   # 09:00
+    - {kind: schedule_tick, t_device_ms: 43200000, t_rx_ms: 43200000, source: care_plan, payload: {tick_kind: measure}, seq: null}   # 12:00
+    - {kind: measurement, t_device_ms: 44640000, t_rx_ms: 44640000, source: cuff, payload: {}, seq: 102}                           # 12:24
+    - {kind: schedule_tick, t_device_ms: 73800000, t_rx_ms: 73800000, source: care_plan, payload: {tick_kind: measure}, seq: null}   # 20:30
+    - {kind: measurement, t_device_ms: 73920000, t_rx_ms: 73920000, source: cuff, payload: {}, seq: 103}                           # 20:32
+    - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: 201}                         # 21:00
+    - {kind: dispense, t_device_ms: 75720000, t_rx_ms: 75720000, source: dispenser, payload: {}, seq: 202}                         # 21:02 unscheduled
+    - {kind: schedule_tick, t_device_ms: 81000000, t_rx_ms: 81000000, source: care_plan, payload: {tick_kind: measure}, seq: null}   # 22:30
+    - {kind: measurement, t_device_ms: 81300000, t_rx_ms: 81300000, source: cuff, payload: {}, seq: 104}                           # 22:35
+  channels_unavailable:
+    - {signal: presence, from_ms: 0, to_ms: 25020000}            # until 06:57
+    - {signal: intake, from_ms: 0, to_ms: 25020000}
+    - {signal: presence, from_ms: 25500000, to_ms: 86400000}     # from 07:05 to the closing step
+    - {signal: intake, from_ms: 25500000, to_ms: 86400000}
+
+scenario_description:
+  not_an_input_of_the_monitor: true
+  events:
+    - {from_ms: 32160000, to_ms: 40800000, what: "cuff node process killed at 08:56, restarted at 11:20 (a lapse of liveliness, not a lifecycle transition); no measurement of the 09:00 tick; nothing from the cuff between", intended_cause: C2}
+    - {at_ms: 44640000, what: "hypertensive reading 152 mmHg at 12:24, healthy cuff, every channel coherent", intended_cause: C1}
+    - {at_ms: 73920000, what: "informed replay of the 12:24 message at 20:32 with fresh metadata; the genuine message is suppressed; the verification fails", intended_cause: C3}
+    - {at_ms: 75720000, what: "unscheduled second opening of the dispenser at 21:02, no content sensing; a double take by the patient and a repeated dispenser signal cannot be told apart", intended_cause: "C1 (double take) or C2 (bounce): not distinguishable with these channels, so the system abstains"}
+
+calibrator:
+  source: "fixture C-1 of conformal.yaml"
+  scores_sorted: [-0.30, -0.22, -0.18, -0.12, -0.05, 0.00, 0.04, 0.09, 0.15]
+  n: 9
+  alpha: 0.2
+  variant: likely
+  upper_rank_k: 8
+  q: 0.09
+
+forecast:
+  instance_key: "sched@43200000"
+  made_at_ms: 43800000            # 12:10, 20 min before the deadline 12:30 (designated instant)
+  predicted_arrival_ms: 45600000  # 12:40
+  predicted_sigma_raw: -600000.0   # ms, slack of the predicted measurement to the deadline: (750 - 760) * 60000
+  sigma_hat: -0.3333333333333333
+
+evidence:
+  profile_note: "H-W6. Readings in the canonical group.field form of attribution-rule.md; every field not listed is null. Denied means the reading is available and shows no problem."
+  "sched@32400000":
+    source_case: "W-11 (root sched)"
+    system.node_lifecycle: {cuff: active, robot: active}
+    system.liveliness_ok: false
+    expected: {kappa: C2, table_row: 4, reason: null, evidence_used: ["system.liveliness_ok"]}
+  "resp@25200000":
+    source_case: "W-11 (resp@07:00)"
+    system.node_lifecycle: {cuff: active, dispenser: active, robot: active}
+    system.liveliness_ok: false
+    expected: {kappa_own_evidence: C2, table_row: 4, kappa_after_cascade: C2, caused_by: "sched@32400000", evidence_used: ["system.liveliness_ok"]}
+  "sched@43200000":
+    source_case: "predicted alert: the rule is not evaluated (CP13, attribution-rule.md section Predicted violations)"
+    expected: {kappa: UNDETERMINED, table_row: null, reason: null, evidence_used: []}
+  "range@44640000":
+    source_case: "W-01 (authenticated deployment)"
+    system.node_lifecycle: {cuff: active}
+    system.diagnostics_ok: true
+    system.liveliness_ok: true
+    system.qos_deadline_missed: false
+    system.ble_link_quality: 1.0
+    signal_quality.ecg_sqi: "at or above ecg_sqi_floor"
+    signal_quality.ppg_sqi: "at or above ppg_sqi_floor"
+    signal_quality.cuff_error_code: ""
+    cross_device.pulse_vs_ecg_hr_diff: "within hr_coherence_tolerance"
+    crypto_temporal.authenticated: true
+    crypto_temporal.seq_gap_or_replay: false
+    crypto_temporal.timestamp_implausible: false
+    expected:
+      kappa: C1
+      table_row: 5
+      reason: null
+      evidence_used: ["system.node_lifecycle", "system.diagnostics_ok", "system.liveliness_ok", "system.qos_deadline_missed", "system.ble_link_quality", "signal_quality.cuff_error_code", "cross_device.pulse_vs_ecg_hr_diff", "crypto_temporal.authenticated", "crypto_temporal.seq_gap_or_replay", "crypto_temporal.timestamp_implausible"]
+  "range@73920000":
+    source_case: "W-08 (replay with rewritten metadata, authenticated deployment)"
+    system.node_lifecycle: {cuff: active}
+    system.diagnostics_ok: true
+    system.liveliness_ok: true
+    system.qos_deadline_missed: false
+    system.ble_link_quality: 1.0
+    signal_quality.ecg_sqi: "at or above ecg_sqi_floor"
+    signal_quality.ppg_sqi: "at or above ppg_sqi_floor"
+    signal_quality.cuff_error_code: ""
+    cross_device.pulse_vs_ecg_hr_diff: "within hr_coherence_tolerance"
+    crypto_temporal.authenticated: false
+    crypto_temporal.seq_gap_or_replay: false
+    crypto_temporal.timestamp_implausible: false
+    expected: {kappa: C3, table_row: 1, reason: null, evidence_used: ["crypto_temporal.authenticated"]}
+  "count@75720000":
+    source_case: "W-06 (double take, dispenser-link channels clean)"
+    system.node_lifecycle: {dispenser: active}
+    system.diagnostics_ok: true
+    system.liveliness_ok: true
+    system.qos_deadline_missed: false
+    system.ble_link_quality: 1.0
+    crypto_temporal.authenticated: true
+    crypto_temporal.seq_gap_or_replay: false
+    crypto_temporal.timestamp_implausible: false
+    expected: {kappa: UNDETERMINED, table_row: 8, reason: insufficient, evidence_used: []}
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# Verdict records at the decision instants (and at the instants that matter). 32 records, chronological.
+records:
+  # ------------------------------------------------------------------ R1  06:52 measurement bp 138, inflation 45000, healthy cuff
+  - id: PD-REC-01
+    contract: ["02-interfaces.md#verdict"]
+    source: "R1, SCHED instance of the 06:50 tick"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "sched@24600000"
+    eval_at_ms: 24720000   # 06:52, step 412
+    expected:
+      template: sched
+      unit: ms
+      t_eval_ms: 24720000
+      state: satisfied
+      sigma_interval: [1680000.0, 1680000.0]
+      sigma_norm_interval: [0.9333333333333333, 0.9333333333333333]
+      rho: null
+      decided_at_ms: 24720000
+      pending_until_ms: 26400000   # 07:20
+    hand_calculation: "Tick 24600000 = (6*60+50)*60000, k_a = 410; w = 1800000/60000 = 30, k_d = 440, t_d = 26400000 (07:20). The measurement at 24720000 is visible at step 24720000/60000 = 412, in [410, 440]. Slack = (440 - 412) * 60000 = 28 * 60000 = 1680000 ms. Any later measurement has slack <= 27 * 60000 = 1620000 < 1680000, so hi = 1680000 too: the interval is the point. lo > 0: SATISFIED at 412. Normalised 1680000 / 1800000 = 0.9333."
+  - id: PD-REC-02
+    contract: ["02-interfaces.md#verdict"]
+    source: "R1, RANGE instance of the 06:52 measurement"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "range@24720000"
+    eval_at_ms: 24720000
+    expected:
+      template: range
+      unit: mmHg
+      t_eval_ms: 24720000
+      state: satisfied
+      sigma_interval: [2.0, 2.0]
+      sigma_norm_interval: [0.1, 0.1]
+      rho: null
+      decided_at_ms: 24720000
+      pending_until_ms: 24720000
+    hand_calculation: "bp_412 = 138. min(138 - 110, 140 - 138) = min(28, 2) = 2 mmHg (distance to the nearer limit). 2 / 20 = 0.1. The band applies at every measurement, including a measurement inside the onset window of the drug (a question for the clinician review, TG-13)."
+  - id: PD-REC-03
+    contract: ["02-interfaces.md#verdict"]
+    source: "R1, SYS instance of the 06:52 measurement"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "sys@24720000"
+    eval_at_ms: 24720000
+    expected:
+      template: sys
+      unit: ms
+      t_eval_ms: 24720000
+      state: satisfied
+      sigma_interval: [15000.0, 15000.0]
+      sigma_norm_interval: [0.5, 0.5]
+      rho: null
+      decided_at_ms: 24720000
+      pending_until_ms: 24720000
+    hand_calculation: "cuff_health = 1.0, so the guard cuff_health == 1 is +inf. inflation_ms = 45000, margin 45000 - 30000 = 15000 ms. min(+inf, 15000) = 15000. 15000 / 30000 = 0.5."
+  # ------------------------------------------------------------------ R2  06:58 presence, 07:00 DISPENSE (auth false), 07:01 INTAKE
+  - id: PD-REC-04
+    contract: ["02-interfaces.md#verdict"]
+    source: "R2, HOLD instance of the 07:00 dispense"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "hold@25200000"
+    eval_at_ms: 25200000   # 07:00, step 420
+    expected:
+      template: hold
+      unit: mmHg
+      t_eval_ms: 25200000
+      state: satisfied
+      sigma_interval: [38.0, 38.0]
+      sigma_norm_interval: [1.0, 1.0]
+      rho: null
+      decided_at_ms: 25200000
+      pending_until_ms: 25200000
+    hand_calculation: "Look-back 3600000/60000 = 60 steps, [360, 420]; the measurement of 06:52 (step 412) is in it, so the guard is +inf. Held bp = 138. Margin 138 - 100 = 38 mmHg. 38 / 20 = 1.9, clipped to 1.0 (clipped value)."
+  - id: PD-REC-05
+    contract: ["02-interfaces.md#verdict"]
+    source: "R2, COUNT limit instance of the 07:00 dispense"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "count@25200000"
+    eval_at_ms: 25200000
+    expected:
+      template: count
+      unit: dose
+      t_eval_ms: 25200000
+      state: satisfied
+      sigma_interval: [1.0, 1.0]
+      sigma_norm_interval: [1.0, 1.0]
+      rho: null
+      decided_at_ms: 25200000
+      pending_until_ms: 25200000
+    hand_calculation: "dose_count over (25200000 - 86400000, 25200000] = this dispense only (H-W3): c_d = 1. Margin 2 - 1 = +1 dose. 1 / 1 = 1.0 (not clipped, equal to the scale)."
+  - id: PD-REC-06
+    contract: ["02-interfaces.md#verdict"]
+    source: "R2, INT instance of the 07:00 dispense (DISPENSE is not INTAKE; the INTAKE event of 07:01 is after the anchor and does not count)"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "int@25200000"
+    eval_at_ms: 25200000
+    expected:
+      template: int
+      unit: ms
+      t_eval_ms: 25200000
+      state: satisfied
+      sigma_interval: [180000.0, 180000.0]
+      sigma_norm_interval: [0.6, 0.6]
+      rho: null
+      decided_at_ms: 25200000
+      pending_until_ms: 25200000
+    hand_calculation: "Presence 1.0 at 25080000 = step 418; 0.0 at step 419 (held level). Witness at step 418, age (420 - 418) * 60000 = 120000 ms. Margin int_window - age = 300000 - 120000 = 180000 ms. Steps 419 and 420 have presence 0, no intake, no auth: -inf. Earlier steps have the channel unavailable (open): a witness there is older, margin at most (420 - 417) = 3 min -> 120000 < 180000, so hi = 180000 too. 180000 / 300000 = 0.6."
+  - id: PD-REC-07
+    contract: ["02-interfaces.md#verdict"]
+    source: "R2, RESP instance of the 07:00 dispense, created at the dispense"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "resp@25200000"
+    eval_at_ms: 25200000
+    expected:
+      template: resp
+      unit: mmHg
+      t_eval_ms: 25200000
+      state: pending
+      sigma_interval: [-.inf, 78.0]
+      sigma_norm_interval: [-1.0, 1.0]
+      rho: null
+      decided_at_ms: null
+      pending_until_ms: 36000000   # 10:00
+    hand_calculation: "pre_i = latest bp sample with device time <= 25200000 = 138 (06:52). k_a = 420, k_d = 420 + 10800000/60000 = 600, t_d = 36000000. Window [420 + 60, 600] = [08:00, 10:00]: no measurement known, lo = -inf. hi = pre_i - bound_bp_lower - delta_resp = 138 - 50 - 10 = 78 (a measurement of 50 would give the largest drop). 78 / 20 = 3.9, clipped to 1.0; -inf maps to -1."
+  - id: PD-REC-08
+    contract: ["02-interfaces.md#verdict"]
+    source: "R2, COUNT day-end instance after the first dispense"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "count@86400000"
+    eval_at_ms: 25200000
+    expected:
+      template: count
+      unit: dose
+      t_eval_ms: 25200000
+      state: pending
+      sigma_interval: [-1.0, .inf]
+      sigma_norm_interval: [-1.0, 1.0]
+      rho: null
+      decided_at_ms: null
+      pending_until_ms: 86400000
+    hand_calculation: "Day-end obligation dose_count >= dose_min_day_end, decided at the closing step K = 1440 (86400000). Known dispenses of steps 1..420: 1. lo = 1 - 2 = -1 dose; unknown future dispenses add [0, +inf), so hi = +inf. -1 / 1 = -1.0; +inf maps to 1.0. PENDING."
+  # ------------------------------------------------------------------ R3  08:56 cuff node crash, 09:00 tick, no measurement, decided 09:30
+  - id: PD-REC-09
+    contract: ["02-interfaces.md#verdict"]
+    source: "R3, SCHED instance of the 09:00 tick"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "sched@32400000"
+    eval_at_ms: 34200000   # 09:30, step 570 = k_d
+    expected:
+      template: sched
+      unit: ms
+      t_eval_ms: 34200000
+      state: violated
+      sigma_interval: [-.inf, -60000.0]
+      sigma_norm_interval: [-1.0, -0.03333333333333333]
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
+      decided_at_ms: 34200000
+      pending_until_ms: 34200000
+      guard_failed: no_measurement_after_tick
+    hand_calculation: "Tick 32400000, k_a = 540, k_d = 570, t_d = 34200000. No measurement in [540, 570]: lo = -inf. The next measurement tick is 12:00 (step 720), so the closing step is H_i = max(570, min(720, 1440)) = 720 > k_d. A measurement can still be accepted at step 571 (09:31) with slack (570 - 571) * 60000 = -60000, so hi = -60000 < 0: VIOLATED at 570. Normalised -60000 / 1800000 = -0.0333; -inf maps to -1. If the next tick were visible at or before the deadline, H_i = k_d and hi = -inf (then -1)."
+  # ------------------------------------------------------------------ R4  10:00 the response window of the 07:00 dose closes with no measurement
+  - id: PD-REC-10
+    contract: ["02-interfaces.md#verdict"]
+    source: "R4, RESP instance of the 07:00 dispense"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "resp@25200000"
+    eval_at_ms: 36000000   # 10:00, step 600 = k_d
+    expected:
+      template: resp
+      unit: mmHg
+      t_eval_ms: 36000000
+      state: violated
+      sigma_interval: [-.inf, -.inf]
+      sigma_norm_interval: [-1.0, -1.0]
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
+      decided_at_ms: 36000000
+      pending_until_ms: 36000000
+      guard_failed: obligation_unmet
+    hand_calculation: "k = k_d = 600: every step of the window [480, 600] is known and carries no measurement (the cuff was down from 08:56 to 11:20), so the maximum over an empty set of witnesses is -inf and no open position is left: [-inf, -inf]. hi < 0: VIOLATED. -inf maps to -1 on both ends. Guard failure obligation_unmet, so rho is DETERMINISTIC 1.0 (06 section 2.3)."
+  # ------------------------------------------------------------------ R5  11:20 restart, 12:00 tick, 12:10 forecast, 12:24 measurement bp 152
+  - id: PD-REC-11
+    contract: ["02-interfaces.md#verdict", "02-interfaces.md#conformal-calibrator"]
+    source: "R5, SCHED instance of the 12:00 tick at the prediction instant"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "sched@43200000"
+    eval_at_ms: 43800000   # 12:10, step 730
+    expected:
+      template: sched
+      unit: ms
+      t_eval_ms: 43800000
+      state: predicted_violation
+      sigma_interval: [-.inf, 1140000.0]
+      sigma_norm_interval: [-1.0, 0.6333333333333333]
+      rho: {kind: predicted, value: 0.9, alpha: 0.2, alpha_star: 0.1, guarantee: "marginal over patient episodes under exchangeability", assumptions: ["calibration unit is the patient episode; calibration and test episodes are exchangeable", "forecaster and normalisation are fixed before calibration and independent of the calibration and test episodes", "one designated prediction instant per episode, with the same rule for calibration and test episodes", "calibrator fitted on the current model version"]}
+      decided_at_ms: null
+      pending_until_ms: 45000000   # 12:30
+      predicted_sigma_norm: -0.2433333333333333
+    hand_calculation: "Tick 43200000, k_a = 720, k_d = 750, t_d = 45000000. At k = 730 no measurement is known: lo = -inf; the earliest measurement that can still be accepted is visible at step 731, slack (750 - 731) * 60000 = 1140000, so hi = 1140000 (the interval is that of the measured prefix, untouched by the forecast). Normalised (-1, 1140000/1800000 = 0.6333). Forecast arrival 12:40 = step 760, slack (750 - 760) * 60000 = -600000, sigma_hat = -600000/1800000 = -0.3333, inside [-1, 0.6333] so no clipping. Calibrator C-1: n = 9, k = ceil(10 * 0.8) = 8, q = 8th smallest score = 0.09. sigma_hat + q = -0.3333 + 0.09 = -0.2433 < 0: emitted (variant likely). m = #{R_i < -sigma_hat = 0.3333} = 9 (all nine scores are below 0.15 < 0.3333); alpha* = (10 - 9) / 10 = 0.1; rho = 1 - alpha* = 9/10 = 0.9; Rho.alpha = 0.2 (the configured level). The record stays PENDING in its interval fields and the state is PREDICTED_VIOLATION (never definitive)."
+  - id: PD-REC-12
+    contract: ["02-interfaces.md#verdict"]
+    source: "R5, the same instance after the measurement of 12:24: a false predictive alarm"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "sched@43200000"
+    eval_at_ms: 44640000   # 12:24, step 744
+    expected:
+      template: sched
+      unit: ms
+      t_eval_ms: 44640000
+      state: satisfied
+      sigma_interval: [360000.0, 360000.0]
+      sigma_norm_interval: [0.2, 0.2]
+      rho: null
+      decided_at_ms: 44640000
+      pending_until_ms: 45000000
+      previous_state: predicted_violation
+      false_predictive_alarm: true
+    hand_calculation: "The measurement at 44640000 is visible at step 744, in [720, 750]. Slack (750 - 744) * 60000 = 360000 ms; a later measurement has slack <= 5 * 60000 = 300000, so the interval is the point. lo > 0: SATISFIED at 744, from PREDICTED_VIOLATION (an allowed transition): the warning is counted as a false predictive alarm. 360000 / 1800000 = 0.2."
+  - id: PD-REC-13
+    contract: ["02-interfaces.md#verdict"]
+    source: "R5, RANGE instance of the 12:24 measurement"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "range@44640000"
+    eval_at_ms: 44640000
+    expected:
+      template: range
+      unit: mmHg
+      t_eval_ms: 44640000
+      state: violated
+      sigma_interval: [-12.0, -12.0]
+      sigma_norm_interval: [-0.6, -0.6]
+      rho: {kind: measured, value: 0.97724986805, value_4dp: "0.9772", alpha: null, guarantee: "conditional on the adequacy of the declared device error model", assumptions: ["measured value equals the true value plus an independent Gaussian error with standard deviation cuff_error_sd", "zero bias after correction (a silent bias is not seen by rho)", "flat prior on the true value", "errors of distinct measurements are independent"]}
+      decided_at_ms: 44640000
+      pending_until_ms: 44640000
+    hand_calculation: "bp_744 = 152. min(152 - 110, 140 - 152) = min(42, -12) = -12 mmHg. -12 / 20 = -0.6. rho MEASURED, band formula Phi((110 - 152)/6) + Phi((152 - 140)/6) = Phi(-7) + Phi(2) = 1.3e-12 + 0.97725 = 0.9772 (cuff_error_sd 6, FIXTURE-ONLY)."
+  - id: PD-REC-14
+    contract: ["02-interfaces.md#verdict"]
+    source: "R5, SYS instance of the 12:24 measurement"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "sys@44640000"
+    eval_at_ms: 44640000
+    expected:
+      template: sys
+      unit: ms
+      t_eval_ms: 44640000
+      state: satisfied
+      sigma_interval: [15000.0, 15000.0]
+      sigma_norm_interval: [0.5, 0.5]
+      rho: null
+      decided_at_ms: 44640000
+      pending_until_ms: 44640000
+    hand_calculation: "cuff_health 1.0 (guard +inf), inflation 45000 - 30000 = 15000 ms; 15000 / 30000 = 0.5."
+  # ------------------------------------------------------------------ R6  20:30 tick, 20:32 sample bp 152 (informed replay)
+  - id: PD-REC-15
+    contract: ["02-interfaces.md#verdict"]
+    source: "R6, SCHED instance of the 20:30 tick"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "sched@73800000"
+    eval_at_ms: 73920000   # 20:32, step 1232
+    expected:
+      template: sched
+      unit: ms
+      t_eval_ms: 73920000
+      state: satisfied
+      sigma_interval: [1680000.0, 1680000.0]
+      sigma_norm_interval: [0.9333333333333333, 0.9333333333333333]
+      rho: null
+      decided_at_ms: 73920000
+      pending_until_ms: 75600000   # 21:00
+    hand_calculation: "Tick 73800000 = 1230 * 60000, k_a = 1230, k_d = 1260, t_d = 75600000. The sample is accepted (on time, fresh metadata, H-W9) and visible at step 1232. Slack (1260 - 1232) * 60000 = 28 * 60000 = 1680000 ms; 1680000 / 1800000 = 0.9333. The monitor cannot tell that the sample is a replay: that is the business of attribution."
+  - id: PD-REC-16
+    contract: ["02-interfaces.md#verdict"]
+    source: "R6, RANGE instance of the replayed 20:32 sample"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "range@73920000"
+    eval_at_ms: 73920000
+    expected:
+      template: range
+      unit: mmHg
+      t_eval_ms: 73920000
+      state: violated
+      sigma_interval: [-12.0, -12.0]
+      sigma_norm_interval: [-0.6, -0.6]
+      rho: {kind: measured, value: 0.97724986805, value_4dp: "0.9772", alpha: null, guarantee: "conditional on the adequacy of the declared device error model", assumptions: ["measured value equals the true value plus an independent Gaussian error with standard deviation cuff_error_sd", "zero bias after correction (a silent bias is not seen by rho)", "flat prior on the true value", "errors of distinct measurements are independent"]}
+      decided_at_ms: 73920000
+      pending_until_ms: 73920000
+    hand_calculation: "Same arithmetic as PD-REC-13: min(152 - 110, 140 - 152) = -12 mmHg, -12 / 20 = -0.6, rho MEASURED Phi(-7) + Phi(2) = 0.9772, a model-based value conditional on the adequacy of the device error model and not covering authenticity (06 section 2.2)."
+  - id: PD-REC-17
+    contract: ["02-interfaces.md#verdict"]
+    source: "R6, SYS instance of the replayed 20:32 group"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "sys@73920000"
+    eval_at_ms: 73920000
+    expected:
+      template: sys
+      unit: ms
+      t_eval_ms: 73920000
+      state: satisfied
+      sigma_interval: [15000.0, 15000.0]
+      sigma_norm_interval: [0.5, 0.5]
+      rho: null
+      decided_at_ms: 73920000
+      pending_until_ms: 73920000
+    hand_calculation: "The informed replay writes the whole group (health 1.0, inflation 45000, threat-model.md H-GROUP): 45000 - 30000 = 15000 ms, 0.5."
+  # ------------------------------------------------------------------ R7  21:00 scheduled DISPENSE, auth true, robot absent
+  - id: PD-REC-18
+    contract: ["02-interfaces.md#verdict"]
+    source: "R7, HOLD instance of the 21:00 dispense"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "hold@75600000"
+    eval_at_ms: 75600000   # 21:00, step 1260
+    expected:
+      template: hold
+      unit: mmHg
+      t_eval_ms: 75600000
+      state: satisfied
+      sigma_interval: [52.0, 52.0]
+      sigma_norm_interval: [1.0, 1.0]
+      rho: null
+      decided_at_ms: 75600000
+      pending_until_ms: 75600000
+    hand_calculation: "Look-back [1200, 1260] contains the measurement at step 1232 (20:32). Held bp = 152. Margin 152 - 100 = 52 mmHg. 52 / 20 = 2.6, clipped to 1.0."
+  - id: PD-REC-19
+    contract: ["02-interfaces.md#verdict"]
+    source: "R7, COUNT limit instance of the 21:00 dispense: the tie (sigma = 0)"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "count@75600000"
+    eval_at_ms: 75600000
+    expected:
+      template: count
+      unit: dose
+      t_eval_ms: 75600000
+      state: satisfied
+      sigma_interval: [0.0, 0.0]
+      sigma_norm_interval: [0.0, 0.0]
+      rho: null
+      decided_at_ms: 75600000
+      pending_until_ms: 75600000
+      tie_rule: true
+    hand_calculation: "dose_count over (75600000 - 86400000, 75600000] contains the dispenses at 07:00 (step 420) and 21:00 (step 1260): c_d = 2. Margin 2 - 2 = 0. Contract rule 1 alone gives neither VIOLATED (hi < 0 false) nor SATISFIED (lo > 0 false); the instance is closed (k = k_d) and the interval is the point 0, so the tie rule (ADR-029, 05 section 3.4) gives SATISFIED. 0 / 1 = 0."
+  - id: PD-REC-20
+    contract: ["02-interfaces.md#verdict"]
+    source: "R7, INT instance of the 21:00 dispense (robot absent: presence and intake unavailable)"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "int@75600000"
+    eval_at_ms: 75600000
+    expected:
+      template: int
+      unit: ms
+      t_eval_ms: 75600000
+      state: satisfied
+      sigma_interval: [300000.0, 300000.0]
+      sigma_norm_interval: [1.0, 1.0]
+      rho: null
+      decided_at_ms: 75600000
+      pending_until_ms: 75600000
+    hand_calculation: "auth sample at 75600000 = step 1260, age 0: margin 300000 - 0 = 300000 ms, the largest value the template can give, so the open (unavailable) presence and intake steps cannot raise it: [300000, 300000]. 300000 / 300000 = 1.0. DISPENSE is not INTAKE: no intake is inferred."
+  - id: PD-REC-21
+    contract: ["02-interfaces.md#verdict"]
+    source: "R7, RESP instance of the 21:00 dispense, created at the dispense"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "resp@75600000"
+    eval_at_ms: 75600000
+    expected:
+      template: resp
+      unit: mmHg
+      t_eval_ms: 75600000
+      state: pending
+      sigma_interval: [-.inf, 92.0]
+      sigma_norm_interval: [-1.0, 1.0]
+      rho: null
+      decided_at_ms: null
+      pending_until_ms: 86400000   # 24:00
+    hand_calculation: "pre_i = 152 (the latest bp sample at or before 21:00 is the one of 20:32). k_a = 1260, k_d = 1260 + 180 = 1440 = K, t_d = 86400000. Window [1320, 1440] = [22:00, 24:00]. lo = -inf; hi = 152 - 50 - 10 = 92; 92 / 20 = 4.6, clipped to 1.0."
+  - id: PD-REC-22
+    contract: ["02-interfaces.md#verdict"]
+    source: "R7, COUNT day-end instance after the second dispense: the residual case lo = 0 < hi"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "count@86400000"
+    eval_at_ms: 75600000
+    expected:
+      template: count
+      unit: dose
+      t_eval_ms: 75600000
+      state: pending
+      sigma_interval: [0.0, .inf]
+      sigma_norm_interval: [0.0, 1.0]
+      rho: null
+      decided_at_ms: null
+      pending_until_ms: 86400000
+    hand_calculation: "Known dispenses of steps 1..1260: 2. lo = 2 - 2 = 0, hi = +inf (more dispenses may come). Rule 1 gives SATISFIED only for lo > 0, the tie rule needs a closed instance (k >= K): PENDING. Every completion satisfies the non-strict atom (CP3-b, a sound refinement lo >= 0 that ADR-029 does not adopt)."
+  # ------------------------------------------------------------------ R8  21:02 unscheduled DISPENSE (auth true)
+  - id: PD-REC-23
+    contract: ["02-interfaces.md#verdict"]
+    source: "R8, COUNT limit instance of the 21:02 dispense (analisi §4.6 row 21:02: margin -1 dose, not -8)"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "count@75720000"
+    eval_at_ms: 75720000   # 21:02, step 1262
+    expected:
+      template: count
+      unit: dose
+      t_eval_ms: 75720000
+      state: violated
+      sigma_interval: [-1.0, -1.0]
+      sigma_norm_interval: [-1.0, -1.0]
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
+      decided_at_ms: 75720000
+      pending_until_ms: 75720000
+    hand_calculation: "dose_count over (75720000 - 86400000, 75720000] = dispenses at steps 420, 1260, 1262: c_d = 3. Margin 2 - 3 = -1 dose. -1 / 1 = -1.0 (equal to the scale, not clipped). hi < 0: VIOLATED at once. Rho DETERMINISTIC 1.0: a count over the event log."
+  - id: PD-REC-24
+    contract: ["02-interfaces.md#verdict"]
+    source: "R8, HOLD instance of the 21:02 dispense"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "hold@75720000"
+    eval_at_ms: 75720000
+    expected:
+      template: hold
+      unit: mmHg
+      t_eval_ms: 75720000
+      state: satisfied
+      sigma_interval: [52.0, 52.0]
+      sigma_norm_interval: [1.0, 1.0]
+      rho: null
+      decided_at_ms: 75720000
+      pending_until_ms: 75720000
+    hand_calculation: "Look-back [1202, 1262] contains step 1232; held bp 152; 152 - 100 = 52; 52 / 20 = 2.6 clipped to 1.0."
+  - id: PD-REC-25
+    contract: ["02-interfaces.md#verdict"]
+    source: "R8, INT instance of the 21:02 dispense"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "int@75720000"
+    eval_at_ms: 75720000
+    expected:
+      template: int
+      unit: ms
+      t_eval_ms: 75720000
+      state: satisfied
+      sigma_interval: [300000.0, 300000.0]
+      sigma_norm_interval: [1.0, 1.0]
+      rho: null
+      decided_at_ms: 75720000
+      pending_until_ms: 75720000
+    hand_calculation: "auth sample at 75720000 = step 1262, age 0: 300000 ms, 300000 / 300000 = 1.0."
+  - id: PD-REC-26
+    contract: ["02-interfaces.md#verdict"]
+    source: "R8, RESP instance of the 21:02 dispense: its window opens at 22:02 and closes after the day end (CP7)"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "resp@75720000"
+    eval_at_ms: 75720000
+    expected:
+      template: resp
+      unit: mmHg
+      t_eval_ms: 75720000
+      state: pending
+      sigma_interval: [-.inf, 92.0]
+      sigma_norm_interval: [-1.0, 1.0]
+      rho: null
+      decided_at_ms: null
+      pending_until_ms: 86520000   # 24:02 on the continuing time axis
+    hand_calculation: "pre_i = 152. k_a = 1262, k_d = 1262 + 180 = 1442 > K = 1440, t_d = 75720000 + 10800000 = 86520000. Window [1322, 1442] = [22:02, 24:02]. lo = -inf; hi = 152 - 50 - 10 = 92. It cannot be VIOLATED at 21:02: that needs pre_i < bound_bp_lower + delta_resp = 60 (05 Lemma 12), and 152 >= 60. The same holds for the instance of 21:00, whose window opens at 22:00 (analisi §4.6 row 21:02, error b)."
+  - id: PD-REC-27
+    contract: ["02-interfaces.md#verdict"]
+    source: "R8, COUNT day-end instance: early satisfaction by the extra dispense"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "count@86400000"
+    eval_at_ms: 75720000
+    expected:
+      template: count
+      unit: dose
+      t_eval_ms: 75720000
+      state: satisfied
+      sigma_interval: [1.0, .inf]
+      sigma_norm_interval: [1.0, 1.0]
+      rho: null
+      decided_at_ms: 75720000
+      pending_until_ms: 86400000
+    hand_calculation: "Known dispenses of steps 1..1262: 3. lo = 3 - 2 = +1 > 0, so SATISFIED at once (05 Lemma 12: the first step with c_today > dose_min_day_end); hi stays +inf. Normalised (1/1 = 1.0, +inf maps to 1.0). Reported, not hidden: the unscheduled dose that violates the 24 h limit also satisfies the day-end minimum."
+  # ------------------------------------------------------------------ R9  22:30 tick, 22:35 measurement bp 132
+  - id: PD-REC-28
+    contract: ["02-interfaces.md#verdict"]
+    source: "R9, SCHED instance of the 22:30 tick"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "sched@81000000"
+    eval_at_ms: 81300000   # 22:35, step 1355
+    expected:
+      template: sched
+      unit: ms
+      t_eval_ms: 81300000
+      state: satisfied
+      sigma_interval: [1500000.0, 1500000.0]
+      sigma_norm_interval: [0.8333333333333334, 0.8333333333333334]
+      rho: null
+      decided_at_ms: 81300000
+      pending_until_ms: 82800000   # 23:00
+    hand_calculation: "Tick 81000000 = 1350 * 60000, k_a = 1350, k_d = 1380, t_d = 82800000. Measurement at step 1355. Slack (1380 - 1355) * 60000 = 25 * 60000 = 1500000 ms; later measurements have slack <= 24 * 60000 = 1440000, so a point. 1500000 / 1800000 = 0.8333."
+  - id: PD-REC-29
+    contract: ["02-interfaces.md#verdict"]
+    source: "R9, RANGE instance of the 22:35 measurement"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "range@81300000"
+    eval_at_ms: 81300000
+    expected:
+      template: range
+      unit: mmHg
+      t_eval_ms: 81300000
+      state: satisfied
+      sigma_interval: [8.0, 8.0]
+      sigma_norm_interval: [0.4, 0.4]
+      rho: null
+      decided_at_ms: 81300000
+      pending_until_ms: 81300000
+    hand_calculation: "bp_1355 = 132. min(132 - 110, 140 - 132) = min(22, 8) = 8 mmHg. 8 / 20 = 0.4."
+  - id: PD-REC-30
+    contract: ["02-interfaces.md#verdict"]
+    source: "R9, SYS instance of the 22:35 measurement"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "sys@81300000"
+    eval_at_ms: 81300000
+    expected:
+      template: sys
+      unit: ms
+      t_eval_ms: 81300000
+      state: satisfied
+      sigma_interval: [15000.0, 15000.0]
+      sigma_norm_interval: [0.5, 0.5]
+      rho: null
+      decided_at_ms: 81300000
+      pending_until_ms: 81300000
+    hand_calculation: "45000 - 30000 = 15000 ms; 15000 / 30000 = 0.5."
+  - id: PD-REC-31
+    contract: ["02-interfaces.md#verdict"]
+    source: "R9, RESP instance of the 21:00 dispense, early satisfaction"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "resp@75600000"
+    eval_at_ms: 81300000
+    expected:
+      template: resp
+      unit: mmHg
+      t_eval_ms: 81300000
+      state: satisfied
+      sigma_interval: [10.0, 92.0]
+      sigma_norm_interval: [0.5, 1.0]
+      rho: null
+      decided_at_ms: 81300000
+      pending_until_ms: 86400000
+    hand_calculation: "Step 1355 is in the window [1320, 1440]. Drop = pre_i - bp = 152 - 132 = 20 mmHg; margin 20 - 10 = +10 mmHg, so lo = 10 > 0: SATISFIED at 22:35, before the deadline. hi = max(10, 152 - 50 - 10) = 92 because k < k_d (a lower pressure may still come). 10 / 20 = 0.5; 92 / 20 = 4.6 clipped to 1.0."
+  - id: PD-REC-32
+    contract: ["02-interfaces.md#verdict"]
+    source: "R9, RESP instance of the 21:02 dispense, early satisfaction (decision step after the day end)"
+    fixture: {registry: F0, step_ms: 60000, reorder_delay_ms: 0}
+    instance_key: "resp@75720000"
+    eval_at_ms: 81300000
+    expected:
+      template: resp
+      unit: mmHg
+      t_eval_ms: 81300000
+      state: satisfied
+      sigma_interval: [10.0, 92.0]
+      sigma_norm_interval: [0.5, 1.0]
+      rho: null
+      decided_at_ms: 81300000
+      pending_until_ms: 86520000
+    hand_calculation: "Step 1355 is in the window [1322, 1442]. Same pre_i = 152 and margin +10 as PD-REC-31: lo = 10 > 0, SATISFIED at 22:35 although k_d = 1442 lies after the closing step (05 Lemma 12b). hi = 92 (k < k_d). 0.5 and 1.0."
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# Alerts: the tuple <tau, kappa, sigma_tilde, rho, xi> and the other seven fields (07 section 1). `issues` lists the values issued in time
+# order; the last one is the value in the current set. Alerts are built from the first VIOLATED record (or the PREDICTED_VIOLATION record).
+alerts:
+  - id: PD-ALT-01
+    contract: ["02-interfaces.md#alert", "02-interfaces.md#attribution"]
+    source: "R3, root of the cascade"
+    from_record: PD-REC-09
+    instance_key: "sched@32400000"
+    expected:
+      t_ms: 34200000
+      label: C2
+      score: 0.03333333333333333
+      tau: sched
+      kappa: C2
+      sigma_norm: -0.03333333333333333
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
+      xi:
+        template: sched
+        instance_key: "sched@32400000"
+        subformula_path: "sched/consequent/once[0, sched_window]/meas (guard no_measurement_after_tick)"
+        param_values: {sched_window: 1800000.0}
+        evidence_used: ["system.liveliness_ok"]
+        text_must_contain: ["a blood pressure measurement within the allowed time after the scheduled time", "09:00", "09:30", "1800000 ms (30 minutes)", "system.liveliness_ok", "violated (definitive)", "system or embodiment failure", "0.03 of the registry scale (unreviewed)", "a later measurement counts as late by at least one monitor step", "follows from or accounts for 1 further violation (re-issue)"]
+      verdict: violated
+      priority: 3
+      root_cause_of: ["resp@25200000"]
+      caused_by: null
+    issues:
+      - {at_ms: 34200000, root_cause_of: [], caused_by: null, note: "first issue at the decision of the record"}
+      - {at_ms: 36000000, root_cause_of: ["resp@25200000"], caused_by: null, note: "re-issued when the effect is issued, only root_cause_of (and the count sentence derived from it) changes (07 section 1.4 item 3; attribution-rule.md cascade rules 7 and 8)"}
+    hand_calculation: "sigma_norm = N_s(hi) of the first VIOLATED record = -60000 / 1800000 = -0.0333 (certified severity, frozen at emission, under H_i > k_d, 07 section 1.5). score = -sigma_norm = 0.0333. priority = priority_sched = 3. kappa: evidence W-11 root, system.liveliness_ok asserted (False), no integrity evidence: row 4, C2. t_ms = decided_at_ms = 34200000."
+  - id: PD-ALT-02
+    contract: ["02-interfaces.md#alert", "02-interfaces.md#attribution"]
+    source: "R4, cascade effect: not a top-level alert"
+    from_record: PD-REC-10
+    instance_key: "resp@25200000"
+    expected:
+      t_ms: 36000000
+      label: C2
+      score: 1.0
+      tau: resp
+      kappa: C2
+      sigma_norm: -1.0
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
+      xi:
+        template: resp
+        instance_key: "resp@25200000"
+        subformula_path: "resp/consequent/once[0, delta2 - delta1]/(meas and bp_drop >= delta_resp) (guard obligation_unmet)"
+        param_values: {delta1: 3600000.0, delta2: 10800000.0, delta_resp: 10.0}
+        evidence_used: ["system.liveliness_ok"]
+        text_must_contain: ["the prescribed blood pressure decrease, measured in the response window after a dose", "dispenser opened 07:00", "08:00", "10:00", "follows from the alert sched@32400000", "system or embodiment failure", "-1.00 of the registry scale (unreviewed)"]
+      verdict: violated
+      priority: 2
+      root_cause_of: []
+      caused_by: "sched@32400000"
+    issues:
+      - {at_ms: 36000000, root_cause_of: [], caused_by: "sched@32400000", note: "issued once with caused_by, kappa and evidence_used of its root already in place"}
+    hand_calculation: "sigma_norm = N_s(-inf) = -1 (failed guard obligation_unmet, hi = -inf). priority = priority_resp = 2 (F0, FIXTURE-ONLY). Own evidence (W-11 resp@07:00): system.liveliness_ok False, so row 4 gives C2, the class of the root: the independent-evidence rule does not stop the fold. Cascade CT-1: the root interval [34200000 - 1800000, 34200000] = [09:00, 09:30] meets the response window [36000000 - (10800000 - 3600000), 36000000] = [08:00, 10:00]; the root is decided strictly earlier (34200000 < 36000000), its kappa is definite, and the decisive sub-formula of the effect is a failed guard. The effect keeps its own sigma_norm, rho, priority and time; kappa and evidence_used are the root's."
+  - id: PD-ALT-03
+    contract: ["02-interfaces.md#alert", "02-interfaces.md#attribution"]
+    source: "R5, early warning, closed by the measurement of 12:24"
+    from_record: PD-REC-11
+    instance_key: "sched@43200000"
+    expected:
+      t_ms: 43800000
+      label: UNDETERMINED
+      score: 0.2433333333333333
+      tau: sched
+      kappa: UNDETERMINED
+      sigma_norm: -0.2433333333333333
+      rho: {kind: predicted, value: 0.9, alpha: 0.2, guarantee: "marginal over patient episodes under exchangeability", assumptions: ["calibration unit is the patient episode; calibration and test episodes are exchangeable", "forecaster and normalisation are fixed before calibration and independent of the calibration and test episodes", "one designated prediction instant per episode, with the same rule for calibration and test episodes", "calibrator fitted on the current model version"]}
+      xi:
+        template: sched
+        instance_key: "sched@43200000"
+        subformula_path: "sched/consequent/once[0, sched_window]/meas (deadline margin age >= 0)"
+        param_values: {sched_window: 1800000.0}
+        evidence_used: []
+        text_must_contain: ["early warning, not a definitive verdict", "variant likely", "conformal score with a guarantee that is marginal over patient episodes under exchangeability", "not the probability that the violation will occur", "no cause named"]
+      verdict: predicted_violation
+      priority: 3
+      root_cause_of: []
+      caused_by: null
+    issues:
+      - {at_ms: 43800000, root_cause_of: [], caused_by: null, note: "predicted alert issued at the prediction instant"}
+    closed:
+      at_ms: 44640000
+      by: PD-REC-12
+      false_predictive_alarm: true
+      note: "T7: the instance ends SATISFIED. No new alert; the predicted alert leaves the current set and stays in the history (07 section 1.4 item 3). Alert has no closed state (OP-T07-5): the closure is carried by the VerdictRecord."
+    hand_calculation: "sigma_norm = clip(sigma_hat + q, -1, 1) = -0.3333 + 0.09 = -0.2433 (07 section 1.5, 06 section 2.4). score = 0.2433. priority = priority_sched = 3. kappa = UNDETERMINED by definition (CP13, 07 section 1.7), evidence_used empty, rule not evaluated. rho PREDICTED 0.9 (m = 9, n = 9)."
+  - id: PD-ALT-04
+    contract: ["02-interfaces.md#alert", "02-interfaces.md#attribution"]
+    source: "R5, clinical deviation with every channel of the exclusion set available and denied"
+    from_record: PD-REC-13
+    instance_key: "range@44640000"
+    expected:
+      t_ms: 44640000
+      label: C1
+      score: 0.6
+      tau: range
+      kappa: C1
+      sigma_norm: -0.6
+      rho: {kind: measured, value: 0.97724986805, alpha: null, guarantee: "conditional on the adequacy of the declared device error model", assumptions: ["measured value equals the true value plus an independent Gaussian error with standard deviation cuff_error_sd", "zero bias after correction (a silent bias is not seen by rho)", "flat prior on the true value", "errors of distinct measurements are independent"]}
+      xi:
+        template: range
+        instance_key: "range@44640000"
+        subformula_path: "range/body/bp <= bp_band_high"
+        param_values: {bp_band_low: 110.0, bp_band_high: 140.0}
+        evidence_used: ["system.node_lifecycle", "system.diagnostics_ok", "system.liveliness_ok", "system.qos_deadline_missed", "system.ble_link_quality", "signal_quality.cuff_error_code", "cross_device.pulse_vs_ecg_hr_diff", "crypto_temporal.authenticated", "crypto_temporal.seq_gap_or_replay", "crypto_temporal.timestamp_implausible"]
+        text_must_contain: ["the measured blood pressure inside the prescribed band", "152 mmHg", "above the prescribed upper limit of 140 mmHg", "12 mmHg beyond the limit", "0.60 of the registry scale of 20 mmHg (unreviewed)", "clinical or adherence deviation", "every channel required for the exclusion was available and showed no problem", "0.98", "conditional on the adequacy of the declared device error model"]
+      verdict: violated
+      priority: 2
+      root_cause_of: []
+      caused_by: null
+    issues:
+      - {at_ms: 44640000, root_cause_of: [], caused_by: null, note: "issued at the decision of the record"}
+    hand_calculation: "sigma_norm = -12 / 20 = -0.6; score 0.6; priority_range = 2. kappa: no integrity evidence (authenticated True, seq False, timestamp False), no system evidence (liveliness True, diagnostics True, qos False, lifecycle active, ble 1.0, cuff_error_code empty, pulse coherent), exclusion set of range satisfied: row 5, C1 (W-01). rho 0.9772 (PD-REC-13)."
+  - id: PD-ALT-05
+    contract: ["02-interfaces.md#alert", "02-interfaces.md#attribution"]
+    source: "R6, integrity violation: the verification of the replayed message fails"
+    from_record: PD-REC-16
+    instance_key: "range@73920000"
+    expected:
+      t_ms: 73920000
+      label: C3
+      score: 0.6
+      tau: range
+      kappa: C3
+      sigma_norm: -0.6
+      rho: {kind: measured, value: 0.97724986805, alpha: null, guarantee: "conditional on the adequacy of the declared device error model", assumptions: ["measured value equals the true value plus an independent Gaussian error with standard deviation cuff_error_sd", "zero bias after correction (a silent bias is not seen by rho)", "flat prior on the true value", "errors of distinct measurements are independent"]}
+      xi:
+        template: range
+        instance_key: "range@73920000"
+        subformula_path: "range/body/bp <= bp_band_high"
+        param_values: {bp_band_low: 110.0, bp_band_high: 140.0}
+        evidence_used: ["crypto_temporal.authenticated"]
+        text_must_contain: ["the measured blood pressure inside the prescribed band", "152 mmHg", "integrity or plausibility violation", "crypto_temporal.authenticated", "the authenticity of the events is not covered by the confidence value", "0.98"]
+      verdict: violated
+      priority: 2
+      root_cause_of: []
+      caused_by: null
+    issues:
+      - {at_ms: 73920000, root_cause_of: [], caused_by: null, note: "issued at the decision of the record"}
+    hand_calculation: "Same sigma_norm and rho as PD-ALT-04 (the monitor cannot see the replay). kappa: crypto_temporal.authenticated asserted (False) = IE-1, row 1, C3, whatever the other fields say (integrity evidence is tested first); evidence_used lists that one field (W-08). The sequence evidence is not used: the informed replay keeps seq continuing (H-W9)."
+  - id: PD-ALT-06
+    contract: ["02-interfaces.md#alert", "02-interfaces.md#attribution"]
+    source: "R8, counter violation by the unscheduled dispense; abstention"
+    from_record: PD-REC-23
+    instance_key: "count@75720000"
+    expected:
+      t_ms: 75720000
+      label: UNDETERMINED
+      score: 1.0
+      tau: count
+      kappa: UNDETERMINED
+      sigma_norm: -1.0
+      rho: {kind: deterministic, value: 1.0, alpha: null, guarantee: "conditional on the integrity of the event log", assumptions: ["the predicate is evaluated on the accepted event log or timestamps without error", "authenticity of the events is attributed by kappa and is not covered by rho"]}
+      xi:
+        template: count
+        instance_key: "count@75720000"
+        subformula_path: "count/limit/dose_count <= dose_max_24h"
+        param_values: {dose_max_24h: 2.0}
+        evidence_used: []
+        text_must_contain: ["the number of doses dispensed in 24 hours within the prescribed limit", "dispenser opened at 21:02", "third opening within 24 hours (07:00, 21:00 and 21:02)", "limit is 2 doses", "exceeded by 1 dose", "1.00 of the registry scale of 1 dose (unreviewed)", "not determined", "no dispenser content evidence is available", "witness.robot_present and witness.intake_observed are unavailable, not denied"]
+      verdict: violated
+      priority: 2
+      root_cause_of: []
+      caused_by: null
+    issues:
+      - {at_ms: 75720000, root_cause_of: [], caused_by: null, note: "issued at the decision of the record"}
+    hand_calculation: "sigma_norm = -1 / 1 = -1.0; score 1.0; priority_count = 2 (F0, FIXTURE-ONLY). kappa: count reads only cuff-independent dispenser-link fields; none is asserted, so rows 1 to 4 do not fire; count has no exclusion set that can be satisfied in contract 0.1.0 (AD-10, the dispenser content evidence has no field: CP8, ADR-032 proposed), no RS predicate holds, the kind is CARE_PLAN: row 8, UNDETERMINED, reason insufficient (W-06)."
+
+# ---------------------------------------------------------------------------------------------------------------------------
+ranking:
+  key: "K0 = (priority ascending, sigma_norm ascending, t_ms ascending, instance_key ascending) (ADR-028)"
+  current_set_after_cascade:      # alerts of violated records, folded effects included, the closed predicted alert excluded
+    - {instance_key: "resp@25200000", priority: 2, sigma_norm: -1.0, t_ms: 36000000, caused_by: "sched@32400000"}
+    - {instance_key: "count@75720000", priority: 2, sigma_norm: -1.0, t_ms: 75720000, caused_by: null}
+    - {instance_key: "range@44640000", priority: 2, sigma_norm: -0.6, t_ms: 44640000, caused_by: null}
+    - {instance_key: "range@73920000", priority: 2, sigma_norm: -0.6, t_ms: 73920000, caused_by: null}
+    - {instance_key: "sched@32400000", priority: 3, sigma_norm: -0.03333333333333333, t_ms: 34200000, caused_by: null}
+  top_level_order: ["count@75720000", "range@44640000", "range@73920000", "sched@32400000"]
+  hand_calculation: "Priority first (ascending, 1 is the highest): priority 2 precedes priority 3, so the folded effect and the three top-level priority-2 alerts precede sched@32400000, whose sigma_norm -0.0333 is the least severe of the five but whose priority is the lowest. Inside priority 2, sigma_norm ascending: -1.0 (resp@25200000, count@75720000) before -0.6 (range@44640000, range@73920000). Ties on sigma_norm are broken by t_ms: 36000000 < 75720000 and 44640000 < 73920000. The top-level list drops the effect (caused_by is not null) and keeps the order of the other four."
+
+# ---------------------------------------------------------------------------------------------------------------------------
+coverage:
+  verdict_states:
+    pending: [PD-REC-07, PD-REC-08, PD-REC-21, PD-REC-22, PD-REC-26]
+    predicted_violation_then_satisfied: [PD-REC-11, PD-REC-12]
+    violated: [PD-REC-09, PD-REC-10, PD-REC-13, PD-REC-16, PD-REC-23]
+    satisfied: [PD-REC-01, PD-REC-02, PD-REC-03, PD-REC-04, PD-REC-05, PD-REC-06, PD-REC-12, PD-REC-14, PD-REC-15, PD-REC-17, PD-REC-18, PD-REC-19, PD-REC-20, PD-REC-24, PD-REC-25, PD-REC-27, PD-REC-28, PD-REC-29, PD-REC-30, PD-REC-31, PD-REC-32]
+  rho:
+    measured: [PD-REC-13, PD-REC-16]
+    predicted: [PD-REC-11]
+    deterministic: [PD-REC-09, PD-REC-10, PD-REC-23]
+    absent: [PD-REC-01, PD-REC-07, PD-REC-12, PD-REC-19]
+  attributed_cause:
+    C1: [PD-ALT-04]
+    C2: [PD-ALT-01, PD-ALT-02]
+    C3: [PD-ALT-05]
+    UNDETERMINED: [PD-ALT-03, PD-ALT-06]
+  cascade: {root: PD-ALT-01, effect: PD-ALT-02}
+  tie_sigma_zero: [PD-REC-19]
+  clipped_value: [PD-REC-04, PD-REC-07, PD-REC-18, PD-REC-21, PD-REC-31]
+  unmet_obligation_guard: [PD-REC-10]
+  templates: {range: PD-REC-02, sched: PD-REC-01, hold: PD-REC-04, count: PD-REC-05, resp: PD-REC-07, sys: PD-REC-03, int: PD-REC-06}
+  dispense_distinct_from_intake: {dispense_events_ms: [25200000, 75600000, 75720000], intake_events_ms: [25260000], note: "07:00 DISPENSE and 07:01 INTAKE are two events; 21:00 and 21:02 are DISPENSE without any INTAKE (robot absent) and no intake is inferred"}
+  final_ranked_list: ranking
