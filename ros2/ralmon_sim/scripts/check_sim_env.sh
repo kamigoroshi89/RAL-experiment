@@ -8,10 +8,11 @@
 # Diagnostics go to stderr and start with "#".
 #
 # Exit codes:
-#   0  every component recorded as `available` is observed
-#   1  at least one component recorded as `available` is not observed
+#   0  every component recorded as `available` is observed ("yes")
+#   1  at least one component recorded as `available` is not observed ("no", or "n/a" because
+#      a documentary component cannot be observed and must not be recorded as available)
 #   2  no sourced ROS 2 environment (nothing is checked)
-#   3  the record cannot be read (python3 with PyYAML is needed)
+#   3  the record cannot be read (one line "cannot read <file>: <error>" on stderr)
 #
 # The script does not need the ralmon core; it only prints whether `import ralmon` works.
 set -u
@@ -27,17 +28,25 @@ fi
 record_lines="$(python3 - "$RECORD" <<'PY'
 import sys
 
-import yaml
+try:
+    import yaml
 
-record = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
-components = record["components"]
-print("TARGET", record["target"]["ros_distro"], record["target"]["gazebo"])
-print("VARIANT", components["robot_sim_pal"]["variant"])
-print("WORLD", components["hospital_world"]["decision"])
-for name, component in components.items():
-    print("COMPONENT", name, component["status"])
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        record = yaml.safe_load(handle)
+    components = record["components"]
+    lines = [
+        f"TARGET {record['target']['ros_distro']} {record['target']['gazebo']}",
+        f"VARIANT {components['robot_sim_pal']['variant']}",
+        f"WORLD {components['hospital_world']['decision']}",
+    ]
+    lines += [f"COMPONENT {name} {item['status']}" for name, item in components.items()]
+except Exception as error:  # any unreadable record has its own exit code, without a traceback
+    message = (str(error).splitlines() or [""])[0]
+    print(f"cannot read {sys.argv[1]}: {type(error).__name__}: {message}", file=sys.stderr)
+    sys.exit(3)
+print("\n".join(lines))
 PY
-)" || { echo "cannot read $RECORD" >&2; exit 3; }
+)" || exit 3
 
 target_distro="" target_gazebo="" variant="" world_decision=""
 while read -r kind a b; do
@@ -104,7 +113,7 @@ while read -r kind name status; do
     seen="no"
   fi
   echo "$name $status $seen"
-  if [ "$status" = "available" ] && [ "$seen" = "no" ]; then
+  if [ "$status" = "available" ] && [ "$seen" != "yes" ]; then
     missing=$((missing + 1))
   fi
 done <<<"$record_lines"
@@ -117,7 +126,7 @@ fi
 echo "# info: ROS_DISTRO=$ROS_DISTRO python=$(python3 --version 2>&1)" >&2
 
 if [ "$missing" -gt 0 ]; then
-  echo "# $missing component(s) recorded as available are not observed" >&2
+  echo "# $missing component(s) recorded as available are not observed (no or n/a)" >&2
   exit 1
 fi
 exit 0

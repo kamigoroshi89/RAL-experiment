@@ -63,10 +63,14 @@ PyYAML 5.4.1 (apt), pytest 6.2.5 (apt), hypothesis 6.168.5, ruff 0.16.10, mypy 2
   (`launch_testing`, `launch_testing_ros`) at start-up; the image links `pytest` to `pytest-3`.
 - numpy is limited to 1.x because the apt `pandas` 1.3.5 of `tracetools_analysis` fails to import
   with numpy 2.2.6 (checked). The system numpy 1.21.5 (REP 2000) is too old for the core: on it
-  one test fails (`tests/benchmark/test_c1_confounders.py::test_foreign_objects_with_unreadable_fields_are_named_errors`)
-  and `mypy src/ralmon` reports 5 `no-untyped-call` errors; both pass with numpy 1.26.4 and 2.2.6.
-  `pyproject.toml` declares no numpy floor (ADR-016), so a ROS node that imports `ralmon` on a
-  machine with only the apt numpy is outside the tested range; see the open items of
-  `ros2/ralmon_sim/doc/availability.md`.
+  one test fails (`tests/benchmark/test_c1_confounders.py::test_foreign_objects_with_unreadable_fields_are_named_errors`,
+  the core does not raise `C1InjectionError`) and `mypy src/ralmon` reports 5 `no-untyped-call`
+  errors. Bisection on Python 3.10.12 in throw-away containers (pip `--target` under `/tmp`, 2026-10-08):
+  the test fails with numpy 1.21.6, 1.22.4, 1.23.5 and 1.24.4 and passes with 1.25.0, 1.25.1, 1.25.2,
+  1.26.4 and 2.2.6; mypy reports the errors with 1.21.5 and 1.21.6 and passes with 1.22.4, 1.25.0 and
+  1.25.2. Patch versions between those were not run, so the floor for the test is about 1.25.
+  `pyproject.toml` declares no numpy floor (ADR-016) and none was added; a ROS node that imports
+  `ralmon` on a machine with only the apt numpy is outside the tested range (open items of
+  `ros2/ralmon_sim/doc/availability.md`).
 - Python 3.10 results (2026-10-08): `pytest -q` 2357 passed, `ruff check src tests`,
   `ruff format --check src tests` and `mypy src/ralmon` exit 0.

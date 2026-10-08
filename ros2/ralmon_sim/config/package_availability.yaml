@@ -105,9 +105,10 @@ components:
         source_url: https://raw.githubusercontent.com/gazebosim/ros_gz/humble/README.md
     notes: >-
       The hand-over text of WS07-T01 says the bridge pairs Humble with Classic or Fortress. The
-      README says Humble binaries pair with Fortress only. For the Classic target the integration
-      is gazebo_ros_pkgs (gazebo_ros), so the component is recorded as both and check_sim_env.sh
-      observes both packages.
+      README table lists Fortress for the ROS-apt binaries of Humble (packages.ros.org); Garden and
+      Harmonic on Humble come from packages.osrfoundation.org, and Classic is not listed. For the
+      Classic target the integration is gazebo_ros_pkgs (gazebo_ros), so the component is recorded
+      as both and check_sim_env.sh observes both packages.
     verified_on: "2026-10-08"
     verified_by: agent
 
@@ -186,9 +187,11 @@ components:
       - "ros2 pkg prefix hunav_agent_manager prints 'Package not found' in ralmon-ros2:humble."
     notes: >-
       Optional (analisi section 5.2, marked unverified there). Humble and Gazebo Classic are
-      documented by the README. The README lists dependencies to build from source (lightsfm,
-      people_msgs, BehaviorTree.CPP 4.6 and BehaviorTree.ROS2); no build was attempted and the repository is
-      not in sim.repos. WS07-T02 decides whether moving humans are worth the build.
+      documented by the READMEs. Both READMEs (branches v1.0-humble and v2.0) list lightsfm,
+      people_msgs, BehaviorTree.CPP and BehaviorTree.ROS2 to build from source; only the README of
+      branch v1.0-humble names a version (BehaviorTree.CPP 4.6), the README of v2.0 names none. No
+      build was attempted and the repository is not in sim.repos. WS07-T02 decides whether moving
+      humans are worth the build.
     verified_on: "2026-10-08"
     verified_by: agent
 
@@ -209,8 +212,8 @@ components:
 
   tc_netem:
     status: partial
-    version: "iproute2 5.15.0-1ubuntu2 (tc 5.15.0 in the image)"
-    source_url: https://packages.ubuntu.com/jammy/iproute2
+    version: "iproute2 5.15.0-1ubuntu2.2 (jammy-updates pocket, the version in the image; the jammy release pocket has 5.15.0-1ubuntu2)"
+    source_url: https://packages.ubuntu.com/jammy-updates/iproute2
     evidence:
       - "host: /usr/sbin/tc exists (iproute2 6.19.0); module sch_netem.ko.zst exists for kernel 7.0.0-38-generic; the host user has no sudo and unprivileged user namespaces are restricted, so netem cannot be configured on the host without a human."
       - "throw-away container as root with docker run --cap-add NET_ADMIN (own network namespace): tc qdisc add dev lo root netem loss 30% exit 0; tc qdisc show prints 'qdisc netem 8001: root refcnt 2 limit 1000 loss 30%'; deleted afterwards."
@@ -244,7 +247,8 @@ components:
     ram_gb: 16
     ram_gb_upgrade: 32
     storage: "512 GB SSD (upgrade 1 TB SSD)"
-    gpu: "none in the base configuration; upgrade 'NVIDIA Jetson PC' (datasheet wording)"
+    gpu: "not stated in 2025-Datasheet-TIAGo-Pro.pdf"
+    gpu_upgrade: "NVIDIA Jetson PC (datasheet wording, listed only under UPGRADES AND ACCESORIES; the datasheet never says that the base configuration has no GPU)"
     os: "Ubuntu LTS 64-bits | PREEMPT-RT, ROS 2 (datasheet wording; the release is not stated)"
     source_ref: "https://pal-robotics.com/wp-content/uploads/2025/05/2025-Datasheet-TIAGo-Pro.pdf, page 2, blocks ROBOT PC, SOFTWARE & DEVELOPMENT and UPGRADES AND ACCESORIES"
     other_variant_ref: "TIAGo: https://pal-robotics.com/wp-content/uploads/2024/04/Datasheet-TIAGo.pdf, block COMPUTER: CPU 'Intel i5 / i7', RAM '8 GB / 16 GB', SSD '250 GB / 500 GB'; cores not stated"

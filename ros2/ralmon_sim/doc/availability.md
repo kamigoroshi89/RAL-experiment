@@ -54,7 +54,7 @@ Adaptations from the Jazzy and Harmonic wording of the task (also in the complet
 
 - Target distribution and simulator: Humble and Gazebo Classic 11; Fortress is the fallback, not Harmonic.
 - The Python check of `ros2_distro` is against 3.10 (ADR-042), not 3.11; the image delivers 3.10.12.
-- `ros_gz_bridge` pairs Humble with Fortress only (README of `ros_gz`, branch humble); the integration for Gazebo Classic is `gazebo_ros_pkgs`. The component records both and `check_sim_env.sh` observes both. The hand-over text said "Classic or Fortress" for the bridge; the README does not list Classic.
+- The ROS-apt binaries (packages.ros.org) of `ros_gz_bridge` for Humble are Fortress only: the README table of `ros_gz` (branch humble) lists Fortress for packages.ros.org and also Garden and Harmonic for Humble from packages.osrfoundation.org; Classic is not listed. The integration for Gazebo Classic is `gazebo_ros_pkgs`. The component records both and `check_sim_env.sh` observes both. The hand-over text said "Classic or Fortress" for the bridge; the README does not list Classic.
 - `test_verdict_consistent_with_components` was adapted for `supersede_adr_011` (target humble and classic, the four gate components available, the superseding ADR present in `03-decisions.md`); `adopt_adr_011` is still forbidden when any gate component is unavailable. The other tests are as the task lists them, plus extra tests for the record header, the dependencies of `package.xml`, `sim.repos`, the headings and the exit code of `check_sim_env.sh`.
 - Tracing on Humble needs LTTng and `tracetools` built from source (the Debian package "will not work out-of-the-box"); the overlay of the image does that.
 - The PAL packages install from the ROS apt repository; the PAL developer Docker image is not used.
@@ -74,7 +74,7 @@ All rows verified on 2026-10-08 by the agent. "Observed" is the third column of 
 | `hospital_world` | available, decision `use_ros2_branch` | `aws_robomaker_hospital_world` 1.0.0, commit 7161eb8, archived upstream ([repository](https://github.com/aws-robotics/aws-robomaker-hospital-world/tree/ros2)) | yes |
 | `human_sim` | partial | HuNavSim, README "Tested in ROS2 Humble", wrappers for Gazebo Classic 11 and Fortress; no binary package, no build attempted ([repository](https://github.com/robotics-upo/hunav_sim)) | no |
 | `ros2_tracing` | available | ros2_tracing 4.1.2-1, `tracetools_analysis` 3.0.0-4, LTTng 2.13.4; `tracetools` built from commit 3c159b3 ([rosdistro humble](https://raw.githubusercontent.com/ros/rosdistro/master/humble/distribution.yaml)) | yes |
-| `tc_netem` | partial | iproute2 5.15.0-1ubuntu2 ([Ubuntu jammy package](https://packages.ubuntu.com/jammy/iproute2)); works in a container with `NET_ADMIN`, not on the host (no privilege) | yes (`tc` present) |
+| `tc_netem` | partial | iproute2 5.15.0-1ubuntu2.2, jammy-updates, the version in the image; the jammy release pocket has 5.15.0-1ubuntu2 ([Ubuntu jammy-updates package](https://packages.ubuntu.com/jammy-updates/iproute2)); works in a container with `NET_ADMIN`, not on the host (no privilege) | yes (`tc` present) |
 | `onboard_computer` | partial | TIAGo Pro datasheet: Intel i5, 16 GB RAM, 512 GB SSD; cores not stated ([datasheet](https://pal-robotics.com/wp-content/uploads/2025/05/2025-Datasheet-TIAGo-Pro.pdf)) | n/a |
 | `isaac_sim` | not_evaluated | by design (analisi section 5.2: optional, GPU-expensive, advised against for a small group) | n/a |
 
@@ -84,6 +84,12 @@ Ordered commands, run from the repository root on 2026-10-08. Outputs are copied
 files of the checks; output lines are cut at 150 characters. The probe scripts were run from
 `outputs/ws07-t01/` (not committed) and their full text is reproduced below, so the steps can be
 repeated by saving each block to that directory.
+
+Reproducibility limits (an item for WS13, see Open items for a human): the base image is the
+floating tag `ros:humble-ros-base` (the digest of 2026-10-08 is recorded in section Host), the apt
+and pip packages installed by `docker/Dockerfile.ros2` are not pinned (the resolved ROS versions are
+printed in step 2), and the 44 Gazebo Fuel models of the hospital world are downloaded from a hosted
+server at build time without pins or checksums, so a later build can differ or fail.
 
 ### Step 1. Image and tool versions
 
@@ -260,10 +266,55 @@ exit=0
 ```
 
 On the system numpy of Humble (1.21.5, REP 2000) the same suite gives `1 failed, 2356 passed`
-(`test_foreign_objects_with_unreadable_fields_are_named_errors`) and `mypy src/ralmon` reports 5
-`no-untyped-call` errors; both are numpy 1.21.5 effects (the test and mypy pass on Python 3.10 with
-numpy 1.26.4 and 2.2.6), not Python 3.10 effects. The image therefore installs numpy `<2`
-(numpy 2.2.6 breaks the import of the apt pandas 1.3.5 that `tracetools_analysis` uses).
+(`test_foreign_objects_with_unreadable_fields_are_named_errors`: the core does not raise
+`C1InjectionError`) and `mypy src/ralmon` reports 5 `no-untyped-call` errors. Both are numpy
+effects, not Python 3.10 effects. Bisection in throw-away containers (pip `--target` under `/tmp`,
+Python 3.10.12, script `numpy_bisect.sh` below, output `numpy_bisect.out`): the test fails with numpy 1.21.6,
+1.22.4, 1.23.5 and 1.24.4 and passes with 1.25.0, 1.25.1, 1.25.2, 1.26.4 (and 2.2.6, earlier run);
+mypy reports the 5 errors with 1.21.5 and 1.21.6 and passes with 1.22.4, 1.25.0 and 1.25.2. The patch
+versions between those (for example 1.24.0 to 1.24.3) were not run, so the floor for the test is
+"about 1.25" (first passing version tried: 1.25.0). The image installs numpy `<2` (1.26.4), because
+numpy 2.2.6 breaks the import of the apt pandas 1.3.5 that `tracetools_analysis` uses.
+
+`numpy_bisect.sh`:
+
+```
+# Throw-away container, as the host user; numpy versions are installed with pip --target under /tmp
+# (never into the image) and put first on PYTHONPATH. Python 3.10.12.
+set -u
+cd /work
+for v in 1.21.6 1.22.4 1.23.5 1.24.4 1.25.0 1.25.1 1.25.2 1.26.4; do
+  d=/tmp/np_$v
+  python3 -m pip install -q --no-deps --target "$d" "numpy==$v" >/dev/null 2>&1 || { echo "numpy $v: pip install failed"; continue; }
+  got=$(PYTHONPATH=$d:/work/src python3 -c "import numpy; print(numpy.__version__)")
+  t=$(PYTHONPATH=$d:/work/src pytest -q -p no:cacheprovider tests/benchmark/test_c1_confounders.py -k unreadable_fields 2>&1 | tail -n 1)
+  echo "numpy $got: test -> $t"
+done
+echo "== mypy src/ralmon"
+for v in 1.21.6 1.22.4 1.25.0 1.25.2; do
+  d=/tmp/np_$v
+  m=$(PYTHONPATH=$d:/work/src mypy src/ralmon 2>&1 | tail -n 1)
+  echo "numpy $v: mypy -> $m"
+done
+```
+
+Output:
+
+```
+numpy 1.21.6: test -> 1 failed, 164 deselected, 2 warnings in 0.55s
+numpy 1.22.4: test -> 1 failed, 164 deselected, 2 warnings in 0.71s
+numpy 1.23.5: test -> 1 failed, 164 deselected, 2 warnings in 0.78s
+numpy 1.24.4: test -> 1 failed, 164 deselected, 2 warnings in 0.72s
+numpy 1.25.0: test -> 1 passed, 164 deselected in 2.37s
+numpy 1.25.1: test -> 1 passed, 164 deselected in 2.34s
+numpy 1.25.2: test -> 1 passed, 164 deselected in 2.39s
+numpy 1.26.4: test -> 1 passed, 164 deselected in 2.34s
+== mypy src/ralmon
+numpy 1.21.6: mypy -> Found 5 errors in 3 files (checked 39 source files)
+numpy 1.22.4: mypy -> Success: no issues found in 39 source files
+numpy 1.25.0: mypy -> Success: no issues found in 39 source files
+numpy 1.25.2: mypy -> Success: no issues found in 39 source files
+```
 
 ### Step 4. Workspace build
 
@@ -336,7 +387,14 @@ exit=0
 
 The exit code is 0 exactly when every component recorded as `available` is observed: with
 `human_sim` temporarily recorded as `available` in a copy of the record, the script printed
-`human_sim available no`, `# 1 component(s) recorded as available are not observed` and exited 1.
+`human_sim available no`, `# 1 component(s) recorded as available are not observed` and exited 1. A component that cannot be
+observed on a machine (`onboard_computer`, `isaac_sim`) prints `n/a`; recorded as `available` it
+counts as not observed, so the script exits 1 (container run with `isaac_sim` set to `available` in a
+scratch copy: `isaac_sim available n/a`, `# 1 component(s) recorded as available are not observed (no or n/a)`,
+exit 1). A record that cannot be read gives one line and exit 3 (container run with the content
+`components: [unclosed`: `cannot read .../config/package_availability.yaml: ParserError: while parsing a flow sequence`,
+exit 3, no traceback). The tests `test_check_script_exits_*` run the same paths on a scratch copy with stub
+executables, so they do not depend on the machine.
 
 ### Step 6. Tracing (LTTng and ros2_tracing, user-space, uid 1000)
 
@@ -785,7 +843,7 @@ and as an image on 2026-10-08).
 | `cores` | not stated in 2025-Datasheet-TIAGo-Pro.pdf |
 | `ram_gb` | 16 (upgrade 32) |
 | Storage | 512 GB SSD (upgrade 1 TB SSD) |
-| GPU | none in the base configuration; upgrade "NVIDIA Jetson PC" |
+| GPU | not stated in 2025-Datasheet-TIAGo-Pro.pdf (the datasheet lists a GPU only under upgrades, "NVIDIA Jetson PC", and never says that the base configuration has none) |
 | OS and middleware | "Ubuntu LTS 64-bits \| PREEMPT-RT", "ROS 2" (release not stated) |
 | `source_ref` | https://pal-robotics.com/wp-content/uploads/2025/05/2025-Datasheet-TIAGo-Pro.pdf |
 
@@ -796,13 +854,17 @@ group's units is not stated in any source.
 
 ## Open items for a human
 
-1. Onboard computer (`partial`): state the exact CPU model, core count, RAM and GPU option of the group's TIAGo Pro, and whether WS07-T07 may run on its onboard computer. Until then the CPU and memory figures use the host description of this record. The booking questions of WS00-T05 (location, contact, time window) are still open there.
+1. Onboard computer (`partial`): state the exact CPU model, core count, RAM and GPU option of the group's TIAGo Pro (the datasheet gives no core count and no base GPU), and whether WS07-T07 may run on its onboard computer. Until then the CPU and memory figures use the host description of this record. The booking questions of WS00-T05 (location, contact, time window) are still open there.
 2. `tc netem` (`partial`): the host user has no privilege. Either a human with root runs the commands of Reproduction step 9 on the host, or approves a compose service with `cap_add: [NET_ADMIN]` (WS07-T05 would add it). The Fast DDS results varied between two runs; netem faults should use CycloneDDS or be re-measured with the experiment's RMW.
-3. numpy floor: `pyproject.toml` declares no numpy version (ADR-016, no pins), and the apt numpy of Humble (1.21.5) fails one test and 5 mypy checks of the core, while numpy 1.26.4 and 2.2.6 pass. Decide whether the ward node and the robot must run a newer numpy (pip), or whether the core should declare a floor (a bisection between 1.21.5 and 1.26.4 was not done), or accept the risk.
-4. Licences before any release (WS13): the hospital world has inconsistent licence statements (`LICENSE` text versus `package.xml` "Apache 2.0", none detected by GitHub) and its 44 Fuel models carry their own licences, not checked.
-5. HuNavSim (`partial`, optional): decide in WS07-T02 whether moving humans justify a source build (lightsfm, people_msgs, BehaviorTree.CPP 4.6, BehaviorTree.ROS2).
-6. Known risks, not actions: Gazebo Classic is end of life since January 2025 and the AWS hospital world repository is archived (both recorded by ADR-042 and WS00-T05); the ROS distribution that the branches `alum-devel` and `master` of `tiago_pro_simulation` target was not checked.
-7. The image `ralmon-ros2:jazzy` is unused; remove it with `docker rmi ralmon-ros2:jazzy` if the space is wanted.
+3. numpy floor: `pyproject.toml` declares no numpy version (ADR-016, no pins). Bisected on Python 3.10.12 (step 3): the core test `test_foreign_objects_with_unreadable_fields_are_named_errors` fails with numpy 1.21.6, 1.22.4, 1.23.5 and 1.24.4 (the core does not raise `C1InjectionError`) and passes from 1.25.0 (tried: 1.25.0, 1.25.1, 1.25.2, 1.26.4, 2.2.6); mypy strict reports 5 errors only with 1.21.5 and 1.21.6 (passes from 1.22.4). The apt numpy of Humble is 1.21.5. Decide whether the ward node and the robot must run a numpy of about 1.25 or newer (pip; numpy 2 breaks the apt pandas of `tracetools_analysis`), or whether the core should declare a floor of about 1.25 (not added to `pyproject.toml` here), or accept the risk.
+4. Dev dependency `tomli`: the `tomllib` fallback of `tests/test_toolchain.py` on Python 3.10 relies on `tomli` arriving as a dependency of pytest 9 (`tomli>=1; python_version < "3.11"`) or of mypy (`tomli>=1.1.0; python_version < "3.11"`). It is missing only with the apt pytest 6.2.5 and no mypy. A human may add `tomli; python_version < "3.11"` to the dev extras of `pyproject.toml` (not done: this task changes `requires-python` only, and `test_pyproject_declares_toolchain` accepts plain names only; the marker would need that test to change).
+5. Licences before any release (WS13): the hospital world has inconsistent licence statements (`LICENSE` text versus `package.xml` "Apache 2.0", none detected by GitHub) and its 44 Fuel models carry their own licences, not checked.
+6. Reproducibility of the image (WS13): floating base tag, unpinned apt and pip packages, and Fuel models downloaded at build time without pins (see Reproduction); a release needs pinned versions or a saved image.
+7. RMW of the real robots: which RMW implementation do the group's TIAGo and TIAGo Pro run? WS00-T05 records that mixed nodes must use the same RMW implementation (ROS documentation: "the same ROS version and the same RMW implementation"). The simulation here used CycloneDDS (compose sets `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`). PAL's own simulation README (https://raw.githubusercontent.com/pal-robotics/tiago_simulation/humble-devel/README.md, opened on 2026-10-08) says: "In our testing environment, we've found out that the simulation is more reliable if we switch to Cyclone DDS" and "We are still looking on the issues when working with Fast RTPS."
+8. HuNavSim (`partial`, optional): decide in WS07-T02 whether moving humans justify a source build (lightsfm, people_msgs, BehaviorTree.CPP, BehaviorTree.ROS2; only the README of branch v1.0-humble names a BehaviorTree.CPP version, 4.6, and the README of v2.0 names none).
+9. Plan documents still describing Jazzy (not edited here): `docs/plan/workstreams/WS07-ros2-sim/README.md` line 20 ("ROS 2 Jazzy with Gazebo Harmonic (ADR-011)"), `docs/plan/workstreams/WS07-ros2-sim/tasks/T02-hospital-world.md` line 17 ("a Gazebo Harmonic (or the generation fixed by WS07-T01) hospital world"), and the text of ADR-031 in `docs/plan/03-decisions.md` (lines 262 and 264: Jazzy image, ADR-011 `[DA-CONFERMARE]`).
+10. Known risks, not actions: Gazebo Classic is end of life since January 2025 and the AWS hospital world repository is archived (both recorded by ADR-042 and WS00-T05); the ROS distribution that the branches `alum-devel` and `master` of `tiago_pro_simulation` target was not checked.
+11. The image `ralmon-ros2:jazzy` is unused; remove it with `docker rmi ralmon-ros2:jazzy` if the space is wanted.
 
 ## Proposed ADR
 
@@ -811,6 +873,6 @@ ADR-042, which is already accepted and which this check confirms. What is new re
 (facts the ADR log may want to cite):
 
 - The PAL packages are available as ROS apt binaries for Humble and ran headless with Nav2 outside the PAL developer image.
-- The new-Gazebo option on Humble is Fortress (`libignition-gazebo6`, `gz-sensors6`); `ros_gz_bridge` on Humble binaries serves Fortress, and Gazebo Classic is served by `gazebo_ros_pkgs`.
+- The new-Gazebo option on Humble is Fortress (`libignition-gazebo6`, `gz-sensors6`); the ROS-apt binaries of `ros_gz_bridge` for Humble serve Fortress, and Gazebo Classic is served by `gazebo_ros_pkgs`.
 - ADR-042 migration done: `requires-python = ">=3.10"`, the `tomllib` import of `tests/test_toolchain.py` has a `tomli` fallback for Python 3.10, and the suite, ruff and mypy pass under Python 3.10.12 in the Humble image (numpy below 2); ADR-031's description of the Jazzy image is superseded by `ralmon-ros2:humble`.
-- Open decision, not an ADR yet (candidate text for a human to promote): numpy floor. Context: Python 3.10 on Humble comes with numpy 1.21.5, which fails one test and mypy strict on the core; numpy 1.26.4 and 2.2.6 pass. Decision (proposed): declare a numpy floor in `pyproject.toml`, chosen by bisection, and install numpy below 2 in the ROS image (the apt pandas needs numpy 1). Alternatives: no floor and a note in the image README; pin numpy in the image only. Consequences: a `pyproject.toml` change that ADR-016 forbids without a decision. Status: proposed, for a human.
+- Open decision, not an ADR yet (candidate text for a human to promote): numpy floor. Context: Python 3.10 on Humble comes with numpy 1.21.5, which fails one test and mypy strict on the core; by bisection the test passes from numpy 1.25.0 (first version tried that passes) and mypy from 1.22.4. Decision (proposed): declare a numpy floor of about 1.25 in `pyproject.toml` and install numpy below 2 in the ROS image (the apt pandas needs numpy 1). Alternatives: no floor and a note in the image README; pin numpy in the image only. Consequences: a `pyproject.toml` change that ADR-016 forbids without a decision. Status: proposed, for a human.

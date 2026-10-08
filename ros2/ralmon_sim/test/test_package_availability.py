@@ -273,6 +273,14 @@ def test_onboard_computer_fields() -> None:
             assert re.fullmatch(r"not stated in \S.*", value), value
 
 
+def test_onboard_computer_gpu_is_not_guessed() -> None:
+    """The datasheet lists a GPU only as an upgrade and never says "none" (review F1)."""
+    computer = _components()["onboard_computer"]
+    gpu = str(computer.get("gpu", ""))
+    assert re.fullmatch(r"not stated in \S.*", gpu), gpu
+    assert "Jetson" in str(computer.get("gpu_upgrade", ""))
+
+
 def test_target_and_record_header_declared() -> None:
     record = _record()
     assert record.get("schema_version") == 1
@@ -519,6 +527,111 @@ def test_check_script_exits_2_without_ros_environment() -> None:
     )
     assert result.returncode == 2, result.stdout + result.stderr
     assert "ROS 2 environment not sourced" in result.stdout + result.stderr
+
+
+_STUB_ROS2 = """#!/bin/sh
+case "$1 $2" in
+  "pkg prefix") echo "/stub/$3" ;;
+  "run tracetools") echo "Tracing enabled" ;;
+esac
+exit 0
+"""
+
+
+def _run_check_script(
+    tmp_path: Path, record_text: str
+) -> subprocess.CompletedProcess[str]:
+    """Run a copy of check_sim_env.sh on `record_text` in a stubbed 'sourced' environment.
+
+    The stubs make every observation succeed, so the result depends on the script and the
+    record only, not on the machine (no ROS 2, no Gazebo, no network).
+    """
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "config").mkdir()
+    (tmp_path / "bin").mkdir()
+    script = tmp_path / "scripts" / "check_sim_env.sh"
+    script.write_text(SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "config" / "package_availability.yaml").write_text(
+        record_text, encoding="utf-8"
+    )
+    stubs = {
+        "ros2": _STUB_ROS2,
+        "gazebo": '#!/bin/sh\necho "Gazebo multi-robot simulator, version 11.10.2"\n',
+        "lttng": '#!/bin/sh\necho "lttng 2.13.4"\n',
+        "tc": "#!/bin/sh\nexit 0\n",
+        "ign": "#!/bin/sh\necho 6.18.0\n",
+        "gz": "#!/bin/sh\necho 8.0.0\n",
+        # a wrapper, not a symlink: a venv interpreter must keep its own location
+        "python3": f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
+    }
+    for name, text in stubs.items():
+        path = tmp_path / "bin" / name
+        path.write_text(text, encoding="utf-8")
+        path.chmod(0o755)
+    env = {
+        "PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "ROS_DISTRO": "humble",
+    }
+    return subprocess.run(
+        ["bash", str(script)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+def test_check_script_exits_0_on_the_committed_record_when_everything_is_observed(
+    tmp_path: Path,
+) -> None:
+    result = _run_check_script(tmp_path, RECORD.read_text(encoding="utf-8"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    rows = {
+        line.split()[0]: line.split()
+        for line in result.stdout.splitlines()
+        if len(line.split()) == 3
+    }
+    assert set(rows) == set(_components())
+    assert rows["isaac_sim"][2] == "n/a"
+    assert rows["onboard_computer"][2] == "n/a"
+    assert all(
+        rows[name][2] == "yes"
+        for name, component in _components().items()
+        if component["status"] == "available"
+    )
+
+
+@pytest.mark.parametrize("name", ["isaac_sim", "onboard_computer"])
+def test_check_script_exits_1_when_an_available_component_cannot_be_observed(
+    tmp_path: Path, name: str
+) -> None:
+    record = _record()
+    record["components"][name]["status"] = "available"
+    result = _run_check_script(tmp_path, yaml.safe_dump(record))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"{name} available n/a" in result.stdout.splitlines()
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "components: [unclosed\n",
+        "- a list, not a mapping\n",
+        "target: {ros_distro: humble, gazebo: classic}\n",
+    ],
+    ids=["yaml-syntax", "wrong-type", "missing-keys"],
+)
+def test_check_script_exits_3_with_one_line_on_a_malformed_record(
+    tmp_path: Path, broken: str
+) -> None:
+    result = _run_check_script(tmp_path, broken)
+    output = (result.stdout + result.stderr).splitlines()
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "Traceback" not in result.stdout + result.stderr
+    assert len([line for line in output if line.strip()]) == 1, output
+    assert "cannot read" in output[0]
 
 
 @pytest.mark.ros
