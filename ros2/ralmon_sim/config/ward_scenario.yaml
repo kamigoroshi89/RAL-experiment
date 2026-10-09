@@ -1,0 +1,173 @@
+# Ward scenario of the simulation (WS07-T02), read by ralmon_sim.ward_scenario.load_scenario.
+#
+# Number of rooms: 6
+# Dry-drive time dock to farthest door: 36830 ms of simulation time (a SAMPLE, not a bound: the largest of
+# 10 runs of this configuration, which gave 27975 to 36830 ms, nine of them 27975 to 29120 ms; the door
+# pose of r05, 12.4 m in a straight line; TIAGo Pro, Nav2 and the PAL parameters of config/nav2_params.yaml
+# as changed there; real-time factor about 1.0; the runs are in the Notes of the task WS07-T02)
+#
+# What this file is. The description of the simulated ward: one robot, a corridor with 6 patient rooms,
+# one patient slot per room, staggered care plans and the clock policy of
+# docs/plan/workstreams/WS07-ros2-sim/README.md ("Clocks, compression and staggering"). It is a
+# technical test environment for a simulation; nothing in it is a clinical value and nothing in it
+# validates a clinical claim.
+#
+# Where the numbers come from. Every value below carries either "source:" (read from the document
+# named) or "run parameter" (declared by this task with the reason given; it has no source and was not
+# validated). No value is a clinical parameter. The parameters of the registry are never copied here:
+# only the NAMES of its time entries are classified (time_entries).
+#
+# Frame and units. Poses are in the map frame, which is the Gazebo world frame (metres and radians,
+# yaw counter-clockwise from +x, in [-pi, pi]); times are integer milliseconds of the ward clock
+# (simulation time, ward_epoch_ms 0). Frozen pose names per room (WS10-T01 mirrors one room): door
+# (in the corridor in front of the doorway, facing it), bedside (the standing pose of the robot next to the
+# bed, in line with the doorway, heading into the room: the bed is beside it), bed and dispenser
+# (furniture positions, on occupied cells, not goals); plus dock (the start pose of the robot) and
+# unreachable_pose (inside a wall, for impossible goals).
+#
+# World, map and poses are generated from one layout:
+#   python3 ros2/ralmon_sim/scripts/generate_ward_world.py --rooms 6
+# worlds/ward.world (SDF boxes), worlds/ward_map.pgm and worlds/ward_map.yaml (the rasterisation of
+# the collision boxes, 0.05 m per cell). The poses below equal the output of layout_poses(6)
+# (checked by test_scenario_poses_equal_the_layout_poses).
+#
+# Limits. The hospital world of the T01 record (AWS RoboMaker, branch ros2) is NOT used: see
+# worlds/NOTICE. Moving humans (HuNavSim) are not simulated (human_sim is only partial in the T01 record).
+schema_version: 1
+
+# File names inside ros2/ralmon_sim/worlds (resolved by the launch file, no directories allowed).
+# source: the output of scripts/generate_ward_world.py
+world_file: ward.world
+map_file: ward_map.yaml
+
+# source: README clock policy item 2: an integer factor F >= 1 (1 means no compression). The value is a
+# run parameter: analisi section 5.3 gives "1 ora = 2 minuti" as an example of a declared factor, which
+# is 30, and WS10-T01 starts from it. WS07-T04 checks whether the robot task durations fit the
+# compressed windows (clock policy item 3); the dry-drive time above is an input to that check.
+compression_factor: 30
+
+# Ward time of the start of the replay, before the per-room offset. run parameter: it has to be
+# later than the time the stack needs to be ready (Nav2 active and the robot localised at the dock),
+# which was 3.4 to 3.9 s of simulation time in 8 runs; one minute is a round margin of about 15 times.
+replay_start_ms: 60000
+
+# README clock policy item 2: origin_ms = replay_start_ms + offset_ms, where the offset of room i is
+# i * spacing_ms unless the room has an explicit offset_ms.
+stagger:
+  # run parameter: 30 s of ward time are 15 min of trace time at compression_factor 30; the six
+  # offsets span 150 s, so that the obligations of the rooms overlap in part.
+  spacing_ms: 30000
+
+# The values of MonitorConfig (02-interfaces.md#monitor) in ward-clock milliseconds (README item 4).
+monitor:
+  # run parameter: the F0 fixture value T_s = 60000 ms (docs/formal/01-signals-sampling.md section
+  # 1.5, FIXTURE-ONLY, no clinical source) divided by compression_factor; with this step the
+  # compressed window parameters of registry 0.2.0 stay multiples of it (checked by test).
+  step_ms: 2000
+  # run parameter: the F0 fixture value D = 0 (docs/formal/01-signals-sampling.md section 1.5,
+  # FIXTURE-ONLY). No transport delay is assumed here; WS07-T05 and WS07-T07 measure the real one.
+  reorder_delay_ms: 0
+  # run parameter: false, because StreamingMonitor refuses predictive=True until WS05-T08 (WS05-T04
+  # test 26); the predictive monitoring of deadlines is evaluated offline by WS07-T06.
+  predictive: false
+  # run parameter: null while predictive is false (MonitorConfig allows None).
+  alpha: null
+  # run parameter: inert while predictive is false; "likely" is the first of the two values of
+  # 02-interfaces.md#monitor. The choice needs a clinical justification that nobody has given.
+  variant: likely
+  # source: configs/registry/hypertension.yaml, registry_version "0.2.0".
+  registry_version: "0.2.0"
+
+# Classification of the registry entries with unit ms for the compression (README clock policy item 2:
+# an unlisted ms entry is an error). Both lists are run parameters (declared classification, not
+# reviewed by a clinician): an entry is care-plan time when it measures the care plan itself (windows,
+# look-backs and the scale of their time robustness), and is divided by compression_factor; it is
+# physical time when it measures a device or the clock, and is not. The test
+# test_every_ms_registry_entry_is_classified_exactly_once checks that every ms entry of
+# configs/registry/hypertension.yaml is in exactly one list.
+time_entries:
+  # run parameter: care-plan time
+  care_plan_time_entries:
+    - sched_window
+    - hold_lookback
+    - int_window
+    - delta1
+    - delta2
+    - scale_sched
+    - scale_int
+  # run parameter: physical time (cuff inflation, its bounds and scale, clock skew)
+  physical_time_entries:
+    - cuff_inflation_min
+    - scale_sys
+    - bound_inflation_ms_lower
+    - bound_inflation_ms_upper
+    - clock_skew_max_ms
+
+# Wall-clock milliseconds allowed from the start of the launch until /clock advances and Nav2 is
+# active. run parameter: Nav2 was active and the robot localised 15 to 16 s of wall time after the
+# start in 8 runs on a 16-core host without a GPU (Xvfb, Mesa software rendering); 180 s leaves a
+# margin of more than 10 times for a slower machine.
+startup_timeout_ms: 180000
+
+# Simulation-clock milliseconds allowed for one NavigateToPose goal. run parameter: the longest leg
+# observed in the same 10 runs (door or bedside pose, room to room) took 36.8 s, the longest bedside
+# leg 29.9 s; 120 s is more than 3 times the longest leg. Compression (compression_factor 30) shrinks
+# the care-plan windows but not these durations: WS07-T04 has to check them against the windows.
+nav_goal_timeout_ms: 120000
+
+# source: scripts/generate_ward_world.py (layout_poses): the robot starts here.
+dock: {x: 1.0, y: 0.0, yaw: 0.0}
+
+# source: scripts/generate_ward_world.py (layout_poses): inside the north corridor wall.
+unreachable_pose: {x: 2.0, y: 1.6, yaw: 0.0}
+
+# Slot status: PLACEHOLDER
+# Patient slots. PLACEHOLDER: the benchmark builder WS04-T11 (which writes manifest.json) is not done,
+# so the (patient_id, day_index) pairs below are declared placeholders, not values read from a manifest.
+# Replace them by pairs of the benchmark manifest when it exists, and then change the line above to
+# "# Slot status: manifest, source: <the manifest file>" and drop the PLACEHOLDER marks of the slot
+# lines; the loader only needs distinct pairs.
+# source of the poses: scripts/generate_ward_world.py (layout_poses).
+rooms:
+  - room_id: r01  # north side of the corridor
+    patient_id: slot-p01  # PLACEHOLDER, see above
+    day_index: 0  # PLACEHOLDER, see above
+    door: {x: 5.0, y: 0.4, yaw: 1.5707963267948966}
+    bedside: {x: 5.0, y: 4.7, yaw: 1.5707963267948966}
+    bed: {x: 6.4, y: 4.7, yaw: 0.0}
+    dispenser: {x: 6.8, y: 3.3, yaw: 0.0}
+  - room_id: r02  # south side of the corridor
+    patient_id: slot-p02  # PLACEHOLDER, see above
+    day_index: 0  # PLACEHOLDER, see above
+    door: {x: 5.0, y: -0.4, yaw: -1.5707963267948966}
+    bedside: {x: 5.0, y: -4.7, yaw: -1.5707963267948966}
+    bed: {x: 6.4, y: -4.7, yaw: 0.0}
+    dispenser: {x: 6.8, y: -3.3, yaw: 0.0}
+  - room_id: r03  # north side of the corridor
+    patient_id: slot-p03  # PLACEHOLDER, see above
+    day_index: 0  # PLACEHOLDER, see above
+    door: {x: 9.2, y: 0.4, yaw: 1.5707963267948966}
+    bedside: {x: 9.2, y: 4.7, yaw: 1.5707963267948966}
+    bed: {x: 10.6, y: 4.7, yaw: 0.0}
+    dispenser: {x: 11.0, y: 3.3, yaw: 0.0}
+  - room_id: r04  # south side of the corridor
+    patient_id: slot-p04  # PLACEHOLDER, see above
+    day_index: 0  # PLACEHOLDER, see above
+    door: {x: 9.2, y: -0.4, yaw: -1.5707963267948966}
+    bedside: {x: 9.2, y: -4.7, yaw: -1.5707963267948966}
+    bed: {x: 10.6, y: -4.7, yaw: 0.0}
+    dispenser: {x: 11.0, y: -3.3, yaw: 0.0}
+  - room_id: r05  # north side of the corridor
+    patient_id: slot-p05  # PLACEHOLDER, see above
+    day_index: 0  # PLACEHOLDER, see above
+    door: {x: 13.4, y: 0.4, yaw: 1.5707963267948966}
+    bedside: {x: 13.4, y: 4.7, yaw: 1.5707963267948966}
+    bed: {x: 14.8, y: 4.7, yaw: 0.0}
+    dispenser: {x: 15.2, y: 3.3, yaw: 0.0}
+  - room_id: r06  # south side of the corridor
+    patient_id: slot-p06  # PLACEHOLDER, see above
+    day_index: 0  # PLACEHOLDER, see above
+    door: {x: 13.4, y: -0.4, yaw: -1.5707963267948966}
+    bedside: {x: 13.4, y: -4.7, yaw: -1.5707963267948966}
+    bed: {x: 14.8, y: -4.7, yaw: 0.0}
+    dispenser: {x: 15.2, y: -3.3, yaw: 0.0}
