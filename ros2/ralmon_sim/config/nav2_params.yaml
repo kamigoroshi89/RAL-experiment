@@ -9,7 +9,8 @@
 #   4. bt_navigator: enable_groot_monitoring False and the two Groot ports removed (see below);
 #   5. planner_server.GridBased.tolerance 0.5 -> 0.0 (see below);
 #   6. amcl.alpha1 to alpha5 0.2 -> 0.05 (see below);
-#   7. this header and the comments marked "PAL:".
+#   7. controller_server.FollowPath: the rotation shim controller in front of DWB (see below);
+#   8. this header and the comments marked "PAL:".
 # Everything else is the PAL value. Every node runs on the
 # simulation clock (use_sim_time true). The licence situation of this derived file is in
 # worlds/NOTICE.
@@ -176,7 +177,18 @@ controller_server:
       stateful: True
     # DWB parameters
     FollowPath:
-      plugin: "dwb_core::DWBLocalPlanner"
+      # PAL: plugin "dwb_core::DWBLocalPlanner". The rotation shim turns the robot in place towards
+      # the path before DWB follows it. Without it DWB turns while moving: starting from a heading
+      # opposite to the path (the first bedside leg starts facing the other room) it sometimes
+      # chose the arc through the doorway jamb, crept along it and lost its localisation (the
+      # attempts are in the completion note of WS07-T02). DWB keeps every parameter below.
+      plugin: "nav2_rotation_shim_controller::RotationShimController"
+      primary_controller: "dwb_core::DWBLocalPlanner"
+      angular_dist_threshold: 0.785
+      forward_sampling_distance: 0.5
+      rotate_to_heading_angular_vel: 1.0
+      max_angular_accel: 3.2
+      simulate_ahead_time: 1.0
       debug_trajectory_details: True
       min_vel_x: 0.0
       min_vel_y: 0.0

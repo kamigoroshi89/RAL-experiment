@@ -1,9 +1,10 @@
 # Ward scenario of the simulation (WS07-T02), read by ralmon_sim.ward_scenario.load_scenario.
 #
 # Number of rooms: 6
-# Dry-drive time dock to farthest door: 30910 ms of simulation time (the longest of 4 runs, 28140 to 30910 ms;
-# the door pose of r05, 12.4 m in a straight line; TIAGo Pro, Nav2 and the PAL parameters of
-# config/nav2_params.yaml; real-time factor about 1.0; the runs are in the completion note of WS07-T02)
+# Dry-drive time dock to farthest door: 36830 ms of simulation time (a SAMPLE, not a bound: the largest of
+# 10 runs of this configuration, which gave 27975 to 36830 ms, nine of them 27975 to 29120 ms; the door
+# pose of r05, 12.4 m in a straight line; TIAGo Pro, Nav2 and the PAL parameters of config/nav2_params.yaml
+# as changed there; real-time factor about 1.0; the runs are in the Notes of the task WS07-T02)
 #
 # What this file is. The description of the simulated ward: one robot, a corridor with 6 patient rooms,
 # one patient slot per room, staggered care plans and the clock policy of
@@ -20,8 +21,9 @@
 # yaw counter-clockwise from +x, in [-pi, pi]); times are integer milliseconds of the ward clock
 # (simulation time, ward_epoch_ms 0). Frozen pose names per room (WS10-T01 mirrors one room): door
 # (in the corridor in front of the doorway, facing it), bedside (the standing pose of the robot next to the
-# bed, facing it), bed and dispenser (furniture positions, on occupied cells, not goals); plus dock
-# (the start pose of the robot) and unreachable_pose (inside a wall, for impossible goals).
+# bed, in line with the doorway, heading into the room: the bed is beside it), bed and dispenser
+# (furniture positions, on occupied cells, not goals); plus dock (the start pose of the robot) and
+# unreachable_pose (inside a wall, for impossible goals).
 #
 # World, map and poses are generated from one layout:
 #   python3 ros2/ralmon_sim/scripts/generate_ward_world.py --rooms 6
@@ -108,8 +110,9 @@ time_entries:
 startup_timeout_ms: 180000
 
 # Simulation-clock milliseconds allowed for one NavigateToPose goal. run parameter: the longest leg
-# observed (door or bedside pose, room to room) took 40 s and the dry-drive time above is 31 s; 120 s is
-# about 4 times the dry-drive time.
+# observed in the same 10 runs (door or bedside pose, room to room) took 36.8 s, the longest bedside
+# leg 29.9 s; 120 s is more than 3 times the longest leg. Compression (compression_factor 30) shrinks
+# the care-plan windows but not these durations: WS07-T04 has to check them against the windows.
 nav_goal_timeout_ms: 120000
 
 # source: scripts/generate_ward_world.py (layout_poses): the robot starts here.
@@ -118,50 +121,53 @@ dock: {x: 1.0, y: 0.0, yaw: 0.0}
 # source: scripts/generate_ward_world.py (layout_poses): inside the north corridor wall.
 unreachable_pose: {x: 2.0, y: 1.6, yaw: 0.0}
 
+# Slot status: PLACEHOLDER
 # Patient slots. PLACEHOLDER: the benchmark builder WS04-T11 (which writes manifest.json) is not done,
 # so the (patient_id, day_index) pairs below are declared placeholders, not values read from a manifest.
-# Replace them by pairs of the benchmark manifest when it exists; the loader only needs distinct pairs.
+# Replace them by pairs of the benchmark manifest when it exists, and then change the line above to
+# "# Slot status: manifest, source: <the manifest file>" and drop the PLACEHOLDER marks of the slot
+# lines; the loader only needs distinct pairs.
 # source of the poses: scripts/generate_ward_world.py (layout_poses).
 rooms:
   - room_id: r01  # north side of the corridor
     patient_id: slot-p01  # PLACEHOLDER, see above
     day_index: 0  # PLACEHOLDER, see above
     door: {x: 5.0, y: 0.4, yaw: 1.5707963267948966}
-    bedside: {x: 5.0, y: 4.7, yaw: 0.0}
+    bedside: {x: 5.0, y: 4.7, yaw: 1.5707963267948966}
     bed: {x: 6.4, y: 4.7, yaw: 0.0}
     dispenser: {x: 6.8, y: 3.3, yaw: 0.0}
   - room_id: r02  # south side of the corridor
     patient_id: slot-p02  # PLACEHOLDER, see above
     day_index: 0  # PLACEHOLDER, see above
     door: {x: 5.0, y: -0.4, yaw: -1.5707963267948966}
-    bedside: {x: 5.0, y: -4.7, yaw: 0.0}
+    bedside: {x: 5.0, y: -4.7, yaw: -1.5707963267948966}
     bed: {x: 6.4, y: -4.7, yaw: 0.0}
     dispenser: {x: 6.8, y: -3.3, yaw: 0.0}
   - room_id: r03  # north side of the corridor
     patient_id: slot-p03  # PLACEHOLDER, see above
     day_index: 0  # PLACEHOLDER, see above
     door: {x: 9.2, y: 0.4, yaw: 1.5707963267948966}
-    bedside: {x: 9.2, y: 4.7, yaw: 0.0}
+    bedside: {x: 9.2, y: 4.7, yaw: 1.5707963267948966}
     bed: {x: 10.6, y: 4.7, yaw: 0.0}
     dispenser: {x: 11.0, y: 3.3, yaw: 0.0}
   - room_id: r04  # south side of the corridor
     patient_id: slot-p04  # PLACEHOLDER, see above
     day_index: 0  # PLACEHOLDER, see above
     door: {x: 9.2, y: -0.4, yaw: -1.5707963267948966}
-    bedside: {x: 9.2, y: -4.7, yaw: 0.0}
+    bedside: {x: 9.2, y: -4.7, yaw: -1.5707963267948966}
     bed: {x: 10.6, y: -4.7, yaw: 0.0}
     dispenser: {x: 11.0, y: -3.3, yaw: 0.0}
   - room_id: r05  # north side of the corridor
     patient_id: slot-p05  # PLACEHOLDER, see above
     day_index: 0  # PLACEHOLDER, see above
     door: {x: 13.4, y: 0.4, yaw: 1.5707963267948966}
-    bedside: {x: 13.4, y: 4.7, yaw: 0.0}
+    bedside: {x: 13.4, y: 4.7, yaw: 1.5707963267948966}
     bed: {x: 14.8, y: 4.7, yaw: 0.0}
     dispenser: {x: 15.2, y: 3.3, yaw: 0.0}
   - room_id: r06  # south side of the corridor
     patient_id: slot-p06  # PLACEHOLDER, see above
     day_index: 0  # PLACEHOLDER, see above
     door: {x: 13.4, y: -0.4, yaw: -1.5707963267948966}
-    bedside: {x: 13.4, y: -4.7, yaw: 0.0}
+    bedside: {x: 13.4, y: -4.7, yaw: -1.5707963267948966}
     bed: {x: 14.8, y: -4.7, yaw: 0.0}
     dispenser: {x: 15.2, y: -3.3, yaw: 0.0}

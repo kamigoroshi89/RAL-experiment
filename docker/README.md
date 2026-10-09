@@ -27,7 +27,7 @@ docker compose --profile ros2 run --rm ros2               # shell in the sourced
 docker compose --profile ros2 run --rm ros2 pytest -q     # the core suite under Python 3.10
 (cd ros2 && colcon build --packages-select ralmon_sim)    # inside the container
 docker compose --profile ros2 run --rm -T ros2 pytest ros2/ralmon_sim/test/test_ward_world.py -q -m ros
-                                          # the ward world, robot and Nav2 headless (5 minutes)
+                                          # the ward world, robot and Nav2 headless (about 5 minutes)
 bash ros2/ralmon_sim/scripts/check_sim_env.sh             # inside the container
 ```
 
@@ -46,6 +46,11 @@ host user differs, put `UID=...` and `GID=...` in a `.env` file (listed in `.git
   `ros2/ralmon_sim/test/conftest.py` starts one when `DISPLAY` is not set. The checks of WS07-T01 had
   installed `Xvfb` in a throw-away root container (see `ros2/ralmon_sim/doc/availability.md`,
   Reproduction step 8).
+- Options of the ward tests (environment variables, passed with `docker compose run -e NAME=value`):
+  `RALMON_SIM_LOG_DIR=/work/<dir>` keeps the log of the simulation there (otherwise it is lost with
+  the container), and `RALMON_TEST_SHUFFLE_SEED=<integer>` shuffles the order of the door legs and
+  of the bedside legs with a seeded generator. The tests print one line `WARD LEGS ...` with the
+  simulation-time duration of every leg, also under `-q`.
 - Isolation between simulations. Two containers on the same host share the DDS domain unless
   `ROS_DOMAIN_ID` differs (the compose file defaults to 42): a second simulation next to the first
   (for example the test run of WS07-T02 while another container still runs) mixes `/clock` and the

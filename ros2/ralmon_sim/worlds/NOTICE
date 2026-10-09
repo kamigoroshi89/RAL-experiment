@@ -64,10 +64,14 @@ decides the release (WS13); it is not legal advice and it does not grant or clea
        of numbers, not a copy of a file.
    4b. config/nav2_params.yaml is derived from config/nav_public_sim.yaml of the package
        omni_base_2dnav 2.24.2 of PAL Robotics (package.xml: "Apache License 2.0"). The header of
-       that file lists the changes. If that derived file is released, the Apache-2.0 conditions
-       apply to it (licence text with the release, statement of the changes); this is an open item
-       for WS13. The launch file launch/sim_ward.launch.py follows the structure of
-       tiago_pro_gazebo.launch.py of tiago_pro_gazebo 1.19.0 in the same way and is under the same
+       that file lists the changes. The launch file launch/sim_ward.launch.py adapts the structure
+       of tiago_pro_gazebo.launch.py of tiago_pro_gazebo 1.19.0 (package.xml: "Apache License
+       2.0"): it keeps the copyright and Apache-2.0 notice of that file as its own header (the text
+       was copied from the installed file) and states its changes under it, as section 4 of the
+       licence asks for modified files. The full Apache-2.0 licence text is not in the image: the
+       Debian copyright files of tiago_pro_gazebo and omni_base_2dnav (read on 2026-10-09) say "See
+       repository for full license text". If these derived files are released, WS13 has to take the
+       licence text from the PAL repositories or from apache.org and ship it with them; this is an
        open item.
    - Gazebo Classic, Nav2 and ROS 2 packages are used through the image and are not distributed here.
 

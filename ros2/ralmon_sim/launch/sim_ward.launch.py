@@ -1,3 +1,30 @@
+# Copyright (c) 2024 PAL Robotics S.L. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# The notice above is the header of tiago_pro_gazebo.launch.py of the package tiago_pro_gazebo
+# 1.19.0 (PAL Robotics; its package.xml declares "Apache License 2.0"), whose structure this file
+# adapts. The licence text itself is not in the image (the Debian copyright file of the package says
+# "See repository for full license text"): see worlds/NOTICE, section 4b.
+#
+# Modified by the ralmon project (WS07-T02, 2026-10-09). Changes against the PAL file: the launch
+# arguments are only `scenario` and `headless`; the world, the map and the spawn pose come from the
+# ward scenario file; the robot is spawned with an explicit pose (spawn_entity.py -x -y -Y) at the
+# dock; navigation_public_sim.launch.py, MoveIt and RViz are not started, Nav2 localisation and
+# navigation are included directly with config/nav2_params.yaml and the map of the scenario, and
+# the initial pose of AMCL is rewritten to the dock pose; the launch configuration `ward_epoch_ms`
+# is set to 0; the structure is reduced to what the ward needs.
+
 """Launch file of the simulated ward (WS07-T02): world, one robot, Nav2, headless.
 
     ros2 launch ralmon_sim sim_ward.launch.py headless:=true [scenario:=<ward_scenario.yaml>]

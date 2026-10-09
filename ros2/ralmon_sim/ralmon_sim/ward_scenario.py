@@ -14,8 +14,10 @@ Conventions
   world frame: the world SDF and the map are generated from one layout (scripts/generate_ward_world.py).
 * The loader is strict: every required key must be present (no defaults), an unknown key is an
   error, and every error is a ``ScenarioError`` that names the key (``rooms[1].door.x``). Nothing
-  else escapes for any input (a file, a path or a value): not ``TypeError``, ``KeyError``,
-  ``ValueError``, ``OverflowError``, ``OSError`` or ``yaml.YAMLError``.
+  else escapes from a public function for any input (a file, a path, a value, a hostile container
+  or a hand-built ``OccupancyGrid``): the checks raise ``ScenarioError`` themselves, and a last guard
+  (``_bounded``) turns any other ``Exception`` into a ``ScenarioError`` that names the original type
+  and chains it as the cause. ``KeyboardInterrupt`` and ``SystemExit`` pass through.
 * YAML is read with ``yaml.SafeLoader`` only (no object construction), after a size check and with
   anchors, aliases, merge keys and repeated keys refused, so an alias bomb cannot expand. A named
   pipe, a device or a directory is refused without blocking.
@@ -32,6 +34,10 @@ humble, trinary mode)
   point exactly on a cell boundary belongs to the cell above and to the right; a point on or
   beyond the far edge is outside the map. The heading and the robot footprint are ignored.
 
+Footprint (``erode_free``): a cell stays free only if every cell within a radius of its centre is
+free (outside the map and unknown cells count as blocked), a Euclidean disc. With the circumscribed
+radius of the robot footprint it answers "can the robot stand here" on the grid.
+
 Reachability (``reachable_from``): a search over free cells with an 8-neighbourhood. A diagonal step
 needs both neighbouring orthogonal cells free (no squeezing between two diagonally touching
 obstacles, which a robot with a footprint cannot do); ``diagonal_squeeze=True`` allows it. Under the
@@ -42,21 +48,23 @@ there (the ``ros`` tests check the shipped scenario at both levels).
 
 from __future__ import annotations
 
+import functools
 import math
 import os
 import re
 import stat
 from collections import deque
-from collections.abc import Hashable, Sequence
+from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
 import yaml
 
 __all__ = [
     "MAX_COORD_M",
+    "MAX_ERODE_CELLS",
     "MAX_FILE_BYTES",
     "MAX_GRID_CELLS",
     "MAX_INT_VALUE",
@@ -73,6 +81,7 @@ __all__ = [
     "ScenarioError",
     "WardScenario",
     "cell_of",
+    "erode_free",
     "load_occupancy_grid",
     "load_scenario",
     "occupancy_grid_from_pixels",
@@ -102,6 +111,9 @@ MAX_COORD_M: float = 1.0e6
 # algorithmic: bounds on the resolution of a map, in metres per cell
 MIN_RESOLUTION_M: float = 1.0e-6
 MAX_RESOLUTION_M: float = 1.0e3
+# algorithmic: bound on the radius of erode_free, in cells (about 2 m at 0.05 m per cell); the work
+# is proportional to the cells of the map times the cells of the disc
+MAX_ERODE_CELLS: int = 40
 # algorithmic: bound on the number of slots stagger_offsets will generate
 MAX_STAGGER_SLOTS: int = 100_000
 # algorithmic: bound on the length of each time-entry list (a registry has a few dozen names)
@@ -134,6 +146,26 @@ class ScenarioError(ValueError):
     """Any failure to read or validate a scenario, a map or an image; the message names the key."""
 
 
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _bounded(function: _F) -> _F:
+    """Last guard of a public function: only ``ScenarioError`` leaves it (cause chained)."""
+
+    @functools.wraps(function)
+    def guarded(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return function(*args, **kwargs)
+        except ScenarioError:
+            raise
+        except Exception as exc:
+            raise ScenarioError(
+                f"{function.__name__}: unexpected {type(exc).__name__}: {_show_exception(exc)}"
+            ) from exc
+
+    return guarded  # type: ignore[return-value]
+
+
 # ----------------------------------------------------------------------------------------------
 # Messages and scalar validation
 # ----------------------------------------------------------------------------------------------
@@ -148,6 +180,13 @@ def _show(value: object) -> str:
     if len(text) > _SHOW_LIMIT:
         text = text[:_SHOW_LIMIT] + "..."
     return text
+
+
+def _show_exception(exc: BaseException) -> str:
+    try:
+        return _show(str(exc))
+    except Exception:  # noqa: BLE001 (str of a foreign exception can raise anything)
+        return "<unprintable>"
 
 
 def _join(where: str, key: str) -> str:
@@ -171,6 +210,10 @@ def _float(value: object, where: str, low: float, high: float) -> float:
         number = float(value)
     except OverflowError as exc:
         raise ScenarioError(f"{where}: the number is too large") from exc
+    except Exception as exc:
+        raise ScenarioError(
+            f"{where}: cannot be read as a number ({type(exc).__name__})"
+        ) from exc
     if not math.isfinite(number) or number < low or number > high:
         raise ScenarioError(
             f"{where}: must be a finite number between {low} and {high}, got {_show(value)}"
@@ -300,6 +343,7 @@ class WardScenario:
 # ----------------------------------------------------------------------------------------------
 
 
+@_bounded
 def stagger_offsets(n_rooms: int, spacing_ms: int) -> list[int]:
     """Offsets ``[0, s, 2 s, ...]`` in ward-clock milliseconds, one per room (``s`` is the spacing)."""
     if type(n_rooms) is not int or not 1 <= n_rooms <= MAX_STAGGER_SLOTS:
@@ -583,6 +627,7 @@ def _rooms(value: object, spacing_ms: int) -> tuple[Room, ...]:
     )
 
 
+@_bounded
 def parse_scenario(data: object) -> WardScenario:
     """Validate plain data (the content of ``ward_scenario.yaml``) and return the scenario."""
     top = _mapping(data, "scenario", _TOP_KEYS)
@@ -633,6 +678,7 @@ def parse_scenario(data: object) -> WardScenario:
     )
 
 
+@_bounded
 def load_scenario(path: str | os.PathLike[str]) -> WardScenario:
     """Read and validate a scenario file; only ``ScenarioError`` can be raised."""
     file_path = _coerce_path(path, "scenario")
@@ -676,6 +722,7 @@ def _pgm_int(token: bytes, what: str) -> int:
     return int(token)
 
 
+@_bounded
 def parse_pgm(data: bytes) -> tuple[np.ndarray, int]:
     """Parse a binary (P5) or ASCII (P2) PGM image; return ``(pixels, maxval)``.
 
@@ -734,6 +781,40 @@ def parse_pgm(data: bytes) -> tuple[np.ndarray, int]:
     return pixels, maxval
 
 
+def _grid_fields(
+    resolution: object,
+    origin_x: object,
+    origin_y: object,
+    free: object,
+    occupied: object,
+) -> tuple[float, float, float]:
+    """Validate the fields of a grid; return the resolution and the origin as floats."""
+    checked_resolution = _float(
+        resolution, "resolution", MIN_RESOLUTION_M, MAX_RESOLUTION_M
+    )
+    checked_x = _float(origin_x, "origin_x", -MAX_COORD_M, MAX_COORD_M)
+    checked_y = _float(origin_y, "origin_y", -MAX_COORD_M, MAX_COORD_M)
+    masks: list[np.ndarray] = []
+    for name, mask in (("free", free), ("occupied", occupied)):
+        if (
+            not isinstance(mask, np.ndarray)
+            or mask.dtype != np.bool_
+            or mask.ndim != 2
+            or mask.size == 0
+        ):
+            raise ScenarioError(
+                f"{name}: must be a non-empty 2-D boolean array, got {_show(mask)}"
+            )
+        if mask.size > MAX_GRID_CELLS:
+            raise ScenarioError(
+                f"{name}: more than the limit of {MAX_GRID_CELLS} cells"
+            )
+        masks.append(mask)
+    if masks[0].shape != masks[1].shape:
+        raise ScenarioError("free and occupied: the two masks must have the same shape")
+    return checked_resolution, checked_x, checked_y
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class OccupancyGrid:
     """A trinary occupancy grid: ``free`` and ``occupied`` masks, row 0 at the top of the map.
@@ -748,7 +829,16 @@ class OccupancyGrid:
     free: np.ndarray
     occupied: np.ndarray
 
+    def __post_init__(self) -> None:
+        resolution, origin_x, origin_y = _grid_fields(
+            self.resolution, self.origin_x, self.origin_y, self.free, self.occupied
+        )
+        object.__setattr__(self, "resolution", resolution)
+        object.__setattr__(self, "origin_x", origin_x)
+        object.__setattr__(self, "origin_y", origin_y)
 
+
+@_bounded
 def occupancy_grid_from_pixels(
     pixels: np.ndarray,
     maxval: int,
@@ -809,6 +899,7 @@ _MAP_KEYS = (
 )
 
 
+@_bounded
 def load_occupancy_grid(path: str | os.PathLike[str]) -> OccupancyGrid:
     """Read a ``map_server`` YAML (trinary mode) and the PGM image next to it."""
     file_path = _coerce_path(path, "map")
@@ -860,8 +951,12 @@ def load_occupancy_grid(path: str | os.PathLike[str]) -> OccupancyGrid:
 
 
 def _check_grid(grid: object) -> OccupancyGrid:
+    """The grid, after a cheap re-check of its fields (they may have been set behind __post_init__)."""
     if not isinstance(grid, OccupancyGrid):
         raise ScenarioError(f"grid: must be an OccupancyGrid, got {_show(grid)}")
+    _grid_fields(
+        grid.resolution, grid.origin_x, grid.origin_y, grid.free, grid.occupied
+    )
     return grid
 
 
@@ -871,6 +966,7 @@ def _check_pose(pose: object, what: str) -> Pose2D:
     return pose
 
 
+@_bounded
 def cell_of(grid: OccupancyGrid, pose: Pose2D) -> tuple[int, int] | None:
     """The ``(row, column)`` of the cell that contains ``pose``, or None outside the map."""
     grid = _check_grid(grid)
@@ -883,22 +979,66 @@ def cell_of(grid: OccupancyGrid, pose: Pose2D) -> tuple[int, int] | None:
     return (height - 1 - row_from_bottom, column)
 
 
+@_bounded
 def pose_is_free(grid: OccupancyGrid, pose: Pose2D) -> bool:
     """True when ``pose`` lies on a free cell (a pose outside the map is not free)."""
     cell = cell_of(grid, pose)
     return cell is not None and bool(grid.free[cell])
 
 
+@_bounded
 def pose_is_occupied(grid: OccupancyGrid, pose: Pose2D) -> bool:
     """True when ``pose`` lies on an occupied cell (a pose outside the map is not occupied)."""
     cell = cell_of(grid, pose)
     return cell is not None and bool(grid.occupied[cell])
 
 
+@_bounded
+def erode_free(grid: OccupancyGrid, radius_m: float) -> OccupancyGrid:
+    """The grid with its free space reduced to the cells where a disc of ``radius_m`` fits.
+
+    A cell stays free only if every cell whose centre lies within ``radius_m`` of its centre (a
+    Euclidean disc, boundary included) is free; cells outside the map and unknown cells count as
+    blocked. The occupied mask, the resolution and the origin are kept. The radius is limited to
+    ``MAX_ERODE_CELLS`` cells.
+    """
+    grid = _check_grid(grid)
+    radius = _float(radius_m, "radius_m", 0.0, MAX_COORD_M)
+    cells = radius / grid.resolution
+    reach = math.floor(cells)
+    if reach > MAX_ERODE_CELLS:
+        raise ScenarioError(
+            f"radius_m: {reach} cells exceed the limit of {MAX_ERODE_CELLS} cells"
+        )
+    height, width = grid.free.shape
+    padded = np.zeros((height + 2 * reach, width + 2 * reach), dtype=bool)
+    padded[reach : reach + height, reach : reach + width] = grid.free
+    limit = cells * cells
+    free = grid.free.copy()
+    for d_row in range(-reach, reach + 1):
+        for d_column in range(-reach, reach + 1):
+            if d_row * d_row + d_column * d_column <= limit:
+                free &= padded[
+                    reach + d_row : reach + d_row + height,
+                    reach + d_column : reach + d_column + width,
+                ]
+    occupied = grid.occupied.copy()
+    free.setflags(write=False)
+    occupied.setflags(write=False)
+    return OccupancyGrid(
+        resolution=grid.resolution,
+        origin_x=grid.origin_x,
+        origin_y=grid.origin_y,
+        free=free,
+        occupied=occupied,
+    )
+
+
 _ORTHOGONAL = ((-1, 0), (1, 0), (0, -1), (0, 1))
 _DIAGONAL = ((-1, -1), (-1, 1), (1, -1), (1, 1))
 
 
+@_bounded
 def reachable_from(
     grid: OccupancyGrid,
     start: Pose2D,

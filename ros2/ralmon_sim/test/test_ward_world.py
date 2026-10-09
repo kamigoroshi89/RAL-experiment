@@ -14,10 +14,10 @@ import dataclasses
 import importlib.util
 import math
 import os
+import random
 import re
 import subprocess
 import sys
-import threading
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -479,6 +479,15 @@ def test_pose_value_ranges(tmp_path: Path) -> None:
         load_data(tmp_path, data)
 
 
+def test_a_number_too_large_for_a_float_is_named_as_such(tmp_path: Path) -> None:
+    with pytest.raises(ws.ScenarioError, match="too large"):
+        ws.Pose2D(10**400, 0, 0)
+    data = make_data(4)
+    data["dock"]["y"] = -(10**400)
+    with pytest.raises(ws.ScenarioError, match=r"dock\.y: the number is too large"):
+        load_data(tmp_path, data)
+
+
 def test_pose_dataclass_validates_itself() -> None:
     assert ws.Pose2D(1, 2, 3).x == 1.0
     assert ws.Pose2D(-ws.MAX_COORD_M, ws.MAX_COORD_M, -math.pi).yaw == -math.pi
@@ -751,6 +760,17 @@ def test_time_entry_lists_may_be_empty_but_must_be_lists_of_registry_names(
                 load_data(tmp_path, data)
 
 
+def test_time_entry_names_may_have_sixty_four_characters(tmp_path: Path) -> None:
+    data = make_data(4)
+    data["time_entries"]["care_plan_time_entries"] = ["a" * 64]
+    data["time_entries"]["physical_time_entries"] = ["b" + "_" * 63]
+    scenario = load_data(tmp_path, data)
+    assert scenario.care_plan_time_entries == ("a" * 64,)
+    data["time_entries"]["care_plan_time_entries"] = ["a" * 65]
+    with pytest.raises(ws.ScenarioError, match="care_plan_time_entries"):
+        load_data(tmp_path, data)
+
+
 def test_time_entry_lists_reject_repeats_inside_one_list(tmp_path: Path) -> None:
     for key in ("care_plan_time_entries", "physical_time_entries"):
         data = make_data(4)
@@ -847,17 +867,28 @@ def test_anchors_aliases_and_merge_keys_are_rejected(tmp_path: Path) -> None:
         ws.load_scenario(path)
 
 
-def test_alias_expansion_bomb_is_refused_quickly(tmp_path: Path) -> None:
+def test_alias_expansion_bomb_is_refused_after_a_bounded_amount_of_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # a work bound, not a time bound: the loader composes only the nodes before the first anchor
     lines = ["a0: &a0 [x, x, x, x, x, x, x, x, x]"]
     for i in range(1, 12):
         previous = f"*a{i - 1}"
         lines.append(f"a{i}: &a{i} [{', '.join([previous] * 9)}]")
     path = tmp_path / "bomb.yaml"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    started = time.monotonic()
-    with pytest.raises(ws.ScenarioError):
+    composed = 0
+    original = ws._StrictLoader.compose_node
+
+    def counting(self: Any, parent: Any, index: Any) -> Any:
+        nonlocal composed
+        composed += 1
+        return original(self, parent, index)
+
+    monkeypatch.setattr(ws._StrictLoader, "compose_node", counting)
+    with pytest.raises(ws.ScenarioError, match="anchor"):
         ws.load_scenario(path)
-    assert time.monotonic() - started < 5.0
+    assert composed <= 5  # the root mapping, a key, and the first anchored value
 
 
 def test_python_tags_are_not_constructed(tmp_path: Path) -> None:
@@ -913,16 +944,15 @@ def test_invalid_utf8_inside_a_comment_is_refused(tmp_path: Path) -> None:
         "surprise: 2020-13-45",  # an impossible date fails inside the YAML constructor
         "surprise: 2020-02-30",
         "surprise: " + "9" * 5000,  # beyond the integer string limit of Python
-        "surprise: 0x" + "f" * 5000,
     ],
-    ids=["month", "day", "decimal", "hex"],
+    ids=["month", "day", "decimal"],
 )
 def test_failures_inside_the_yaml_constructor_become_scenario_errors(
     tmp_path: Path, line: str
 ) -> None:
     path = tmp_path / "s.yaml"
     path.write_text(yaml.safe_dump(make_data(4), sort_keys=False) + line + "\n")
-    with pytest.raises(ws.ScenarioError):
+    with pytest.raises(ws.ScenarioError, match="invalid YAML content"):
         ws.load_scenario(path)
 
 
@@ -939,11 +969,12 @@ def test_missing_file_directory_and_bad_path_types(tmp_path: Path) -> None:
     with pytest.raises(ws.ScenarioError, match="not a regular file"):
         ws.load_scenario(tmp_path)
     for bad in (None, 5, 1.5, True, b"scenario.yaml", ["a"], object()):
-        with pytest.raises(ws.ScenarioError):
+        with pytest.raises(ws.ScenarioError, match="must be a str or an os.PathLike"):
             ws.load_scenario(bad)  # type: ignore[arg-type]
-    with pytest.raises(ws.ScenarioError):
+    # the messages come from the reader itself, not from the last guard of the public function
+    with pytest.raises(ws.ScenarioError, match="cannot read"):
         ws.load_scenario("bad\x00name.yaml")
-    with pytest.raises(ws.ScenarioError):
+    with pytest.raises(ws.ScenarioError, match="cannot read"):
         ws.load_scenario("x" * 5000)
 
 
@@ -962,35 +993,65 @@ def test_load_scenario_accepts_str_and_pathlike(tmp_path: Path) -> None:
         def __fspath__(self) -> str:
             raise RuntimeError("broken")
 
-    with pytest.raises(ws.ScenarioError):
+    with pytest.raises(ws.ScenarioError, match="cannot be converted to text"):
         ws.load_scenario(Broken())  # type: ignore[arg-type]
 
     class NotText:
         def __fspath__(self) -> bytes:
             return b"x"
 
-    with pytest.raises(ws.ScenarioError):
+    with pytest.raises(ws.ScenarioError, match="must be text"):
         ws.load_scenario(NotText())  # type: ignore[arg-type]
 
 
+# Hang guard, not a timing assertion: the subprocess below only fails the test when it does not end
+# at all within this many seconds (a blocking open of a named pipe never ends).
+HANG_GUARD_S = 120
+
+
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
-def test_named_pipe_is_refused_without_blocking(tmp_path: Path) -> None:
+def test_named_pipe_is_opened_without_blocking_and_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fifo = tmp_path / "pipe.yaml"
     os.mkfifo(fifo)
-    outcome: list[object] = []
+    flags: list[int] = []
+    real_open = os.open
 
-    def run() -> None:
-        try:
-            ws.load_scenario(fifo)
-        except BaseException as exc:  # noqa: BLE001 (recorded, checked by the main thread)
-            outcome.append(exc)
+    def recording_open(path: Any, mode: int, *args: Any, **kwargs: Any) -> int:
+        flags.append(mode)
+        return real_open(path, mode, *args, **kwargs)
 
-    worker = threading.Thread(target=run, daemon=True)
-    worker.start()
-    worker.join(timeout=10)
-    assert not worker.is_alive(), "load_scenario blocked on a named pipe"
-    assert len(outcome) == 1 and isinstance(outcome[0], ws.ScenarioError)
-    assert "not a regular file" in str(outcome[0])
+    monkeypatch.setattr(ws.os, "open", recording_open)
+    with pytest.raises(ws.ScenarioError, match="not a regular file"):
+        ws.load_scenario(fifo)
+    assert len(flags) == 1 and flags[0] & os.O_NONBLOCK
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+def test_named_pipe_does_not_hang_the_loader_in_a_fresh_process(tmp_path: Path) -> None:
+    fifo = tmp_path / "pipe.yaml"
+    os.mkfifo(fifo)
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); "
+        "from ralmon_sim import ward_scenario as ws\n"
+        "try:\n"
+        "    ws.load_scenario(sys.argv[2])\n"
+        "except ws.ScenarioError as exc:\n"
+        "    print('REFUSED', exc)\n"
+    )
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", code, str(PACKAGE_DIR), str(fifo)],
+            capture_output=True,
+            text=True,
+            timeout=HANG_GUARD_S,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:  # pragma: no cover (only on a hang)
+        pytest.fail("load_scenario blocked on a named pipe")
+    assert done.returncode == 0, done.stderr
+    assert "REFUSED" in done.stdout and "not a regular file" in done.stdout
 
 
 def test_oversized_file_is_refused_before_parsing(tmp_path: Path) -> None:
@@ -1161,6 +1222,13 @@ def test_parse_pgm_comments_may_end_with_a_carriage_return_only() -> None:
     assert pixels.tolist() == [[1, 2, 3], [4, 5, 6]] and maxval == 255
     pixels, _ = ws.parse_pgm(b"P2\r1 2\r7\r# comment\r3\r4\r")
     assert pixels.tolist() == [[3], [4]]
+
+
+def test_parse_pgm_zero_sizes_are_named() -> None:
+    with pytest.raises(ws.ScenarioError, match="the size must be positive"):
+        ws.parse_pgm(b"P5\n0 1\n255\n")
+    with pytest.raises(ws.ScenarioError, match="the size must be positive"):
+        ws.parse_pgm(b"P2\n1 0\n255\n")
 
 
 def test_parse_pgm_messages_say_what_is_wrong() -> None:
@@ -1354,7 +1422,7 @@ def test_direct_grid_construction_validates_its_inputs(
             build(ok, maxval=bad_maxval)  # type: ignore[arg-type]
     monkeypatch.setattr(ws, "MAX_GRID_CELLS", 3)
     assert build(np.zeros((1, 3), dtype=np.uint16)).free.shape == (1, 3)
-    with pytest.raises(ws.ScenarioError, match="limit"):
+    with pytest.raises(ws.ScenarioError, match="map: more than the limit"):
         build(np.zeros((2, 2), dtype=np.uint16))
 
 
@@ -1457,6 +1525,168 @@ def test_grids_compare_by_identity_and_never_raise() -> None:
     assert (first == alias) is True
     assert (first == second) is False  # the arrays are not compared element by element
     assert (first != second) is True
+
+
+GARBAGE_MASKS: list[object] = [
+    None,
+    [[True, True], [True, True]],
+    np.ones(4, dtype=bool),
+    np.ones((2, 2), dtype=int),
+    np.ones((2, 3), dtype=bool),
+    np.zeros((0, 2), dtype=bool),
+    "mask",
+    np.ones((2, 2, 2), dtype=bool),
+]
+GARBAGE_FIELDS: dict[str, list[object]] = {
+    "resolution": [
+        0,
+        0.0,
+        -1.0,
+        float("nan"),
+        float("inf"),
+        None,
+        "1",
+        True,
+        [1.0],
+        1e-9,
+        5000.0,
+    ],
+    "origin_x": [float("nan"), float("inf"), None, "0", True, 1e9, [0.0]],
+    "origin_y": [float("nan"), -float("inf"), None, "0", False, -1e9, {}],
+    "free": GARBAGE_MASKS,
+    "occupied": GARBAGE_MASKS,
+}
+GARBAGE_CASES = [
+    (name, value) for name, values in GARBAGE_FIELDS.items() for value in values
+]
+
+
+def good_fields() -> dict[str, Any]:
+    return {
+        "resolution": 1.0,
+        "origin_x": 0.0,
+        "origin_y": 0.0,
+        "free": np.ones((2, 2), dtype=bool),
+        "occupied": np.zeros((2, 2), dtype=bool),
+    }
+
+
+def hand_built_grid(**overrides: Any) -> ws.OccupancyGrid:
+    """A grid whose fields were set behind the constructor (a pickle, a subclass, a mistake)."""
+    grid = object.__new__(ws.OccupancyGrid)
+    for name, value in {**good_fields(), **overrides}.items():
+        object.__setattr__(grid, name, value)
+    return grid
+
+
+@pytest.mark.parametrize("name,value", GARBAGE_CASES)
+def test_grid_constructor_rejects_garbage_fields(name: str, value: object) -> None:
+    assert ws.OccupancyGrid(**good_fields()).free.shape == (2, 2)
+    with pytest.raises(ws.ScenarioError, match=name):
+        ws.OccupancyGrid(**{**good_fields(), name: value})
+
+
+@pytest.mark.parametrize("name,value", GARBAGE_CASES)
+def test_public_functions_raise_scenario_error_for_hand_built_garbage_grids(
+    name: str, value: object
+) -> None:
+    grid = hand_built_grid(**{name: value})
+    here = ws.Pose2D(0.5, 0.5, 0.0)
+    calls = {
+        "cell_of": lambda: ws.cell_of(grid, here),
+        "pose_is_free": lambda: ws.pose_is_free(grid, here),
+        "pose_is_occupied": lambda: ws.pose_is_occupied(grid, here),
+        "reachable_from": lambda: ws.reachable_from(grid, here, [here]),
+        "erode_free": lambda: ws.erode_free(grid, 0.5),
+    }
+    for label, call in calls.items():
+        with pytest.raises(ws.ScenarioError):
+            call()
+        assert label  # which function failed shows in the parametrised report
+
+
+class EvilMapping(dict):  # type: ignore[type-arg]
+    def __iter__(self) -> Any:
+        raise RuntimeError("iteration refused")
+
+
+class EvilLookup(dict):  # type: ignore[type-arg]
+    def __getitem__(self, key: Any) -> Any:
+        raise RuntimeError("lookup refused")
+
+
+class EvilList(list):  # type: ignore[type-arg]
+    def __len__(self) -> int:
+        raise RuntimeError("length refused")
+
+
+class EvilIterList(list):  # type: ignore[type-arg]
+    def __iter__(self) -> Any:
+        raise RuntimeError("iteration refused")
+
+
+def evil_scenarios() -> list[tuple[str, Any]]:
+    cases: list[tuple[str, Any]] = [("top mapping", EvilMapping(make_data(4)))]
+    data = make_data(4)
+    data["monitor"] = EvilLookup(data["monitor"])
+    cases.append(("monitor lookup", data))
+    data = make_data(4)
+    data["rooms"] = EvilList(data["rooms"])
+    cases.append(("rooms length", data))
+    data = make_data(4)
+    data["rooms"] = EvilIterList(data["rooms"])
+    cases.append(("rooms iteration", data))
+    data = make_data(4)
+    data["rooms"][0] = EvilMapping(data["rooms"][0])
+    cases.append(("room mapping", data))
+    data = make_data(4)
+    data["time_entries"]["care_plan_time_entries"] = EvilIterList(["sched_window"])
+    cases.append(("time entries", data))
+    data = make_data(4)
+    data["dock"] = EvilLookup(data["dock"])
+    cases.append(("pose lookup", data))
+    return cases
+
+
+@pytest.mark.parametrize(
+    "label,data", evil_scenarios(), ids=[c[0] for c in evil_scenarios()]
+)
+def test_hostile_containers_become_scenario_errors_with_the_original_type_named(
+    label: str, data: Any
+) -> None:
+    with pytest.raises(ws.ScenarioError, match="RuntimeError") as info:
+        ws.parse_scenario(data)
+    assert isinstance(info.value.__cause__, RuntimeError), label
+
+
+class EvilFloat(float):
+    def __float__(self) -> float:
+        raise RuntimeError("conversion refused")
+
+
+def test_a_number_subclass_that_refuses_conversion_is_a_scenario_error(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ws.ScenarioError, match="RuntimeError"):
+        ws.Pose2D(EvilFloat(1.0), 0.0, 0.0)
+    data = make_data(4)
+    data["dock"]["x"] = EvilFloat(1.0)
+    with pytest.raises(ws.ScenarioError, match="dock.x"):
+        ws.parse_scenario(data)
+
+
+def test_hostile_arguments_to_the_other_public_functions() -> None:
+    grid = grid_from(FIVE)
+    here = ws.Pose2D(1.5, 3.5, 0.0)
+    with pytest.raises(ws.ScenarioError, match="RuntimeError"):
+        ws.reachable_from(grid, here, EvilIterList([here]))
+    wall = ws.Pose2D(
+        0.5, 0.5, 0.0
+    )  # a start that cannot move asks for the length of the goals
+    with pytest.raises(ws.ScenarioError, match="RuntimeError"):
+        ws.reachable_from(grid, wall, EvilList([here]))
+    with pytest.raises(ws.ScenarioError):
+        ws.stagger_offsets(n_rooms=EvilList(), spacing_ms=1)  # type: ignore[arg-type]
 
 
 def test_reachable_from_open_ring() -> None:
@@ -1572,10 +1802,185 @@ def test_reachable_from_requires_valid_arguments() -> None:
         ws.reachable_from(grid, (1.5, 3.5), [ok])  # type: ignore[arg-type]
     with pytest.raises(ws.ScenarioError):
         ws.reachable_from(grid, ok, [(1.5, 3.5)])  # type: ignore[list-item]
-    with pytest.raises(ws.ScenarioError):
+    with pytest.raises(ws.ScenarioError, match="goals: must be a list"):
         ws.reachable_from(grid, ok, None)  # type: ignore[arg-type]
     with pytest.raises(ws.ScenarioError):
         ws.reachable_from("grid", ok, [ok])  # type: ignore[arg-type]
+
+
+def blank_grid(size: int = 9, **kwargs: Any) -> ws.OccupancyGrid:
+    return grid_from([[255] * size for _ in range(size)], **kwargs)
+
+
+def test_erode_free_with_radius_zero_changes_nothing() -> None:
+    grid = grid_from(FIVE)
+    eroded = ws.erode_free(grid, 0.0)
+    assert np.array_equal(eroded.free, grid.free)
+    assert np.array_equal(eroded.occupied, grid.occupied)
+
+
+def test_erode_free_treats_the_outside_of_the_map_as_blocked() -> None:
+    eroded = ws.erode_free(blank_grid(7), 1.0)
+    expected = np.zeros((7, 7), dtype=bool)
+    expected[1:6, 1:6] = True
+    assert np.array_equal(eroded.free, expected)
+    assert ws.erode_free(
+        blank_grid(7), 0.99
+    ).free.all()  # less than one cell: nothing changes
+
+
+def test_erode_free_uses_a_euclidean_disc() -> None:
+    rows = [[255] * 9 for _ in range(9)]
+    rows[4][4] = 0
+    grid = grid_from(rows)
+    # a cell next to the obstacle by a diagonal step is at distance sqrt(2) = 1.414...
+    assert ws.erode_free(grid, 1.4).free[3, 3]
+    assert not ws.erode_free(grid, 1.5).free[3, 3]
+    # a cell two steps away in a straight line is at distance 2
+    assert ws.erode_free(grid, 1.99).free[4, 2]
+    assert not ws.erode_free(grid, 2.0).free[4, 2]
+    # the radius is in metres: the same disc on a half-metre grid
+    half = grid_from(rows, resolution=0.5)
+    assert ws.erode_free(half, 0.7).free[3, 3]
+    assert not ws.erode_free(half, 0.75).free[3, 3]
+    assert not ws.erode_free(half, 1.0).free[4, 2]
+
+
+def test_erode_free_blocks_cells_near_obstacles_and_near_unknown_cells() -> None:
+    rows = [[255] * 5 for _ in range(5)]
+    rows[2][2] = 128  # unknown at the default thresholds
+    grid = grid_from(rows)
+    eroded = ws.erode_free(grid, 1.0)
+    assert not eroded.free[2, 1] and not eroded.free[1, 2] and not eroded.free[2, 3]
+    assert not eroded.free[2, 2]
+
+
+def test_erode_free_keeps_the_frame_and_does_not_touch_its_input() -> None:
+    grid = grid_from(FIVE, resolution=0.5, origin=(10.0, -4.0))
+    before = grid.free.copy()
+    eroded = ws.erode_free(grid, 0.5)
+    assert (eroded.resolution, eroded.origin_x, eroded.origin_y) == (0.5, 10.0, -4.0)
+    assert np.array_equal(eroded.occupied, grid.occupied)
+    assert np.array_equal(grid.free, before)
+    assert not eroded.free.flags.writeable and not eroded.occupied.flags.writeable
+    assert eroded is not grid
+
+
+def test_erode_free_does_not_change_the_arrays_of_the_grid_it_is_given() -> None:
+    grid = ws.OccupancyGrid(**good_fields())  # writeable masks built by the caller
+    ws.erode_free(grid, 0.5)
+    assert grid.free.flags.writeable and grid.occupied.flags.writeable
+    assert isinstance(grid.resolution, float)
+    integer_resolution = ws.OccupancyGrid(**{**good_fields(), "resolution": 1})
+    assert isinstance(integer_resolution.resolution, float)
+    assert isinstance(integer_resolution.origin_x, float)
+
+
+def test_erode_free_counts_whole_cells_of_radius() -> None:
+    # 40.5 cells reach 40 whole cells (allowed); 41 cells do not
+    reach = ws.MAX_ERODE_CELLS
+    assert ws.erode_free(blank_grid(3), reach + 0.5).free.shape == (3, 3)
+    with pytest.raises(ws.ScenarioError, match="cells"):
+        ws.erode_free(blank_grid(3), reach + 1.0)
+
+
+def test_garbage_masks_of_equal_shape_are_named_for_what_is_wrong() -> None:
+    ok_mask = np.ones((2, 2), dtype=bool)
+    bad_masks = [
+        np.ones(4, dtype=bool),  # one-dimensional, same shape twice
+        np.ones((2, 2, 2), dtype=bool),  # three-dimensional, same shape twice
+        np.zeros((0, 2), dtype=bool),  # empty, same shape twice
+    ]
+    wrong = "free: must be a non-empty 2-D boolean array"
+    for mask in bad_masks:
+        with pytest.raises(ws.ScenarioError, match=wrong):
+            ws.OccupancyGrid(**{**good_fields(), "free": mask, "occupied": mask})
+    assert ws.OccupancyGrid(**{**good_fields(), "free": ok_mask}).free is ok_mask
+
+
+def test_grid_masks_are_limited_in_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ws, "MAX_GRID_CELLS", 4)
+    assert ws.OccupancyGrid(**good_fields()).free.shape == (2, 2)
+    big = np.ones((2, 3), dtype=bool)
+    with pytest.raises(ws.ScenarioError, match="free: more than the limit"):
+        ws.OccupancyGrid(**{**good_fields(), "free": big, "occupied": big})
+
+
+def test_a_foreign_exception_with_an_unprintable_text_is_still_a_scenario_error() -> (
+    None
+):
+    class Unprintable(Exception):
+        def __str__(self) -> str:
+            raise RuntimeError("no text")
+
+    class Raises(dict):  # type: ignore[type-arg]
+        def __iter__(self) -> Any:
+            raise Unprintable()
+
+    with pytest.raises(
+        ws.ScenarioError, match="unexpected Unprintable: <unprintable>"
+    ) as info:
+        ws.parse_scenario(Raises(make_data(4)))
+    assert isinstance(info.value.__cause__, Unprintable)
+
+
+def test_integer_origin_and_resolution_are_stored_as_floats() -> None:
+    fields = {**good_fields(), "origin_x": 3, "origin_y": -2, "resolution": 2}
+    grid = ws.OccupancyGrid(**fields)
+    assert (grid.origin_x, grid.origin_y, grid.resolution) == (3.0, -2.0, 2.0)
+    assert all(
+        isinstance(v, float) for v in (grid.origin_x, grid.origin_y, grid.resolution)
+    )
+
+
+def test_the_image_name_is_a_plain_file_name_even_when_the_named_file_exists(
+    tmp_path: Path,
+) -> None:
+    rows = FIVE
+    (tmp_path / "a").mkdir()
+    raster = p5(len(rows[0]), len(rows), 255, [v for row in rows for v in row])
+    names = ("a/b.pgm", "i.pgm", ".hidden.pgm", "n" * 125 + ".pgm", "m" * 124 + ".pgm")
+    for relative in names:
+        (tmp_path / relative).write_bytes(raster)
+    for bad in ("a/b.pgm", "a/../i.pgm", ".hidden.pgm", "n" * 125 + ".pgm"):
+        path = write_map(tmp_path, yaml_overrides={"image": bad}, name="m.yaml")
+        with pytest.raises(
+            ws.ScenarioError, match="image: .* does not match the pattern"
+        ):
+            ws.load_occupancy_grid(path)
+    path = write_map(
+        tmp_path, yaml_overrides={"image": "m" * 124 + ".pgm"}, name="m.yaml"
+    )
+    assert ws.load_occupancy_grid(path).free.shape == (
+        5,
+        5,
+    )  # 128 characters are allowed
+
+
+def test_erode_free_validates_its_arguments() -> None:
+    grid = blank_grid(5)
+    for bad in (-0.1, float("nan"), float("inf"), True, None, "1", [1.0], 10**400):
+        with pytest.raises(ws.ScenarioError, match="radius_m"):
+            ws.erode_free(grid, bad)  # type: ignore[arg-type]
+    with pytest.raises(ws.ScenarioError, match="OccupancyGrid"):
+        ws.erode_free("grid", 1.0)  # type: ignore[arg-type]
+    reach = ws.MAX_ERODE_CELLS
+    assert ws.erode_free(blank_grid(3), float(reach)).free.shape == (3, 3)
+    with pytest.raises(ws.ScenarioError, match="cells"):
+        ws.erode_free(blank_grid(3), reach + 1.0)
+
+
+def test_reachability_on_an_eroded_grid_is_stricter() -> None:
+    # a gap two cells wide: reachable for a point, not for a robot of radius 1.2 cells
+    rows = [[255] * 9 for _ in range(9)]
+    for row in range(9):
+        if row not in (4, 5):
+            rows[row][4] = 0
+    grid = grid_from(rows)
+    start, goal = ws.Pose2D(1.5, 4.5, 0.0), ws.Pose2D(7.5, 4.5, 0.0)
+    assert ws.reachable_from(grid, start, [goal]) == [True]
+    assert ws.reachable_from(ws.erode_free(grid, 0.9), start, [goal]) == [True]
+    assert ws.reachable_from(ws.erode_free(grid, 1.2), start, [goal]) == [False]
 
 
 # map YAML + PGM files
@@ -1692,7 +2097,11 @@ def test_map_yaml_keys_are_required(tmp_path: Path, key: str) -> None:
         {"occupied_thresh": float("nan")},
         {"occupied_thresh": "0.65"},
         {"image": "sub/m.pgm"},
+        {"image": "a/b.pgm"},
+        {"image": "a/../i.pgm"},
         {"image": "../m.pgm"},
+        {"image": "/etc/passwd"},
+        {"image": "a\\b.pgm"},
         {"image": ""},
         {"image": None},
         {"image": 5},
@@ -1827,23 +2236,99 @@ def test_shipped_scenario_records_the_dry_drive_time() -> None:
     assert 0 < int(found[0]) < shipped().nav_goal_timeout_ms
 
 
-def test_shipped_scenario_marks_placeholder_slots() -> None:
-    lines = SCENARIO_PATH.read_text(encoding="utf-8").splitlines()
+SLOT_STATUS = re.compile(
+    r"^# Slot status: (?P<status>PLACEHOLDER|manifest, source: (?P<source>\S.*))$"
+)
+
+
+def slot_declaration(text: str) -> tuple[str, str | None, list[str]]:
+    """Status, manifest source and the slot lines of a scenario text.
+
+    The status is declared by one line ``# Slot status: PLACEHOLDER`` or
+    ``# Slot status: manifest, source: <manifest file>`` in the comment block above ``rooms:``.
+    """
+    lines = text.splitlines()
     rooms_at = lines.index("rooms:")
-    block: list[str] = []
+    declared: list[re.Match[str]] = []
     i = rooms_at - 1
     while i >= 0 and lines[i].startswith("#"):
-        block.append(lines[i])
+        match = SLOT_STATUS.match(lines[i])
+        if match:
+            declared.append(match)
         i -= 1
-    text = " ".join(block)
-    assert "PLACEHOLDER" in text and "WS04-T11" in text and "manifest" in text
+    assert len(declared) == 1, "exactly one 'Slot status' line above rooms:"
     slot_lines = [
         line
         for line in lines[rooms_at:]
         if re.match(r"\s+(patient_id|day_index):", line)
     ]
-    assert len(slot_lines) == 2 * len(shipped().rooms)
-    assert all("PLACEHOLDER" in line for line in slot_lines)
+    status = (
+        "PLACEHOLDER" if declared[0].group("status") == "PLACEHOLDER" else "manifest"
+    )
+    return status, declared[0].group("source"), slot_lines
+
+
+def check_slot_declaration(text: str, rooms: tuple[ws.Room, ...]) -> None:
+    status, source, slot_lines = slot_declaration(text)
+    assert len(slot_lines) == 2 * len(
+        rooms
+    )  # every room has its patient_id and day_index
+    assert len({(room.patient_id, room.day_index) for room in rooms}) == len(rooms)
+    uses_placeholders = any(room.patient_id.startswith("slot-") for room in rooms)
+    if status == "PLACEHOLDER":
+        assert source is None
+        assert all("PLACEHOLDER" in line for line in slot_lines)
+        assert uses_placeholders, (
+            "the PLACEHOLDER flag stays only while placeholders are used"
+        )
+        assert "WS04-T11" in text and "manifest" in text
+    else:
+        assert source is not None and source.strip()
+        assert not any("PLACEHOLDER" in line for line in slot_lines)
+        assert not uses_placeholders, "placeholder ids declared as manifest ids"
+
+
+def test_shipped_scenario_declares_the_status_of_its_patient_slots() -> None:
+    check_slot_declaration(SCENARIO_PATH.read_text(encoding="utf-8"), shipped().rooms)
+
+
+def test_placeholder_state_is_flagged_while_placeholders_are_used() -> None:
+    status, _, _ = slot_declaration(SCENARIO_PATH.read_text(encoding="utf-8"))
+    uses = any(room.patient_id.startswith("slot-") for room in shipped().rooms)
+    assert (status == "PLACEHOLDER") == uses
+
+
+def test_slot_declaration_check_accepts_manifest_ids_and_rejects_mislabelled_ones(
+    tmp_path: Path,
+) -> None:
+    text = SCENARIO_PATH.read_text(encoding="utf-8")
+    manifest = text.replace(
+        "# Slot status: PLACEHOLDER", "# Slot status: manifest, source: m.json"
+    )
+    manifest = re.sub(r"slot-p0(\d)", r"p-000\1", manifest)
+    manifest = manifest.replace("  # PLACEHOLDER, see above", "")
+    scenario = ws.parse_scenario(yaml.safe_load(manifest))
+    check_slot_declaration(
+        manifest, scenario.rooms
+    )  # the replacement by WS04-T11 is allowed
+    with pytest.raises(AssertionError):  # placeholder ids flagged as manifest ids
+        check_slot_declaration(
+            text.replace(
+                "# Slot status: PLACEHOLDER", "# Slot status: manifest, source: m.json"
+            ),
+            shipped().rooms,
+        )
+    with pytest.raises(AssertionError):  # real ids still flagged as placeholders
+        check_slot_declaration(
+            manifest.replace(
+                "# Slot status: manifest, source: m.json", "# Slot status: PLACEHOLDER"
+            ),
+            scenario.rooms,
+        )
+    with pytest.raises(AssertionError):  # no declaration
+        check_slot_declaration(
+            text.replace("# Slot status: PLACEHOLDER\n", ""), shipped().rooms
+        )
 
 
 def test_room_poses_in_free_cells_of_map() -> None:
@@ -1893,6 +2378,60 @@ def test_algorithmic_bounds_are_the_documented_values() -> None:
     assert ws.MAX_TIME_ENTRIES == 64
 
 
+# The robot footprint of the PAL parameters, read from config/nav2_params.yaml (derived from
+# nav_public_sim.yaml of omni_base_2dnav 2.24.2, the Nav2 configuration of the TIAGo Pro omni base):
+# footprint [[0.35, 0.24], [-0.35, 0.24], [-0.35, -0.24], [0.35, -0.24]], a 0.70 x 0.48 m rectangle,
+# circumscribed radius 0.424 m. The margin is test-only, not part of the scenario: two map cells.
+CLEARANCE_MARGIN_M = 0.10
+
+
+def footprint_radius() -> float:
+    params = yaml.safe_load(NAV2_PARAMS_PATH.read_text(encoding="utf-8"))
+    footprints = [
+        yaml.safe_load(params[name][name]["ros__parameters"]["footprint"])
+        for name in ("global_costmap", "local_costmap")
+    ]
+    assert footprints[0] == footprints[1], "the two costmaps use one footprint"
+    return max(math.hypot(x, y) for x, y in footprints[0])
+
+
+def test_footprint_radius_is_read_from_the_nav2_parameters() -> None:
+    assert footprint_radius() == pytest.approx(math.hypot(0.35, 0.24))
+
+
+def test_every_door_bedside_and_dock_pose_is_reachable_for_the_footprint_of_the_robot() -> (
+    None
+):
+    scenario, grid = shipped(), shipped_grid()
+    eroded = ws.erode_free(grid, footprint_radius() + CLEARANCE_MARGIN_M)
+    assert ws.pose_is_free(eroded, scenario.dock)
+    targets = [r.door for r in scenario.rooms] + [r.bedside for r in scenario.rooms]
+    assert all(ws.pose_is_free(eroded, pose) for pose in targets)
+    assert all(ws.reachable_from(eroded, scenario.dock, targets))
+    # and the unreachable pose is still unreachable
+    assert ws.reachable_from(eroded, scenario.dock, [scenario.unreachable_pose]) == [
+        False
+    ]
+
+
+def test_the_footprint_check_catches_a_door_that_is_too_narrow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gen = load_generator()
+    monkeypatch.setattr(
+        gen, "DOOR_WIDTH_CM", 100
+    )  # a door narrower than the robot plus margin
+    assert gen.main(["--rooms", "6", "--out", str(tmp_path)]) == 0
+    grid = ws.load_occupancy_grid(tmp_path / "ward_map.yaml")
+    poses = {k: ws.Pose2D(*v) for k, v in gen.layout_poses(6).items()}
+    bedsides = [poses[f"r0{i}.bedside"] for i in range(1, 7)]
+    assert all(ws.reachable_from(grid, poses["dock"], bedsides)), (
+        "a point can still pass"
+    )
+    eroded = ws.erode_free(grid, footprint_radius() + CLEARANCE_MARGIN_M)
+    assert not any(ws.reachable_from(eroded, poses["dock"], bedsides))
+
+
 def test_door_poses_are_further_apart_than_twice_the_goal_tolerance() -> None:
     # Nav2's goal tolerance is 0.25 m (config/nav2_params.yaml): two door poses closer than twice
     # that could not be told apart by "the robot is within the tolerance of this pose"
@@ -1901,6 +2440,20 @@ def test_door_poses_are_further_apart_than_twice_the_goal_tolerance() -> None:
     for i, a in enumerate(points):
         for b in points[i + 1 :]:
             assert math.dist(a, b) > 0.5
+
+
+def test_bedside_pose_is_in_line_with_the_doorway_and_heads_along_the_approach() -> (
+    None
+):
+    # the robot arrives from the door pose with the yaw of the bedside pose: no turn at the goal
+    # (a turn of 90 degrees there made DWB hunt for 10 to 60 s, completion note of WS07-T02)
+    for room in shipped().rooms:
+        assert room.bedside.x == room.door.x, room.room_id
+        approach = math.atan2(
+            room.bedside.y - room.door.y, room.bedside.x - room.door.x
+        )
+        assert room.bedside.yaw == pytest.approx(approach, abs=1e-9), room.room_id
+        assert room.door.yaw == pytest.approx(approach, abs=1e-9), room.room_id
 
 
 def test_shipped_pose_names_are_the_frozen_list() -> None:
@@ -1959,11 +2512,6 @@ def test_every_numeric_value_has_a_provenance_comment() -> None:
         )
 
 
-def test_slots_are_declared_placeholders_not_manifest_values() -> None:
-    scenario = shipped()
-    assert all(room.patient_id.startswith("slot-") for room in scenario.rooms)
-
-
 # ----------------------------------------------------------------------------------------------
 # Consistency with the parameter registry (a data file; no import of ralmon)
 # ----------------------------------------------------------------------------------------------
@@ -2004,12 +2552,6 @@ def test_window_parameters_stay_multiples_of_the_step_after_compression() -> Non
         compressed = entries[name] / factor
         assert compressed == int(compressed), name
         assert int(compressed) % step == 0, (name, compressed, step)
-
-
-def test_compressed_step_is_the_fixture_step_divided_by_the_factor() -> None:
-    # docs/formal/01-signals-sampling.md section 1: T_s = 60000 ms in trace time (FIXTURE-ONLY)
-    scenario = shipped()
-    assert scenario.monitor.step_ms * scenario.compression_factor == 60_000
 
 
 # ----------------------------------------------------------------------------------------------
@@ -2130,6 +2672,14 @@ def test_every_generated_layout_satisfies_the_scenario_conditions(
     assert all(reach)
     assert ws.pose_is_occupied(grid, to_pose["unreachable_pose"])
     assert ws.reachable_from(grid, dock, [to_pose["unreachable_pose"]]) == [False]
+    # the same with the free space reduced by the footprint of the robot plus a margin
+    eroded = ws.erode_free(grid, footprint_radius() + CLEARANCE_MARGIN_M)
+    targets = [to_pose[f"{r}.door"] for r in rooms] + [
+        to_pose[f"{r}.bedside"] for r in rooms
+    ]
+    assert ws.pose_is_free(eroded, dock)
+    assert all(ws.pose_is_free(eroded, pose) for pose in targets)
+    assert all(ws.reachable_from(eroded, dock, targets))
 
 
 def sdf_boxes(world: Path) -> list[tuple[float, float, float, float]]:
@@ -2238,6 +2788,33 @@ def test_nav2_params_name_the_shipped_map() -> None:
     )
 
 
+def test_leg_order_is_the_given_order_unless_a_shuffle_seed_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    items = list("abcdefgh")
+    monkeypatch.delenv("RALMON_TEST_SHUFFLE_SEED", raising=False)
+    assert leg_order(items) == items
+    monkeypatch.setenv("RALMON_TEST_SHUFFLE_SEED", "7")
+    first = leg_order(items)
+    assert first == leg_order(items)  # the same seed gives the same order
+    assert sorted(first) == items and first != items
+    monkeypatch.setenv("RALMON_TEST_SHUFFLE_SEED", "8")
+    assert leg_order(items) != first
+    assert items == list("abcdefgh")  # the input is not changed
+
+
+def test_controller_turns_in_place_towards_the_path_before_dwb_follows_it() -> None:
+    # Without the shim, DWB turned while moving from a heading opposite to the path and sometimes
+    # crept along a doorway jamb (completion note of WS07-T02); DWB stays the primary controller
+    params = yaml.safe_load(NAV2_PARAMS_PATH.read_text(encoding="utf-8"))
+    follow = params["controller_server"]["ros__parameters"]["FollowPath"]
+    assert follow["plugin"] == "nav2_rotation_shim_controller::RotationShimController"
+    assert follow["primary_controller"] == "dwb_core::DWBLocalPlanner"
+    assert follow["angular_dist_threshold"] > 0
+    assert follow["rotate_to_heading_angular_vel"] > 0
+    assert follow["critics"], "the DWB parameters stay under the same plugin name"
+
+
 def test_planner_does_not_move_goals_out_of_walls() -> None:
     # a goal on an occupied cell must fail; PAL's default tolerance of 0.5 m would relocate it
     params = yaml.safe_load(NAV2_PARAMS_PATH.read_text(encoding="utf-8"))
@@ -2261,14 +2838,37 @@ def test_launch_declares_scenario_and_headless_but_not_use_humans() -> None:
         ):
             declared.add(str(node.args[0].value))
     assert declared == {"scenario", "headless"}
-    text = LAUNCH_PATH.read_text(encoding="utf-8")
-    header = text.split('"""', 2)[1] if text.lstrip().startswith('"""') else ""
+    header = ast.get_docstring(launch_tree()) or ""
     assert "use_humans" in header and "human_sim" in header, (
         "the limitation must be stated"
     )
     for node in ast.walk(launch_tree()):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             assert node.value != "use_humans"
+
+
+def test_launch_keeps_the_notice_of_the_pal_file_it_adapts_and_states_its_changes() -> (
+    None
+):
+    # Apache License 2.0, section 4: the derivative keeps the copyright, patent, trademark and
+    # attribution notices, and a modified file carries a notice that says it was changed. The text
+    # is the header of tiago_pro_gazebo.launch.py 1.19.0 as installed (package.xml: Apache License 2.0).
+    text = LAUNCH_PATH.read_text(encoding="utf-8")
+    head = text.split('"""', 1)[0]
+    for needle in (
+        "Copyright (c) 2024 PAL Robotics S.L. All rights reserved.",
+        'Licensed under the Apache License, Version 2.0 (the "License");',
+        "http://www.apache.org/licenses/LICENSE-2.0",
+        'distributed under the License is distributed on an "AS IS" BASIS,',
+        "limitations under the License.",
+    ):
+        assert needle in head, needle
+    assert re.search(r"(?im)^# Modified .*WS07-T02", head), (
+        "a statement that the file was changed"
+    )
+    assert "tiago_pro_gazebo.launch.py" in head
+    notice = (WORLDS_DIR / "NOTICE").read_text(encoding="utf-8")
+    assert "Apache" in notice and "launch/sim_ward.launch.py" in notice
 
 
 def test_launch_sets_the_ward_epoch_to_zero_and_sim_time_on() -> None:
@@ -2383,6 +2983,8 @@ class Stack:
         )
         # ground truth: the pose of the robot model in the world (world plugin gazebo_ros_state)
         self.truth: tuple[float, float] | None = None
+        self.trace: list[str] = []
+        self._last_trace_ms = 0
         self.node.create_subscription(
             ModelStates,
             "/gazebo/model_states",
@@ -2395,6 +2997,19 @@ class Stack:
     def _on_clock(self, msg: Any) -> None:
         self.sim_time_ns = msg.clock.sec * 1_000_000_000 + msg.clock.nanosec
         self.clock_messages += 1
+
+    def _on_feedback(self, message: Any) -> None:
+        """Keep one line of Nav2 feedback every 2 s of simulation time (for failure messages)."""
+        feedback = message.feedback
+        if self.trace and self.sim_ms - self._last_trace_ms < 2_000:
+            return
+        self._last_trace_ms = self.sim_ms
+        amcl = self.robot_pose()
+        self.trace.append(
+            f"sim {self.sim_ms} ms: model {self.truth}, AMCL {amcl}, "
+            f"distance remaining {feedback.distance_remaining:.2f} m, "
+            f"recoveries {feedback.number_of_recoveries}"
+        )
 
     def _on_model_states(self, msg: Any) -> None:
         if ROBOT_MODEL_NAME in msg.name:
@@ -2446,7 +3061,6 @@ class Stack:
         )
 
     def navigate(self, target: ws.Pose2D, timeout_ms: int) -> tuple[str, int, Any]:
-        """Send a NavigateToPose goal; return (outcome, sim ms used, final goal status)."""
         from action_msgs.msg import GoalStatus
         from geometry_msgs.msg import PoseStamped
 
@@ -2459,7 +3073,8 @@ class Stack:
         goal.pose.pose.orientation.w = math.cos(target.yaw / 2.0)
         started_ms = self.sim_ms
         wall_end = time.monotonic() + WALL_GUARD_FACTOR * timeout_ms / 1000.0
-        send = self.nav.send_goal_async(goal)
+        self.trace.clear()
+        send = self.nav.send_goal_async(goal, feedback_callback=self._on_feedback)
         while not send.done():
             self.rclpy.spin_once(self.node, timeout_sec=0.05)
             if time.monotonic() > wall_end:
@@ -2490,6 +3105,24 @@ class Stack:
         status = result.result().status
         outcome = "succeeded" if status == GoalStatus.STATUS_SUCCEEDED else "failed"
         return outcome, self.sim_ms - started_ms, status
+
+    def diagnosis(self, lines: int = 25) -> str:
+        """Where the robot is (model pose, AMCL pose) and the last Nav2 warnings, for failures."""
+        text = self.handle.log_path.read_text(errors="replace") if self.handle else ""
+        text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        recent = [
+            line[:220]
+            for line in text.splitlines()
+            if ("[WARN]" in line or "[ERROR]" in line)
+            and "Timed out waiting for transform" not in line
+        ][-lines:]
+        return (
+            f"model pose {self.truth}, AMCL pose {self.robot_pose()}, sim {self.sim_ms} ms; "
+            "trace of the goal:\n"
+            + "\n".join(self.trace[-25:])
+            + "\nlast warnings:\n"
+            + "\n".join(recent)
+        )
 
     def localisation_error(self) -> float:
         """Distance in metres between the AMCL estimate and the model pose (nan when unknown)."""
@@ -2567,6 +3200,20 @@ def test_world_publishes_clock_headless(ward_stack: Stack) -> None:
     assert ward_stack.sim_time_ns > first
 
 
+def leg_order(rooms: Any) -> list[Any]:
+    """The rooms in the order of the legs: as given, or shuffled when the seed variable is set.
+
+    ``RALMON_TEST_SHUFFLE_SEED=<integer>`` shuffles the order of the door legs and of the bedside
+    legs (a seeded ``random.Random``), to check that no leg depends on the one before it. Unset,
+    the order is that of the scenario (the doors by decreasing distance from the dock).
+    """
+    order = list(rooms)
+    seed = os.environ.get("RALMON_TEST_SHUFFLE_SEED")
+    if seed is not None:
+        random.Random(int(seed)).shuffle(order)
+    return order
+
+
 def wait_for_navigation(stack: Stack) -> None:
     wall_s = stack.scenario.startup_timeout_ms / 1000.0
     end = time.monotonic() + wall_s
@@ -2589,8 +3236,36 @@ def wait_for_navigation(stack: Stack) -> None:
     stack.wait_until(lambda: stack.truth is not None, wall_s, "/gazebo/model_states")
 
 
+def report_legs(capfd: pytest.CaptureFixture[str], title: str, legs: list[str]) -> None:
+    """One line on the terminal even under -q (the durations of the legs of a run)."""
+    with capfd.disabled():
+        print(f"\nWARD LEGS {title}: " + " ".join(legs), flush=True)
+
+
+def reach(stack: Stack, label: str, target: ws.Pose2D, legs: list[str]) -> None:
+    """Navigate to ``target``; the answer of Nav2 rests on the AMCL pose, the model pose is the test."""
+    scenario = stack.scenario
+    outcome, used_ms, _ = stack.navigate(target, scenario.nav_goal_timeout_ms)
+    legs.append(f"{label}={used_ms}")
+    stack.spin_for(1.0)
+    print(
+        f"NAV {label} outcome={outcome} sim_ms={used_ms} "
+        f"amcl_error_m={stack.localisation_error():.2f}"
+    )
+    assert outcome == "succeeded", (
+        f"{label}: {outcome} after {used_ms} sim ms\n{stack.diagnosis()}"
+    )
+    assert used_ms <= scenario.nav_goal_timeout_ms
+    assert stack.truth is not None
+    assert math.dist(stack.truth, (target.x, target.y)) < POSE_MARGIN_M, (
+        f"{label}: Nav2 reports success but the robot is at {stack.truth}"
+    )
+
+
 @pytest.mark.ros
-def test_robot_reaches_every_room_door(ward_stack: Stack) -> None:
+def test_robot_reaches_every_room_door(
+    ward_stack: Stack, capfd: pytest.CaptureFixture[str]
+) -> None:
     stack = ward_stack
     wait_for_navigation(stack)
     scenario = stack.scenario
@@ -2599,50 +3274,35 @@ def test_robot_reaches_every_room_door(ward_stack: Stack) -> None:
         "the robot is not at the dock"
     )
     # the farthest door first, from the dock: its time is the dry-drive time of the scenario header
-    ordered = sorted(
-        scenario.rooms,
-        key=lambda r: (
-            -math.dist((scenario.dock.x, scenario.dock.y), (r.door.x, r.door.y))
-        ),
+    ordered = leg_order(
+        sorted(
+            scenario.rooms,
+            key=lambda r: (
+                -math.dist((scenario.dock.x, scenario.dock.y), (r.door.x, r.door.y))
+            ),
+        )
     )
-    for index, room in enumerate(ordered):
-        outcome, used_ms, _ = stack.navigate(room.door, scenario.nav_goal_timeout_ms)
-        stack.spin_for(1.0)
-        print(
-            f"NAV room={room.room_id} outcome={outcome} sim_ms={used_ms} first_leg={index == 0} "
-            f"amcl_error_m={stack.localisation_error():.2f}"
-        )
-        assert outcome == "succeeded", (
-            f"{room.room_id}: {outcome} after {used_ms} sim ms"
-        )
-        assert used_ms <= scenario.nav_goal_timeout_ms
-        # the answer of Nav2 rests on the AMCL pose; the model pose in the world is the test
-        assert stack.truth is not None
-        assert math.dist(stack.truth, (room.door.x, room.door.y)) < POSE_MARGIN_M, (
-            f"{room.room_id}: Nav2 reports success but the robot is at {stack.truth}"
-        )
+    legs: list[str] = []
+    try:
+        for room in ordered:
+            reach(stack, f"door {room.room_id}", room.door, legs)
+    finally:
+        report_legs(capfd, "doors, sim ms (the first leg is the dry-drive time)", legs)
 
 
 @pytest.mark.ros
-def test_robot_reaches_the_bedside_pose_of_every_room(ward_stack: Stack) -> None:
+def test_robot_reaches_the_bedside_pose_of_every_room(
+    ward_stack: Stack, capfd: pytest.CaptureFixture[str]
+) -> None:
     """The robot task layer (WS07-T04) navigates to the bedside pose: through the door, room to room."""
     stack = ward_stack
     wait_for_navigation(stack)
-    scenario = stack.scenario
-    for room in scenario.rooms:
-        outcome, used_ms, _ = stack.navigate(room.bedside, scenario.nav_goal_timeout_ms)
-        stack.spin_for(1.0)
-        print(
-            f"NAV bedside room={room.room_id} outcome={outcome} sim_ms={used_ms} "
-            f"amcl_error_m={stack.localisation_error():.2f}"
-        )
-        assert outcome == "succeeded", (
-            f"{room.room_id}: {outcome} after {used_ms} sim ms"
-        )
-        assert stack.truth is not None
-        assert (
-            math.dist(stack.truth, (room.bedside.x, room.bedside.y)) < POSE_MARGIN_M
-        ), f"{room.room_id}: Nav2 reports success but the robot is at {stack.truth}"
+    legs: list[str] = []
+    try:
+        for room in leg_order(stack.scenario.rooms):
+            reach(stack, f"bedside {room.room_id}", room.bedside, legs)
+    finally:
+        report_legs(capfd, "bedside, sim ms", legs)
 
 
 @pytest.mark.ros

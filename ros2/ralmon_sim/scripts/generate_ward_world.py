@@ -17,7 +17,9 @@ Layout (centimetres, map frame = Gazebo world frame; x runs along the corridor)
 * in a room, with ``u`` along +x from the west interior face and ``v`` from the corridor-side
   interior face into the room: bed 100 x 200 against the back wall (u in [290, 390], v in [200, 400]),
   dispenser table 40 x 40 (u in [360, 400], v in [140, 180]); the robot's bedside pose is
-  (u 200, v 300), in line with the doorway, facing the bed;
+  (u 200, v 300), in line with the doorway, heading along the approach from the doorway (into the
+  room), so that the robot arrives with the yaw of the pose and has no turn to make; the bed is
+  beside it, 0.9 m to its east;
 * the door pose is in the corridor in front of the doorway, 110 from the corridor-side wall face,
   facing the doorway (not in the doorway: see the note at ``DOOR_WIDTH_CM``);
 * the dock is at x = 100, y = 0 facing +x; the unreachable pose is inside the corridor wall.
@@ -51,6 +53,9 @@ WALL_CM = 20
 WALL_HEIGHT_CM = 250
 CORRIDOR_HALF_WIDTH_CM = 150
 ROOM_INTERIOR_CM = 400
+# Bedside yaw: it was first 0 (facing the bed); the in-place turn of 90 degrees at that pose made
+# DWB hunt for 10 to 60 s while AMCL drifted (completion note of WS07-T02). The yaw is now the
+# approach direction.
 # Corridor, door and stand-off sizes. With a 2.4 m corridor, 1.2 m or 1.6 m doors and the door pose in
 # the doorway or 0.6 to 0.9 m from the wall, the robot with the PAL parameters stopped near the pose
 # (it must turn 90 degrees to the yaw of the pose within the 0.25 m goal tolerance), the spin
@@ -280,7 +285,11 @@ def build_layout(n_rooms: int) -> Layout:
         )
         bedside_x, bedside_y = to_map(BEDSIDE_U_CM, BEDSIDE_V_CM)
         poses[f"{room_id}.door"] = (_meters(door_x), _meters(door_y), into_room_yaw)
-        poses[f"{room_id}.bedside"] = (_meters(bedside_x), _meters(bedside_y), 0.0)
+        poses[f"{room_id}.bedside"] = (
+            _meters(bedside_x),
+            _meters(bedside_y),
+            into_room_yaw,
+        )
         poses[f"{room_id}.bed"] = (_meters(bed_cx), _meters(bed_cy), 0.0)
         poses[f"{room_id}.dispenser"] = (_meters(table_cx), _meters(table_cy), 0.0)
 
