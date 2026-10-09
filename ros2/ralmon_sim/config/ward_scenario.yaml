@@ -1,7 +1,7 @@
 # Ward scenario of the simulation (WS07-T02), read by ralmon_sim.ward_scenario.load_scenario.
 #
 # Number of rooms: 6
-# Dry-drive time dock to farthest door: 30910 ms of simulation time (the longest of 3 runs, 28140 to 30910 ms;
+# Dry-drive time dock to farthest door: 30910 ms of simulation time (the longest of 4 runs, 28140 to 30910 ms;
 # the door pose of r05, 12.4 m in a straight line; TIAGo Pro, Nav2 and the PAL parameters of
 # config/nav2_params.yaml; real-time factor about 1.0; the runs are in the completion note of WS07-T02)
 #
