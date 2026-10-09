@@ -1311,6 +1311,23 @@ def test_a_reading_older_than_the_look_back_is_not_the_deciding_one_of_a_hold() 
     assert (event.subtype, event.injected) == ("hypotension_below_hold", True)
 
 
+def test_the_look_back_of_a_hold_is_measured_on_the_step_of_the_reading() -> None:
+    # re-review MINOR 3: the monitor reads an off-grid reading at the step that contains it (ceil), so a
+    # reading at 05:59:30 is at the 06:00 step, inside the 60 min look-back of a dispense at 07:00
+    event_record = violated("hold", f"hold@{T(7)}", T(7), T(7))
+    window = hypo_record(T(5, 50), T(6))
+    for reading, linked in (
+        (T(5, 59, 30), True),
+        (T(5, 59), False),
+        (T(5, 58, 30), False),
+    ):
+        latent = make_latent(measurements=(reading,), dispenses=(T(7),))
+        [event] = label([event_record], latent=latent, injections=[window])
+        assert (event.subtype, event.injected) == (
+            ("hypotension_below_hold", True) if linked else ("spontaneous_hold", False)
+        ), reading
+
+
 def test_count_limit_is_explained_through_the_24_hour_window_of_the_counter() -> None:
     # a double take at 07:00 (surplus dispense 07:02) violates the limit at the NEXT dispense, 21:00,
     # because the trailing 24 h count is then 3: the surplus lies in the window of the counter
