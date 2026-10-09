@@ -2949,7 +2949,7 @@ def test_reference_reproduces_the_golden_verdict_cases() -> None:
         was_violated = any(v.template == name and v.anchor_ms == anchor for v in found)
         assert was_violated == (e["state"] == "violated"), case["id"]
         checked += 1
-    assert checked >= 12  # SCHED 2-5b and PRED-2/3, RESP-3 to 6, COUNT-1, 2 and 4
+    assert checked == 14  # SCHED 2 to 5b, PRED-2 and 3, RESP-3 to 6, COUNT-1, 2 and 4
 
 
 def test_the_reference_evaluator_shares_no_code_with_the_monitor_or_the_labeller() -> (
