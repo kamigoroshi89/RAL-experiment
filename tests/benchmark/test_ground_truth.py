@@ -4173,3 +4173,86 @@ def test_assemble_refuses_an_observed_day_that_is_not_valid() -> None:
             unsorted, result.latent, plan, records, result.behaviour_log, None, CFG, None,
             MODE_SCHEDULED, registry=F0, templates=LIBRARY,
         )  # fmt: skip
+
+
+def test_the_latent_day_index_and_the_plan_are_checked() -> None:
+    base = make_latent(measurements=(T(12),))
+    for day_index in (True, 1.5, None):
+        with pytest.raises(IdealObservationError):
+            ideal_observation(clone_with(base, day_index=day_index), PLAN_ID)
+    # a day before the first, and one after the last, whose items lie on their own axis
+    for day_index in (-1, labelling.MAX_DAY_INDEX + 1):
+        with pytest.raises(IdealObservationError, match="day_index"):
+            ideal_observation(make_latent(day_index, measurements=(T(12),)), PLAN_ID)
+    # the earliest and the latest day are fine (nothing in the day is outside its own axis)
+    ideal_observation(
+        make_latent(labelling.MAX_DAY_INDEX, measurements=(T(12),)), PLAN_ID
+    )
+    # a plan with a repeated key, two parameter records of one template, or an instance of no template
+    twice = make_plan(sched=(T(9),))
+    instance = twice.instances[0]
+    for bad in (
+        clone_with(twice, instances=(*twice.instances, instance)),
+        clone_with(
+            twice,
+            instances=(
+                *twice.instances,
+                TemplateInstance(TemplateId.RESP, "a", {}, None),
+                TemplateInstance(TemplateId.RESP, "b", {}, None),
+            ),
+        ),
+        clone_with(twice, instances=(clone_with(instance, template="sched"),)),
+        clone_with(
+            twice,
+            instances=(clone_with(instance, anchor_ms=None, param_values=[1]),),
+        ),
+        clone_with(
+            twice,
+            instances=(clone_with(instance, anchor_ms=None, param_values={1: 2.0}),),
+        ),
+        clone_with(
+            twice,
+            instances=(clone_with(instance, anchor_ms=None, param_values={"a": True}),),
+        ),
+    ):
+        with pytest.raises(LabellingError):
+            label(plan=bad)
+    with pytest.raises(LabellingError, match="CarePlan"):
+        label(plan="plan")  # type: ignore[arg-type]
+
+
+def test_a_signal_selection_must_be_a_collection() -> None:
+    latent = make_latent(measurements=(T(12),))
+    for bad in (iter(("bp",)), (s for s in ("bp",)), "bp", 5, {"bp": 1}):
+        with pytest.raises(IdealObservationError, match="collection"):
+            ideal_observation(latent, PLAN_ID, signals=bad)  # type: ignore[arg-type]
+    for good in (("bp",), ["bp"], {"bp"}, frozenset({"bp"})):
+        assert bp_pairs(ideal_observation(latent, PLAN_ID, signals=good)) == [
+            (T(12), 130.0)
+        ]
+
+
+def test_a_behaviour_entry_must_have_a_state() -> None:
+    entry = BehaviourEntry(T(7), 0, AdherenceState.ON_TIME, (T(7),))
+    for bad in (
+        clone_with(entry, state="OMITTED"),
+        clone_with(entry, state=None),
+        clone_with(entry, day_index=True),
+        clone_with(entry, slot_tick_ms=1.5),
+        clone_with(entry, dispense_times_ms=5),
+        clone_with(entry, dispense_times_ms=(True,)),
+    ):
+        with pytest.raises(LabellingError):
+            label([], behaviour=[bad])
+
+
+def test_the_order_of_the_latent_events_does_not_matter() -> None:
+    forward = NOON_LATENT
+    backward = dataclasses.replace(forward, events=tuple(reversed(forward.events)))
+    record = nonresponse_record([NOON + LAG], T(11), T(13))
+    expected = label([EVENT_RECORDS["resp"]], latent=forward, injections=[record])
+    assert expected[0].subtype == "drug_nonresponse"
+    assert (
+        label([EVENT_RECORDS["resp"]], latent=backward, injections=[record]) == expected
+    )
+    assert ideal_observation(backward, PLAN_ID) == ideal_observation(forward, PLAN_ID)
