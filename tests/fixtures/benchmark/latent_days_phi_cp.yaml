@@ -160,9 +160,9 @@ cases:
 
   - id: GT-10-dispense-at-the-day-start
     why: >
-      A dispense at exactly 00:00 belongs to the previous day by the day boundary (the day covers (0, T_day]): it counts
-      in the trailing counter but not in the dispenses of the day. Dispenses 00:00 and 12:00: today = 1 < 2, COUNT
-      violated at the closing step. The dose at 00:00 has no reading in its look-back (HOLD guard failed, violated) and
+      A dispense at exactly 00:00 is seen by the first step, so it counts in the trailing counter and creates its HOLD
+      and RESP instances, but by the day boundary (the day covers (0, T_day]) it is not one of the dispenses of the day
+      that the day-end count adds up. Dispenses 00:00 and 12:00: today = 1 < 2, COUNT violated at the closing step. The dose at 00:00 has no reading in its look-back (HOLD guard failed, violated) and
       none in its window [01:00, 03:00] (RESP violated, end 03:00). The dose at 12:00 has the reading 130 at 11:30 and
       118 at 14:00 (drop 12, window [13:00, 15:00]): satisfied.
     bp_default: 130.0
@@ -250,4 +250,59 @@ cases:
     dispenses: ["07:00"]
     sched_ticks: []
     count_end: false
+    expected: []
+
+  - id: GT-16-deadline-at-the-closing-step-and-one-step-after
+    why: >
+      A deadline exactly at the closing step is decided there, one step later it is open (not a violation, 05 section 7.5
+      item 2). Ticks 23:30 (deadline 24:00, no reading in [23:30, 24:00]: SCHED violated at the closing step) and 23:31
+      (deadline 24:01, also without a reading: open). Doses 21:00 (window [22:00, 24:00], no reading: RESP violated, onset
+      21:00, end 24:00) and 21:01 (window [22:01, 24:01]: open). The reading 130 at 20:30 is in band, in the look-back of
+      both doses (130 - 100 = +30) and answers the tick 20:30. Two doses meet the limit (2 - 2 = 0, a tie) and the
+      day-end minimum.
+    bp_default: 130.0
+    bp_segments: []
+    measurements: ["20:30"]
+    dispenses: ["21:00", "21:01"]
+    sched_ticks: ["20:30", "23:30", "23:31"]
+    count_end: true
+    expected:
+      - {template: resp, onset: "21:00", end: "24:00"}
+      - {template: sched, onset: "23:30", end: "24:00"}
+
+  - id: GT-17-resp-early-bound-tie
+    why: >
+      The early decision of RESP needs pre - 50 - 10 < 0. Dose 22:30 after the reading 60 at 21:30: 60 - 50 - 10 = 0, a
+      tie, not decided at the anchor, and its window [23:30, 25:30] ends after the closing step: open, no event. Dose
+      23:00 after the reading 59 at 22:45: 59 - 50 - 10 = -1 < 0, decided at the anchor (onset 23:00, end 26:00). Both
+      readings are RANGE-violated (60 - 110 = -50, 59 - 110 = -51) and both doses HOLD-violated at the dose (60 - 100 =
+      -40 with the reading 21:30 at the near edge of [21:30, 22:30]; 59 - 100 = -41). Two doses meet the limit and the
+      day-end minimum.
+    bp_default: 130.0
+    bp_segments: [["21:30", "22:45", 60.0], ["22:45", "24:00", 59.0]]
+    measurements: ["21:30", "22:45"]
+    dispenses: ["22:30", "23:00"]
+    sched_ticks: []
+    count_end: true
+    expected:
+      - {template: range, onset: "21:30", end: null}
+      - {template: hold, onset: "22:30", end: null}
+      - {template: range, onset: "22:45", end: null}
+      - {template: hold, onset: "23:00", end: null}
+      - {template: resp, onset: "23:00", end: "26:00"}
+
+  - id: GT-18-resp-any-reading-in-the-window-answers
+    why: >
+      One reading that answers the dose is enough, whatever its place in the window (the maximum of the margins over the
+      window readings, not the first, the last or the minimum). Dose 07:00 with pre-dose 130 (06:50): window [08:00,
+      10:00] holds 125 at 08:30 (margin 130 - 125 - 10 = -5) then 118 at 09:30 (margin +2): satisfied. Dose 14:00 with
+      pre-dose 130 (13:50): window [15:00, 17:00] holds 118 at 15:00 (+2) then 125 at 15:30 (-5): satisfied. All readings
+      are in band and in the look-back of their dose. Two doses meet the limit and the day-end minimum. Nothing is
+      violated.
+    bp_default: 130.0
+    bp_segments: [["08:30", "09:00", 125.0], ["09:30", "10:00", 118.0], ["15:00", "15:30", 118.0], ["15:30", "16:00", 125.0]]
+    measurements: ["06:50", "08:30", "09:30", "13:50", "15:00", "15:30"]
+    dispenses: ["07:00", "14:00"]
+    sched_ticks: []
+    count_end: true
     expected: []

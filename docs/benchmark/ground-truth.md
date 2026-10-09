@@ -88,9 +88,10 @@ window that crosses midnight, a SCHED deadline after 24:00) is decided early whe
 applies and is otherwise PENDING at trace end: **it is not a violation** (`docs/formal/05` section 7.5 item 2; the
 monitor and the labeller apply one rule). A day is labelled with empty history, as the monitor runs it
 (ADR-046 is proposed): a counter that depends on the previous day under-counts, and a RESP window that ends
-after the closing step is not labelled on either day. A dispense at exactly the start of the day belongs to the
-previous day by the day boundary (the day covers `(d * T_day, (d + 1) * T_day]`): it counts in the trailing 24 h
-counter but not in the dispenses of the day.
+after the closing step is not labelled on either day. A dispense at exactly the start of the day (00:00) is
+seen by the first step of the run, so it creates its HOLD and RESP instances on this day and counts in the trailing
+24 h counter; by the day boundary (the day covers `(d * T_day, (d + 1) * T_day]`) it is not one of the dispenses of
+the day that the day-end count adds up (case GT-10).
 
 **Order of the truth.** The events of a day are sorted by `(onset_ms, cls, subtype, end_ms)` with `end_ms = None`
 first; ties are broken by template, injected flag, group and record position, so the order is a function of the
@@ -194,7 +195,7 @@ all in `tests/benchmark/test_ground_truth.py` (the reference evaluator is `tests
 
 | Test | What it shows |
 |---|---|
-| `test_perfect_observation_equals_ground_truth_on_c1` | With zero cuff error, no fault, no attack and readings at the ticks, the set of `(template, anchor)` of the VIOLATED phi_CP verdicts on the observed day (built from the case data, not from the labeller) equals the C1 truth, on fifteen hand-computed cases and two days of the continuing axis |
+| `test_perfect_observation_equals_ground_truth_on_c1` | With zero cuff error, no fault, no attack and readings at the ticks, the set of `(template, anchor)` of the VIOLATED phi_CP verdicts on the observed day (built from the case data, not from the labeller) equals the C1 truth, on eighteen hand-computed cases and two days of the continuing axis |
 | `test_noisy_observation_diverges_from_ground_truth` | Latent 139 with bias +3 reads 142 (a false positive); latent 141 with bias -3 reads 138 (a false negative), through the measurement process of WS04-T06 and the real monitor |
 | `test_c1_truth_follows_latent_not_injection_intent` | A spike that keeps the reading in the band has a record and no event; one that crosses the edge has one `hypertensive_spike` event |
 | `test_ground_truth_unchanged_by_observation_corruption` | Cuff noise, a C2 fault and a C3 attack on one latent day give the identical set of C1 events while the monitor's violated set changes |
@@ -217,7 +218,9 @@ What the evaluation does and does not show, stated so that it cannot be read as 
 * The **same specification** defines the truth and the monitored constraints. The tests show that observation
   loss is what is measured: with a perfect observation the monitor reproduces the truth exactly, and every
   divergence in the results is caused by what is added between the latent day and the monitor (sampling, error,
-  faults, attacks). They do not show that phi_CP is clinically right.
+  faults, attacks). They do not show that phi_CP is clinically right. "A perfect observation equals the truth"
+  holds by construction, since one specification defines both; what the test adds is that the ideal observation
+  equals an independently built one and that the hand-computed cases agree.
 * The **clinical validity of phi_CP rests on the registry review** (WS00-T07): the band, the hold threshold, the
   response window and the other values are literature proposals that no clinician has reviewed (registry 0.2.0,
   `review_status: unreviewed`, ADR-043). A result computed on them is a technical, pre-clinical result.

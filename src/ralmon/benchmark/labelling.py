@@ -224,7 +224,6 @@ _LINK_KIND: Final = {
     "sched": _K_SCHED,
     "count": _K_LIMIT,
 }
-_WINDOWED: Final = (_K_SCHED, _K_RESP, _K_END)
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -317,12 +316,16 @@ def _text(value: object, what: str, error: type[LabellingError]) -> str:
 def _items(
     value: object, what: str, limit: int, error: type[LabellingError]
 ) -> tuple[Any, ...]:
-    """The items of a list or tuple, its length checked before it is read."""
+    """The items of a list or tuple: the length is checked before the read, and the read stops past the limit
+    (a subclass can report a short length and yield without end)."""
     if not isinstance(value, (list, tuple)):
         raise error(f"{what} must be a list or a tuple, got {_show(value)}")
     if len(value) > limit:
         raise error(f"{what} has more than {limit} items")
-    return tuple(value)
+    items = tuple(itertools.islice(iter(value), limit + 1))
+    if len(items) > limit:
+        raise error(f"{what} has more than {limit} items")
+    return items
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -440,7 +443,12 @@ def _wanted_signals(signals: object) -> frozenset[str]:
         len(signals) > MAX_TEMPLATES
     ):  # the length is read before the collection is iterated
         raise IdealObservationError(f"signals has more than {MAX_TEMPLATES} items")
-    for name in tuple(signals):
+    listed = tuple(itertools.islice(iter(signals), MAX_TEMPLATES + 1))
+    if (
+        len(listed) > MAX_TEMPLATES
+    ):  # a collection can report a short length and yield without end
+        raise IdealObservationError(f"signals has more than {MAX_TEMPLATES} items")
+    for name in listed:
         plain = _text(name, "a template signal", IdealObservationError)
         if plain not in known:
             raise IdealObservationError(f"{plain!r} is not a signal")
@@ -795,27 +803,42 @@ def _run(
     return _items(result, "the runner's records", MAX_VERDICT_RECORDS, RunnerError)
 
 
-def _delta2(setup: _Setup, plan: _Plan) -> int:
-    override = plan.parameters.get(TemplateId.RESP, {}).get("delta2")
+def _window_ms(
+    setup: _Setup, plan: _Plan, template: TemplateId, name: str, meaning: str
+) -> int:
+    """A window length: the plan's own parameter record of the template, else the registry."""
+    override = plan.parameters.get(template, {}).get(name)
     if override is not None:
         value = override
     else:
         try:
-            value = setup.registry.get("delta2").value
+            value = setup.registry.get(name).value
         except Exception as exc:
             raise LabellingError(
-                f"the registry has no value for 'delta2', the window length of RESP: {exc}"
+                f"the registry has no value for {name!r}, {meaning}: {exc}"
             ) from exc
     if _is_int(value):
         length = int(value)
     else:
-        number = _finite(value, "delta2", LabellingError)
+        number = _finite(value, name, LabellingError)
         if number != math.floor(number):
-            raise LabellingError("delta2 must be a whole number of milliseconds")
+            raise LabellingError(f"{name} must be a whole number of milliseconds")
         length = int(number)
     if length <= 0:
-        raise LabellingError("delta2 must be positive")
+        raise LabellingError(f"{name} must be positive")
     return length
+
+
+def _delta2(setup: _Setup, plan: _Plan) -> int:
+    return _window_ms(
+        setup, plan, TemplateId.RESP, "delta2", "the window length of RESP"
+    )
+
+
+def _hold_lookback(setup: _Setup, plan: _Plan) -> int:
+    return _window_ms(
+        setup, plan, TemplateId.HOLD, "hold_lookback", "the look-back of HOLD"
+    )
 
 
 def _violations(
@@ -851,6 +874,10 @@ def _violations(
         previous = t_eval
         if template not in cp:
             continue  # SYS and INT are not phi_CP: their records never become C1
+        if template is TemplateId.COUNT and plan.day_end_anchor.get(key, hi) != hi:
+            # the day-end count of another day: its closing step is not this day's, and the run starts
+            # with an empty history at this day's first step (a patient-level plan lists such instances)
+            continue
         if not lo <= t_eval <= hi:
             raise RunnerError(
                 f"a record of {key!r} is evaluated at {t_eval}, outside this day [{lo}, {hi}]"
@@ -1092,6 +1119,7 @@ class _Context:
     measurement_times: list[int]
     dispense_times: list[int]
     intake_of: dict[int, int]
+    hold_lookback: Callable[[], int]  # read when a HOLD violation needs it
 
 
 def _context(
@@ -1102,6 +1130,7 @@ def _context(
     bound: _Bound,
     records: list[_C1Record],
     behaviour: list[BehaviourEntry],
+    plan: _Plan,
 ) -> _Context:
     measurement_times = sorted(
         e.t_device_ms for e in day.events if e.kind is EventKind.MEASUREMENT
@@ -1130,6 +1159,7 @@ def _context(
         measurement_times,
         dispense_times,
         intake_of,
+        lambda: _hold_lookback(setup, plan),
     )
 
 
@@ -1166,7 +1196,12 @@ def _explaining(violation: _Violation, ctx: _Context) -> _C1Record | None:
             if violation.kind == _K_HOLD:
                 # the violation is decided at the dispense but caused by the latest reading before it
                 at = bisect.bisect_right(ctx.measurement_times, violation.decided) - 1
-                if at >= 0:
+                # only a reading in the look-back window can have decided it (the refined form needs one)
+                if (
+                    at >= 0
+                    and violation.decided - ctx.measurement_times[at]
+                    <= ctx.hold_lookback()
+                ):
                     instants.append(ctx.measurement_times[at])
             if not any(record.onset <= t < reach for t in instants):
                 continue
@@ -1318,7 +1353,9 @@ def _label(
     verdicts = _run(run_fn, day, plan, setup)
     violations = _violations(verdicts, day_latent, read_plan, setup)
     bound = _Bound(latency_bound_fn, setup)
-    ctx = _context(day_latent, latent, day, setup, bound, c1_records, behaviour)
+    ctx = _context(
+        day_latent, latent, day, setup, bound, c1_records, behaviour, read_plan
+    )
 
     entries: list[tuple[GroundTruthEvent, int | None]] = []
     for violation in violations:

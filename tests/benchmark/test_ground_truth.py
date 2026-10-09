@@ -1289,6 +1289,28 @@ def test_hold_is_explained_by_the_record_that_covers_its_deciding_measurement() 
     assert event.injected is False
 
 
+def test_a_reading_older_than_the_look_back_is_not_the_deciding_one_of_a_hold() -> None:
+    # review M1: the refined HOLD needs a reading in the look-back window (60 min in F0); the latest reading
+    # before the dispense links a hypotension record only while it lies in that window (closed at its far end)
+    event_record = violated("hold", f"hold@{T(7)}", T(7), T(7))
+    window = hypo_record(T(5), T(6, 30))
+    for reading, linked in ((T(6), True), (T(5, 59), False), (T(5, 30), False)):
+        latent = make_latent(measurements=(reading,), dispenses=(T(7),))
+        [event] = label([event_record], latent=latent, injections=[window])
+        assert (event.subtype, event.injected) == (
+            ("hypotension_below_hold", True) if linked else ("spontaneous_hold", False)
+        ), reading
+    # the look-back is the plan's own when the plan carries it
+    longer = make_plan(
+        parameter_records=[
+            TemplateInstance(TemplateId.HOLD, "hold", {"hold_lookback": 2 * HOUR}, None)
+        ]
+    )
+    latent = make_latent(measurements=(T(5, 30),), dispenses=(T(7),))
+    [event] = label([event_record], latent=latent, plan=longer, injections=[window])
+    assert (event.subtype, event.injected) == ("hypotension_below_hold", True)
+
+
 def test_count_limit_is_explained_through_the_24_hour_window_of_the_counter() -> None:
     # a double take at 07:00 (surplus dispense 07:02) violates the limit at the NEXT dispense, 21:00,
     # because the trailing 24 h count is then 3: the surplus lies in the window of the counter
@@ -1798,6 +1820,82 @@ def test_too_many_items_are_refused_before_any_work(
     assert len(label([], injections=records[:2])) == 2
 
 
+LIMIT = 3  # the bound of the tests below, small so that the offending list is short
+
+
+@pytest.mark.parametrize(
+    "limit_name, what",
+    [
+        ("MAX_INJECTION_RECORDS", "injection records"),
+        ("MAX_BEHAVIOUR_ENTRIES", "behaviour_log"),
+        ("MAX_VERDICT_RECORDS", "runner's records"),
+        ("MAX_TEMPLATES", "templates"),
+        ("MAX_LATENT_ITEMS", "latent.samples"),
+        ("MAX_LATENT_ITEMS", "latent.events"),
+        ("MAX_PLAN_INSTANCES", "plan.instances"),
+        ("MAX_TEMPLATES", "signals"),
+        ("MAX_TEMPLATES", "a template's signals"),
+        ("MAX_DISPENSES_PER_SLOT", "dispense_times_ms"),
+    ],
+)
+def test_a_list_is_bounded_by_what_is_read_not_by_what_len_claims(
+    monkeypatch: pytest.MonkeyPatch, limit_name: str, what: str
+) -> None:
+    monkeypatch.setattr(labelling, limit_name, LIMIT)
+    hostile = endless()
+    latent, plan = SMALL_LATENT, SMALL_PLAN
+    kw: dict[str, Any] = {}
+    run_fn: Callable[..., Any] | None = None
+    injections: Sequence[Any] = ()
+    behaviour: Sequence[Any] = ()
+    if what == "injection records":
+        injections = hostile
+    elif what == "behaviour_log":
+        behaviour = hostile
+    elif what == "runner's records":
+        run_fn = lambda *a, **k: hostile
+    elif what == "templates":
+        kw["templates"] = hostile
+    elif what == "latent.samples":
+        latent = clone_with(make_latent(grid_ms=DAY), samples=hostile)
+    elif what == "latent.events":
+        latent = clone_with(
+            make_latent(grid_ms=DAY), events=hostile
+        )  # one sample: within the bound
+    elif what == "plan.instances":
+        plan = clone_with(plan, instances=hostile)
+    elif what == "signals":
+        with pytest.raises(LabellingError, match="more than"):
+            ideal_observation(SMALL_LATENT, PLAN_ID, signals=hostile)
+        assert hostile.read <= LIMIT + 1
+        return
+    elif what == "a template's signals":
+        hostile = endless("x")
+        kw["templates"] = [clone_with(CP_TEMPLATES[0], signals=hostile)]
+    else:
+        assert what == "dispense_times_ms"
+        behaviour = [
+            BehaviourEntry(T(7), 0, AdherenceState.ON_TIME, hostile),  # type: ignore[arg-type]
+        ]
+    kw.setdefault("templates", LIBRARY)
+    with pytest.raises(LabellingError, match="more than"):
+        label_latent_day(  # not through ``label``: its ``list(...)`` would read the whole of the argument
+            latent,
+            plan,
+            injections,
+            behaviour,
+            Stub([]) if run_fn is None else run_fn,
+            CFG,
+            None,
+            MODE_SCHEDULED,
+            registry=F0,
+            **kw,
+        )
+    assert (
+        hostile.read <= LIMIT + 1
+    )  # a bounded read, never the whole of an endless iterable
+
+
 # ---------------------------------------------------------------------------------------------------
 # Robustness: only the module's named errors, whatever the argument
 # ---------------------------------------------------------------------------------------------------
@@ -1853,6 +1951,28 @@ class GrowingList(list):  # type: ignore[type-arg]
         return 10**12
 
 
+class ShortLenLongIter(list):  # type: ignore[type-arg]
+    """A list that reports one item and then yields without end (here: 10**6 copies of ``item``): the bound
+    must hold for what is read, not for what ``__len__`` claims."""
+
+    def __init__(self, item: Any = 0) -> None:
+        super().__init__([item])
+        self.item = item
+        self.read = 0
+
+    def __len__(self) -> int:
+        return 1
+
+    def __iter__(self) -> Any:
+        for _ in range(10**6):
+            self.read += 1
+            yield self.item
+
+
+def endless(item: Any = 0) -> ShortLenLongIter:
+    return ShortLenLongIter(item)
+
+
 JUNK: tuple[Any, ...] = (
     None,
     True,
@@ -1888,6 +2008,7 @@ JUNK: tuple[Any, ...] = (
     BoomInt(3),
     BoomFloat(1.5),
     GrowingList(),
+    ShortLenLongIter(),
     lambda: 1,
     float,
 )
@@ -3158,6 +3279,115 @@ def test_instances_open_at_the_end_of_the_day_are_not_violations(day: int) -> No
     ]
 
 
+# --- review M2: edges that the first mutation run left alive ------------------------------------------
+
+
+def test_n_verdict_records_counts_every_record_the_runner_returned() -> None:
+    records, plan, _ = convention_records()
+    extra = [vr("sys", "sys@0", VerdictState.SATISFIED, T(1), pending=None)]
+    returned = ordered([*records, *extra])
+    detailed = label_latent_day_detailed(
+        make_latent(measurements=(T(12),)),
+        plan,
+        [],
+        [],
+        Stub(returned),
+        CFG,
+        None,
+        MODE_SCHEDULED,
+        registry=F0,
+        templates=LIBRARY,
+    )
+    assert detailed.n_verdict_records == len(returned) == len(records) + 1
+    assert label_latent_day_detailed(
+        make_latent(), plan, [], [], Stub([]), CFG, None, MODE_SCHEDULED,
+        registry=F0, templates=LIBRARY,
+    ).n_verdict_records == 0  # fmt: skip
+
+
+def test_a_decision_is_not_after_its_evaluation_and_is_inside_the_day() -> None:
+    key = f"range@{DAY + T(12)}"
+    latent = make_latent(1, measurements=(T(12),))
+    plan = make_plan(1)
+    same = violated("range", key, DAY + T(12), DAY + T(12), t_eval=DAY + T(12))
+    assert len(label([same], latent=latent, plan=plan)) == 1
+    later = violated("range", key, DAY + T(12) + 1, DAY + T(12) + 1, t_eval=DAY + T(12))
+    with pytest.raises(RunnerError, match="decided"):
+        label([later], latent=latent, plan=plan)
+    # the first instant of the day is inside it, the instant before is not (a SCHED event is anchored by the
+    # plan, so only the decision itself can be outside the day)
+    plan = make_plan(1, sched=(T(0),))
+    sched = f"sched@{DAY}"
+    first = violated("sched", sched, DAY, DAY + 30 * MIN, t_eval=DAY)
+    assert len(label([first], latent=latent, plan=plan)) == 1
+    before = violated("sched", sched, DAY - 1, DAY + 30 * MIN, t_eval=DAY)
+    with pytest.raises(RunnerError, match="decided"):
+        label([before], latent=latent, plan=plan)
+
+
+def test_the_latest_reading_before_a_dispense_does_not_depend_on_the_order_of_the_events() -> (
+    None
+):
+    event_record = violated("hold", f"hold@{T(7)}", T(7), T(7))
+    covering = hypo_record(T(6, 40), T(6, 55))
+    latent = make_latent(measurements=(T(6, 50), T(6, 58)), dispenses=(T(7),))
+    shuffled = clone_with(latent, events=tuple(reversed(latent.events)))
+    for arranged in (latent, shuffled):
+        [event] = label([event_record], latent=arranged, injections=[covering])
+        assert (event.subtype, event.injected) == ("spontaneous_hold", False)
+
+
+# --- review B1: a plan that lists the day-end counts of other days ---------------------------------------
+
+
+def multi_day_plan(day: int, *, sched: Sequence[int] = (), around: int = 1) -> CarePlan:
+    """One patient-level plan: the day-end COUNT of the ``around`` days before and after ``day`` too."""
+    others = [
+        TemplateInstance(TemplateId.COUNT, f"count@{k * DAY}", {}, k * DAY)
+        for k in range(
+            day + 1 - around, day + 2 + around
+        )  # closing steps, a positive multiple of a day
+        if k != day + 1 and k >= 1
+    ]
+    return make_plan(day, sched=sched, parameter_records=others)
+
+
+@pytest.mark.parametrize("day", [1, 2, 5])
+def test_a_day_end_count_of_another_day_is_not_this_days_violation_stub(
+    day: int,
+) -> None:
+    # the previous day's closing step is the first step of this run, where its window holds nothing
+    previous = violated("count", f"count@{day * DAY}", day * DAY, day * DAY)
+    own = violated(
+        "count", f"count@{day * DAY + DAY}", day * DAY + DAY, day * DAY + DAY
+    )
+    latent = make_latent(day, measurements=(T(12),))
+    plan = multi_day_plan(day)
+    out = label([previous, own], latent=latent, plan=plan)
+    assert [(e.template_id, e.onset_ms, e.end_ms) for e in out] == [
+        ("count", day * DAY + DAY, day * DAY + DAY)
+    ]
+    assert label([previous], latent=latent, plan=plan) == ()
+
+
+@pytest.mark.parametrize("day", [1, 2, 5])
+@pytest.mark.parametrize("doses", [(T(7), T(19)), (T(7),), ()])
+def test_a_patient_level_plan_labels_a_day_like_the_per_day_plan(
+    day: int, doses: tuple[int, ...]
+) -> None:
+    latent = make_latent(
+        day, measurements=(T(6), T(12), T(18)), dispenses=doses, ticks=(T(6), T(12))
+    )
+    per_day = make_plan(day, sched=(T(6), T(12)))
+    patient_level = multi_day_plan(day, sched=(T(6), T(12)), around=2)
+    expected = truth_of(latent, per_day)
+    assert truth_of(latent, patient_level) == expected
+    # the closing step of this day is the only day-end COUNT that can be a violation of the day
+    for event in truth_of(latent, patient_level):
+        if event.template_id == "count" and event.end_ms is not None:
+            assert event.onset_ms == day * DAY + DAY
+
+
 # --- tests 21 and 22 -----------------------------------------------------------------------------------
 
 
@@ -3175,6 +3405,19 @@ def test_labeller_takes_no_observed_day() -> None:
             "config",
             "latency_bound_fn",
             "mode",
+        ]
+        # the whole list, so that no further parameter (a view of the observed day under another name) is added
+        assert list(sig.parameters) == [
+            "latent",
+            "plan",
+            "records",
+            "behaviour_log",
+            "run_fn",
+            "config",
+            "latency_bound_fn",
+            "mode",
+            "registry",
+            "templates",
         ]
         for name, parameter in sig.parameters.items():
             text = f"{name} {parameter.annotation}".lower()
@@ -3836,6 +4079,14 @@ def test_the_ceiling_rule_decides_which_readings_share_a_bin() -> None:
 def test_two_measurements_at_one_instant_are_refused() -> None:
     with pytest.raises(IdealObservationError, match="share one instant"):
         ideal_observation(make_latent(measurements=(T(12), T(12))), PLAN_ID)
+    # whatever the order of the events: the two readings at 06:00 are not neighbours in the list
+    latent = make_latent(measurements=(T(6), T(7), T(12)))
+    first, second, third = (e for e in latent.events if e.kind is EventKind.MEASUREMENT)
+    apart = clone_with(
+        latent, events=(first, second, clone_with(third, t_device_ms=T(6)))
+    )
+    with pytest.raises(IdealObservationError, match="share one instant"):
+        ideal_observation(apart, PLAN_ID)
 
 
 def test_a_step_that_does_not_divide_the_day_is_refused() -> None:
