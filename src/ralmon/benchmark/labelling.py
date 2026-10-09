@@ -42,7 +42,7 @@ its confounder group) iff its template matches by ``LINK_TABLE`` and the instant
 window extended by the template latency bound of the monitor (``verdict_latency_bound_ms``); ``drug_nonresponse``
 is linked through ``details["intake_times_ms"]`` (its window selects intakes, the RESP anchor is the dispense),
 the COUNT limit through the 24 h window of the counter, and HOLD also through the reading that decided it
-(ADR-055, proposed, records these readings of the rule).
+(ADR-055, accepted for the link rules, records these readings of the rule).
 An event no record explains gets its natural subtype: ``double_take`` or ``dose_omission`` from the behaviour
 log (never injected), else ``spontaneous_<template id>``. C2 and C3 events are one per REALISED record through
 ``record_to_ground_truth``; no C1 record is ever passed to it (it would answer ``injected = True`` and no
