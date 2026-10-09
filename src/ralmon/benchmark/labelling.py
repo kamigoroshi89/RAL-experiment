@@ -740,7 +740,9 @@ def _check_supply(setup: _Setup) -> frozenset[str]:
         raise IdealObservationError(
             f"the phi_CP templates need the signal(s) {unknown}, which a latent day cannot supply"
         )
-    return frozenset(setup.needed - derived)
+    return (
+        setup.needed
+    )  # the derived ones are dropped by ideal_observation: the monitor computes them
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -866,9 +868,7 @@ def _violations(
                 )
         known = final.get(key)
         if known is not None:
-            if not definitive:
-                raise RunnerError(f"{key!r} left a definitive state")
-            if state is not known:
+            if state is not known:  # a definitive state is absorbing
                 raise RunnerError(
                     f"{key!r} changed from {known.value} to {state.value}"
                 )
@@ -1135,7 +1135,7 @@ def _anchor_of(t: int, ctx: _Context) -> int:
 
 def _explaining(violation: _Violation, ctx: _Context) -> _C1Record | None:
     """The record that explains a violation: template by the link table, then the instant rule."""
-    candidates: list[tuple[tuple[int, int, int], _C1Record]] = []
+    candidates: list[tuple[tuple[int, int], _C1Record]] = []
     template = violation.template
     for record in ctx.records:
         if record.kind != violation.kind:
@@ -1165,9 +1165,13 @@ def _explaining(violation: _Violation, ctx: _Context) -> _C1Record | None:
                     instants.append(ctx.measurement_times[at])
             if not any(record.onset <= t < reach for t in instants):
                 continue
-            exclusive = record.end if record.end is not None else record.onset + 1
-            strict = any(record.onset <= t < exclusive for t in instants)
-        candidates.append(((0 if strict else 1, record.onset, record.index), record))
+            # a window record is strict when the instant lies in its own window, without the extension;
+            # a point record has no window of its own
+            strict = record.end is not None and any(
+                record.onset <= t < record.end for t in instants
+            )
+        candidates.append(((0 if strict else 1, record.onset), record))
+    # the records are visited in the order of the argument, and min keeps the first of equal keys
     return min(candidates, key=lambda c: c[0])[1] if candidates else None
 
 

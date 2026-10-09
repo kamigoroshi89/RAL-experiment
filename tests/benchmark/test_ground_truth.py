@@ -504,15 +504,22 @@ def test_ideal_observation_scheduled_mode() -> None:
         dispenses=(T(7), T(21)),
         ticks=(T(6, 50), T(12)),
         vitals=True,
+        seed=7,
     )
     day = ideal_observation(latent, PLAN_ID)  # the default mode is `scheduled`
     assert isinstance(day, ObservedDay)
     assert (day.patient_id, day.day_index, day.seed, day.care_plan_id) == (
         PATIENT,
         0,
-        0,
+        7,
         PLAN_ID,
     )
+    sources = {e.kind: e.source for e in day.events}
+    assert sources == {
+        EventKind.MEASUREMENT: "cuff",
+        EventKind.DISPENSE: "dispenser",
+        EventKind.SCHEDULE_TICK: "ward",
+    }
     # bp exists only at the latent MEASUREMENT times, with the exact held latent value
     # (the value of the last grid point at or before the instant: 09:00:30 holds the 09:00 value)
     assert bp_pairs(day) == [
@@ -603,9 +610,9 @@ def test_ideal_observation_rejects_missing_template_signal() -> None:
         (),
         (Event(EventKind.MEASUREMENT, T(12), T(12), "cuff", {}, None),),
     )
-    with pytest.raises(IdealObservationError, match="bp"):
+    with pytest.raises(IdealObservationError, match="no bp sample"):
         ideal_observation(no_bp, PLAN_ID)
-    with pytest.raises(IdealObservationError, match="bp"):
+    with pytest.raises(IdealObservationError, match="no bp sample"):
         ideal_observation(no_bp, PLAN_ID, MODE_DENSE)
     # a measurement before the first pressure: there is no value to hold, nothing is guessed
     late_start = LatentDay(
@@ -631,11 +638,11 @@ def test_ideal_observation_rejects_missing_template_signal() -> None:
     ):
         with pytest.raises(IdealObservationError, match=name):
             ideal_observation(latent, PLAN_ID, signals=("bp", "meas", name))
-    with pytest.raises(IdealObservationError):
+    with pytest.raises(IdealObservationError, match="not a signal"):
         ideal_observation(latent, PLAN_ID, signals=("not_a_signal",))
     # the same through the labeller: a phi_CP template that needs the `presence` signal
     needy = dataclasses.replace(CP_TEMPLATES[0], signals=("meas", "presence"))
-    with pytest.raises(IdealObservationError, match="presence"):
+    with pytest.raises(IdealObservationError, match="phi_CP templates need.*presence"):
         label(templates=(needy, *CP_TEMPLATES[1:]))
 
 
@@ -900,7 +907,9 @@ def test_the_first_violated_record_defines_the_event_and_the_others_must_agree()
             pending=T(9, 30),
         ),
         vr("sched", key, VerdictState.PENDING, T(9, 40), pending=T(9, 30)),
-        violated("range", key, T(9, 40), T(9, 40)),  # the key of another template
+        violated(
+            "range", key, T(9, 30), T(9, 30), t_eval=T(9, 40)
+        ),  # the key of another template
     ):
         with pytest.raises(RunnerError):
             label(ordered([first, bad]), plan=plan)
@@ -1232,7 +1241,7 @@ def test_drug_nonresponse_is_linked_through_the_intake_times_not_the_window() ->
     assert (event.subtype, event.injected) == ("spontaneous_resp", False)
     # a record that lists no intake times cannot be linked: an error, not a guess
     bare = c1_record("drug_nonresponse", T(11), T(13), details={})
-    with pytest.raises(LabellingError, match="intake_times_ms"):
+    with pytest.raises(LabellingError, match="has no details"):
         label_noon("resp", [bare])
     for bad in ("x", [True], [1.5], [None], 5, {"a": 1}, [-1]):
         broken = c1_record(
@@ -1712,7 +1721,7 @@ def test_a_runner_that_raises_is_wrapped_with_its_cause() -> None:
         assert info.value.__cause__ is monitor_error
     # a non-callable runner
     for bad in (5, "run", object(), [Stub()]):
-        with pytest.raises(LabellingError):
+        with pytest.raises(LabellingError, match="callable"):
             label(run_fn=bad)  # type: ignore[arg-type]
 
 
@@ -3793,3 +3802,374 @@ def test_natural_double_take_and_omission_are_labelled_from_the_generator_log() 
         if e.template_id == "count"
     ]
     assert [(e.subtype, e.injected) for e in limits] == [("double_take", True)]
+
+
+# ---------------------------------------------------------------------------------------------------
+# Tests added after the mutation self-check (each kills at least one mutant of labelling.py)
+# ---------------------------------------------------------------------------------------------------
+
+
+def test_dense_mode_with_only_the_measurement_signal() -> None:
+    day = ideal_observation(
+        make_latent(measurements=(T(9),)), PLAN_ID, MODE_DENSE, signals=("meas",)
+    )
+    assert not day.samples
+    assert times_of(day, EventKind.MEASUREMENT) == list(range(0, DAY, MIN))
+
+
+def test_the_ceiling_rule_decides_which_readings_share_a_bin() -> None:
+    # 12:00:00 is the step 720 and 12:00:30 the step 721 (an item is visible at ceil(t / T_s)): two bins
+    ideal_observation(
+        make_latent(measurements=(T(12), T(12, 0, 30))), PLAN_ID, step_ms=MIN
+    )
+    # 12:00:10 and 12:00:40 are both in (12:00, 12:01]
+    with pytest.raises(IdealObservationError, match="bin"):
+        ideal_observation(
+            make_latent(measurements=(T(12, 0, 10), T(12, 0, 40))), PLAN_ID, step_ms=MIN
+        )
+    with pytest.raises(IdealObservationError, match="bin"):
+        ideal_observation(
+            make_latent(measurements=(T(12, 0, 1), T(12, 1))), PLAN_ID, step_ms=MIN
+        )
+
+
+def test_two_measurements_at_one_instant_are_refused() -> None:
+    with pytest.raises(IdealObservationError, match="share one instant"):
+        ideal_observation(make_latent(measurements=(T(12), T(12))), PLAN_ID)
+
+
+def test_a_step_that_does_not_divide_the_day_is_refused() -> None:
+    latent = make_latent(measurements=(T(12),))
+    for bad in (7_000, 0, -MIN, 10**400, True, 1.5, "60000", DAY + 1):
+        with pytest.raises(IdealObservationError):
+            ideal_observation(latent, PLAN_ID, step_ms=bad)  # type: ignore[arg-type]
+    with pytest.raises(IdealObservationError, match="divide"):
+        ideal_observation(latent, PLAN_ID, step_ms=7_000)
+    ideal_observation(latent, PLAN_ID, step_ms=DAY)  # one step a day divides it
+
+
+def test_a_tick_outside_the_day_is_refused() -> None:
+    base = make_latent(measurements=())
+    for t in (-1, DAY + 1):
+        tick = Event(EventKind.SCHEDULE_TICK, t, t, "ward", {"kind": "dose"}, None)
+        with pytest.raises(IdealObservationError, match="day"):
+            ideal_observation(dataclasses.replace(base, events=(tick,)), PLAN_ID)
+
+
+def test_a_boolean_is_not_a_pressure() -> None:
+    base = make_latent(measurements=(T(12),))
+    samples = tuple(
+        dataclasses.replace(s, value=True) if s.t_device_ms == T(12) else s
+        for s in base.samples
+    )
+    with pytest.raises(IdealObservationError):
+        ideal_observation(dataclasses.replace(base, samples=samples), PLAN_ID)
+
+
+# --- configuration, registry and templates ------------------------------------------------------------
+
+
+def test_the_configuration_is_checked() -> None:
+    with pytest.raises(LabellingError, match="predictive"):
+        label(config=make_config(predictive=True))
+    with pytest.raises(LabellingError, match="predictive"):
+        label(config=clone_with(CFG, predictive="no"))
+    with pytest.raises(LabellingError, match="divide the day"):
+        label(config=make_config(step_ms=7_000))
+    for delay in (-1, DAY + 1, True, 1.5, None):
+        with pytest.raises(LabellingError, match="reorder_delay_ms"):
+            label(config=clone_with(CFG, reorder_delay_ms=delay))
+    label(config=make_config(reorder_delay_ms=DAY))  # the largest delay
+    with pytest.raises(LabellingError, match="config"):
+        label(config="not a configuration")  # type: ignore[arg-type]
+
+
+def test_a_missing_configuration_is_derived_from_the_registry() -> None:
+    stub = Stub()
+    label_latent_day(
+        make_latent(measurements=(T(12),)), make_plan(), [], [], stub, None, None,
+        MODE_SCHEDULED, registry=F0, templates=LIBRARY,
+    )  # fmt: skip
+    assert stub.calls[0]["config"] == CFG  # step 60000, no reorder delay, measured only
+    # a registry that was not loaded with a step gives nothing to derive one from
+    no_step = load_registry(F0_PATH, allow_fixture_only=True)
+    with pytest.raises(LabellingError, match="step_ms"):
+        label_latent_day(
+            make_latent(measurements=(T(12),)), make_plan(), [], [], stub, None, None,
+            MODE_SCHEDULED, registry=no_step, templates=LIBRARY,
+        )  # fmt: skip
+    with pytest.raises(LabellingError, match="step_ms"):
+        label_latent_day(
+            make_latent(), make_plan(), [], [], stub, None, None, MODE_SCHEDULED
+        )
+
+
+def test_a_library_without_a_care_plan_template_is_refused() -> None:
+    others = [t for t in LIBRARY if t.kind is not TemplateKind.CARE_PLAN]
+    assert others
+    for library in (others, ()):
+        with pytest.raises(LabellingError, match="phi_CP"):
+            label(templates=library)
+    with pytest.raises(LabellingError, match="Template"):
+        label(templates=[object()])
+    with pytest.raises(LabellingError, match="templates"):
+        label(templates="templates")  # type: ignore[arg-type]
+
+
+def test_only_the_signals_the_templates_use_are_supplied() -> None:
+    range_only = [t for t in LIBRARY if t.id is TemplateId.RANGE]
+    stub = Stub()
+    label(
+        run_fn=stub,
+        templates=range_only,
+        latent=make_latent(measurements=(T(12),), dispenses=(T(7),), ticks=(T(9),)),
+    )
+    day = stub.calls[0]["day"]
+    assert {e.kind for e in day.events} == {EventKind.MEASUREMENT}
+    assert {s.signal for s in day.samples} == {"bp"}  # no day_end, no dispense, no tick
+    assert [t.id for t in stub.calls[0]["templates"]] == [TemplateId.RANGE]
+
+
+def test_a_registry_that_cannot_be_loaded_is_a_named_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ralmon.spec import RegistryError, TemplateLibraryError
+
+    def no_registry(*a: Any, **k: Any) -> Any:
+        raise RegistryError("no such file")
+
+    monkeypatch.setattr(labelling, "load_registry", no_registry)
+    with pytest.raises(LabellingError, match="default registry cannot be loaded"):
+        label(registry=None)
+
+    def no_library(*a: Any, **k: Any) -> Any:
+        raise TemplateLibraryError("broken library")
+
+    monkeypatch.setattr(labelling, "load_templates", no_library)
+    with pytest.raises(
+        LabellingError, match="default template library cannot be loaded"
+    ):
+        label(templates=None)
+
+
+def test_a_registry_object_must_have_get_and_version() -> None:
+    class OnlyVersion:
+        def version(self) -> str:
+            return F0.version()
+
+    class OnlyGet:
+        def get(self, name: str) -> Any:
+            return F0.get(name)
+
+    class BadVersion(OnlyGet):
+        def __init__(self, version: Any) -> None:
+            self._version = version
+
+        def version(self) -> Any:
+            if isinstance(self._version, Exception):
+                raise self._version
+            return self._version
+
+    with pytest.raises(LabellingError, match="get method"):
+        label(registry=OnlyVersion())
+    with pytest.raises(LabellingError, match="version method"):
+        label(registry=OnlyGet())
+    for version in (RuntimeError("x"), 5, None, ""):
+        with pytest.raises(LabellingError):
+            label(registry=BadVersion(version))
+
+
+def test_the_window_length_must_be_a_positive_whole_number_of_milliseconds() -> None:
+    def with_delta2(value: float) -> CarePlan:
+        record = TemplateInstance(
+            TemplateId.RESP, "resp-params", {"delta2": value}, None
+        )
+        return make_plan(parameter_records=(record,))
+
+    resp = [violated("resp", f"resp@{T(7)}", T(10), T(10))]
+    for bad in (0, -HOUR, 2 * HOUR + 0.5):
+        with pytest.raises(LabellingError, match="delta2"):
+            label(resp, plan=with_delta2(bad))
+    [event] = label(
+        resp, plan=with_delta2(2.0 * HOUR)
+    )  # a whole number as a float is fine
+    assert event.onset_ms == T(8)
+
+
+# --- the verdict records -------------------------------------------------------------------------------
+
+
+def test_more_incoherent_records_are_refused() -> None:
+    plan = make_plan(sched=(T(9),))
+    key = f"sched@{T(9)}"
+    # decided before the day started (a SCHED anchor comes from the plan, so only this check sees it)
+    before = vr(
+        "sched", key, VerdictState.VIOLATED, T(9, 30), decided=-MIN, pending=T(9, 30)
+    )
+    with pytest.raises(RunnerError, match="outside this day"):
+        label([before], plan=plan)
+    # a deadline before the anchor
+    early = violated("sched", key, T(9, 30), T(8))
+    with pytest.raises(RunnerError, match="before its anchor"):
+        label([early], plan=plan)
+    # a negative deadline on a record that is not even violated
+    negative = vr("resp", f"resp@{T(3)}", VerdictState.PENDING, T(3), pending=-1)
+    with pytest.raises(RunnerError):
+        label([negative])
+    # a key longer than the bound, and one of exactly the bound
+    with pytest.raises(RunnerError):
+        label([violated("range", "k" * (labelling.MAX_TEXT + 1), T(12), T(12))])
+    assert len(label([violated("range", "k" * labelling.MAX_TEXT, T(12), T(12))])) == 1
+    # an empty key
+    with pytest.raises(RunnerError):
+        label([violated("range", "", T(12), T(12))])
+
+
+def test_the_day_end_obligation_starts_at_its_plan_anchor() -> None:
+    # decided a minute before the closing step (a hand-written record), anchored at the closing step
+    [event] = label([violated("count", f"count@{DAY}", T(23, 59), DAY)])
+    assert (event.onset_ms, event.end_ms, event.template_id) == (DAY, DAY, "count")
+
+
+# --- injection records, behaviour log, bounds ---------------------------------------------------------
+
+
+def test_an_unrealised_nonresponse_needs_no_intake_list() -> None:
+    bare = c1_record("drug_nonresponse", T(11), T(13), realised=False, details={})
+    [event] = label_noon("resp", [bare])
+    assert (event.subtype, event.injected) == ("spontaneous_resp", False)
+
+
+def test_the_latency_bound_function_is_checked() -> None:
+    with pytest.raises(LabellingError, match="callable"):
+        label(bound=5)  # type: ignore[arg-type]  # even when no record needs it
+    with pytest.raises(LabellingError, match="latency bound"):
+        label(
+            [violated("range", f"range@{T(12)}", T(12), T(12))],
+            injections=[spike_record()],
+            bound=lambda t: -1,
+        )
+    for bad in (None, True, 1.5, "60000"):
+        with pytest.raises(LabellingError, match="latency bound"):
+            label(
+                [violated("range", f"range@{T(12)}", T(12), T(12))],
+                injections=[spike_record()],
+                bound=lambda t, _b=bad: _b,  # type: ignore[arg-type,misc]
+            )
+
+    def failing(template: TemplateId) -> int:
+        raise ValueError("no bound")
+
+    with pytest.raises(LabellingError, match="latency_bound_fn failed"):
+        label(
+            [violated("range", f"range@{T(12)}", T(12), T(12))],
+            injections=[spike_record()],
+            bound=failing,
+        )
+    assert (
+        label(
+            [violated("range", f"range@{T(12)}", T(12), T(12))],
+            injections=[spike_record()],
+            bound=lambda t: 0,
+        )[0].injected
+        is True
+    )
+
+
+def test_records_and_behaviour_log_must_be_a_list_or_a_tuple() -> None:
+    latent, plan = make_latent(measurements=(T(12),)), make_plan()
+
+    def call(records: Any, behaviour: Any) -> Any:
+        return label_latent_day(
+            latent, plan, records, behaviour, Stub(), CFG, None, MODE_SCHEDULED,
+            registry=F0, templates=LIBRARY,
+        )  # fmt: skip
+
+    for bad in (set(), frozenset(), iter(()), {}, "x", 5):
+        with pytest.raises(LabellingError):
+            call(bad, [])
+        with pytest.raises(LabellingError):
+            call([], bad)
+    assert call((), ()) == () and call([], []) == ()
+
+
+def test_intake_pairing_when_the_counts_differ() -> None:
+    # more INTAKE events than DISPENSE events (a hand-written latent day): the dispense instant stands in
+    extra = Event(EventKind.INTAKE, NOON + HOUR, NOON + HOUR, "patient", {}, None)
+    latent = dataclasses.replace(NOON_LATENT, events=(*NOON_LATENT.events, extra))
+    record = nonresponse_record([NOON], T(11), T(13))
+    [event] = label([EVENT_RECORDS["resp"]], latent=latent, injections=[record])
+    assert event.subtype == "drug_nonresponse"
+    # fewer INTAKE events than DISPENSE events
+    fewer = make_latent(
+        measurements=(T(6),), dispenses=(NOON, NOON + 3 * HOUR), intakes=False
+    )
+    [event] = label([EVENT_RECORDS["resp"]], latent=fewer, injections=[record])
+    assert event.subtype == "drug_nonresponse"
+
+
+def test_the_resp_anchor_is_the_grid_step_of_the_dispense() -> None:
+    # a dispense at 07:00:20 is visible at the step 07:01 (the ceiling rule): the instance is anchored there,
+    # and the intake 5 s after the dispense belongs to it
+    latent = make_latent(measurements=(T(6),), dispenses=(T(7, 0, 20),))
+    resp = violated("resp", f"resp@{T(7, 0, 20)}", T(10, 1), T(10, 1))
+    record = nonresponse_record([T(7, 0, 20) + LAG], T(7), T(8))
+    [event] = label([resp], latent=latent, injections=[record])
+    assert (event.onset_ms, event.subtype, event.injected) == (
+        T(7, 1),
+        "drug_nonresponse",
+        True,
+    )
+
+
+def test_natural_double_take_needs_a_surplus_dispense_inside_the_counter_window() -> (
+    None
+):
+    limit = violated("count", f"count@{T(20)}", T(20), T(20))
+    # the surplus of the slot (20:02) comes after the decision at 20:00 and its first dispense is not a surplus
+    entry = BehaviourEntry(T(20), 0, AdherenceState.DOUBLE_TAKE, (T(20), T(20, 2)))
+    [event] = label([limit], behaviour=[entry])
+    assert event.subtype == "spontaneous_count"
+    # a surplus more than 24 h before the decision (here exactly 24 h) is out of the window
+    old = BehaviourEntry(-2 * MIN, 0, AdherenceState.DOUBLE_TAKE, (-2 * MIN, 0))
+    at_end = violated("count", f"count@{DAY}#2", DAY, DAY)
+    [event] = label([at_end], behaviour=[old])
+    assert event.subtype == "spontaneous_count"
+    # an entry that is not a double take is not one, whatever its dispenses
+    other = BehaviourEntry(T(20), 0, AdherenceState.ON_TIME, (T(20), T(20, 2)))
+    [event] = label(
+        [violated("count", f"count@{T(20, 2)}", T(20, 2), T(20, 2))], behaviour=[other]
+    )
+    assert event.subtype == "spontaneous_count"
+
+
+def test_the_labeller_refuses_two_readings_in_one_bin() -> None:
+    close = make_latent(measurements=(T(12, 0, 10), T(12, 0, 40)))
+    with pytest.raises(IdealObservationError, match="bin"):
+        label(latent=close)
+
+
+def test_the_default_mode_of_every_entry_point_is_scheduled() -> None:
+    for function in (
+        label_latent_day,
+        label_latent_day_detailed,
+        assemble_benchmark_day,
+    ):
+        assert inspect.signature(function).parameters["mode"].default == MODE_SCHEDULED
+    assert (
+        inspect.signature(ideal_observation).parameters["mode"].default
+        == MODE_SCHEDULED
+    )
+
+
+def test_assemble_refuses_an_observed_day_that_is_not_valid() -> None:
+    _out, observed, result, plan, records = assembled_fixture()
+    unsorted = dataclasses.replace(observed, samples=tuple(reversed(observed.samples)))
+    assert [s.t_rx_ms for s in unsorted.samples] != sorted(
+        s.t_rx_ms for s in unsorted.samples
+    )
+    with pytest.raises(LabellingError, match="invalid"):
+        assemble_benchmark_day(
+            unsorted, result.latent, plan, records, result.behaviour_log, None, CFG, None,
+            MODE_SCHEDULED, registry=F0, templates=LIBRARY,
+        )  # fmt: skip
