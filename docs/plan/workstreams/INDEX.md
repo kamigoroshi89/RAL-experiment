@@ -98,8 +98,9 @@ Total estimate: 34.0 person-days.
 | WS05-T08 | predictive-integration | Predictive integration and run_offline end to end | agent | WS05-T05, WS05-T06, WS05-T07, WS01-T08 | yes | no | 2 | analisi §4.7 (3) | #monitor #verdict #detector | - |
 | WS05-T09 | ros2-wrappers | ROS 2 wrapper packages: RSM, attribution, event manager, watchdog, heartbeat, ward-node placement | agent | WS05-T08, WS07-T01 | yes | no | 3 | analisi §4.9 (1), §9 (5) | #ros-2-interfaces | R3-W2 AE-4 |
 | WS05-T10 | monitor-history-input | Monitor history input: run_offline replays the earlier days of the patient (ADR-046) | agent | WS05-T04 | yes | no | 2 | ADR-046, ADR-053 (h), docs/formal/01 §5.5 | #monitor #time-and-units #trace-schema | - |
+| WS05-T11 | robot-channel-availability | Robot-channel availability from NODE_STATE colocated reports (ADR-054 (b)) | agent | WS05-T10 | yes | no | 1.5 | ADR-054, docs/models/evidence-channels.md | #monitor #signals | - |
 
-Total estimate: 25.5 person-days.
+Total estimate: 27.0 person-days.
 
 ## WS06-baselines: Baselines
 
@@ -133,7 +134,7 @@ Total estimate: 18.0 person-days.
 
 | id | slug | title | owner | depends_on | crit | nonneg | pd | sources | interfaces | review_items |
 |---|---|---|---|---|---|---|---|---|---|---|
-| WS08-T01 | runner-metrics | Experiment runner, config and metrics module | agent | WS04-T11, WS06-T01, WS05-T08 | yes | no | 3 | analisi §5.5 | #metrics #experiment-config-and-outputs | - |
+| WS08-T01 | runner-metrics | Experiment runner, config and metrics module | agent | WS04-T11, WS06-T01, WS05-T08, WS05-T11 | yes | no | 3 | analisi §5.5 | #metrics #experiment-config-and-outputs | - |
 | WS08-T02 | main-experiment | Main experiment: B1-B5 versus proposed method | agent | WS08-T01, WS06-T07 | yes | no | 2.5 | analisi §5.4, §5.5 | #metrics #detector | R3-W1 R3-W6 AE-1 |
 | WS08-T03 | ablations | Ablations A1, A2, A3, A5, A7 | agent | WS08-T02 | yes | no | 3 | analisi §5.6 | #experiment-config-and-outputs | R2-W1 R2-W9 |
 | WS08-T04 | ablation-a4-embodied | Ablation A4: embodied channel removed | agent | WS08-T02, WS02-T05 | yes | yes | 2 | analisi §5.6 (A4), §10 (3) | #evidencevector #attribution | R3-W2 AE-4 |

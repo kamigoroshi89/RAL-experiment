@@ -109,3 +109,7 @@ Time axis and plan anchors of `run_offline`: the days of a patient are written o
 ### ADR-046 adopted (gab, 2026-10-09)
 
 The history input is in the contract (`#monitor` 0.2.0): WS05-T10 adds `history` to `run_offline` and WS04-T15 labels a day with the earlier days as history, so point (3) of the paragraph on the time axis ("no carry-over between days") stops being true once they are done. The builder passes to the labeller and to the detectors the days that precede the day to build (at least `H = max(T_day, largest window parameter)` of history; one day is enough with the registry of today), and an event belongs to the day in which the monitor decides it (its onset may lie in the previous day). The `Detector` contract has no history input yet: see ADR-046, status.
+
+### ADR-054 decided (gab, 2026-10-09)
+
+Option (b) is chosen. The builder writes a robot `NODE_STATE` report per visit of `ObservedStream.visits`: `payload.colocated` true at the arrival and false at the departure (`payload.state` `active`; the payload key follows ADR-035). WS05-T11 turns the reports into the availability of both robot channels. Gate every INT-based number on `run_offline_detailed(...).stats.presence_samples_without_availability_marks == 0` (the correction above stands: `presence_level_older_than_window_steps` is information only).

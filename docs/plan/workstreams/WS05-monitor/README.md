@@ -106,5 +106,6 @@ From the repository root, inside `.venv`; ROS 2 commands in the workspace of WS0
 | WS05-T08 | Predictive integration and run_offline end to end | agent | blocked | WS05-T05, WS05-T06, WS05-T07, WS01-T08 |
 | WS05-T09 | ROS 2 wrapper packages: RSM, attribution, event manager, watchdog, heartbeat, ward-node placement | agent | blocked | WS05-T08, WS07-T01 |
 | WS05-T10 | Monitor history input: run_offline replays the earlier days of the patient (ADR-046) | agent | ready | WS05-T04 |
+| WS05-T11 | Robot-channel availability from NODE_STATE colocated reports (ADR-054 (b)) | agent | blocked | WS05-T10 |
 
-Total estimate: 25.5 person-days (analisi §9 item 5: 4 to 5 person-weeks; WS05-T10 added by ADR-046, 2 pd).
+Total estimate: 25.5 person-days (analisi §9 item 5: 4 to 5 person-weeks; WS05-T10 added by ADR-046, 2 pd; WS05-T11 added by ADR-054, 1.5 pd).

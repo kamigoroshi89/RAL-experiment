@@ -44,3 +44,7 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 
 - gab ha adottato la storia dei giorni precedenti (ADR-046) e accettato il nucleo del monitor (ADR-053): un solo commit modifica `02-interfaces.md` (`#monitor` 0.2.0, `#time-and-units` 0.1.1, `#trace-schema` 0.1.1, API pubblica 0.2.1) e `__all__` di `ralmon.monitor`. Tempi sempre non negativi: asse continuo di ADR-053 (h), la parte sui tempi negativi di ADR-046 (a) è sostituita.
 - Nuovi task: WS05-T10 (parametro `history` di `run_offline`, `ready`) e WS04-T15 (etichettatura con storia, chiude ADR-055 (b), `blocked`); WS04-T11 dipende anche da WS04-T15. Aperto: il contratto `Detector` non ha la storia (vedi ADR-046).
+
+## ADR-054 decisa (2026-10-09)
+
+- gab ha scelto la strada (b): la disponibilità dei canali del robot viene dai messaggi `NODE_STATE` con `colocated`, e la presenza vale per una sola visita (regola dell'episodio). Nuovo task WS05-T11 (1,5 pd); WS08-T01 ne dipende, così nessun esperimento gira con il testimone cieco. Il costruttore WS04-T11 scrive i messaggi; l'estrattore di WS05-T07 adotta la stessa regola. La chiave del payload segue ADR-035, ancora proposta.

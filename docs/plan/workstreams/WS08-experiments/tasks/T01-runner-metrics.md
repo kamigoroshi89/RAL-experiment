@@ -4,7 +4,7 @@ title: Experiment runner, config and metrics module
 workstream: WS08-experiments
 owner: agent
 status: blocked
-depends_on: ["WS04-T11", "WS06-T01", "WS05-T08"]
+depends_on: ["WS04-T11", "WS06-T01", "WS05-T08", "WS05-T11"]
 critical_path: true
 non_negotiable: false
 estimate_pd: 3
