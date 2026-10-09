@@ -6,13 +6,13 @@ that has not been pushed, then call ``advance(t_k + D)``. With ``D > 0`` this is
 late-sample policy of docs/formal/01 section 4.3 hold: an input received after the watermark of its
 step arrives after the step has been finalised and is reported late, never applied.
 
-Keyword-only ``registry``, ``templates`` and ``verifier`` are AHEAD OF THE CONTRACT signature until
-ADR-047 and ADR-048 are accepted: ``MonitorConfig`` carries only a registry version string, so without
-them the registry would have to be found by the function itself. When ``registry`` is ``None`` it is
+Keyword-only ``registry``, ``templates`` and ``verifier`` are part of the contract (ADR-053, accepted):
+``MonitorConfig`` carries only a registry version string, so without them the registry would have to be
+found by the function itself. When ``registry`` is ``None`` it is
 ``load_registry(step_ms=config.step_ms)`` (the real registry, never a fixture); when ``templates`` is
-``None`` it is ``load_templates(registry=registry)``. There is no ``history`` argument (ADR-046 is
-proposed): a day starts with empty state, so a counter that depends on the previous day can only
-under-count (docs/formal/01 section 5.5, item 5).
+``None`` it is ``load_templates(registry=registry)``. The contract (ADR-046, accepted) also has a keyword-only
+``history`` argument; WS05-T10 adds it. Until then a day starts with empty state, so a counter that depends
+on the previous day can only under-count (docs/formal/01 section 5.5, item 5).
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@ title: "Benchmark builder CLI: splits by patient, manifest, seeds, scale"
 workstream: WS04-benchmark
 owner: agent
 status: blocked
-depends_on: ["WS04-T10"]
+depends_on: ["WS04-T10", "WS04-T15"]
 critical_path: true
 non_negotiable: false
 estimate_pd: 2
@@ -105,3 +105,7 @@ WS05-T03 (`ralmon.spec`, branch `ws05-t03-spec-package`, status `in_progress` wh
 Correction of the gate in the hand-over above: it said to require `presence_level_older_than_window_steps == 0`, which cannot be met (the generator's dwell of 10 minutes exceeds `int_window` of 5, so any visit counts, with or without marks). The gate is `stats().presence_samples_without_availability_marks == 0`: non-zero exactly when presence samples were used and no availability mark for `presence` ever arrived. Emit the robot `NODE_STATE` reports (ADR-054 option (b)) or the explicit zeros (option (a)) and read that counter from `run_offline_detailed`.
 
 Time axis and plan anchors of `run_offline`: the days of a patient are written on one continuing axis (`day_index * T_day + clock time`, WS04-T06), and `run_offline` now runs the day `day_index` from the step `day_index * K` on that axis (it used to run steps 0 to K whatever the day, so a day with `day_index >= 1` was accepted with 0 inputs and no error). Consequences for the builder: (1) the times of day `d` must be on the continuing axis (a day written on the per-day axis with `day_index >= 1` has every input rejected as finalised, visible in `stats().after_finalisation_count`); (2) the plan may list the instances of other days: those anchored before the first step of the run are skipped and counted in `stats().plan_instances_before_start`, those anchored in the finalised past of the run still raise `PlanFeasibilityError`; the day-end COUNT of day `d` has the anchor `(d + 1) * T_day`; (3) there is no carry-over between days (ADR-046 is not implemented): the 24 h counter and the held levels start empty at the first step of the run, so a counter that depends on the previous day under-counts. The contract text of `TimeMs` ("since the start of the patient-day trace") reads as the per-day axis; ADR-053 (h) asks the plan owner to settle the axis in `02-interfaces.md`.
+
+### ADR-046 adopted (gab, 2026-10-09)
+
+The history input is in the contract (`#monitor` 0.2.0): WS05-T10 adds `history` to `run_offline` and WS04-T15 labels a day with the earlier days as history, so point (3) of the paragraph on the time axis ("no carry-over between days") stops being true once they are done. The builder passes to the labeller and to the detectors the days that precede the day to build (at least `H = max(T_day, largest window parameter)` of history; one day is enough with the registry of today), and an event belongs to the day in which the monitor decides it (its onset may lie in the previous day). The `Detector` contract has no history input yet: see ADR-046, status.

@@ -223,7 +223,8 @@ def test_public_all_is_the_contract_row_and_nothing_more() -> None:
     assert set(re.findall(r"`(\w+)`", row.split("|")[2])) == set(m.__all__)
 
 
-def test_extra_names_are_importable_from_the_package_root() -> None:
+def test_the_names_of_adr_053_are_in_the_package_root_and_in_all() -> None:
+    # ADR-053 (d), accepted 2026-10-09: the named errors and the report types joined the contract table
     for name in (
         "MonitorInputError",
         "PlanFeasibilityError",
@@ -231,7 +232,7 @@ def test_extra_names_are_importable_from_the_package_root() -> None:
         "MonitorStats",
     ):
         assert hasattr(m, name), name
-        assert name not in m.__all__
+        assert name in m.__all__, name
 
 
 def test_error_classes_are_distinct_named_exceptions() -> None:

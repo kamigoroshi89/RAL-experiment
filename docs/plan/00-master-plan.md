@@ -42,7 +42,7 @@ Effort per workstream is taken from analisi §9. WS00 rows come from the phase-0
 | WS12 | Writing, internal devil's-advocate review, title (0.4) and abstract (0.5) (12) | 2-3 pw | all |
 | WS13 | Open-source repository (13) | 1 pw | WS05, WS04 |
 
-The plan's task estimates add up to about 201 person-days (about 40 pw) including the optional second pathology; the total of analisi §9 is about 33-42 pw, feasible for 3-4 people in 3-4 months (roughly 14-16 weeks for the full submission) if WS04, WS05 and WS07 run in parallel.
+The plan's task estimates add up to about 205 person-days (about 41 pw, 3.5 pd of them added by ADR-046: WS05-T10 and WS04-T15) including the optional second pathology; the total of analisi §9 is about 33-42 pw, feasible for 3-4 people in 3-4 months (roughly 14-16 weeks for the full submission) if WS04, WS05 and WS07 run in parallel.
 
 ## 3. Milestones
 

@@ -76,12 +76,13 @@ Total estimate: 8.0 person-days.
 | WS04-T08 | inject-c3 | C3 integrity attacks at naive and informed attacker levels | agent | WS04-T06, WS02-T02, WS02-T03 | yes | no | 2.5 | analisi §5.1 (3), §3.6 | #trace-schema #evidencevector | - |
 | WS04-T09 | inject-c1-confounders | C1 injection and deliberate confounders | agent | WS04-T07, WS04-T08 | yes | no | 2 | analisi §5.1 (3, 4) | #trace-schema | R3-W4 |
 | WS04-T10 | latent-ground-truth | Latent ground-truth labeller (phi_CP on the latent trace) and non-circularity tests | agent | WS04-T09, WS05-T04 | yes | no | 2 | analisi §5.1, §10 (1) | #trace-schema #monitor | R3-W1 |
-| WS04-T11 | benchmark-builder | Benchmark builder CLI: splits by patient, manifest, seeds, scale | agent | WS04-T10 | yes | no | 2 | analisi §5.1 | #trace-schema #experiment-config-and-outputs | R3-W1 |
+| WS04-T11 | benchmark-builder | Benchmark builder CLI: splits by patient, manifest, seeds, scale | agent | WS04-T10, WS04-T15 | yes | no | 2 | analisi §5.1 | #trace-schema #experiment-config-and-outputs | R3-W1 |
 | WS04-T12 | benchmark-validation | Benchmark validation report and alert-load sanity check | agent | WS04-T11 | no | no | 1.5 | analisi §5.1, §10 (1) | #trace-schema | R3-W1 |
 | WS04-T13 | mimic-priorsource | MimicPriorSource and eICU variant (blocked until credentialing) | agent | WS04-T02, WS00-T04 | no | no | 2 | analisi §5.1 | #priorsource | - |
 | WS04-T14 | second-pathology-optional | OPTIONAL: second pathology (diabetes, simglucose) | agent | WS04-T11 | no | no | 4 | analisi §5.8, §9 | #priorsource | - |
+| WS04-T15 | multi-day-labelling | Multi-day ground-truth labelling with history (ADR-046, ADR-055 (b)) | agent | WS04-T10, WS05-T10 | yes | no | 1.5 | ADR-046, ADR-055 (b), analisi §5.1 | #trace-schema #monitor | - |
 
-Total estimate: 32.5 person-days.
+Total estimate: 34.0 person-days.
 
 ## WS05-monitor: Monitor, conformal calibrator, attribution, ROS 2 wrappers
 
@@ -96,8 +97,9 @@ Total estimate: 32.5 person-days.
 | WS05-T07 | attribution-package | Attribution package: hierarchical rule, cascades, Attributor, natural-language rendering | agent | WS05-T04, WS02-T04, WS02-T05 | yes | no | 3 | analisi §4.5, §4.9 (3), §2 R3 weakness 6 | #attribution #alert #evidencevector | R3-W6 |
 | WS05-T08 | predictive-integration | Predictive integration and run_offline end to end | agent | WS05-T05, WS05-T06, WS05-T07, WS01-T08 | yes | no | 2 | analisi §4.7 (3) | #monitor #verdict #detector | - |
 | WS05-T09 | ros2-wrappers | ROS 2 wrapper packages: RSM, attribution, event manager, watchdog, heartbeat, ward-node placement | agent | WS05-T08, WS07-T01 | yes | no | 3 | analisi §4.9 (1), §9 (5) | #ros-2-interfaces | R3-W2 AE-4 |
+| WS05-T10 | monitor-history-input | Monitor history input: run_offline replays the earlier days of the patient (ADR-046) | agent | WS05-T04 | yes | no | 2 | ADR-046, ADR-053 (h), docs/formal/01 §5.5 | #monitor #time-and-units #trace-schema | - |
 
-Total estimate: 23.5 person-days.
+Total estimate: 25.5 person-days.
 
 ## WS06-baselines: Baselines
 

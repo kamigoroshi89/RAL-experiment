@@ -191,7 +191,8 @@ Run from the repository root once T01 to T12 are `done` (T13 needs WS00-T04, T14
 | WS04-T08 | C3 integrity attacks at naive and informed attacker levels | agent | blocked | WS04-T06, WS02-T02, WS02-T03 |
 | WS04-T09 | C1 injection and deliberate confounders | agent | blocked | WS04-T07, WS04-T08 |
 | WS04-T10 | Latent ground-truth labeller (phi_CP on the latent trace) and non-circularity tests | agent | blocked | WS04-T09, WS05-T04 |
-| WS04-T11 | Benchmark builder CLI: splits by patient, manifest, seeds, scale | agent | blocked | WS04-T10 |
+| WS04-T11 | Benchmark builder CLI: splits by patient, manifest, seeds, scale | agent | blocked | WS04-T10, WS04-T15 |
 | WS04-T12 | Benchmark validation report and alert-load sanity check | agent | blocked | WS04-T11 |
 | WS04-T13 | MimicPriorSource and eICU variant (blocked until credentialing) | agent | blocked | WS04-T02, WS00-T04 |
 | WS04-T14 | OPTIONAL: second pathology (diabetes, simglucose) | agent | blocked | WS04-T11 |
+| WS04-T15 | Multi-day ground-truth labelling with history (ADR-046, ADR-055 (b)) | agent | blocked | WS04-T10, WS05-T10 |

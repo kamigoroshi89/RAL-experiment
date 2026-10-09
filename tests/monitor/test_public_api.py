@@ -291,9 +291,8 @@ def composite_record() -> Any:
     return next(r for r in mon.advance(t) if r.instance_key == f"sys@{t}")
 
 
-def test_the_root_exports_what_the_attribution_layer_needs_without_widening_all() -> (
-    None
-):
+def test_the_root_exports_what_the_attribution_layer_needs() -> None:
+    # ADR-053 (d), accepted 2026-10-09: these names are in the contract table, so in ``__all__``
     for name in (
         "resolve_subformula_path",
         "resolve_subformula_paths",
@@ -301,7 +300,7 @@ def test_the_root_exports_what_the_attribution_layer_needs_without_widening_all(
         "OfflineResult",
     ):
         assert hasattr(m, name), name
-        assert name not in m.__all__, name
+        assert name in m.__all__, name
 
 
 def test_a_composite_path_is_split_at_the_semicolons_and_resolves_part_by_part() -> (
