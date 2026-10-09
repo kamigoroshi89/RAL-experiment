@@ -3,7 +3,7 @@ id: WS05-T04
 title: "Monitor core: past-time evaluation, robustness intervals, verdicts, reorder buffer, latency bounds"
 workstream: WS05-monitor
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS05-T03", "WS01-T05"]
 critical_path: true
 non_negotiable: false
