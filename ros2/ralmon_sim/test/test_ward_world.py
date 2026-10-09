@@ -345,8 +345,12 @@ def test_non_text_keys_are_rejected(tmp_path: Path, key: object) -> None:
     data["monitor"][key] = 1
     path = tmp_path / "scenario.yaml"
     path.write_text(yaml.dump(data, sort_keys=False), encoding="utf-8")
-    with pytest.raises(ws.ScenarioError):
+    with pytest.raises(ws.ScenarioError) as info:
         ws.load_scenario(path)
+    if not isinstance(
+        key, tuple
+    ):  # a tuple key is a python tag, refused by the safe loader
+        assert "keys must be text" in str(info.value)
 
 
 BAD_INTS = [
@@ -477,6 +481,15 @@ def test_pose_value_ranges(tmp_path: Path) -> None:
 
 def test_pose_dataclass_validates_itself() -> None:
     assert ws.Pose2D(1, 2, 3).x == 1.0
+    assert ws.Pose2D(-ws.MAX_COORD_M, ws.MAX_COORD_M, -math.pi).yaw == -math.pi
+    for args in [
+        (ws.MAX_COORD_M * 2, 0, 0),
+        (-ws.MAX_COORD_M * 2, 0, 0),
+        (0, ws.MAX_COORD_M * 2, 0),
+        (0, -ws.MAX_COORD_M * 2, 0),
+    ]:
+        with pytest.raises(ws.ScenarioError):
+            ws.Pose2D(*args)
     for args in [
         (float("nan"), 0, 0),
         (0, float("inf"), 0),
@@ -507,7 +520,10 @@ def test_pose_dataclass_validates_itself() -> None:
             ["", "a/b.world", ".world", "../x.world", "x.txt", "w" * 200],
         ),
         (("map_file",), ["", "a/b.yaml", "..", "x.pgm", "m" * 200]),
-        (("monitor", "registry_version"), ["", "v 1", "1" * 40, "0.2.0\n", "a/b"]),
+        (
+            ("monitor", "registry_version"),
+            ["", "v 1", "1" * 33, "1" * 40, "0.2.0\n", "a/b"],
+        ),
     ],
     ids=["room_id", "patient_id", "world_file", "map_file", "registry_version"],
 )
@@ -528,6 +544,8 @@ def test_identifier_patterns_accept_the_documented_forms(tmp_path: Path) -> None
     data["rooms"][0]["patient_id"] = "p" + "A.b_c-9" * 9  # 64 characters
     data["world_file"] = "ward-2.world"
     data["map_file"] = "ward_map.v2.yaml"
+    data["monitor"]["registry_version"] = "a" * 32
+    assert load_data(tmp_path, data).monitor.registry_version == "a" * 32
     data["monitor"]["registry_version"] = "0.2.0"
     scenario = load_data(tmp_path, data)
     assert len(scenario.rooms[0].room_id) == 32
@@ -561,24 +579,23 @@ def test_alpha_is_none_or_a_level_strictly_between_zero_and_one(tmp_path: Path) 
     data = make_data(4)
     data["monitor"]["alpha"] = None
     assert load_data(tmp_path, data).monitor.alpha is None
-    for bad in (
-        0.0,
-        1.0,
-        -0.1,
-        1.5,
-        0,
-        1,
-        "0.1",
-        True,
-        False,
-        float("nan"),
-        float("inf"),
-        [],
-        {},
-    ):
+    # not a float: the message says what is expected
+    for bad in (0, 1, "0.1", True, False, [], {}):
         data = make_data(4)
         data["monitor"]["alpha"] = bad
-        with pytest.raises(ws.ScenarioError, match="alpha"):
+        with pytest.raises(ws.ScenarioError, match="alpha: must be null or a float"):
+            load_data(tmp_path, data)
+    # a float on the closed unit interval but not strictly inside it
+    for bad in (0.0, 1.0):
+        data = make_data(4)
+        data["monitor"]["alpha"] = bad
+        with pytest.raises(ws.ScenarioError, match="alpha: must lie strictly between"):
+            load_data(tmp_path, data)
+    # a float outside the unit interval, or not finite
+    for bad in (-0.1, 1.5, float("nan"), float("inf")):
+        data = make_data(4)
+        data["monitor"]["alpha"] = bad
+        with pytest.raises(ws.ScenarioError, match="alpha: must be a finite number"):
             load_data(tmp_path, data)
 
 
@@ -630,6 +647,12 @@ def test_stagger_slot_count_must_be_a_positive_bounded_integer(n_rooms: object) 
         ws.stagger_offsets(n_rooms=n_rooms, spacing_ms=10)  # type: ignore[arg-type]
 
 
+def test_stagger_slot_count_upper_bound_is_inclusive() -> None:
+    offsets = ws.stagger_offsets(n_rooms=ws.MAX_STAGGER_SLOTS, spacing_ms=1)
+    assert len(offsets) == ws.MAX_STAGGER_SLOTS
+    assert offsets[-1] == ws.MAX_STAGGER_SLOTS - 1
+
+
 def test_stagger_offsets_stay_below_the_integer_bound() -> None:
     limit = ws.MAX_INT_VALUE
     assert ws.stagger_offsets(n_rooms=2, spacing_ms=limit) == [0, limit]
@@ -661,17 +684,18 @@ def test_explicit_room_offsets_override_and_must_be_distinct(tmp_path: Path) -> 
     equal = make_data(4)
     equal["rooms"][0]["offset_ms"] = 11_000
     equal["rooms"][1]["offset_ms"] = 11_000
-    with pytest.raises(ws.ScenarioError, match="offset_ms"):
+    with pytest.raises(ws.ScenarioError, match=r"rooms\[1\]\.offset_ms"):
         load_data(tmp_path, equal)
 
     collides_with_generated = make_data(4)
     collides_with_generated["rooms"][0]["offset_ms"] = 30_000  # room 1 generates 30_000
-    with pytest.raises(ws.ScenarioError, match="offset_ms"):
+    # the explicit offset is blamed, not the generated one it collides with
+    with pytest.raises(ws.ScenarioError, match=r"rooms\[0\]\.offset_ms"):
         load_data(tmp_path, collides_with_generated)
 
     negative = make_data(4)
     negative["rooms"][1]["offset_ms"] = -1
-    with pytest.raises(ws.ScenarioError, match="offset_ms"):
+    with pytest.raises(ws.ScenarioError, match=r"rooms\[1\]\.offset_ms"):
         load_data(tmp_path, negative)
 
 
@@ -857,7 +881,7 @@ def test_unhashable_mapping_keys_raise_scenario_error(tmp_path: Path) -> None:
 def test_deeply_nested_documents_raise_scenario_error(tmp_path: Path) -> None:
     path = tmp_path / "s.yaml"
     path.write_text("[" * 50_000 + "]" * 50_000, encoding="utf-8")
-    with pytest.raises(ws.ScenarioError):
+    with pytest.raises(ws.ScenarioError, match="nested too deeply"):
         ws.load_scenario(path)
     path.write_text("a: " + "[" * 50_000, encoding="utf-8")
     with pytest.raises(ws.ScenarioError):
@@ -870,6 +894,36 @@ def test_non_utf8_and_binary_files_raise_scenario_error(tmp_path: Path) -> None:
         path.write_bytes(payload)
         with pytest.raises(ws.ScenarioError):
             ws.load_scenario(path)
+
+
+def test_invalid_utf8_inside_a_comment_is_refused(tmp_path: Path) -> None:
+    # a lenient decoder would read this file as a valid scenario
+    body = yaml.safe_dump(make_data(4), sort_keys=False).encode("utf-8")
+    path = tmp_path / "s.yaml"
+    path.write_bytes(body + b"# \xff\n")
+    with pytest.raises(ws.ScenarioError, match="UTF-8"):
+        ws.load_scenario(path)
+    path.write_bytes(body + b"# \xc3\xa9\n")  # a valid two-byte character is fine
+    assert len(ws.load_scenario(path).rooms) == 4
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "surprise: 2020-13-45",  # an impossible date fails inside the YAML constructor
+        "surprise: 2020-02-30",
+        "surprise: " + "9" * 5000,  # beyond the integer string limit of Python
+        "surprise: 0x" + "f" * 5000,
+    ],
+    ids=["month", "day", "decimal", "hex"],
+)
+def test_failures_inside_the_yaml_constructor_become_scenario_errors(
+    tmp_path: Path, line: str
+) -> None:
+    path = tmp_path / "s.yaml"
+    path.write_text(yaml.safe_dump(make_data(4), sort_keys=False) + line + "\n")
+    with pytest.raises(ws.ScenarioError):
+        ws.load_scenario(path)
 
 
 def test_control_characters_in_the_text_raise_scenario_error(tmp_path: Path) -> None:
@@ -1100,6 +1154,30 @@ def test_parse_pgm_ascii() -> None:
     assert ws.parse_pgm(b"P2\r\n1 1\r\n255\r\n3\r\n")[0].tolist() == [[3]]
 
 
+def test_parse_pgm_comments_may_end_with_a_carriage_return_only() -> None:
+    pixels, maxval = ws.parse_pgm(
+        b"P5\r# comment\r3 2\r255\r" + bytes([1, 2, 3, 4, 5, 6])
+    )
+    assert pixels.tolist() == [[1, 2, 3], [4, 5, 6]] and maxval == 255
+    pixels, _ = ws.parse_pgm(b"P2\r1 2\r7\r# comment\r3\r4\r")
+    assert pixels.tolist() == [[3], [4]]
+
+
+def test_parse_pgm_messages_say_what_is_wrong() -> None:
+    with pytest.raises(ws.ScenarioError, match="more than"):
+        ws.parse_pgm(b"P2 1 1 255 1 2")
+    with pytest.raises(ws.ScenarioError, match="expected"):
+        ws.parse_pgm(b"P2 2 1 255 1")
+    # twelve digits are a number (too large an image), thirteen are not a number of this format
+    with pytest.raises(ws.ScenarioError, match="cells"):
+        ws.parse_pgm(b"P5 " + b"1" * 12 + b" 1 255\n")
+    with pytest.raises(ws.ScenarioError, match="decimal number"):
+        ws.parse_pgm(b"P5 " + b"1" * 13 + b" 1 255\n")
+    # the byte after maxval must be whitespace: a hash is not
+    with pytest.raises(ws.ScenarioError, match="whitespace"):
+        ws.parse_pgm(b"P5 1 1 255#\x07")
+
+
 BAD_PGM = {
     "empty": b"",
     "magic": b"P6\n1 1\n255\n\x00\x00\x00",
@@ -1223,6 +1301,63 @@ def test_unknown_cells_are_neither_free_nor_occupied() -> None:
     assert not ws.pose_is_occupied(grid, ws.Pose2D(0.5, 0.5, 0))
 
 
+def test_direct_grid_construction_validates_its_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def build(
+        pixels: np.ndarray, maxval: int = 255, **overrides: Any
+    ) -> ws.OccupancyGrid:
+        arguments: dict[str, Any] = {
+            "resolution": 1.0,
+            "origin": (0.0, 0.0),
+            "negate": 0,
+            "free_thresh": 0.25,
+            "occupied_thresh": 0.65,
+        }
+        arguments.update(overrides)
+        return ws.occupancy_grid_from_pixels(pixels, maxval, **arguments)
+
+    ok = np.array([[0, 255]], dtype=np.uint16)
+    assert build(ok).free.shape == (1, 2)
+    with pytest.raises(ws.ScenarioError, match="outside"):
+        build(np.array([[300]], dtype=np.uint16))  # above maxval
+    with pytest.raises(ws.ScenarioError, match="outside"):
+        build(np.array([[-1]], dtype=np.int16))  # below zero
+    with pytest.raises(ws.ScenarioError, match="integers"):
+        build(np.array([[0.5]]))
+    with pytest.raises(ws.ScenarioError, match="2-D"):
+        build(np.array([0, 1], dtype=np.uint16))
+    with pytest.raises(ws.ScenarioError, match="2-D"):
+        build(np.zeros((0, 3), dtype=np.uint16))
+    with pytest.raises(ws.ScenarioError, match="2-D"):
+        build([[0, 1]])  # type: ignore[arg-type]
+    with pytest.raises(ws.ScenarioError, match="below"):
+        build(ok, free_thresh=0.5, occupied_thresh=0.5)
+    with pytest.raises(ws.ScenarioError, match="below"):
+        build(ok, free_thresh=0.6, occupied_thresh=0.5)
+    for bad_negate in (2, -1, 0.5, "0", None):
+        with pytest.raises(ws.ScenarioError, match="negate"):
+            build(ok, negate=bad_negate)
+    assert build(ok, negate=True).occupied.tolist() == [[False, True]]
+    for bad_origin in (
+        (1.0,),
+        (1.0, 2.0, 3.0),
+        5,
+        None,
+        (float("nan"), 0.0),
+        ("a", 0.0),
+    ):
+        with pytest.raises(ws.ScenarioError, match="origin"):
+            build(ok, origin=bad_origin)
+    for bad_maxval in (0, 65536, 1.5, True, None):
+        with pytest.raises(ws.ScenarioError, match="maxval"):
+            build(ok, maxval=bad_maxval)  # type: ignore[arg-type]
+    monkeypatch.setattr(ws, "MAX_GRID_CELLS", 3)
+    assert build(np.zeros((1, 3), dtype=np.uint16)).free.shape == (1, 3)
+    with pytest.raises(ws.ScenarioError, match="limit"):
+        build(np.zeros((2, 2), dtype=np.uint16))
+
+
 def test_the_default_thresholds_of_nav2_treat_gray_205_as_free() -> None:
     # with free_thresh 0.25 a pixel of 205 reads as occupancy 0.196, below the threshold: free
     grid = grid_from(
@@ -1300,6 +1435,28 @@ def test_pose_functions_require_the_types() -> None:
             call(grid, (1.5, 3.5, 0.0))  # type: ignore[arg-type]
         with pytest.raises(ws.ScenarioError):
             call("grid", ws.Pose2D(1.5, 3.5, 0.0))  # type: ignore[arg-type]
+
+
+def test_an_isolated_start_cell_reaches_itself_only() -> None:
+    rows = [
+        [0, 0, 0],
+        [0, 255, 0],
+        [0, 0, 0],
+    ]
+    grid = grid_from(rows)
+    here = ws.Pose2D(1.5, 1.5, 0.0)
+    assert ws.reachable_from(grid, here, [here, ws.Pose2D(0.5, 0.5, 0.0)]) == [
+        True,
+        False,
+    ]
+
+
+def test_grids_compare_by_identity_and_never_raise() -> None:
+    first, second = grid_from(FIVE), grid_from(FIVE)
+    alias = first
+    assert (first == alias) is True
+    assert (first == second) is False  # the arrays are not compared element by element
+    assert (first != second) is True
 
 
 def test_reachable_from_open_ring() -> None:
@@ -1671,8 +1828,22 @@ def test_shipped_scenario_records_the_dry_drive_time() -> None:
 
 
 def test_shipped_scenario_marks_placeholder_slots() -> None:
-    text = SCENARIO_PATH.read_text(encoding="utf-8")
-    assert "PLACEHOLDER" in text and "WS04-T11" in text
+    lines = SCENARIO_PATH.read_text(encoding="utf-8").splitlines()
+    rooms_at = lines.index("rooms:")
+    block: list[str] = []
+    i = rooms_at - 1
+    while i >= 0 and lines[i].startswith("#"):
+        block.append(lines[i])
+        i -= 1
+    text = " ".join(block)
+    assert "PLACEHOLDER" in text and "WS04-T11" in text and "manifest" in text
+    slot_lines = [
+        line
+        for line in lines[rooms_at:]
+        if re.match(r"\s+(patient_id|day_index):", line)
+    ]
+    assert len(slot_lines) == 2 * len(shipped().rooms)
+    assert all("PLACEHOLDER" in line for line in slot_lines)
 
 
 def test_room_poses_in_free_cells_of_map() -> None:
@@ -1708,6 +1879,18 @@ def test_every_door_connected_to_dock_in_free_space() -> None:
     assert ws.reachable_from(grid, scenario.dock, [scenario.unreachable_pose]) == [
         False
     ]
+
+
+def test_algorithmic_bounds_are_the_documented_values() -> None:
+    # a change of a bound is a decision: it has to change this test too
+    assert (ws.MIN_ROOMS, ws.MAX_ROOMS) == (4, 8)  # analisi section 5.2
+    assert ws.MAX_FILE_BYTES == 1_048_576
+    assert ws.MAX_PGM_BYTES == 16_777_216
+    assert ws.MAX_GRID_CELLS == 1_000_000
+    assert ws.MAX_INT_VALUE == 10**12
+    assert ws.MAX_COORD_M == 1.0e6
+    assert ws.MAX_STAGGER_SLOTS == 100_000
+    assert ws.MAX_TIME_ENTRIES == 64
 
 
 def test_door_poses_are_further_apart_than_twice_the_goal_tolerance() -> None:
@@ -1887,6 +2070,17 @@ def test_generator_rejects_room_counts_outside_four_to_eight() -> None:
             gen.build_layout(n)
     for n in (4, 8):
         gen.build_layout(n)
+
+
+def test_generator_refuses_a_layout_that_is_not_aligned_to_the_map_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gen = load_generator()
+    layout = gen.build_layout(6)
+    gen.render_map(layout)  # aligned: fine
+    monkeypatch.setattr(gen, "WALL_CM", 22)
+    with pytest.raises(ValueError, match="aligned"):
+        gen.render_map(gen.build_layout(6))
 
 
 def test_scenario_poses_equal_the_layout_poses() -> None:

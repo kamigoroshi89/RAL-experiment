@@ -1,9 +1,9 @@
 # Ward scenario of the simulation (WS07-T02), read by ralmon_sim.ward_scenario.load_scenario.
 #
 # Number of rooms: 6
-# Dry-drive time dock to farthest door: 29000 ms of simulation time (the longest of the runs listed in the
-# completion note of WS07-T02, 28140 to 29000 ms; the door pose of r05, 12.4 m; TIAGo Pro, Nav2 and the
-# PAL parameters of config/nav2_params.yaml; real-time factor about 1.0)
+# Dry-drive time dock to farthest door: 30910 ms of simulation time (the longest of 3 runs, 28140 to 30910 ms;
+# the door pose of r05, 12.4 m in a straight line; TIAGo Pro, Nav2 and the PAL parameters of
+# config/nav2_params.yaml; real-time factor about 1.0; the runs are in the completion note of WS07-T02)
 #
 # What this file is. The description of the simulated ward: one robot, a corridor with 6 patient rooms,
 # one patient slot per room, staggered care plans and the clock policy of
@@ -108,7 +108,7 @@ time_entries:
 startup_timeout_ms: 180000
 
 # Simulation-clock milliseconds allowed for one NavigateToPose goal. run parameter: the longest leg
-# observed (door or bedside pose, room to room) took 39 s and the dry-drive time above is 29 s; 120 s is
+# observed (door or bedside pose, room to room) took 40 s and the dry-drive time above is 31 s; 120 s is
 # about 4 times the dry-drive time.
 nav_goal_timeout_ms: 120000
 

@@ -46,6 +46,14 @@ host user differs, put `UID=...` and `GID=...` in a `.env` file (listed in `.git
   `ros2/ralmon_sim/test/conftest.py` starts one when `DISPLAY` is not set. The checks of WS07-T01 had
   installed `Xvfb` in a throw-away root container (see `ros2/ralmon_sim/doc/availability.md`,
   Reproduction step 8).
+- Isolation between simulations. Two containers on the same host share the DDS domain unless
+  `ROS_DOMAIN_ID` differs (the compose file defaults to 42): a second simulation next to the first
+  (for example the test run of WS07-T02 while another container still runs) mixes `/clock` and the
+  Nav2 lifecycle nodes of both. Wait for the first container to exit or run with
+  `ROS_DOMAIN_ID=<other number> docker compose --profile ros2 run ...`. On this host
+  `docker kill` and `docker rm -f` of a running container failed with "permission denied"
+  (`docker stop` was not tried); `docker exec <name> kill <pid>` of the command inside worked, and a
+  container ends when its command ends.
 - The capability `NET_ADMIN`: `tc netem` works only in a container started with
   `--cap-add NET_ADMIN` as root; the `ros2` service has neither (WS07-T05 decides).
 - A user entry for the host uid: Gazebo Classic printed `Error getting username: no matching

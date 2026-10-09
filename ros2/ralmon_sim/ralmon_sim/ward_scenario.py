@@ -389,9 +389,8 @@ def _read_limited(path: Path, limit: int, what: str) -> bytes:
         os.close(descriptor)
         raise ScenarioError(f"{what}: {shown} is not a regular file")
     try:
-        with open(
-            descriptor, "rb"
-        ) as handle:  # takes over the descriptor and closes it
+        # open() takes over the descriptor and closes it
+        with open(descriptor, "rb") as handle:
             data = handle.read(limit + 1)
     except (OSError, ValueError) as exc:
         raise ScenarioError(f"{what}: cannot read {shown}") from exc
