@@ -184,8 +184,8 @@ Total estimate: 13.5 person-days.
 
 | id | slug | title | owner | depends_on | crit | nonneg | pd | sources | interfaces | review_items |
 |---|---|---|---|---|---|---|---|---|---|---|
-| WS12-T01 | title-abstract | Title selection and abstract without numbers (commitment letter) | human | WS00-T02 | yes | no | 0.5 | analisi §8.3, §8.4, §9 (0.4, 0.5) | - | - |
-| WS12-T02 | paper-skeleton | Paper skeleton with page budget | human | WS00-T01 | no | no | 1 | analisi §7 | - | - |
+| WS12-T01 | title-abstract | Title selection and abstract without numbers (commitment letter) | human | WS00-T02, WS08-T07, WS09-T05, WS07-T07 | yes | no | 0.5 | analisi §8.3, §8.4, §9 (0.4, 0.5) | - | - |
+| WS12-T02 | paper-skeleton | Paper skeleton with page budget | human | WS00-T01, WS08-T07, WS09-T05, WS07-T07 | no | no | 1 | analisi §7 | - | - |
 | WS12-T03 | intro-contributions | Introduction and contributions rewrite | human | WS01-T08, WS12-T02, WS00-T07 | no | no | 1.5 | analisi §6, §7, §10 (3) | - | R3-W3 |
 | WS12-T04 | methods-sections | Sections III and IV (formulation and methods) | human | WS01-T08, WS02-T05, WS12-T02, WS00-T07 | yes | no | 3 | analisi §4, §7, §8.1 | #template #alert | R2-W8 R2-W9 AE-5 |
 | WS12-T05 | experiments-section | Section V experiments and results | human | WS09-T05, WS08-T07, WS07-T07, WS10-T06 | yes | no | 2.5 | analisi §5, §7 | #metrics | - |

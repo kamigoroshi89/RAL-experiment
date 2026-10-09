@@ -34,3 +34,8 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 ## M1 formalization freeze (WS01-T08, 2026-10-08)
 
 - M1 documents frozen (`docs/formal/README.md`: `FROZEN: yes`, `clinician_review: pending`, ADR-043); the M1 gate of `00-master-plan.md` (contract amendments decided by ADR, `02-interfaces.md` versions agreed) closes when the proposed contract-amending ADRs (ADR-045 to ADR-050 and those listed in `docs/formal/08-consistency-review.md` section 4.2) are decided by gab; open points OPF-1 to OPF-17 in `docs/formal/08-consistency-review.md` section 5.4.
+
+## Paper posticipato in fondo (ADR-056, 2026-10-09)
+
+- Per istruzione di gab, tutta la stesura del paper (WS12) viene per ultima: WS12-T01 e WS12-T02 passano da `ready` a `blocked`, con le nuove dipendenze WS08-T07, WS09-T05 e WS07-T07; T03..T08 seguono per transitività. La demo di laboratorio (WS10-T06) non è nel gate perché tagliabile.
+- M0 si chiude con WS00-T01 e WS00-T02; il testo della lettera di impegno si scrive quando gli organizzatori lo chiedono (nessuna data nota, `WS00-T01.md`): per anticiparlo bastano togliere le tre dipendenze di WS12-T01.

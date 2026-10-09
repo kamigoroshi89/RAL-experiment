@@ -4,6 +4,8 @@ Everything here derives from `docs/source/analisi.md` (cited as "analisi §x"). 
 
 > **Decisions 2026-10-08 (ADR-042, ADR-043).** ROS 2 Humble with Gazebo Classic and Python 3.10 as the floor of `ralmon` (ADR-042). The clinician review WS00-T07 no longer gates M1: the freeze runs with the review pending, parameter values are proposed from the literature in WS01-T09 and checked by gab, and the review becomes a pre-submission item (ADR-043). MIMIC credentialing (WS00-T04) is postponed; no human-participant activity is planned (WS00-T06).
 
+> **Decision 2026-10-09 (ADR-056).** All paper writing (WS12) is postponed to the end: WS12-T01 and WS12-T02 wait for WS08-T07, WS09-T05 and WS07-T07. M0 closes with WS00-T01 and WS00-T02; the commitment-letter text is written when the organisers ask for it. Sections 4 and 6 and the M0 row are updated accordingly.
+
 > **Scope change 2026-10-05 (ADR-037).** The paper (WS12) is written by the human, not by the agent; WS12-T01 to WS12-T08 are `owner: human`. M5 (submission) is a human milestone for its paper part. WS09 (figures and tables) is to be settled when WS08 produces results. Sections 2 to 7 below are otherwise unchanged.
 
 ## 1. Goal
@@ -46,7 +48,7 @@ The plan's task estimates add up to about 201 person-days (about 40 pw) includin
 
 | Id | Milestone | Gate (verifiable) |
 |---|---|---|
-| M0 | Commitment letter ready (analisi §9, weeks 1-2) | WS00-T01, T02 done; title and abstract without numbers written (WS12) |
+| M0 | Commitment letter ready (analisi §9, weeks 1-2) | WS00-T01, T02 done; the title and abstract without numbers (WS12-T01) are written when the organisers ask for the letter (ADR-056) |
 | M1 | Formalization frozen | WS01 done (the freeze WS01-T08 runs with `clinician_review: pending`; the clinician review WS00-T07 is a pre-submission item, ADR-043); contract amendments decided by ADR (ADR-021); `02-interfaces.md` versions agreed |
 | M2 | Core running offline | WS04 generator produces traces with latent ground truth; WS05 monitor emits verdicts and alerts on them; unit and property tests green |
 | M3 | Baselines and main results | WS06 B1-B5 run on the same traces; WS08 main table and A1-A4 produced |
@@ -60,7 +62,7 @@ Dependencies follow analisi §9 literally.
 - Root: WS00-T01 (CFP) → WS00-T02 (scope) → WS01.
 - Chain A (benchmark): WS01 → WS04 → WS06 → WS08 → WS09 → WS12. WS04 also needs PhysioNet credentialing (WS00-T04), which has an external wait, so it starts on day one.
 - Chain B (monitor): WS01 → WS02 → WS05 → WS08 (and → WS07 → WS10).
-- WS03 (related work) and the paper skeleton in WS12 run in parallel from the start.
+- WS03 (related work) runs in parallel from the start; the paper work in WS12 starts after the results (ADR-056).
 - WS04, WS05 and WS07 must run concurrently (analisi §9). This is only possible because `02-interfaces.md` freezes the contracts early: WS04 and WS05 code against the trace schema, template and alert types while WS01 finishes the prose.
 - WS08 is the merge point: it needs WS04, WS05 and WS06 complete.
 - WS10 and WS11 are tails: they improve the paper but do not block WS08.
@@ -85,7 +87,7 @@ These are marked `non_negotiable: true` in task frontmatter (B5, A4, WS01). The 
 3. WS01 first tasks freeze the template table and normalisation; then WS02.
 4. WS05-T01 scaffolding as soon as contracts are frozen; WS04 and WS05 proceed in parallel against the contracts.
 5. WS06 after WS04 traces exist; WS07 after the WS05 core; WS08 when WS04, WS05 and WS06 are done.
-6. WS09 figures, WS10 lab demo, WS11 vignettes; WS12 throughout, final pass last; WS13 at the end.
+6. WS09 figures, WS10 lab demo, WS11 vignettes, WS13 release; WS12 (the paper) starts after WS08-T07, WS09-T05 and WS07-T07 and comes last (ADR-056).
 
 ## 7. Cut order if time is short
 

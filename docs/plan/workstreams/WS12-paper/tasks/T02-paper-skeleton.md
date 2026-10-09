@@ -3,8 +3,8 @@ id: WS12-T02
 title: Paper skeleton with page budget
 workstream: WS12-paper
 owner: human
-status: ready
-depends_on: ["WS00-T01"]
+status: blocked
+depends_on: ["WS00-T01", "WS08-T07", "WS09-T05", "WS07-T07"]
 critical_path: false
 non_negotiable: false
 estimate_pd: 1
@@ -97,3 +97,7 @@ Selected by the loop on 2026-10-02 and SKIPPED (the status stays `ready` because
 ### Scope change (2026-10-05)
 
 The human removed paper writing from the agent's scope (ADR-037): this task is now `owner: human`. The agent does not write, edit or compile any text under `paper/`. Existing blocking notes of this file are moot.
+
+### Postponed to the end (ADR-056, 2026-10-09)
+
+gab asked that all paper writing come last. This task is `blocked` until WS08-T07, WS09-T05 and WS07-T07 are `done`; WS12-T03 and WS12-T04 follow through this task.
