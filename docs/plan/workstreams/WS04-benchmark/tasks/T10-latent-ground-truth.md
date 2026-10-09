@@ -3,7 +3,7 @@ id: WS04-T10
 title: Latent ground-truth labeller (phi_CP on the latent trace) and non-circularity tests
 workstream: WS04-benchmark
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS04-T09", "WS05-T04"]
 critical_path: true
 non_negotiable: false
@@ -139,3 +139,7 @@ Verified on the fixed tree: `pytest tests/benchmark/test_ground_truth.py -q` 286
 ### ADR-055 decision (gab, 2026-10-09)
 
 gab accepted (a) the link rules, (c) the carrier `AssembledDay` and (d) the five phi_CP templates only. (b) per-day labelling with empty history stays open and is decided with ADR-046. Remaining before `done`: an independent re-review of the review fixes (commit `226fab0` and this one) and the merge.
+
+### Post-task review (2026-10-09)
+
+Produced: the latent ground-truth labeller `ralmon.benchmark.labelling` (five phi_CP templates, link table of ADR-055 (a), carrier `AssembledDay`), the independent reference evaluator, 116 test functions (287 collected) and `docs/benchmark/ground-truth.md`. The independent re-review of the fixes (HEAD `a8b5853`, after master was merged in with ADR-035 and ADR-046/053/054/056) returned PASS with no blocker; it re-ran the HEAD tests against the pre-fix labeller (23 failures, all B1, B2, M1 cases) and found no regression. Its three MINOR findings are fixed test-first (`def60bf` red, `9aa65ec` green): the HOLD look-back is measured from the step that contains the reading, as the monitor's guard does (an off-grid reading at 05:59:30 before a 07:00 dispense was unlinked); the docs no longer call ADR-046 proposed; `ground-truth.md` no longer claims that the per-day gaps are left out of scoring, and ADR-055 (a) states the look-back bound. Deviations: the link rules of ADR-055 (a). Dependents: WS04-T15 stays `blocked` (WS05-T10) and WS04-T11 stays `blocked` (WS04-T15); no assumption of theirs changes. Risk: until WS04-T15 is done the truth is per-day (about 7 to 12% of natural events, mostly cross-midnight COUNT and RESP, are missing), so a monitor run with `history` can report violations that this truth lacks; WS08-T01 depends on WS04-T11 and so sees the multi-day truth. The Python 3.10 run was not repeated after the fixes (no 3.11-only construct added).
