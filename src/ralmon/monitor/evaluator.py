@@ -34,6 +34,7 @@ from ralmon.monitor.config import (
     T_DAY_MS,
     MonitorConfigError,
     MonitorInputError,
+    MonitorInvariantError,
 )
 from ralmon.monitor.formula import (
     REFERENCE_FORMULAS,
@@ -204,7 +205,7 @@ class _Evaluator:
             )
         return CountLimitInstance(ctx, self._template, key, 0, anchor, k_a, params)
 
-    @converting(MonitorInputError)
+    @converting(MonitorInputError, MonitorInvariantError)
     def step(self, t_ms: object, values: object) -> float | None:
         t = as_int(t_ms, "t_ms", MonitorInputError)
         if t != self._next * self._step:

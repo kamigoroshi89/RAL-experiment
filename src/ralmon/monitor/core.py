@@ -36,6 +36,7 @@ from ralmon.monitor.config import (
     MonitorConfig,
     MonitorConfigError,
     MonitorInputError,
+    MonitorInvariantError,
     PlanFeasibilityError,
     PlanVersionError,
     check_config,
@@ -545,7 +546,7 @@ class StreamingMonitor:
         mark = ChannelAvailability(channel, available, t_dev, t_rx)
         self._ingest("avail", mark, t_dev, t_rx, None, None, (channel, available))
 
-    @converting(MonitorInputError)
+    @converting(MonitorInputError, MonitorInvariantError)
     def advance(self, t_ms: TimeMs) -> tuple[VerdictRecord, ...]:
         """Finalise the steps up to ``floor((t_ms - D) / T_s)`` and return their records, in step order.
 

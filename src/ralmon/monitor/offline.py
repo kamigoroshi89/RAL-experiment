@@ -26,6 +26,7 @@ from ralmon.monitor.config import (
     MonitorConfig,
     MonitorConfigError,
     MonitorInputError,
+    MonitorInvariantError,
     check_config,
 )
 from ralmon.monitor.core import StreamingMonitor
@@ -44,7 +45,9 @@ from ralmon.spec import (
 __all__ = ["run_offline"]
 
 
-@converting(MonitorInputError, MonitorConfigError, PlanIntegrityError)
+@converting(
+    MonitorInputError, MonitorConfigError, PlanIntegrityError, MonitorInvariantError
+)
 def run_offline(
     day: ObservedTrace,
     plan: CarePlan,
