@@ -34,3 +34,21 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 ## M1 formalization freeze (WS01-T08, 2026-10-08)
 
 - M1 documents frozen (`docs/formal/README.md`: `FROZEN: yes`, `clinician_review: pending`, ADR-043); the M1 gate of `00-master-plan.md` (contract amendments decided by ADR, `02-interfaces.md` versions agreed) closes when the proposed contract-amending ADRs (ADR-045 to ADR-050 and those listed in `docs/formal/08-consistency-review.md` section 4.2) are decided by gab; open points OPF-1 to OPF-17 in `docs/formal/08-consistency-review.md` section 5.4.
+
+## Paper posticipato in fondo (ADR-056, 2026-10-09)
+
+- Per istruzione di gab, tutta la stesura del paper (WS12) viene per ultima: WS12-T01 e WS12-T02 passano da `ready` a `blocked`, con le nuove dipendenze WS08-T07, WS09-T05 e WS07-T07; T03..T08 seguono per transitività. La demo di laboratorio (WS10-T06) non è nel gate perché tagliabile.
+- M0 si chiude con WS00-T01 e WS00-T02; il testo della lettera di impegno si scrive quando gli organizzatori lo chiedono (nessuna data nota, `WS00-T01.md`): per anticiparlo bastano togliere le tre dipendenze di WS12-T01.
+
+## ADR-046 e ADR-053 adottate e applicate (2026-10-09)
+
+- gab ha adottato la storia dei giorni precedenti (ADR-046) e accettato il nucleo del monitor (ADR-053): un solo commit modifica `02-interfaces.md` (`#monitor` 0.2.0, `#time-and-units` 0.1.1, `#trace-schema` 0.1.1, API pubblica 0.2.1) e `__all__` di `ralmon.monitor`. Tempi sempre non negativi: asse continuo di ADR-053 (h), la parte sui tempi negativi di ADR-046 (a) è sostituita.
+- Nuovi task: WS05-T10 (parametro `history` di `run_offline`, `ready`) e WS04-T15 (etichettatura con storia, chiude ADR-055 (b), `blocked`); WS04-T11 dipende anche da WS04-T15. Aperto: il contratto `Detector` non ha la storia (vedi ADR-046).
+
+## ADR-054 decisa (2026-10-09)
+
+- gab ha scelto la strada (b): la disponibilità dei canali del robot viene dai messaggi `NODE_STATE` con `colocated`, e la presenza vale per una sola visita (regola dell'episodio). Nuovo task WS05-T11 (1,5 pd); WS08-T01 ne dipende, così nessun esperimento gira con il testimone cieco. Il costruttore WS04-T11 scrive i messaggi; l'estrattore di WS05-T07 adotta la stessa regola. La chiave del payload segue ADR-035, ancora proposta.
+
+## ADR-035 accettata (2026-10-09)
+
+- gab ha accettato le convenzioni sulle evidenze della traccia con il nuovo membro `EventKind.VERIFICATION`: una verifica fallita al gateway è un evento `verification` (sorgente il gateway, chiavi `verification` e `subject`) e non viaggia più su `DEVICE_ERROR`, che resta un guasto del dispositivo con il solo `error_code`. Un Sample `auth` esiste solo per un dispense verificato. `#trace-schema` passa a 0.2.0 (membro e regole 5-7); aggiornati `ralmon.signals`, il vocabolario e l'iniettore C3 del benchmark, il confronto dei confondenti e `docs/models/evidence-channels.md` (EC-GAP-4 chiuso). Note di passaggio in WS07-T03 (manca la riga `verification` nella mappatura dei messaggi) e WS10-T02.

@@ -80,8 +80,9 @@ def test_event_kind_values_match_contract() -> None:
         ("NODE_STATE", "node_state"),
         ("ROBOT_TASK", "robot_task"),
         ("DEVICE_ERROR", "device_error"),
+        ("VERIFICATION", "verification"),
     ]
-    assert len(expected) == 8
+    assert len(expected) == 9
     assert [(m.name, m.value) for m in EventKind] == expected
     assert _contract_members("EventKind") == expected
 

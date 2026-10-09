@@ -277,6 +277,7 @@ def test_dataclass_fields_match_contract() -> None:
         "NODE_STATE",
         "ROBOT_TASK",
         "DEVICE_ERROR",
+        "VERIFICATION",
     ]
 
 

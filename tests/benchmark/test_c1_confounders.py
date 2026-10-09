@@ -1991,7 +1991,7 @@ def test_compare_observed_names_each_discriminating_field() -> None:
             day_of(
                 events=[
                     E(
-                        EventKind.DEVICE_ERROR,
+                        EventKind.VERIFICATION,
                         DOSE,
                         "gateway",
                         {"verification": "failed", "subject": "dispenser"},

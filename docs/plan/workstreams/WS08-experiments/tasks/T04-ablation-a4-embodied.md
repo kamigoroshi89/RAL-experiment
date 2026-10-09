@@ -96,3 +96,7 @@ The A4 results and the dispense-forgery detection depend on ADR-054 (proposed): 
 ### Hand-over (worker, 2026-10-09, from the WS05-T04 review, round 2)
 
 Correction of the gate in the hand-over above: it said to require `presence_level_older_than_window_steps == 0`, which cannot be met on a correct trace (the generator's visit lasts longer than `int_window`). Gate on `run_offline_detailed(...).stats.presence_samples_without_availability_marks == 0` (non-zero exactly when presence samples were used and no availability mark for `presence` ever arrived) and report it; `presence_level_older_than_window_steps` is information only.
+
+### ADR-054 decided (gab, 2026-10-09)
+
+Option (b) is chosen; WS08-T01 depends on WS05-T11, so the runner exists only once the reports drive the witness. The A4 mask (the robot channel removed) is the same `NODE_STATE colocated` mask. Gate on `presence_samples_without_availability_marks == 0` and report it per day.

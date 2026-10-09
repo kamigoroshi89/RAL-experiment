@@ -3,8 +3,8 @@ id: WS12-T01
 title: Title selection and abstract without numbers (commitment letter)
 workstream: WS12-paper
 owner: human
-status: ready
-depends_on: ["WS00-T02"]
+status: blocked
+depends_on: ["WS00-T02", "WS08-T07", "WS09-T05", "WS07-T07"]
 critical_path: true
 non_negotiable: false
 estimate_pd: 0.5
@@ -87,3 +87,7 @@ Selected by the loop on 2026-10-02 and SKIPPED (the status stays `ready` because
 ### Scope change (2026-10-05)
 
 The human removed paper writing from the agent's scope (ADR-037): this task is now `owner: human`. The agent does not write, edit or compile any text under `paper/`. Existing blocking notes of this file are moot.
+
+### Postponed to the end (ADR-056, 2026-10-09)
+
+gab asked that all paper writing come last. This task is `blocked` until WS08-T07, WS09-T05 and WS07-T07 are `done`. If the organisers ask for the commitment letter earlier (`outputs/WS00-T01.md`, section `## Commitment letter content`; no date is known), remove the three added dependencies here and in `docs/plan/workstreams/INDEX.md`, set `status: ready`, and run `python3 tools/check_plan.py`.

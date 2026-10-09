@@ -1,14 +1,11 @@
 """ralmon.monitor: public API (see 02-interfaces.md#package-public-api).
 
-``__all__`` is the ``ralmon.monitor`` row of the contract table. The names below it are importable from
-this package root so that other packages respect the rule of importing package roots only, and they stay
-outside ``__all__`` (as WS05-T03 did for the extras of ``ralmon.spec``) until ADR-053 puts them in the
-contract table: the named errors ``MonitorInputError``, ``PlanFeasibilityError`` and
-``MonitorInvariantError``; the report types ``MonitorStats``, ``RejectedInput`` and
-``ChannelAvailability``; ``run_offline_detailed`` and its ``OfflineResult`` (the records of
-``run_offline`` plus the late and rejected inputs and the counters of the run); and
-``resolve_subformula_path`` and ``resolve_subformula_paths``, which the attribution layer uses to turn the
-``subformula_path`` of a record (several parts joined by ``;``) into the text of the sub-formulas.
+``__all__`` is the ``ralmon.monitor`` row of the contract table (Package public API 0.2.1). The named errors
+``MonitorInputError``, ``PlanFeasibilityError`` and ``MonitorInvariantError``, the report types
+``MonitorStats``, ``RejectedInput`` and ``ChannelAvailability``, ``run_offline_detailed`` with its
+``OfflineResult`` (the records of ``run_offline`` plus the late and rejected inputs and the counters of the
+run) and ``resolve_subformula_path`` / ``resolve_subformula_paths`` (the text of the sub-formulas that a
+``subformula_path`` of a record names, several parts joined by ``;``) joined the table with ADR-053.
 
 ``build_calibration_episodes`` and ``StaleCalibratorError`` stay placeholders owned by WS05-T08.
 """
@@ -72,13 +69,20 @@ from ralmon.monitor.verdict import (
 )
 
 __all__ = [
+    "ChannelAvailability",
     "Forecast",
     "Forecaster",
     "Monitor",
     "MonitorConfig",
     "MonitorConfigError",
+    "MonitorInputError",
+    "MonitorInvariantError",
+    "MonitorStats",
+    "OfflineResult",
+    "PlanFeasibilityError",
     "PlanVersionError",
     "PointEvaluator",
+    "RejectedInput",
     "Rho",
     "RhoKind",
     "RobustnessInterval",
@@ -88,5 +92,8 @@ __all__ = [
     "VerdictState",
     "build_calibration_episodes",
     "make_point_evaluator",
+    "resolve_subformula_path",
+    "resolve_subformula_paths",
     "run_offline",
+    "run_offline_detailed",
 ]

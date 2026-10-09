@@ -37,10 +37,10 @@ Shared contracts between workstreams. Sources: analisi §4 (technical design), �
 
 ## Time and units
 
-Version 0.1.0. Owner WS05. Consumers: all. Sources: analisi §4.1 (sampling semantics), §4.9 item 2 (time semantics).
+Version 0.1.1 (ADR-046, ADR-053 (h): the continuing axis). Owner WS05. Consumers: all. Sources: analisi §4.1 (sampling semantics), §4.9 item 2 (time semantics).
 
 ```python
-TimeMs = int      # milliseconds since the start of the patient-day trace (ADR-017)
+TimeMs = int      # milliseconds on the continuing axis of the patient: the day with index d starts at d * 86,400,000 (ADR-017, ADR-053 (h)); never negative; a verdict or alert time can exceed the end of its day
 DurationMs = int
 
 MS_PER_SECOND: int = 1_000
@@ -57,10 +57,11 @@ Rules:
 2. Point events with an exact window `O[W,W]` are evaluated as `O[W, W+T_s]` (analisi §4.1 item 5).
 3. Two clocks exist per sample: `t_device_ms` (device timestamp) and `t_rx_ms` (receive time). Verdict latency is measured against `t_device_ms` after reordering with a bounded reorder buffer (maximum delay declared in the monitor configuration).
 4. Normalised robustness is dimensionless; raw robustness carries the unit declared in the template (`RobustnessUnit`).
+5. The days of one patient are written on one continuing axis, `day_index * T_day + clock time` (WS04-T06); day 0 is the per-day axis. `run_offline` runs the day `day_index` from the step `day_index * K` on that axis and replays the earlier days of `history` first (ADR-046). An input stamped before the first step of the run is reported as finalised, not swallowed.
 
 ## Trace schema
 
-Version 0.1.0. Owner WS04. Consumers: WS05, WS06, WS07, WS08, WS10. Sources: analisi §5.1 (trace generator, ground truth), §4.1 (signals), §4.5 (evidence).
+Version 0.2.0 (ADR-035: the member `EventKind.VERIFICATION` and the evidence conventions; 0.1.1 was ADR-046, text on times beyond the day). Owner WS04. Consumers: WS05, WS06, WS07, WS08, WS10. Sources: analisi §5.1 (trace generator, ground truth), §4.1 (signals), §4.5 (evidence).
 
 A patient-day is represented twice: the **latent trace** (noise-free, fault-free, attack-free) used only to compute ground truth, and the **observed trace** that the monitor and every baseline see.
 
@@ -74,6 +75,7 @@ class EventKind(str, Enum):
     NODE_STATE = "node_state"          # lifecycle or liveliness change of a device or robot node
     ROBOT_TASK = "robot_task"          # navigation or manipulation task outcome
     DEVICE_ERROR = "device_error"      # error code from a device (e.g. cuff)
+    VERIFICATION = "verification"      # a message failed the gateway verification (ADR-035); payload verification, subject
 
 @dataclass(frozen=True, slots=True)
 class Sample:
@@ -137,6 +139,10 @@ Rules:
 1. **Ground truth definition** (analisi §5.1): a true C1 is a violation of φ_CP evaluated on the *latent* trace. True C2 and C3 are the injected events. The monitor never receives `LatentDay` or `ground_truth`.
 2. Every split is by patient: `patient_id` belongs to exactly one of train, calibration or test (analisi §5.1, §4.4).
 3. Files on disk: one directory per benchmark version, `days/<patient_id>/<day_index>.json` (or Parquet, chosen by WS04-T01 and recorded as an ADR), plus a `manifest.json` with generator git revision, seeds and prior source provenance.
+4. The times of `samples` and `events` of an `ObservedDay` are on the continuing axis of the patient (`#time-and-units`). The time of a verdict or of an alert can exceed the end of the day for an instance anchored in it and decided after it (a RESP window across midnight); with a `history` an instance anchored in an earlier day can be decided in this day, and its onset then lies before the first step of the day (ADR-046). A `GroundTruthEvent` belongs to the day in which the monitor decides it.
+5. **Evidence conventions** (ADR-035). The table "Trace evidence conventions" of `docs/models/evidence-channels.md` is binding for the `payload` keys of `NODE_STATE`, `ROBOT_TASK`, `DEVICE_ERROR`, `VERIFICATION` and `DISPENSE`; a key enters a trace only if the table declares it. A message that fails the gateway verification stays in the trace (policy "flag") and the gateway logs a `VERIFICATION` event (`source` the gateway, `payload` `verification` = `failed` and `subject` = the device); a `DEVICE_ERROR` is a fault report of a device and carries only `error_code`.
+6. **`auth`** (ADR-035). The gateway delivers an `auth` Sample only for a dispense message whose verification passed, and a source that cannot verify does not emit `auth`, so an injector without keys cannot satisfy INT through it.
+7. **Robot-channel availability** (ADR-035, ADR-054). The availability of `presence` and `intake` is derived from the robot `NODE_STATE` events (`state`, `colocated`); no field is added to `ObservedDay`.
 
 ## PriorSource
 
@@ -435,7 +441,7 @@ Rules (analisi §4.4):
 
 ## Monitor
 
-Version 0.1.0. Owner WS05. Consumers: WS06, WS07, WS08. Sources: analisi §4.7 (online monitoring), §4.1 (samples), §4.9 items 1 and 2.
+Version 0.2.0 (ADR-053, ADR-046). Owner WS05. Consumers: WS06, WS07, WS08. Sources: analisi §4.7 (online monitoring), §4.1 (samples), §4.9 items 1 and 2.
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -455,10 +461,14 @@ class Monitor(Protocol):
     def verdict_latency_bound_ms(self, template: TemplateId) -> DurationMs: ...
 
 def run_offline(day: ObservedDay, plan: CarePlan, config: MonitorConfig, calibrator: ConformalCalibrator | None,
-                forecaster: Forecaster | None) -> Sequence[VerdictRecord]: ...
+                forecaster: Forecaster | None, *, registry: ParameterRegistry | None = None,
+                templates: Sequence[Template] | None = None, verifier: PlanVerifier | None = None,
+                history: Sequence[ObservedDay] = ()) -> Sequence[VerdictRecord]: ...
 ```
 
 Rules: `advance` is causal (no look-ahead); processing cost per sample is O(number of active template instances) and the bound is reported. The monitor separates verdicts from attribution: it emits `VerdictRecord`s; the `Attribution` step turns violated records into alerts.
+
+Rules of 0.2.0 (ADR-053, ADR-046). (1) `registry` defaults to `load_registry(step_ms=config.step_ms)`, `templates` to `load_templates(registry=registry)`; a signed plan without a `verifier` raises `PlanIntegrityError`; a caller that passes the five positional arguments keeps working. (2) `history` holds the accepted observed days that precede `day` for the same patient, in order of day index, on the continuing axis (`#time-and-units`); they are replayed first and the verdicts of the steps before the first step of `day` are not returned. The history needed is `H = max(T_day, largest window parameter)`. With an empty `history` the run starts with empty state: a counter over 24 h can only under-count, so a VIOLATED verdict stays sound and a SATISFIED one can be wrong. (3) `StreamingMonitor` offers, outside the `Monitor` protocol, `push_availability(signal, available, t_device_ms, t_rx_ms)` (the availability of the robot channels `presence` and `intake`, ordered with the inputs and late by the same rule), `late_inputs()`, `rejected_inputs()`, `stats()` and `close()`; `run_offline_detailed(...)` takes the same arguments as `run_offline` and returns an `OfflineResult` (the records plus those diagnostics). (4) `make_point_evaluator(template, instance, registry, step_ms, *, anchor_kind=None) -> PointEvaluator` is the entry point of the baselines B3 and B5; `PointEvaluator.step(t_ms, values) -> float | None` returns the raw robustness at the decision step and `None` before it (ADR-053 (c) has the details).
 
 ## Alert
 
@@ -669,7 +679,7 @@ QoS: liveliness and deadline QoS on `/ralmon/heartbeat` and `/ralmon/samples`; t
 
 ## Package public API
 
-Version 0.2.0. Owner WS05. Consumers: all. Sources: analisi §9 item 5, `01-conventions.md` section 1. History: 0.1.1 (ADR-021, editorial additions of missing public names); 0.2.0 (ADR-024, API reconciliation: names that the contracts of WS05-T02 to WS05-T08 use; no signature changes).
+Version 0.2.1. Owner WS05. Consumers: all. Sources: analisi §9 item 5, `01-conventions.md` section 1. History: 0.1.1 (ADR-021, editorial additions of missing public names); 0.2.0 (ADR-024, API reconciliation: names that the contracts of WS05-T02 to WS05-T08 use; no signature changes); 0.2.1 (ADR-053 (d), the named errors, report types and extra entry points of `ralmon.monitor`).
 
 Consumers import only these names, from the package root.
 
@@ -677,7 +687,7 @@ Consumers import only these names, from the package root.
 |---|---|
 | `ralmon.signals` | `SignalId`, `Sample`, `Event`, `EventKind`, `DerivedSignal`, `hold_last`, `minutes`, `hours`, `TimeMs`, `DurationMs`, `MS_PER_SECOND`, `MS_PER_MINUTE`, `MS_PER_HOUR`, `ObservedTrace`, `default_derived_signals`, `event_to_sample`, `impulses_on_grid` |
 | `ralmon.spec` | `Template`, `TemplateId`, `TemplateKind`, `TemplateInstance`, `CarePlan`, `RobustnessUnit`, `ParameterRegistry`, `RegistryEntry`, `PhysioBounds`, `normalise`, `rank_alerts`, `load_registry`, `load_templates`, `Rho`, `RhoKind`, `PlanVerifier`, `HmacSha256PlanVerifier`, `PlanIntegrityError`, `verify_plan` |
-| `ralmon.monitor` | `Monitor`, `MonitorConfig`, `VerdictRecord`, `VerdictState`, `RobustnessInterval`, `Rho`, `RhoKind`, `run_offline`, `Forecaster`, `Forecast`, `StreamingMonitor`, `PointEvaluator`, `make_point_evaluator`, `MonitorConfigError`, `PlanVersionError`, `build_calibration_episodes`, `StaleCalibratorError` |
+| `ralmon.monitor` | `Monitor`, `MonitorConfig`, `VerdictRecord`, `VerdictState`, `RobustnessInterval`, `Rho`, `RhoKind`, `run_offline`, `Forecaster`, `Forecast`, `StreamingMonitor`, `PointEvaluator`, `make_point_evaluator`, `MonitorConfigError`, `PlanVersionError`, `PlanFeasibilityError`, `MonitorInputError`, `MonitorInvariantError`, `MonitorStats`, `RejectedInput`, `ChannelAvailability`, `OfflineResult`, `run_offline_detailed`, `resolve_subformula_path`, `resolve_subformula_paths`, `build_calibration_episodes`, `StaleCalibratorError` |
 | `ralmon.conformal` | `ConformalCalibrator`, `CalibrationEpisode`, `PredictedViolation`, `AlphaAllocation`, `SplitConformal`, `AdaptiveConformal`, `BonferroniAllocation` |
 | `ralmon.attribution` | `EvidenceVector` (and its parts), `AttributionRule`, `Attributor`, `AttributedCause`, `Alert`, `Explanation`, `Detection`, `HierarchicalRule`, `RuleAttributor`, `EvidenceExtractor`, `extract_evidence` |
 | `ralmon.benchmark` | `PriorSource`, `LiteraturePriorSource`, `PatientParams`, `AdherenceParams`, `DeviceErrorModel`, `ParamProvenance`, `BenchmarkDay`, `ObservedDay`, `LatentDay`, `GroundTruthEvent`, `InjectedClass`, `generate_benchmark`, `load_benchmark` |

@@ -35,8 +35,8 @@ order of the contract: the attack-to-evidence table and the table TX-9 of the th
 path under its own condition (the union of raised and conditional paths, as for C2). Whether a
 device authenticates is a deployment property per device (``InjectionContext.authenticating_devices``,
 hypothesis H-DEP and TM-OP-8): a forged or rewritten message of such a device leaves one failed
-verification, a ``DEVICE_ERROR`` event of the source ``gateway`` (``verification`` ``failed``,
-``subject`` the device: the interim convention of ``docs/models/evidence-channels.md``, gap G-4,
+verification, a ``VERIFICATION`` event of the source ``gateway`` (``verification`` ``failed``,
+``subject`` the device: ADR-035 and the conventions of ``docs/models/evidence-channels.md``,
 policy "flag"); a verbatim copy has a valid tag and leaves none; a device that does not
 authenticate leaves none (the field is ``None``, never a negative). A record whose signature is
 empty carries ``details["expected_undetectable"]`` True: the informed attacker that is coherent on
@@ -404,7 +404,7 @@ def _gateway_failure(device: str, t: int) -> Event:
         vocab.KEY_VERIFICATION: vocab.VERIFICATION_FAILED,
         vocab.KEY_SUBJECT: device,
     }
-    return Event(EventKind.DEVICE_ERROR, t, t, vocab.SOURCE_GATEWAY, payload, None)
+    return Event(EventKind.VERIFICATION, t, t, vocab.SOURCE_GATEWAY, payload, None)
 
 
 def _seq_in_range(value: int) -> int:

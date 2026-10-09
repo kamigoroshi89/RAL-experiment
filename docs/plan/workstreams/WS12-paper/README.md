@@ -11,7 +11,7 @@ The paper is a **pre-clinical technical validation**: semi-synthetic benchmark, 
 - use the claim wording of analisi §4.8 and the binding glossary of `docs/plan/01-conventions.md` section 7;
 - take every number from `outputs/` through scripts (`01-conventions.md` section 9), never typed by hand.
 
-Effort: 13.0 person-days (analisi §9 item 12 "Scrittura, review interna in ruolo avvocato del diavolo", plus items 0.4 title and 0.5 abstract, placed here by ADR-014). Task T01 is on the M0 critical path; T04, T05, T06, T07 and T08 are on the M5 critical path.
+Effort: 13.0 person-days (analisi §9 item 12 "Scrittura, review interna in ruolo avvocato del diavolo", plus items 0.4 title and 0.5 abstract, placed here by ADR-014). The whole workstream starts last (ADR-056, 2026-10-09): T01 and T02 wait for WS08-T07, WS09-T05 and WS07-T07, and T01 is pulled forward only if the organisers ask for the commitment letter. T04, T05, T06, T07 and T08 are on the M5 critical path.
 
 ## Inputs
 
@@ -178,8 +178,8 @@ Each item is checkable by command or by inspecting a named file.
 
 | id | title | owner | status | depends_on |
 |---|---|---|---|---|
-| WS12-T01 | Title selection and abstract without numbers (commitment letter) | agent | blocked | WS00-T02 |
-| WS12-T02 | Paper skeleton with page budget | agent | blocked | WS00-T01 |
+| WS12-T01 | Title selection and abstract without numbers (commitment letter) | agent | blocked | WS00-T02, WS08-T07, WS09-T05, WS07-T07 |
+| WS12-T02 | Paper skeleton with page budget | agent | blocked | WS00-T01, WS08-T07, WS09-T05, WS07-T07 |
 | WS12-T03 | Introduction and contributions rewrite | agent | blocked | WS01-T08, WS12-T02, WS00-T07 |
 | WS12-T04 | Sections III and IV (formulation and methods) | agent | blocked | WS01-T08, WS02-T05, WS12-T02, WS00-T07 |
 | WS12-T05 | Section V experiments and results | agent | blocked | WS09-T05, WS08-T07, WS07-T07, WS10-T06 |
