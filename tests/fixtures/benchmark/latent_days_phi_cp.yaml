@@ -1,0 +1,177 @@
+# Hand-written latent days with hand-computed phi_CP ground truth (WS04-T10).
+#
+# FIXTURE-ONLY. Every number is arithmetic against the fixture registry F0 (tests/fixtures/spec/registry_f0.yaml,
+# ADR-027): band [110, 140], hold threshold 100 with a look-back of 60 min, dose limit 2 and day-end minimum 2,
+# delta1 60 min, delta2 180 min, delta_resp 10, sched_window 30 min, lower pressure bound 50, step 60 s.
+# None of it is a clinical value and none is a statement about any patient.
+#
+# Format of a case. The latent pressure is a piecewise constant function of the clock time on the 1-minute grid:
+# `bp_default`, overridden by the half-open intervals of `bp_segments` ([from, to, value], clock "HH:MM", "24:00"
+# is the end of the day). `measurements` are the instants of the ideal MEASUREMENT events (their value is the
+# pressure at that instant), `dispenses` the DISPENSE events (an INTAKE follows 5 s later), `sched_ticks` the
+# anchors of the SCHED instances of the plan and `count_end` whether the plan has the day-end COUNT obligation.
+# `expected` lists the C1 events that the specification gives on this latent day, with the hand calculation in
+# `why`: the template, the onset and the end (a clock time or null) and the subtype (no injection record, no
+# behaviour log: every event is natural). A case is run on day 0 and on day 1 and 3 of the continuing axis
+# (every time shifted by `day_index * 24 h`).
+
+cases:
+  - id: GT-01-null-day
+    why: >
+      Two doses with a measurement before and after each, every reading in band, a drop of 12 at both response
+      windows: 130 - 118 = 12 >= 10. The post-dose reading of the second dose is at 22:30, inside [22:00, 24:00],
+      whose end 21:00 + 180 min = 24:00 is the closing step. The four SCHED ticks coincide with their readings.
+      The two doses meet the day-end minimum 2. Nothing is violated.
+    bp_default: 130.0
+    bp_segments: [["08:00", "12:00", 118.0], ["22:00", "24:00", 118.0]]
+    measurements: ["06:50", "09:00", "20:30", "22:30"]
+    dispenses: ["07:00", "21:00"]
+    sched_ticks: ["06:50", "09:00", "20:30", "22:30"]
+    count_end: true
+    expected: []
+
+  - id: GT-02-band-edges
+    why: >
+      No dose. Readings 139 (inside), 140 (the upper limit: sigma = 0, a tie, satisfied), 141 (sigma = 140 - 141 = -1,
+      violated), 110 (the lower limit, a tie) and 109 (sigma = 109 - 110 = -1, violated). Every tick has its reading.
+    bp_default: 139.0
+    bp_segments: [["12:00", "16:00", 140.0], ["16:00", "20:00", 141.0], ["20:00", "23:00", 110.0], ["23:00", "24:00", 109.0]]
+    measurements: ["08:00", "12:00", "16:00", "20:00", "23:00"]
+    dispenses: []
+    sched_ticks: ["08:00", "12:00", "16:00", "20:00", "23:00"]
+    count_end: false
+    expected:
+      - {template: range, onset: "16:00", end: null}
+      - {template: range, onset: "23:00", end: null}
+
+  - id: GT-03-hold-tie-and-guard
+    why: >
+      Reading 100 at 06:00 (RANGE: min(100 - 110, 140 - 100) = -10, violated). Dose at 06:30: the look-back
+      [05:30, 06:30] holds the reading and 100 - 100 = 0 is a tie, satisfied. Dose at 09:00: the last reading is
+      3 h old, no measurement in [08:00, 09:00], the guard fails: HOLD violated at 09:00. RESP of the dose at 06:30:
+      window [07:30, 09:30] holds no measurement, violated (end 09:30); RESP of the dose at 09:00: window [10:00, 12:00]
+      holds none, violated (end 12:00). The two doses meet the day-end minimum.
+    bp_default: 100.0
+    bp_segments: []
+    measurements: ["06:00"]
+    dispenses: ["06:30", "09:00"]
+    sched_ticks: []
+    count_end: true
+    expected:
+      - {template: range, onset: "06:00", end: null}
+      - {template: resp, onset: "06:30", end: "09:30"}
+      - {template: hold, onset: "09:00", end: null}
+      - {template: resp, onset: "09:00", end: "12:00"}
+
+  - id: GT-04-count-limit-third-dispense
+    why: >
+      The null day plus a dispense at 07:05. The trailing 24 h count is 1 at 07:00, 2 at 07:05 (the limit, a tie) and
+      3 at 21:00: 2 - 3 = -1, COUNT violated at 21:00. Every other instance is satisfied (the readings before and after
+      each dose are those of the null day; the day-end count is 3 >= 2).
+    bp_default: 130.0
+    bp_segments: [["08:00", "12:00", 118.0], ["22:00", "24:00", 118.0]]
+    measurements: ["06:50", "09:00", "20:30", "22:30"]
+    dispenses: ["07:00", "07:05", "21:00"]
+    sched_ticks: ["06:50", "09:00", "20:30", "22:30"]
+    count_end: true
+    expected:
+      - {template: count, onset: "21:00", end: null}
+
+  - id: GT-05-sched-deadline
+    why: >
+      No dose, readings 130 (in band). Tick 09:00 with a reading at 09:30, on the deadline: slack 0, satisfied. Tick 12:00
+      with its only reading at 12:31, one minute late: no measurement in [12:00, 12:30], violated at 12:30. Tick 15:00 with
+      no reading in its window: violated at 15:30. Tick 18:00 with a reading at 17:59, before the tick (it does not
+      count): violated at 18:30.
+    bp_default: 130.0
+    bp_segments: []
+    measurements: ["09:30", "12:31", "17:59"]
+    dispenses: []
+    sched_ticks: ["09:00", "12:00", "15:00", "18:00"]
+    count_end: false
+    expected:
+      - {template: sched, onset: "12:00", end: "12:30"}
+      - {template: sched, onset: "15:00", end: "15:30"}
+      - {template: sched, onset: "18:00", end: "18:30"}
+
+  - id: GT-06-resp-window-and-max
+    why: >
+      Dose 07:00 with pre-dose reading 130 (06:50). Readings 07:30 (100, before the window [08:00, 10:00], ignored
+      by RESP but RANGE-violated: min(100 - 110, 140 - 100) = -10), 08:30 (125: margin 130 - 125 - 10 = -5) and
+      09:30 (121: margin 130 - 121 - 10 = -1). The maximum is -1 < 0: RESP violated at 10:00 (onset 07:00, end 10:00).
+      Dose 21:00 with pre-dose reading 130 (20:30) and one reading at 22:00, the first step of its window, of 120:
+      margin 0, a tie, satisfied at the closing step. The two doses meet the day-end minimum.
+    bp_default: 130.0
+    bp_segments: [["07:30", "08:00", 100.0], ["08:00", "09:00", 125.0], ["09:00", "20:00", 121.0], ["22:00", "24:00", 120.0]]
+    measurements: ["06:50", "07:30", "08:30", "09:30", "20:30", "22:00"]
+    dispenses: ["07:00", "21:00"]
+    sched_ticks: []
+    count_end: true
+    expected:
+      - {template: range, onset: "07:30", end: null}
+      - {template: resp, onset: "07:00", end: "10:00"}
+
+  - id: GT-07-resp-undefined-pre-and-early-bound
+    why: >
+      Dose 07:00 with no earlier reading: HOLD has no measurement in [06:00, 07:00], guard failed, violated. Its pre-dose
+      value is undefined, a reading at 09:00 (100) lies in the window, so RESP stays undecided (no event); that reading
+      is RANGE-violated (-10). Dose 21:00 after a reading of 55 at 20:30 (RANGE: 55 - 110 = -55, violated): HOLD
+      55 - 100 = -45 violated; RESP: 55 - 50 - 10 = -5 < 0, no pressure of [50, 250] can give the response, violated at
+      the anchor (onset 21:00, end 24:00). The two doses meet the day-end minimum.
+    bp_default: 100.0
+    bp_segments: [["20:30", "24:00", 55.0]]
+    measurements: ["09:00", "20:30"]
+    dispenses: ["07:00", "21:00"]
+    sched_ticks: []
+    count_end: true
+    expected:
+      - {template: hold, onset: "07:00", end: null}
+      - {template: range, onset: "09:00", end: null}
+      - {template: range, onset: "20:30", end: null}
+      - {template: hold, onset: "21:00", end: null}
+      - {template: resp, onset: "21:00", end: "24:00"}
+
+  - id: GT-08-open-at-the-end-of-the-day
+    why: >
+      One dose at 22:00 after a reading of 130 at 21:30 and no later reading. The response window ends at 25:00, after
+      the closing step: the instance is open at the end of the day (not decided, not a violation, 05 section 7.5 item 2).
+      The tick at 23:45 has its deadline at 24:15, also open. The single dose is below the day-end minimum 2: COUNT
+      violated at the closing step (onset = end = 24:00).
+    bp_default: 130.0
+    bp_segments: []
+    measurements: ["21:30"]
+    dispenses: ["22:00"]
+    sched_ticks: ["23:45"]
+    count_end: true
+    expected:
+      - {template: count, onset: "24:00", end: "24:00"}
+
+  - id: GT-09-no-dose-day
+    why: >
+      No dispense: the day-end count is 0 and the minimum is 2, sigma = 0 - 2 = -2, violated at the closing step.
+    bp_default: 130.0
+    bp_segments: []
+    measurements: ["12:00"]
+    dispenses: []
+    sched_ticks: ["12:00"]
+    count_end: true
+    expected:
+      - {template: count, onset: "24:00", end: "24:00"}
+
+  - id: GT-10-dispense-at-the-day-start
+    why: >
+      A dispense at exactly 00:00 belongs to the previous day by the day boundary (the day covers (0, T_day]): it counts
+      in the trailing counter but not in the dispenses of the day. Dispenses 00:00 and 12:00: today = 1 < 2, COUNT
+      violated at the closing step. The dose at 00:00 has no reading in its look-back (HOLD guard failed, violated) and
+      none in its window [01:00, 03:00] (RESP violated, end 03:00). The dose at 12:00 has the reading 130 at 11:30 and
+      118 at 14:00 (drop 12, window [13:00, 15:00]): satisfied.
+    bp_default: 130.0
+    bp_segments: [["13:00", "15:00", 118.0]]
+    measurements: ["11:30", "14:00"]
+    dispenses: ["00:00", "12:00"]
+    sched_ticks: []
+    count_end: true
+    expected:
+      - {template: hold, onset: "00:00", end: null}
+      - {template: resp, onset: "00:00", end: "03:00"}
+      - {template: count, onset: "24:00", end: "24:00"}
