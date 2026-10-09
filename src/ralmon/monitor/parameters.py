@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
-from ralmon.monitor._text import as_number, describe, show
+from ralmon.monitor._text import as_number, converting, describe, show
 from ralmon.monitor.config import MonitorConfigError, PlanFeasibilityError
 from ralmon.spec import RegistryError, Template, as_duration_ms
 
@@ -37,6 +37,7 @@ WINDOW_PARAMS: Final = (
 )
 
 
+@converting(MonitorConfigError)
 def check_registry(registry: object) -> None:
     for name in ("get", "bounds", "version"):
         if not callable(getattr(registry, name, None)):
@@ -45,6 +46,7 @@ def check_registry(registry: object) -> None:
             )
 
 
+@converting(MonitorConfigError)
 def read_value(registry: Any, name: str) -> float:
     """The value of a registry entry; an unset or unknown name is an error that names it."""
     try:
@@ -59,6 +61,7 @@ def read_value(registry: Any, name: str) -> float:
     )
 
 
+@converting(MonitorConfigError)
 def optional_value(registry: Any, name: str, *, low: float | None) -> float | None:
     """A registry value that switches a feature off when it is unset or absent (the caller says so)."""
     try:
@@ -75,6 +78,7 @@ def optional_value(registry: Any, name: str, *, low: float | None) -> float | No
     return value
 
 
+@converting(MonitorConfigError)
 def read_latency(registry: Any, template: Template) -> int:
     """``max_latency_<id>`` in ms (a derived name: it needs the registry loaded with ``step_ms``)."""
     name = template.max_verdict_latency_param
@@ -87,6 +91,7 @@ def read_latency(registry: Any, template: Template) -> int:
         ) from exc
 
 
+@converting(MonitorConfigError)
 def read_bounds(registry: Any) -> tuple[float, float]:
     """The physiological bounds of ``bp`` (analisi §4.7 step 2): ``lower < upper``, both finite."""
     try:
@@ -108,6 +113,7 @@ def read_bounds(registry: Any) -> tuple[float, float]:
     return lower, upper
 
 
+@converting(MonitorConfigError)
 def read_overrides(registry: Any) -> list[tuple[str, float, float]]:
     """The approved ranges ``(name, min, max)`` of per-patient values; none if the registry has none."""
     getter = getattr(registry, "overrides", None)
@@ -125,6 +131,7 @@ def read_overrides(registry: Any) -> list[tuple[str, float, float]]:
     return out
 
 
+@converting(MonitorConfigError)
 def layer_values(
     template: Template,
     registry_values: Mapping[str, float],
@@ -152,6 +159,7 @@ def layer_values(
     return out
 
 
+@converting(MonitorConfigError)
 def check_alignment(params: Mapping[str, float], step_ms: int, where: str) -> None:
     """The window parameters are non-negative integer multiples of ``T_s`` (01 section 3.6, F1)."""
     for name in WINDOW_PARAMS:

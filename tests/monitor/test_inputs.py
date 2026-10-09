@@ -156,7 +156,6 @@ def sample_cases() -> list[tuple[str, Any]]:
         "dispense",
         "intake",
         "sched_tick",
-        "day_end",
         HostileStr("bp"),
         Hostile(),
     ):

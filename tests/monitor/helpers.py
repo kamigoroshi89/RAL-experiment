@@ -444,6 +444,13 @@ def step_values(inputs: Inputs, last_step: int) -> list[dict[str, float | None]]
     last_out: dict[str, float] = {}
     pointer = 0
     out: list[dict[str, float | None]] = []
+    # the level of `presence` belongs to one co-location episode (ADR-054): a baseline must build it so
+    presence_steps = sorted(
+        (s.t_device_ms + STEP - 1) // STEP
+        for s in inputs.samples
+        if s.signal == "presence"
+    )
+    last_off = -1
     for k, t in enumerate(grid):
         while pointer < len(stream) and stream[pointer].t_device_ms <= t:
             for d in derived:
@@ -456,10 +463,16 @@ def step_values(inputs: Inputs, last_step: int) -> list[dict[str, float | None]]
             if produced is not None:
                 last_out[produced.signal] = produced.value
         values: dict[str, float | None] = {}
+        if not available("presence", k):
+            last_off = k
         for sig in held_ids:
             v = held[sig][k]
             if sig == "presence" and not available("presence", k):
                 values[sig] = None
+            elif sig == "presence" and not any(
+                last_off < s <= k for s in presence_steps
+            ):
+                pass  # no sample since the channel returned: undefined, not the level of an earlier visit
             elif not math.isnan(v):
                 values[sig] = v
         for sig, arr in impulses.items():
@@ -481,11 +494,12 @@ def registry_variant(
     values: Mapping[str, float] | None = None,
     add_entries: Sequence[Mapping[str, Any]] = (),
     overrides: Sequence[Mapping[str, Any]] = (),
+    unset: Sequence[Mapping[str, Any]] = (),
     step_ms: int | None = STEP,
 ) -> Any:
-    """Load a copy of the F0 registry with ``values`` replaced, ``add_entries`` appended and
-    ``overrides`` added. The copy lives in ``directory`` (a temporary directory); the real registry
-    file is never touched."""
+    """Load a copy of the F0 registry with ``values`` replaced, ``add_entries`` appended,
+    ``overrides`` added and ``unset`` names declared. The copy lives in ``directory`` (a temporary
+    directory); the real registry file is never touched."""
     from ralmon.spec import load_registry
 
     doc = yaml.safe_load(F0_PATH.read_text(encoding="utf-8"))
@@ -495,6 +509,8 @@ def registry_variant(
     doc["entries"].extend(dict(e) for e in add_entries)
     if overrides:
         doc["overrides"] = [dict(o) for o in overrides]
+    if unset:
+        doc["unset"] = [dict(u) for u in unset]
     path = directory / "registry.yaml"
     path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
     return load_registry(path, step_ms=step_ms, allow_fixture_only=True)

@@ -132,10 +132,13 @@ def test_a_presence_level_other_than_one_is_not_a_witness(level: float) -> None:
 def test_an_open_position_at_the_first_step_of_the_window_is_named_in_the_marker() -> (
     None
 ):
-    """Dispense at step 30, window 5 steps: the channel is down at step 25 only (the first step)."""
+    """Dispense at step 30, window 5 steps: the channel is down at step 25 only (the first step).
+
+    A level is cleared by the outage (ADR-054), so the robot reports again (0.0) at the step after it.
+    """
     scn = Scenario(
         dispenses=(hhmm(0, 30),),
-        presence=((0, 0.0),),
+        presence=((0, 0.0), (hhmm(0, 26), 0.0)),
         unavailable_presence=((25, 25),),
     )
     records = against_oracle(scn, 31)
@@ -146,7 +149,7 @@ def test_an_open_position_at_the_first_step_of_the_window_is_named_in_the_marker
     # one step earlier the position is outside the window: the age is over the window, a violation
     scn_out = Scenario(
         dispenses=(hhmm(0, 30),),
-        presence=((0, 0.0),),
+        presence=((0, 0.0), (hhmm(0, 25), 0.0)),
         unavailable_presence=((24, 24),),
     )
     out = last_of(against_oracle(scn_out, 31), f"int@{hhmm(0, 30)}")
@@ -784,7 +787,7 @@ def test_an_input_with_a_sequence_number_precedes_one_without_at_the_same_key() 
 def test_a_formula_may_not_nest_without_limit() -> None:
     from ralmon.monitor.formula import parse_formula
 
-    with pytest.raises(m.MonitorConfigError, match="deep|depth|nest"):
+    with pytest.raises(m.MonitorConfigError, match="nesting deeper than"):
         parse_formula("(" * 200 + "meas" + ")" * 200)
 
 
@@ -804,22 +807,39 @@ def test_find_returns_the_first_node_in_preorder() -> None:
 
 
 @pytest.mark.parametrize(
-    "path",
+    ("path", "fragment"),
     [
-        "int/0/no_witness/1",  # the guard marker is only the last element
-        "int/²",  # a digit that is not an ASCII digit
-        "int/٣",  # an Arabic-Indic digit, which int() would accept
-        "int/-1",
-        "int/ 1",
-        "int/0//0",
-        "int/9",
+        (
+            "int/0/no_witness/1",
+            "unknown element",
+        ),  # the guard marker is only the last element
+        ("int/²", "unknown element"),  # a digit that is not an ASCII digit
+        ("int/٣", "unknown element"),  # an Arabic-Indic digit, which int() would accept
+        ("int/-1", "unknown element"),
+        ("int/ 1", "unknown element"),
+        ("int/0//0", "unknown element"),
+        ("int/9", "has no child"),
+        ("int/0/1/0/1/2", "has no child"),
     ],
 )
-def test_a_path_that_does_not_resolve_is_a_named_error(path: str) -> None:
+def test_a_path_that_does_not_resolve_is_a_named_error(
+    path: str, fragment: str
+) -> None:
     from ralmon.monitor.formula import resolve_subformula_path
 
-    with pytest.raises(m.MonitorInputError):
+    with pytest.raises(m.MonitorInputError, match=fragment):
         resolve_subformula_path(BY_ID[TemplateId.INT], path)
+
+
+def test_a_child_index_past_the_last_child_is_refused_with_its_name() -> None:
+    from ralmon.monitor.formula import parse_formula
+
+    formula = parse_formula(BY_ID[TemplateId.INT].formula_past_time)
+    assert formula.node_at([0]) is formula.root.kids[0]
+    with pytest.raises(m.MonitorInputError, match="has no child 1"):
+        formula.node_at([1])  # the root has one child
+    with pytest.raises(m.MonitorInputError, match="has no child -1"):
+        formula.node_at([-1])
 
 
 def test_the_marker_names_the_sorted_unique_entries() -> None:

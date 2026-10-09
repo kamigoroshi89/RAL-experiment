@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from ralmon.monitor._text import show
+from ralmon.monitor._text import converting, show
 from ralmon.monitor.config import MonitorConfigError, MonitorInputError
 from ralmon.spec import Template, TemplateId
 
@@ -34,6 +34,7 @@ __all__ = [
     "check_library_formulas",
     "parse_formula",
     "resolve_subformula_path",
+    "resolve_subformula_paths",
 ]
 
 # algorithmic: the longest formula text and the deepest nesting the parser accepts, so that a hostile
@@ -341,6 +342,7 @@ class Formula:
     def text(self) -> str:
         return render(self.root)
 
+    @converting(MonitorInputError)
     def node_at(self, indices: Sequence[int]) -> Node:
         node = self.root
         for index in indices:
@@ -351,6 +353,7 @@ class Formula:
             node = node.kids[index]
         return node
 
+    @converting(MonitorConfigError)
     def find(self, text: str) -> tuple[int, ...]:
         """The indices of the first node, in preorder, whose canonical text is ``text``."""
         found = _find(self.root, text, ())
@@ -371,6 +374,7 @@ def _find(node: Node, text: str, path: tuple[int, ...]) -> tuple[int, ...] | Non
     return None
 
 
+@converting(MonitorConfigError)
 def parse_formula(text: object) -> Formula:
     """Parse a template string; anything outside the grammar raises ``MonitorConfigError``."""
     if not isinstance(text, str):
@@ -388,6 +392,7 @@ def parse_formula(text: object) -> Formula:
     return Formula(node)
 
 
+@converting(MonitorConfigError)
 def check_library_formulas(templates: Sequence[Template]) -> None:
     """Refuse a library whose string differs (structurally) from the reference string of its id."""
     for template in templates:
@@ -408,6 +413,7 @@ class PathTable:
     template: TemplateId
     roles: dict[str, tuple[int, ...]]
 
+    @converting(MonitorInputError)
     def path(self, role: str, marker: str | None = None) -> str:
         indices = self.roles[role]
         elements = [self.template.value]
@@ -421,6 +427,7 @@ class PathTable:
         return "/".join(elements)
 
 
+@converting(MonitorConfigError)
 def build_path_table(template_id: TemplateId) -> PathTable:
     formula = parse_formula(REFERENCE_FORMULAS[template_id])
     return PathTable(
@@ -429,14 +436,8 @@ def build_path_table(template_id: TemplateId) -> PathTable:
     )
 
 
-def resolve_subformula_path(template: Template, path: object) -> str:
-    """The canonical text of the sub-formula that ``path`` names in the string of ``template``.
-
-    The last element may be the guard marker of the template (it names a failed guard and does not
-    change what the path resolves to). Raises ``MonitorInputError`` for a path that does not resolve.
-    """
-    if not isinstance(path, str) or not path:
-        raise MonitorInputError(f"a path must be a non-empty str, got {show(path)}")
+def _resolve_one(template: Template, path: str) -> str:
+    """One path (no ``;``) against the string of ``template``."""
     elements = path.split("/")
     if elements[0] != template.id.value:
         raise MonitorInputError(
@@ -461,3 +462,34 @@ def resolve_subformula_path(template: Template, path: object) -> str:
                 f"path {show(path)}: unknown element {show(element)}"
             )
     return render(formula.node_at(indices))
+
+
+@converting(MonitorInputError, MonitorConfigError)
+def resolve_subformula_paths(template: Template, path: object) -> tuple[str, ...]:
+    """The canonical texts of the sub-formulas that ``path`` names in the string of ``template``.
+
+    ``path`` is the ``subformula_path`` of a ``VerdictRecord``: one path, or several joined by ``;``
+    (the decisive path first, then the other violated sub-formulas, ADR-048 (a)). Every part starts
+    with the template id; the last element of a part may be the guard marker of the template (it names
+    a failed guard and does not change what the part resolves to). The texts come back in the order of
+    the parts. Raises ``MonitorInputError`` for an argument that is not a ``Template``, a path that is
+    not a non-empty ``str``, an empty part or a part that does not resolve.
+    """
+    if not isinstance(template, Template):
+        raise MonitorInputError(f"template must be a Template, got {show(template)}")
+    if not isinstance(path, str) or not path:
+        raise MonitorInputError(f"a path must be a non-empty str, got {show(path)}")
+    parts = path.split(";")
+    if any(not part for part in parts):
+        raise MonitorInputError(f"path {show(path)} has an empty part")
+    return tuple(_resolve_one(template, part) for part in parts)
+
+
+@converting(MonitorInputError, MonitorConfigError)
+def resolve_subformula_path(template: Template, path: object) -> str:
+    """The canonical text of the decisive sub-formula that ``path`` names in the string of ``template``.
+
+    For a composite path (parts joined by ``;``) the answer is the first part, the decisive one; use
+    ``resolve_subformula_paths`` for all of them. Raises ``MonitorInputError`` as that function does.
+    """
+    return resolve_subformula_paths(template, path)[0]

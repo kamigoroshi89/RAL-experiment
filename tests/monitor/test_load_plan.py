@@ -368,12 +368,13 @@ def test_a_needed_unset_name_is_a_named_error_naming_the_parameter(name: str) ->
 
 
 def test_the_real_registry_loads_and_runs_without_reading_its_unset_names() -> None:
-    """Registry 0.2.0 has three unset names; the monitor needs none of them and substitutes nothing."""
+    """Whatever names the real registry leaves unset, the monitor needs none of them and substitutes nothing.
+
+    Nothing about the registry is pinned (version, values, the set of unset names): a registry that fills
+    its unset names, or changes a value, must leave this test green.
+    """
     real = load_registry(step_ms=STEP)
     unset = real.unset_names()
-    assert (
-        unset
-    )  # priority_sys, priority_int, bound_dose_count_upper at the time of writing
     spy = SpyRegistry(real, unset=unset)
     lib = load_templates(registry=real)
     mon = m.StreamingMonitor(make_config(real), spy, lib)
@@ -388,6 +389,31 @@ def test_the_real_registry_loads_and_runs_without_reading_its_unset_names() -> N
     for r in records:
         assert r.sigma_interval.lo <= r.sigma_interval.hi
         assert -1.0 <= r.sigma_norm_interval[0] <= r.sigma_norm_interval[1] <= 1.0
+
+
+def test_a_declared_but_unset_name_that_no_template_needs_is_never_read(
+    tmp_path: Any,
+) -> None:
+    """The state-independent form of the test above: a synthetic unset name in the fixture registry."""
+    name = "synthetic_unset_parameter"
+    reg = registry_variant(
+        tmp_path,
+        unset=[
+            {
+                "parameter": name,
+                "unit": "dose",
+                "required_by": ["count"],
+                "note": "a name declared without a value, used by a test only",
+            }
+        ],
+    )
+    assert reg.unset_names() == (name,)
+    spy = SpyRegistry(reg, unset=reg.unset_names())
+    mon = m.StreamingMonitor(make_config(reg), spy, load_lib(reg))
+    mon.load(make_plan(reg, sched=(TICK,)))
+    mon.push_event(evt("dispense", hhmm(7, 0), source="dispenser"))
+    assert mon.advance(hhmm(7, 0))
+    assert name not in spy.read
 
 
 # ---------------------------------------------------------------------------------------------

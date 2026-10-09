@@ -303,6 +303,12 @@ class Grid:
                     current = samples[pointer][2]
                     pointer += 1
                 arr[j] = current
+                if sig == "presence" and self.unavailable(sig, j):
+                    # `presence` exists only while the robot is co-located (02-interfaces.md#signals, rule;
+                    # 01-signals-sampling.md section 2.2): its held level belongs to one co-location
+                    # episode, so an unavailable step clears it (proposed in ADR-054; the literal
+                    # reading of 01 section 3.2 would carry the level across the outage)
+                    current = math.nan
             self.held[sig] = arr
 
     # -- positions -----------------------------------------------------------------------

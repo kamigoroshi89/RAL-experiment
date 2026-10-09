@@ -106,6 +106,10 @@ class WitnessTracker:
     1, ``intake`` seen on an available channel); ``last_poss`` the last step with a possible one (a
     determined witness or an open ``presence`` or ``intake`` position); ``last_open`` the last step at
     which each kind of open position occurred (for the marker of 05 section 3.5).
+
+    The ``presence`` level that ``update`` receives is the level of the current co-location episode: the
+    caller (``StreamingMonitor``) clears it at a step where the channel is unavailable (ADR-054). The
+    tracker itself holds no level.
     """
 
     __slots__ = ("last_det", "last_open", "last_poss")

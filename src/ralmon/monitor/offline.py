@@ -18,6 +18,7 @@ under-count (docs/formal/01 section 5.5, item 5).
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from ralmon.monitor._text import as_int, converting, show
@@ -29,7 +30,8 @@ from ralmon.monitor.config import (
     MonitorInvariantError,
     check_config,
 )
-from ralmon.monitor.core import StreamingMonitor
+from ralmon.monitor.core import MonitorStats, RejectedInput, StreamingMonitor
+from ralmon.monitor.forecast import Forecaster
 from ralmon.monitor.verdict import VerdictRecord
 from ralmon.signals import Event, ObservedTrace, Sample
 from ralmon.spec import (
@@ -42,7 +44,23 @@ from ralmon.spec import (
     load_templates,
 )
 
-__all__ = ["run_offline"]
+__all__ = ["OfflineResult", "run_offline", "run_offline_detailed"]
+
+
+@dataclass(frozen=True, slots=True)
+class OfflineResult:
+    """What ``run_offline_detailed`` returns: the records of ``run_offline`` and the diagnostics of the run.
+
+    ``late_inputs`` are the inputs excluded as late, ``rejected_inputs`` every input that was not used
+    (late, finalised, duplicate, future-stamped, over capacity; the last ``REPORT_CAPACITY`` of them),
+    ``stats`` the counters of the monitor at the end of the day. Not part of the contract of
+    ``run_offline``, which returns the records only (ADR-053).
+    """
+
+    records: tuple[VerdictRecord, ...]
+    late_inputs: tuple[RejectedInput, ...]
+    rejected_inputs: tuple[RejectedInput, ...]
+    stats: MonitorStats
 
 
 @converting(
@@ -53,7 +71,7 @@ def run_offline(
     plan: CarePlan,
     config: MonitorConfig,
     calibrator: object | None,
-    forecaster: object | None,
+    forecaster: Forecaster | None,
     *,
     registry: Any | None = None,
     templates: Any | None = None,
@@ -61,11 +79,51 @@ def run_offline(
 ) -> Sequence[VerdictRecord]:
     """The measured verdicts of one patient-day: every record of every step ``0..K`` in step order.
 
-    ``calibrator`` and ``forecaster`` are accepted for the contract signature and are not used: the
-    predictive mode is WS05-T08 (``config.predictive`` is refused until then). ``registry``,
-    ``templates`` and ``verifier`` are keyword-only additions, ahead of the contract signature until
-    ADR-047 and ADR-048 are accepted (see the module docstring).
+    ``forecaster`` is typed as in the contract; ``calibrator`` is ``object | None`` where the contract says
+    ``ConformalCalibrator | None``, because this package may import only ``ralmon.signals`` and
+    ``ralmon.spec`` (the type returns with WS05-T08). Both are accepted and never called: the predictive
+    mode is WS05-T08 (``config.predictive`` is refused until then), so any object is accepted and ignored.
+    ``registry``, ``templates`` and ``verifier`` are keyword-only additions, ahead of the contract
+    signature until ADR-047, ADR-048 and ADR-053 are accepted (see the module docstring). The late and
+    rejected inputs and the counters of the run are not reachable from here: use
+    ``run_offline_detailed``.
     """
+    return _run(
+        day, plan, config, calibrator, forecaster, registry, templates, verifier
+    ).records
+
+
+@converting(
+    MonitorInputError, MonitorConfigError, PlanIntegrityError, MonitorInvariantError
+)
+def run_offline_detailed(
+    day: ObservedTrace,
+    plan: CarePlan,
+    config: MonitorConfig,
+    calibrator: object | None,
+    forecaster: Forecaster | None,
+    *,
+    registry: Any | None = None,
+    templates: Any | None = None,
+    verifier: PlanVerifier | None = None,
+) -> OfflineResult:
+    """``run_offline`` with the diagnostics of the run: the same records, plus the inputs that were not
+    used and the counters of the monitor (``OfflineResult``). Same arguments, same errors."""
+    return _run(
+        day, plan, config, calibrator, forecaster, registry, templates, verifier
+    )
+
+
+def _run(
+    day: ObservedTrace,
+    plan: CarePlan,
+    config: MonitorConfig,
+    calibrator: object | None,
+    forecaster: Forecaster | None,
+    registry: Any | None,
+    templates: Any | None,
+    verifier: PlanVerifier | None,
+) -> OfflineResult:
     cfg = check_config(config)
     if not isinstance(day, ObservedTrace):
         raise MonitorInputError(
@@ -115,7 +173,12 @@ def run_offline(
             pointer += 1
         records.extend(monitor.advance(t))
     monitor.close()
-    return tuple(records)
+    return OfflineResult(
+        tuple(records),
+        monitor.late_inputs(),
+        monitor.rejected_inputs(),
+        monitor.stats(),
+    )
 
 
 def _items(value: object, kind: type, what: str) -> list[Any]:

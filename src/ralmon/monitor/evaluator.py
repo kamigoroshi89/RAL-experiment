@@ -41,6 +41,7 @@ from ralmon.monitor.formula import (
     build_path_table,
     parse_formula,
     resolve_subformula_path,
+    resolve_subformula_paths,
 )
 from ralmon.monitor.instances import (
     CountEndInstance,
@@ -72,6 +73,7 @@ __all__ = [
     "make_point_evaluator",
     "parse_formula",
     "resolve_subformula_path",
+    "resolve_subformula_paths",
 ]
 
 _NAN: Final = math.nan
@@ -274,6 +276,12 @@ def make_point_evaluator(
     ``anchor_kind`` is ``measurement`` (RANGE, SYS), ``dispense`` (HOLD, RESP, INT, COUNT limit),
     ``sched_tick`` (SCHED) or ``day_end`` (COUNT day-end obligation); it defaults to the anchor of the
     template. Raises ``MonitorConfigError`` for an argument that cannot be used.
+
+    The caller builds ``values`` (docs/formal/01 sections 3 and 5): the level of ``presence`` that it
+    passes is the level of the current co-location episode, that is absent (undefined) from the step at
+    which the channel returns until the first new sample, and ``None`` while the channel is unavailable
+    (ADR-054, proposed). The evaluator cannot tell a held level from a new sample, so it does not clear a
+    stale one: a baseline that holds a presence level across an outage disagrees with the monitor.
     """
     if not isinstance(template, Template):
         raise MonitorConfigError(f"template must be a Template, got {show(template)}")
