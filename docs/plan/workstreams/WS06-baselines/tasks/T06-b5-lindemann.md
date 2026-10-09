@@ -84,3 +84,9 @@ Write these after Passi steps 1 and 2 (the deviation record fixes what is being 
 - `grep -c -E '^## (Sparse sampling|Mixed units|No attribution|Control: where B5 works|Benchmark-scale evidence)$' docs/plan/workstreams/WS06-baselines/notes/B5-failure-analysis.md` prints `5`.
 - `grep -c 'locator:' docs/plan/workstreams/WS06-baselines/notes/B5-deviations.md` prints a number greater than 0.
 - `grep -lE 'LatentDay|GroundTruthEvent|normalise|rank_alerts|scale_param|priority_param' src/ralmon/baselines/b5_conformal_stl.py` prints nothing.
+
+## Notes
+
+### Hand-over (worker, 2026-10-09, from the WS05-T04 review, round 2)
+
+No INT-based result on a generated day is evidence until ADR-054 is decided (the presence level of the last robot visit is read at every later dispense when the trace has no availability mark and no zero). Gate on `run_offline_detailed(...).stats.presence_samples_without_availability_marks`: it must be 0 (or the trace must carry the explicit zeros of option (a)), and report it when it is not. `presence_level_older_than_window_steps` is information only and is positive even on a correct trace, because a robot visit (10 minutes in the generator) is longer than `int_window` (5). When calling `make_point_evaluator`, build `presence` per co-location episode (see the note of WS06-T04).

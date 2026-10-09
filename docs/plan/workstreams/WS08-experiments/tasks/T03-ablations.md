@@ -86,3 +86,9 @@ Write these first. All numbers are test fixtures (scales, priorities, windows ar
 - `for id in A1 A2 A3 A5 A7; do n=$(ls outputs/$id/*/metrics.json | wc -l); test "$n" -ge 5 || echo "$id has $n seeds"; done` prints nothing.
 - `python -m ralmon.eval.analysis --check outputs/A1 outputs/A2 outputs/A3 outputs/A5 outputs/A7` exits 0.
 - `grep -c '"bp"' outputs/A1/0/metrics.json` prints at least 1 (the H1 blood-pressure row is present).
+
+## Notes
+
+### Hand-over (worker, 2026-10-09, from the WS05-T04 review, round 2)
+
+No INT-based result on a generated day is evidence until ADR-054 is decided (the presence level of the last robot visit is read at every later dispense when the trace has no availability mark and no zero). Gate on `run_offline_detailed(...).stats.presence_samples_without_availability_marks`: it must be 0 (or the trace must carry the explicit zeros of option (a)), and report it when it is not. `presence_level_older_than_window_steps` is information only and is positive even on a correct trace, because a robot visit (10 minutes in the generator) is longer than `int_window` (5).
