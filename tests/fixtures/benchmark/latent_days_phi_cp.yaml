@@ -175,3 +175,79 @@ cases:
       - {template: hold, onset: "00:00", end: null}
       - {template: resp, onset: "00:00", end: "03:00"}
       - {template: count, onset: "24:00", end: "24:00"}
+
+  - id: GT-11-hold-lookback-edge
+    why: >
+      The look-back window of HOLD is closed at both ends. Dose 07:00 with the reading 06:00 exactly 60 min earlier:
+      the reading is in [06:00, 07:00], 130 - 100 = +30, satisfied. Dose 07:01 sees the same reading 61 min earlier,
+      outside [06:01, 07:01]: the guard fails, HOLD violated at 07:01. Neither dose has a reading in its response
+      window, so RESP is violated for both (07:00 with end 10:00, 07:01 with end 10:01). Two doses meet the limit
+      and the day-end minimum.
+    bp_default: 130.0
+    bp_segments: []
+    measurements: ["06:00"]
+    dispenses: ["07:00", "07:01"]
+    sched_ticks: []
+    count_end: true
+    expected:
+      - {template: resp, onset: "07:00", end: "10:00"}
+      - {template: hold, onset: "07:01", end: null}
+      - {template: resp, onset: "07:01", end: "10:01"}
+
+  - id: GT-12-resp-window-end-is-closed
+    why: >
+      Dose 07:00 with the pre-dose reading 130 (06:50) and the only reading of the window at 10:00 = 07:00 + delta2,
+      the last step of [08:00, 10:00]: 130 - 118 - 10 = +2, satisfied at the deadline. Nothing is violated.
+    bp_default: 130.0
+    bp_segments: [["10:00", "24:00", 118.0]]
+    measurements: ["06:50", "10:00"]
+    dispenses: ["07:00"]
+    sched_ticks: []
+    count_end: false
+    expected: []
+
+  - id: GT-13-resp-reading-one-step-late
+    why: >
+      The same dose and pressure as GT-12 with the reading one step late, 10:01: it is outside [08:00, 10:00], so the
+      response window holds no reading and RESP is violated at 10:00 (onset 07:00, end 10:00).
+    bp_default: 130.0
+    bp_segments: [["10:01", "24:00", 118.0]]
+    measurements: ["06:50", "10:01"]
+    dispenses: ["07:00"]
+    sched_ticks: []
+    count_end: false
+    expected:
+      - {template: resp, onset: "07:00", end: "10:00"}
+
+  - id: GT-14-resp-decided-at-the-anchor-across-midnight
+    why: >
+      A dose at 22:00 after a reading of 55 at 21:30 (the pressure stays 55). The window of RESP ends at 25:00, after the
+      closing step, but no pressure of [50, 250] can answer the dose (55 - 50 - 10 = -5 < 0): the instance is decided at
+      its anchor (onset 22:00, end 25:00). The reading is RANGE-violated (55 - 110 = -55) and HOLD-violated (55 - 100 =
+      -45) at the dose. One dose is below the day-end minimum 2: COUNT violated at the closing step.
+    bp_default: 130.0
+    bp_segments: [["21:30", "24:00", 55.0]]
+    measurements: ["21:30"]
+    dispenses: ["22:00"]
+    sched_ticks: []
+    count_end: true
+    expected:
+      - {template: range, onset: "21:30", end: null}
+      - {template: hold, onset: "22:00", end: null}
+      - {template: resp, onset: "22:00", end: "25:00"}
+      - {template: count, onset: "24:00", end: "24:00"}
+
+  - id: GT-15-pre-dose-reading-at-the-dispense-instant
+    why: >
+      A reading at the very instant of the dispense counts as taken before it (docs/formal/01, the pre-dose capture of
+      T01 section 5.3): the pre-dose value of the dose at 07:00 is the 07:00 reading, 140, and not the earlier 130 of 06:50.
+      The 08:30 reading of 128 then answers the dose (140 - 128 - 10 = +2); with the earlier reading it would not
+      (130 - 128 - 10 = -8). The 07:00 reading is the band edge (tie) and the dose finds it in its look-back
+      (140 - 100 = +40). Nothing is violated.
+    bp_default: 130.0
+    bp_segments: [["07:00", "08:00", 140.0], ["08:00", "24:00", 128.0]]
+    measurements: ["06:50", "07:00", "08:30"]
+    dispenses: ["07:00"]
+    sched_ticks: []
+    count_end: false
+    expected: []

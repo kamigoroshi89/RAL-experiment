@@ -194,7 +194,7 @@ all in `tests/benchmark/test_ground_truth.py` (the reference evaluator is `tests
 
 | Test | What it shows |
 |---|---|
-| `test_perfect_observation_equals_ground_truth_on_c1` | With zero cuff error, no fault, no attack and readings at the ticks, the set of `(template, anchor)` of the VIOLATED phi_CP verdicts on the observed day (built from the case data, not from the labeller) equals the C1 truth, on ten hand-computed cases and two days of the continuing axis |
+| `test_perfect_observation_equals_ground_truth_on_c1` | With zero cuff error, no fault, no attack and readings at the ticks, the set of `(template, anchor)` of the VIOLATED phi_CP verdicts on the observed day (built from the case data, not from the labeller) equals the C1 truth, on fifteen hand-computed cases and two days of the continuing axis |
 | `test_noisy_observation_diverges_from_ground_truth` | Latent 139 with bias +3 reads 142 (a false positive); latent 141 with bias -3 reads 138 (a false negative), through the measurement process of WS04-T06 and the real monitor |
 | `test_c1_truth_follows_latent_not_injection_intent` | A spike that keeps the reading in the band has a record and no event; one that crosses the edge has one `hypertensive_spike` event |
 | `test_ground_truth_unchanged_by_observation_corruption` | Cuff noise, a C2 fault and a C3 attack on one latent day give the identical set of C1 events while the monitor's violated set changes |
