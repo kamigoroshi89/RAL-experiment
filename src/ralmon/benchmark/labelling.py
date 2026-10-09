@@ -32,8 +32,9 @@ Conventions (``docs/benchmark/ground-truth.md`` section "Onset and end conventio
 * Instances still open at the end of the day (``k_d > K``: a RESP window or a SCHED deadline after the closing
   step) are decided early where the monitor's early-decision rule applies (RESP with a pre-dose value that no
   pressure of the physiological domain can answer) and are otherwise PENDING at trace end: they are not
-  violations (docs/formal/05 section 7.5 item 2; ADR-046 proposed). A day is labelled with empty history, as the
-  monitor runs it: nothing is carried over from the day before.
+  violations (docs/formal/05 section 7.5 item 2). A day is labelled with empty history, as ``run_offline`` runs it
+  without ``history``: nothing is carried over from the day before (multi-day labelling with the history of
+  ADR-046 is WS04-T15).
 * Time is the continuing axis ``day_index * T_day + clock time`` (ADR-053 (h)); ``run_offline`` starts the
   monitor at the step ``day_index * K``.
 
@@ -1196,10 +1197,11 @@ def _explaining(violation: _Violation, ctx: _Context) -> _C1Record | None:
             if violation.kind == _K_HOLD:
                 # the violation is decided at the dispense but caused by the latest reading before it
                 at = bisect.bisect_right(ctx.measurement_times, violation.decided) - 1
-                # only a reading in the look-back window can have decided it (the refined form needs one)
+                # only a reading in the look-back window can have decided it (the refined form needs one);
+                # the monitor measures the window from the step that contains the reading
                 if (
                     at >= 0
-                    and violation.decided - ctx.measurement_times[at]
+                    and violation.decided - _anchor_of(ctx.measurement_times[at], ctx)
                     <= ctx.hold_lookback()
                 ):
                     instants.append(ctx.measurement_times[at])

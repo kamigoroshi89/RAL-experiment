@@ -87,8 +87,9 @@ what WS08 uses as the deadline when it measures a detection delay "relative to t
 window that crosses midnight, a SCHED deadline after 24:00) is decided early where the early-decision rule
 applies and is otherwise PENDING at trace end: **it is not a violation** (`docs/formal/05` section 7.5 item 2; the
 monitor and the labeller apply one rule). A day is labelled with empty history, as the monitor runs it
-(ADR-046 is proposed): a counter that depends on the previous day under-counts, and a RESP window that ends
-after the closing step is not labelled on either day. A dispense at exactly the start of the day (00:00) is
+without `history` (ADR-046 is accepted; multi-day labelling with the history is WS04-T15, ADR-055 (b)): a
+counter that depends on the previous day under-counts, and a RESP window that ends after the closing step is not
+labelled on either day. A dispense at exactly the start of the day (00:00) is
 seen by the first step of the run, so it creates its HOLD and RESP instances on this day and counts in the trailing
 24 h counter; by the day boundary (the day covers `(d * T_day, (d + 1) * T_day]`) it is not one of the dispenses of
 the day that the day-end count adds up (case GT-10).
@@ -127,7 +128,9 @@ function can be passed as `latency_bound_fn`). Three template-specific readings 
   events differ the pairing is unknown and the dispense instant stands in for the intake instant.)
 * **HOLD, `hypotension_below_hold`.** HOLD is decided at the dispense but caused by the latest reading before it;
   the record explains the event if its window reaches the decision instant or the instant of the latest latent
-  MEASUREMENT at or before it.
+  MEASUREMENT at or before it, the latter only while that reading lies within `hold_lookback` of the decision
+  (closed edge; the plan's own value overrides the registry), measured from the step that contains the reading,
+  as the monitor reads it.
 * **COUNT limit, `double_take`.** The counter looks back 24 h: a surplus dispense at 07:02 violates the limit at
   the next dispense, 21:00, when the trailing count is 3. The record explains the event iff its instant lies in
   `(decision - 24 h, decision]`, the window of `dose_count`.
@@ -232,7 +235,9 @@ What the evaluation does and does not show, stated so that it cannot be read as 
   limits.
 * **Per-day labelling.** The truth of a day uses empty history, as the monitor does. Violations that need the
   previous day (a counter over 24 h across midnight) and RESP windows that end after the closing step are not
-  labelled; the corresponding monitor results are not scored either.
+  labelled. Nothing in this task removes the corresponding monitor results from scoring: a monitor run with
+  `history` (ADR-046) can report such a violation, which the per-day truth lacks. Until WS04-T15 labels with
+  the history, the scoring of WS08-T01 must leave these instances out or count them apart.
 * **Cross-template consequences** of an injection (a hypotension window that also leaves the band) are labelled
   `spontaneous_<template id>`, not injected.
 * The label `injected` says that a record explains the event by the link table, not that the event would not have
