@@ -4286,3 +4286,33 @@ def test_a_collection_that_claims_a_huge_length_is_refused_before_it_is_read() -
             label(latent=clone_with(latent, events=bad))
         with pytest.raises(LabellingError, match="more than"):
             label(plan=clone_with(make_plan(), instances=bad))
+
+
+def test_real_monitor_refinement_records_give_one_event() -> None:
+    # the monitor keeps emitting records of a SCHED instance after its decision (the graded lateness): the
+    # first VIOLATED record defines the event and the later ones add nothing
+    case = next(c for c in CASES if c["id"] == "GT-05-sched-deadline")
+    latent, plan = case_latent(case, 0), case_plan(case, 0)
+    ideal = ideal_observation(latent, PLAN_ID, step_ms=MIN)
+    records = run_offline(
+        ideal, plan, CFG, None, None, registry=F0, templates=CP_TEMPLATES
+    )
+    key = f"sched@{clock('12:00')}"
+    violated_records = [
+        r for r in records if r.instance_key == key and r.state is VerdictState.VIOLATED
+    ]
+    assert len(violated_records) > 1  # the refinement records
+    first = violated_records[0]
+    assert first.t_eval_ms == first.decided_at_ms == clock("12:30")
+    assert all(
+        r.decided_at_ms == first.decided_at_ms
+        and r.pending_until_ms == first.pending_until_ms
+        for r in violated_records
+    )
+    assert (
+        len({r.sigma_interval for r in violated_records}) > 1
+    )  # the interval refines, the decision does not
+    events = [e for e in truth_of(latent, plan) if e.onset_ms == clock("12:00")]
+    assert [(e.template_id, e.end_ms) for e in events] == [("sched", clock("12:30"))]
+    # every record of the real run carries pending_until_ms (OP-T05-17), RANGE and HOLD included
+    assert all(r.pending_until_ms is not None for r in records)
