@@ -298,6 +298,31 @@ def test_the_day_end_count_of_a_plan_loaded_mid_day_counts_the_dispenses_of_its_
     assert rec.state.value == "violated"
 
 
+def test_a_dispense_at_the_first_step_after_a_mid_day_load_is_counted() -> None:
+    """The day-end count starts at the step after the load; the dispense of that very step is its first."""
+    mon = make_monitor()
+    mon.advance(5 * STEP)
+    mon.load(make_plan(REG, day_end=[T_DAY]))
+    mon.push_event(evt("dispense", 6 * STEP))  # the step after the last finalised one
+    mon.push_event(evt("dispense", 9 * STEP))
+    rec = final(list(mon.advance(T_DAY)), f"count@{T_DAY}")
+    minimum = REG.get("dose_min_day_end").value
+    assert rec.sigma_interval.lo == rec.sigma_interval.hi == 2 - minimum
+    assert rec.state.value == "satisfied"  # 2 of 2: the tie rule at the closing step
+
+
+def test_a_dispense_on_the_first_step_of_the_day_is_not_of_the_day() -> None:
+    """A plan loaded before the day: the instance exists from its first step, which closes the day before."""
+    mon = make_monitor(day_end=[2 * T_DAY])
+    mon.advance(K_DAY * STEP - 1)  # the previous day
+    mon.push_event(evt("dispense", T_DAY))  # step K_DAY: the last step of the first day
+    mon.push_event(evt("dispense", T_DAY + 2 * STEP))
+    mon.push_event(evt("dispense", T_DAY + 3 * STEP))
+    rec = final(list(mon.advance(2 * T_DAY)), f"count@{2 * T_DAY}")
+    minimum = REG.get("dose_min_day_end").value
+    assert rec.sigma_interval.lo == rec.sigma_interval.hi == 2 - minimum
+
+
 @pytest.mark.parametrize("anchor", [0, T_DAY - STEP, T_DAY + STEP, 2 * T_DAY - 1])
 def test_a_day_end_anchor_must_close_a_day(anchor: int) -> None:
     with pytest.raises(m.PlanFeasibilityError, match="closing step of a day"):

@@ -852,6 +852,14 @@ class StreamingMonitor:
         step = self._step
         t_k = k * step
         self._nodes += 1  # the summaries of the step
+        # the instances of the plan that start at this step exist before the step's inputs are applied, so
+        # that a day-end COUNT counts the dispense of its first step after a mid-day load
+        for instance in self._scheduled.pop(k, ()):
+            bisect.insort(self._active, instance, key=_seq_of)
+            self._active_keys.add(instance.key)
+            self._started.add(instance.key)
+            if isinstance(instance, CountEndInstance):
+                self._dayend_active.append(instance)
         for entry in self._buffer.release(t_k):
             self._apply(entry, k)
             self._released += 1
@@ -884,12 +892,6 @@ class StreamingMonitor:
             self._intake_n > 0,
             self._auth_n > 0,
         )
-        for instance in self._scheduled.pop(k, ()):
-            bisect.insort(self._active, instance, key=_seq_of)
-            self._active_keys.add(instance.key)
-            self._started.add(instance.key)
-            if isinstance(instance, CountEndInstance):
-                self._dayend_active.append(instance)
         survivors: list[Instance] = []
         for instance in self._active:
             out.append(instance.step(k, view))
