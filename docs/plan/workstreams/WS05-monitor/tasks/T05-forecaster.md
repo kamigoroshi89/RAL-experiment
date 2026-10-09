@@ -3,7 +3,7 @@ id: WS05-T05
 title: "Forecaster for continuous signals and robot deadlines"
 workstream: WS05-monitor
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS05-T04"]
 critical_path: true
 non_negotiable: false

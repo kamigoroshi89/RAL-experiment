@@ -3,7 +3,7 @@ id: WS04-T10
 title: Latent ground-truth labeller (phi_CP on the latent trace) and non-circularity tests
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS04-T09", "WS05-T04"]
 critical_path: true
 non_negotiable: false
