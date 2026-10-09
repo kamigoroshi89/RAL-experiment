@@ -361,6 +361,112 @@ def test_two_measurements_of_one_instant_make_two_instances_with_distinct_keys()
     assert keys == [f"range@{t}", f"range@{t}#2"]
 
 
+@pytest.mark.parametrize("measurement_first", [True, False])
+def test_the_records_of_one_step_do_not_depend_on_the_arrival_order(
+    measurement_first: bool,
+) -> None:
+    """A measurement and a dispense of one instant: RANGE and SYS before HOLD, COUNT, RESP and INT."""
+    mon = make_monitor()
+    t = 10 * STEP
+    pair = [
+        evt("measurement", t, source="cuff"),
+        evt("dispense", t, source="dispenser"),
+    ]
+    for event in pair if measurement_first else pair[::-1]:
+        mon.push_event(event)
+    keys = [r.instance_key for r in mon.advance(t) if r.t_eval_ms == t]
+    assert keys == [
+        f"{name}@{t}" for name in ("range", "sys", "hold", "count", "resp", "int")
+    ]
+
+
+def test_the_dedup_key_names_the_source_the_kind_and_the_signal() -> None:
+    mon = make_monitor()
+    t = STEP
+    mon.push_event(evt("measurement", t, source="cuff-a", seq=1))
+    mon.push_event(
+        evt("measurement", t, source="cuff-b", seq=1)
+    )  # another source: distinct
+    mon.push_event(
+        evt("measurement", t, source="cuff-a", seq=1)
+    )  # the same input again
+    mon.push_event(evt("dispense", t, source="cuff-a", seq=1))  # another kind: distinct
+    mon.push_sample(smp("bp", t, 120.0, seq=1))
+    mon.push_sample(smp("cuff_health", t, 1.0, seq=1))  # another signal: distinct
+    mon.push_sample(smp("bp", t, 120.0, seq=1))  # the same sample again
+    stats = mon.stats()
+    assert (stats.accepted_count, stats.duplicate_count) == (5, 2)
+    assert [r.reason for r in mon.rejected_inputs()] == ["duplicate", "duplicate"]
+
+
+def test_a_template_that_does_not_run_has_no_latency_bound() -> None:
+    reg = REG
+    mon = m.StreamingMonitor(
+        make_config(reg), reg, LIB, template_ids=[TemplateId.RANGE, TemplateId.SCHED]
+    )
+    assert mon.verdict_latency_bound_ms(TemplateId.RANGE) > 0
+    with pytest.raises(m.MonitorInputError, match="does not run"):
+        mon.verdict_latency_bound_ms(TemplateId.HOLD)
+
+
+def test_template_ids_must_name_templates_of_the_library() -> None:
+    partial = [t for t in LIB if t.id is not TemplateId.RANGE]
+    with pytest.raises(m.MonitorConfigError, match="absent from the library"):
+        m.StreamingMonitor(
+            make_config(REG), REG, partial, template_ids=[TemplateId.RANGE]
+        )
+
+
+def good_plan() -> Any:
+    return make_plan(REG, sched=[hhmm(1, 0)])
+
+
+def with_instance(**changes: Any) -> Any:
+    plan = good_plan()
+    return dataclasses.replace(
+        plan, instances=(dataclasses.replace(plan.instances[0], **changes),)
+    )
+
+
+@pytest.mark.parametrize(
+    ("plan", "match"),
+    [
+        (dataclasses.replace(good_plan(), schedule=5), "schedule must be"),
+        (dataclasses.replace(good_plan(), schedule={0: 1}), "schedule must be"),
+        (dataclasses.replace(good_plan(), schedule=(1.5,)), r"schedule\[0\]"),
+        (dataclasses.replace(good_plan(), signature=5), "signature must be a str"),
+        (dataclasses.replace(good_plan(), plan_version=-1), "plan_version"),
+        (dataclasses.replace(good_plan(), plan_version=True), "plan_version"),
+        (
+            dataclasses.replace(good_plan(), care_plan_id=""),
+            "care_plan_id must not be empty",
+        ),
+        (dataclasses.replace(good_plan(), care_plan_id=5), "care_plan_id"),
+        (dataclasses.replace(good_plan(), instances=5), "instances must be"),
+        (dataclasses.replace(good_plan(), instances=(5,)), "TemplateInstance"),
+        (with_instance(template="sched"), "TemplateId"),
+        (with_instance(instance_key=""), "instance_key must not be empty"),
+        (with_instance(instance_key=5), "instance_key"),
+        (with_instance(anchor_ms=1.5), "anchor_ms"),
+        (with_instance(anchor_ms=-1), "anchor_ms"),
+        (with_instance(param_values=[1]), "param_values must be a mapping"),
+        (with_instance(param_values={"sched_window": math.nan}), "param_values"),
+        (with_instance(param_values={"sched_window": INF}), "param_values"),
+        (with_instance(param_values={"sched_window": True}), "param_values"),
+        (with_instance(param_values={"sched_window": "1"}), "param_values"),
+        (with_instance(param_values={5: 1.0}), "param_values key"),
+    ],
+)
+def test_a_plan_that_cannot_be_read_is_a_plan_integrity_error(
+    plan: Any, match: str
+) -> None:
+    from ralmon.spec import PlanIntegrityError
+
+    mon = make_monitor()
+    with pytest.raises(PlanIntegrityError, match=match):
+        mon.load(plan)
+
+
 # ---------------------------------------------------------------------------------------------
 # the counters and what is kept
 # ---------------------------------------------------------------------------------------------
