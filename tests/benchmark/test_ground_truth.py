@@ -43,21 +43,6 @@ from typing import Any
 import numpy as np
 import pytest
 import yaml
-from ralmon.benchmark.labelling import (
-    LINK_TABLE,
-    MODE_DENSE,
-    MODE_SCHEDULED,
-    AssembledDay,
-    IdealObservationError,
-    LabelledDay,
-    LabellingError,
-    RegistryMismatchError,
-    RunnerError,
-    assemble_benchmark_day,
-    ideal_observation,
-    label_latent_day,
-    label_latent_day_detailed,
-)
 
 from ralmon.benchmark import labelling
 from ralmon.benchmark.adherence import (
@@ -75,6 +60,21 @@ from ralmon.benchmark.injection import (
     finalize_observed,
     injection_log,
     record_to_ground_truth,
+)
+from ralmon.benchmark.labelling import (
+    LINK_TABLE,
+    MODE_DENSE,
+    MODE_SCHEDULED,
+    AssembledDay,
+    IdealObservationError,
+    LabelledDay,
+    LabellingError,
+    RegistryMismatchError,
+    RunnerError,
+    assemble_benchmark_day,
+    ideal_observation,
+    label_latent_day,
+    label_latent_day_detailed,
 )
 from ralmon.benchmark.latent import T_DAY_MS
 from ralmon.benchmark.latent_day import (
@@ -664,10 +664,33 @@ def test_day_end_impulse_is_added_exactly_when_a_template_needs_it() -> None:
     assert only_ticks.events[0].payload == {"kind": "measurement"}
 
 
+def test_ideal_observation_keeps_each_tick_with_its_own_kind() -> None:
+    # a dose tick and a measurement tick at one instant are two events, each with its own payload
+    base = make_latent(measurements=(T(8),))
+    ticks = (
+        Event(EventKind.SCHEDULE_TICK, T(8), T(8), "ward", {"kind": "dose"}, None),
+        Event(
+            EventKind.SCHEDULE_TICK, T(8), T(8), "ward", {"kind": "measurement"}, None
+        ),
+    )
+    latent = dataclasses.replace(base, events=(*ticks, *base.events))
+    day = ideal_observation(latent, PLAN_ID)
+    got = [dict(e.payload) for e in day.events if e.kind is EventKind.SCHEDULE_TICK]
+    assert got == [{"kind": "dose"}, {"kind": "measurement"}]
+    # a payload that is not a mapping is refused
+    broken = clone_with(ticks[0], payload=[1])
+    with pytest.raises(IdealObservationError):
+        ideal_observation(
+            dataclasses.replace(base, events=(broken, *base.events)), PLAN_ID
+        )
+
+
 def test_ideal_observation_refuses_what_the_semantics_cannot_hold() -> None:
     step = MIN
     # (A0) of docs/formal/05 section 2.1: at most one pressure per grid bin
-    close = make_latent(measurements=(T(12), T(12, 0, 30)))
+    close = make_latent(
+        measurements=(T(12, 0, 10), T(12, 0, 40))
+    )  # one bin (12:00, 12:01]
     with pytest.raises(IdealObservationError, match="bin"):
         ideal_observation(close, PLAN_ID, step_ms=step)
     ideal_observation(close, PLAN_ID)  # without a step the check cannot be made
@@ -1264,7 +1287,9 @@ def test_count_limit_is_explained_through_the_24_hour_window_of_the_counter() ->
     [event] = label([event_record], injections=[double_take_record(T(7, 2))])
     assert (event.subtype, event.injected) == ("double_take", True)
     # the window is (decision - 24 h, decision]: the surplus exactly 24 h before is out, 1 ms later is in
-    at_end = violated("count", f"count@{DAY}", DAY, DAY)
+    at_end = violated(
+        "count", f"count@{DAY}#2", DAY, DAY
+    )  # the limit instance, not the day-end obligation
     [event] = label([at_end], injections=[double_take_record(0)])
     assert event.injected is False
     [event] = label([at_end], injections=[double_take_record(1)])
@@ -1741,8 +1766,10 @@ def test_bounds_are_named_constants_with_a_reason() -> None:
     for name in names:
         defining = [i for i, line in enumerate(lines) if re.match(rf"^{name}\b", line)]
         assert defining, name
-        # the line (or the comment block just above it) says "# algorithmic: <reason>"
-        window = " ".join(lines[max(0, defining[0] - 2) : defining[0] + 1])
+        # the definition (up to the wrapped value) says "# algorithmic: <reason>"
+        window = " ".join(
+            lines[defining[0] : defining[0] + 4]
+        )  # the value may be wrapped by the formatter
         assert re.search(r"#\s*algorithmic:\s*\S", window), name
 
 
@@ -2801,10 +2828,15 @@ def test_the_reference_comparison_is_not_vacuous(
     assert templates == {"range", "hold", "resp", "sched", "count"}
     assert sum(len(run["reference"]) for run in natural_days.values()) >= 60
     subtypes = {e.subtype for run in natural_days.values() for e in run["truth"]}
-    assert {
+    assert (
+        "dose_omission" in subtypes
+    )  # the natural adherence model produced an omitted slot
+    assert subtypes <= {
+        f"spontaneous_{t}" for t in ("range", "hold", "resp", "sched", "count")
+    } | {
         "dose_omission",
         "double_take",
-    } <= subtypes  # the natural adherence model produced both
+    }
     days_with_events = sum(1 for run in natural_days.values() if run["truth"])
     assert days_with_events >= 10
 
@@ -3695,7 +3727,7 @@ def test_default_registry_path_is_the_real_registry_and_is_never_substituted() -
     else:
         assert out == () and len(stub.calls) == 1
         loaded = stub.calls[0]["registry"]
-        assert loaded.version() == version and not loaded.fixture_only()
+        assert loaded.version() == version and not loaded.fixture_only
     # a fixture registry is refused unless the caller loaded it with the explicit flag (ADR-027)
     with pytest.raises(LabellingError):
         label_latent_day(
@@ -3709,3 +3741,55 @@ def test_default_registry_path_is_the_real_registry_and_is_never_substituted() -
             MODE_SCHEDULED,
             registry=str(F0_PATH),  # type: ignore[arg-type]
         )
+
+
+def test_natural_double_take_and_omission_are_labelled_from_the_generator_log() -> None:
+    # the adherence model of WS04-T05 as a point mass: every slot a double take, then every slot omitted
+    schedule = Schedule(
+        dose_ticks_ms=(8 * HOUR, 20 * HOUR),
+        measurement_ticks_ms=(T(7, 30), T(12), T(19, 30), T(22, 30)),
+    )
+    plan = make_plan(sched=schedule.measurement_ticks_ms)
+    config = AdherenceConfig(intake_lag_ms=LAG, double_take_gap_ms=2 * MIN)
+    doubles = AdherenceModel(AdherenceParams(0.0, 0.0, 1.0, 10 * MIN), config)
+    result = assemble(make_patient(baseline=130.0), schedule, adherence=doubles)
+    assert [e.state for e in result.behaviour_log] == [AdherenceState.DOUBLE_TAKE] * 2
+    out = truth_of(result.latent, plan, result.c1_records, result.behaviour_log)
+    limits = [e for e in out if e.template_id == "count"]
+    # 08:00, 08:02, 20:00, 20:02: the trailing count is 3 at 20:00 and 4 at 20:02 (the limit is 2)
+    assert [(e.onset_ms, e.subtype, e.injected) for e in limits] == [
+        (20 * HOUR, "double_take", False),
+        (20 * HOUR + 2 * MIN, "double_take", False),
+    ]
+    assert all(e.confounder_group is None and e.end_ms is None for e in limits)
+    omitted = AdherenceModel(AdherenceParams(0.0, 1.0, 0.0, 10 * MIN), config)
+    result = assemble(make_patient(baseline=130.0), schedule, adherence=omitted)
+    assert [e.state for e in result.behaviour_log] == [AdherenceState.OMITTED] * 2
+    out = truth_of(result.latent, plan, result.c1_records, result.behaviour_log)
+    [end] = [e for e in out if e.template_id == "count"]
+    assert tup(end) == c1_event("dose_omission", "count", DAY, DAY, injected=False)
+    # a forced omission is a scenario control without a record: the log still labels it, not injected
+    result = assemble(
+        make_patient(baseline=130.0),
+        schedule,
+        forced=[ForcedSlot(0, 1, AdherenceState.OMITTED)],
+    )
+    [end] = [
+        e
+        for e in truth_of(result.latent, plan, result.c1_records, result.behaviour_log)
+        if e.template_id == "count"
+    ]
+    assert (end.subtype, end.injected, end.confounder_group) == (
+        "dose_omission",
+        False,
+        None,
+    )
+    # a forced double take is an injection with a record: the same limit events, now injected
+    spec = c1_spec("double_take", 20 * HOUR)
+    result = assemble(make_patient(baseline=130.0), schedule, [spec])
+    limits = [
+        e
+        for e in truth_of(result.latent, plan, result.c1_records, result.behaviour_log)
+        if e.template_id == "count"
+    ]
+    assert [(e.subtype, e.injected) for e in limits] == [("double_take", True)]
