@@ -367,6 +367,7 @@ class StreamingMonitor:
         self._plan_loaded = False
         self._started: set[str] = set()
         self._static_keys: set[str] = set()
+        self._day_end_step: dict[str, int] = {}
         self._scheduled: dict[int, list[Instance]] = {}
         self._dyn_params: dict[TemplateId, dict[str, float]] = {
             tid: dict(p) for tid, p in self._defaults.items()
@@ -653,6 +654,15 @@ class StreamingMonitor:
         self._k_start = k0
         self._k_f = k0 - 1
 
+    def _day_end_keys_closing_at(self, step: int) -> frozenset[str]:
+        """Keys of the day-end COUNT instances of the loaded plan whose closing step is ``step``.
+
+        Package-private (used by ``run_offline`` with a history): the obligation of a day is anchored at
+        the closing step ``K`` of that day, which is the first step of the next one; the run of the next
+        day, replaying its history, must not return it a second time.
+        """
+        return frozenset(k for k, at in self._day_end_step.items() if at == step)
+
     @converting(MonitorInputError)
     def verdict_latency_bound_ms(self, template: TemplateId) -> DurationMs:
         """``max_latency_<id> + reorder_delay_ms`` (docs/formal/05 section 7.2), without the compute time."""
@@ -929,6 +939,11 @@ class StreamingMonitor:
         self._plan_id = read.care_plan_id
         self._plan_versions[read.care_plan_id] = read.plan_version
         self._static_keys = {static.key for static in built.statics}
+        self._day_end_step = {
+            static.key: step_of(static.anchor, self._step)
+            for static in built.statics
+            if static.template is TemplateId.COUNT
+        }
         self._scheduled = {}
         for step, instance in planned:
             self._scheduled.setdefault(step, []).append(instance)

@@ -524,8 +524,14 @@ def test_hostile_history_raises_only_named_errors() -> None:
     assert run(day, plan, history)  # the well-formed history is accepted and replayed
     leaks = Leaks()
 
-    def go(label: str, hist: Any) -> None:
-        for fn in (m.run_offline, m.run_offline_detailed):
+    def go(label: str, hist: Any, both: bool = False) -> None:
+        # both entry points share one implementation: the field loops use the detailed one only
+        entries = (
+            (m.run_offline, m.run_offline_detailed)
+            if both
+            else (m.run_offline_detailed,)
+        )
+        for fn in entries:
             leaks.run(
                 f"{fn.__name__}[{label}]",
                 fn,
@@ -540,11 +546,11 @@ def test_hostile_history_raises_only_named_errors() -> None:
             )
 
     for value in pool():
-        go("history=v", value)
-        go("history=[v]", [value])
-        go("history=[good, v]", [history[0], value])
-        go("history=[v, good]", [value, history[1]])
-        go("history=[good, good, v]", [*history, value])
+        go("history=v", value, both=True)
+        go("history=[v]", [value], both=True)
+        go("history=[good, v]", [history[0], value], both=True)
+        go("history=[v, good]", [value, history[1]], both=True)
+        go("history=[good, good, v]", [*history, value], both=True)
     for position in range(2):
         for f in dataclasses.fields(LocalDay):
             for value in pool():

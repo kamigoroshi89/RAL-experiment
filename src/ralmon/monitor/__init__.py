@@ -7,6 +7,10 @@
 run) and ``resolve_subformula_path`` / ``resolve_subformula_paths`` (the text of the sub-formulas that a
 ``subformula_path`` of a record names, several parts joined by ``;``) joined the table with ADR-053.
 
+``run_offline`` and ``run_offline_detailed`` take the keyword-only ``history`` of ADR-046: the observed days of
+the same patient that precede ``day``, on the continuing axis, replayed first so that the 24 h dose counter, the
+held pressure and the instances whose window ends after midnight carry into the day (``monitor/offline.py``).
+
 ``build_calibration_episodes`` and ``StaleCalibratorError`` stay placeholders owned by WS05-T08.
 """
 

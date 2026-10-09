@@ -62,3 +62,15 @@ Write first; each fails before the implementation. Fixture-only (registry F0, `s
 - `pytest tests/monitor/test_history.py -q` exits 0 and `pytest -q` exits 0.
 - `ruff check src tests`, `ruff format --check src tests` and `mypy src/ralmon` exit 0.
 - `pytest tests/test_public_api.py -q` exits 0 and `python3 tools/check_plan.py` exits 0.
+
+## Notes
+
+### Completion note (worker, 2026-10-10)
+
+Implemented in `src/ralmon/monitor/offline.py` (`history`, `MAX_HISTORY_DAYS = 14`, `_read_history`) and `core.py` (the package-private `_day_end_keys_closing_at`, fed by a `key -> closing step` map built at `_commit`); tests in `tests/monitor/test_history.py` with the hand-computed `tests/fixtures/monitor/golden_history.yaml` (5 cases).
+
+- Run: from the first step of the first history day to the closing step of `day`, the same cadence; records of steps before `day_index * K` are dropped in `_run` (the monitor still emits them). The named bound is on the span from the first history day to `day` (a gap in the history counts), so a history of a few far days cannot make the run replay millions of steps.
+- Rule of this task beyond the contract text (needed by test 6): with a non-empty `history`, the day-end COUNT obligation anchored at the first step of `day` (it closes the previous day) is not returned. With an empty `history` the run is exactly the present one, so a day that follows another still returns that obligation with count 0 (the labeller of WS04-T10 guards against it).
+- Boundary step: the closing step of a day is the first step of the next one. Any other record at that step (an instance carried from the history, or decided exactly there) is returned by both runs; the contract says only that steps before the first step are not returned. Consumers that need "decided once" key by `(instance_key, t_eval_ms)`.
+- Contract text `#monitor` 0.2.0 is consistent with the implementation; the history items are typed `ObservedTrace` in code (the monitor imports only `ralmon.signals` and `ralmon.spec`), as `day` is.
+- Not changed: `Detector` has no history input (WS06-T01, ADR-046 status); `StreamingMonitor` has no history argument (the replay is the cadence of `run_offline`).

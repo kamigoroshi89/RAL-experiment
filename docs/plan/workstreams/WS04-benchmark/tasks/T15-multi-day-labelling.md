@@ -56,3 +56,9 @@ Write first. Fixture-only; the real monitor with `history`.
 - `ruff check src tests`, `ruff format --check src tests` and `mypy src/ralmon` exit 0.
 - `grep -cE '^## (Definition|Onset and end conventions|Injection records versus truth|Modes|Non-circularity tests|Residual circularity)$' docs/benchmark/ground-truth.md` prints `6`.
 - `python3 tools/check_plan.py` exits 0.
+
+## Notes
+
+### Real signature of the monitor history input (worker of WS05-T10, 2026-10-10)
+
+`run_offline(day, plan, config, calibrator, forecaster, *, registry=None, templates=None, verifier=None, history=())` and `run_offline_detailed(...)` with the same arguments (`history: Sequence[ObservedDay] = ()`, typed in code as `Sequence[ObservedTrace]`). Pass the days that precede the day to label, on the continuing axis, in increasing `day_index` order, the same `patient_id`; at most `ralmon.monitor.offline.MAX_HISTORY_DAYS` (14) days before `day`, one day is enough with the registry of today. Records of steps before the first step of `day` are not returned; the day-end COUNT that closes the previous day at that first step is not returned either (its own day's run decides it). Every other record at the first step of `day` is returned, including those of instances anchored in an earlier day: the closing step of a day is also the first step of the next, so an instance that is decided exactly at that step appears in both runs (key by `(instance_key, t_eval_ms)`, or assign ownership by `decided_at_ms`). With an empty `history` the run is unchanged, including the day-end COUNT record of the previous day at the first step of a day that follows another (the labeller's guard on the day-end COUNT of another day stays needed for the no-history call).
