@@ -48,3 +48,7 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 ## ADR-054 decisa (2026-10-09)
 
 - gab ha scelto la strada (b): la disponibilità dei canali del robot viene dai messaggi `NODE_STATE` con `colocated`, e la presenza vale per una sola visita (regola dell'episodio). Nuovo task WS05-T11 (1,5 pd); WS08-T01 ne dipende, così nessun esperimento gira con il testimone cieco. Il costruttore WS04-T11 scrive i messaggi; l'estrattore di WS05-T07 adotta la stessa regola. La chiave del payload segue ADR-035, ancora proposta.
+
+## ADR-035 accettata (2026-10-09)
+
+- gab ha accettato le convenzioni sulle evidenze della traccia con il nuovo membro `EventKind.VERIFICATION`: una verifica fallita al gateway è un evento `verification` (sorgente il gateway, chiavi `verification` e `subject`) e non viaggia più su `DEVICE_ERROR`, che resta un guasto del dispositivo con il solo `error_code`. Un Sample `auth` esiste solo per un dispense verificato. `#trace-schema` passa a 0.2.0 (membro e regole 5-7); aggiornati `ralmon.signals`, il vocabolario e l'iniettore C3 del benchmark, il confronto dei confondenti e `docs/models/evidence-channels.md` (EC-GAP-4 chiuso). Note di passaggio in WS07-T03 (manca la riga `verification` nella mappatura dei messaggi) e WS10-T02.

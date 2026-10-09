@@ -359,7 +359,7 @@ def values_of(out: InjectionResult | ObservedStream, signal: str) -> list[float]
 
 
 def gateway_events(out: InjectionResult | ObservedStream) -> list[Event]:
-    return [e for e in events_of(out, EventKind.DEVICE_ERROR) if e.source == "gateway"]
+    return [e for e in events_of(out, EventKind.VERIFICATION) if e.source == "gateway"]
 
 
 def cuff_seqs(out: InjectionResult | ObservedStream) -> list[tuple[int, int | None]]:
@@ -2476,13 +2476,17 @@ def test_gateway_verification_key_declared_in_vocab() -> None:
     assert vocab.VERIFICATIONS == ("failed",)
     # the names are those of the conventions table of evidence-channels.md
     rows = conventions_rows()
-    assert {vocab.KEY_VERIFICATION, vocab.KEY_SUBJECT, vocab.KEY_ERROR_CODE} <= rows[
-        "DEVICE_ERROR"
-    ]
+    # ADR-035: a failed verification is an event of its own kind, not a device error
+    assert rows["VERIFICATION"] == {vocab.KEY_VERIFICATION, vocab.KEY_SUBJECT}
+    assert rows["DEVICE_ERROR"] == {vocab.KEY_ERROR_CODE}
     text = EVIDENCE_DOC.read_text(encoding="utf-8")
     assert f"`{vocab.VERIFICATION_FAILED}`" in text
-    assert vocab.KEY_VERIFICATION in vocab.PAYLOAD_KEYS[EventKind.DEVICE_ERROR]
-    assert vocab.KEY_SUBJECT in vocab.PAYLOAD_KEYS[EventKind.DEVICE_ERROR]
+    assert vocab.PAYLOAD_KEYS[EventKind.VERIFICATION] == frozenset(
+        {vocab.KEY_VERIFICATION, vocab.KEY_SUBJECT}
+    )
+    assert vocab.PAYLOAD_KEYS[EventKind.DEVICE_ERROR] == frozenset(
+        {vocab.KEY_ERROR_CODE}
+    )
     assert (
         vocab.KEY_VERIFICATION in vocab.ALL_PAYLOAD_KEYS
         and vocab.KEY_SUBJECT in vocab.ALL_PAYLOAD_KEYS
@@ -2524,7 +2528,7 @@ GATEWAY_BAD: list[Any] = [
         "verification": "failed",
         "subject": "cuff",
         "error_code": "E1",
-    },  # not both kinds of report
+    },  # a device error code is not a key of a verification
     {"verification": "failed", "subject": "cuff", "extra": 1},
 ]
 
@@ -2532,16 +2536,23 @@ GATEWAY_BAD: list[Any] = [
 @pytest.mark.parametrize("payload", GATEWAY_BAD)
 def test_vocab_refuses_bad_verification_payloads(payload: Any) -> None:
     with pytest.raises(vocab.VocabularyError):
-        vocab.check_payload(EventKind.DEVICE_ERROR, payload)
+        vocab.check_payload(EventKind.VERIFICATION, payload)
 
 
 def test_vocab_still_accepts_the_device_error_of_a_device() -> None:
     vocab.check_payload(EventKind.DEVICE_ERROR, {"error_code": "CUFF_E01"})
     vocab.check_payload(
-        EventKind.DEVICE_ERROR, {"verification": "failed", "subject": "cuff"}
+        EventKind.VERIFICATION, {"verification": "failed", "subject": "cuff"}
     )
+    # ADR-035: a failed verification no longer travels on a device error
+    with pytest.raises(vocab.VocabularyError):
+        vocab.check_payload(
+            EventKind.DEVICE_ERROR, {"verification": "failed", "subject": "cuff"}
+        )
     assert vocab.REQUIRED_ALTERNATIVES[EventKind.DEVICE_ERROR] == (
         frozenset({vocab.KEY_ERROR_CODE}),
+    )
+    assert vocab.REQUIRED_ALTERNATIVES[EventKind.VERIFICATION] == (
         frozenset({vocab.KEY_VERIFICATION, vocab.KEY_SUBJECT}),
     )
     assert vocab.SOURCE_GATEWAY not in {

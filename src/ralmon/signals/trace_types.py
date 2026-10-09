@@ -28,6 +28,7 @@ class EventKind(str, Enum):
     )
     ROBOT_TASK = "robot_task"  # navigation or manipulation task outcome
     DEVICE_ERROR = "device_error"  # error code from a device (e.g. cuff)
+    VERIFICATION = "verification"  # a message failed the gateway verification (ADR-035)
 
 
 @dataclass(frozen=True, slots=True)

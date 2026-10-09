@@ -998,7 +998,7 @@ def _payload(event: Event) -> tuple[tuple[str, Any], ...]:
 
 
 def _is_gateway_error(event: Event) -> bool:
-    return event.kind is EventKind.DEVICE_ERROR and event.source == vocab.SOURCE_GATEWAY
+    return event.kind is EventKind.VERIFICATION and event.source == vocab.SOURCE_GATEWAY
 
 
 def _views(

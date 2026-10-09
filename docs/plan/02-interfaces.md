@@ -61,7 +61,7 @@ Rules:
 
 ## Trace schema
 
-Version 0.1.1 (ADR-046: text on times beyond the day). Owner WS04. Consumers: WS05, WS06, WS07, WS08, WS10. Sources: analisi §5.1 (trace generator, ground truth), §4.1 (signals), §4.5 (evidence).
+Version 0.2.0 (ADR-035: the member `EventKind.VERIFICATION` and the evidence conventions; 0.1.1 was ADR-046, text on times beyond the day). Owner WS04. Consumers: WS05, WS06, WS07, WS08, WS10. Sources: analisi §5.1 (trace generator, ground truth), §4.1 (signals), §4.5 (evidence).
 
 A patient-day is represented twice: the **latent trace** (noise-free, fault-free, attack-free) used only to compute ground truth, and the **observed trace** that the monitor and every baseline see.
 
@@ -75,6 +75,7 @@ class EventKind(str, Enum):
     NODE_STATE = "node_state"          # lifecycle or liveliness change of a device or robot node
     ROBOT_TASK = "robot_task"          # navigation or manipulation task outcome
     DEVICE_ERROR = "device_error"      # error code from a device (e.g. cuff)
+    VERIFICATION = "verification"      # a message failed the gateway verification (ADR-035); payload verification, subject
 
 @dataclass(frozen=True, slots=True)
 class Sample:
@@ -139,6 +140,9 @@ Rules:
 2. Every split is by patient: `patient_id` belongs to exactly one of train, calibration or test (analisi §5.1, §4.4).
 3. Files on disk: one directory per benchmark version, `days/<patient_id>/<day_index>.json` (or Parquet, chosen by WS04-T01 and recorded as an ADR), plus a `manifest.json` with generator git revision, seeds and prior source provenance.
 4. The times of `samples` and `events` of an `ObservedDay` are on the continuing axis of the patient (`#time-and-units`). The time of a verdict or of an alert can exceed the end of the day for an instance anchored in it and decided after it (a RESP window across midnight); with a `history` an instance anchored in an earlier day can be decided in this day, and its onset then lies before the first step of the day (ADR-046). A `GroundTruthEvent` belongs to the day in which the monitor decides it.
+5. **Evidence conventions** (ADR-035). The table "Trace evidence conventions" of `docs/models/evidence-channels.md` is binding for the `payload` keys of `NODE_STATE`, `ROBOT_TASK`, `DEVICE_ERROR`, `VERIFICATION` and `DISPENSE`; a key enters a trace only if the table declares it. A message that fails the gateway verification stays in the trace (policy "flag") and the gateway logs a `VERIFICATION` event (`source` the gateway, `payload` `verification` = `failed` and `subject` = the device); a `DEVICE_ERROR` is a fault report of a device and carries only `error_code`.
+6. **`auth`** (ADR-035). The gateway delivers an `auth` Sample only for a dispense message whose verification passed, and a source that cannot verify does not emit `auth`, so an injector without keys cannot satisfy INT through it.
+7. **Robot-channel availability** (ADR-035, ADR-054). The availability of `presence` and `intake` is derived from the robot `NODE_STATE` events (`state`, `colocated`); no field is added to `ObservedDay`.
 
 ## PriorSource
 

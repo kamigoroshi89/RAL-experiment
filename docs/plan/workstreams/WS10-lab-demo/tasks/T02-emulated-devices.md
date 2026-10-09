@@ -69,3 +69,9 @@ for k in board_model firmware_path firmware_git_rev devices_emulated commercial_
 ```
 
 Field meanings: `devices_emulated` lists each device with the `SignalId` values it emits; `commercial_device` gives model, mode of use and the sentence tying the mode to the ethics decision; `gateway_bridge` gives host, ROS 2 node name, topics published, message types and code path; `link_test` gives N, N_rx and loss rate; `path_latency_ms` gives p50, p95, p99 and N.
+
+## Notes
+
+### Hand-over from ADR-035 (accepted by gab, 2026-10-09)
+
+A frame that fails the authentication check (field `authentication_mode`) is published by the bridge as an `Event` of kind `verification` (`source` the gateway, payload `verification` = `failed`, `subject` = the device), never as a `device_error`, which carries only the cuff `error_code`. The bridge publishes an `auth` Sample only for a dispense frame whose verification passed; a device that cannot verify emits no `auth` (`#trace-schema` 0.2.0, rules 5 and 6; payload keys from the conventions table of `docs/models/evidence-channels.md`).

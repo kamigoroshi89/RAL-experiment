@@ -23,12 +23,12 @@ verification outcome): they extend ``PAYLOAD_KEYS`` here, so a key can only ente
 being declared. ``check_payload`` is the one conformity check.
 
 WS04-T08 adds the gateway verification outcome of the conventions table (gap G-4 of
-``docs/models/evidence-channels.md``, ADR-035, interim until it is confirmed): a ``DEVICE_ERROR``
-event from the source ``gateway`` with ``verification`` (the value ``failed``) and ``subject``
-(the identifier of the device whose message failed verification). A device error carries
-``error_code`` or the two keys of the gateway, never both kinds. The schema has no event kind for
-a gateway outcome, so the failed verification of one message is logged as this event (the policy
-"flag" of ``docs/models/threat-model.md`` hypothesis H-GW: the message itself stays in the trace).
+``docs/models/evidence-channels.md``): since ADR-035 (accepted 2026-10-09) it is an event of its own
+kind, ``VERIFICATION``, from the source ``gateway``, with ``verification`` (the value ``failed``) and
+``subject`` (the identifier of the device whose message failed verification). A ``DEVICE_ERROR`` is
+a fault report of a device and carries only ``error_code``. The failed verification of one message
+is logged as this event (the policy "flag" of ``docs/models/threat-model.md`` hypothesis H-GW: the
+message itself stays in the trace).
 
 WS04-T09 adds the outcome ``declined`` of a ``ROBOT_TASK`` (the patient refused the step: the C1
 subtype ``measurement_refusal`` against the C2 ``manipulation_failure``, confounder group
@@ -162,8 +162,8 @@ KEY_COMMANDED: Final = "commanded"  # bool: the transition was announced as deli
 # DEVICE_ERROR: a device-defined label, never a clinical value.
 KEY_ERROR_CODE: Final = "error_code"
 _MAX_ERROR_CODE: Final = 256  # algorithmic: longest error label
-# DEVICE_ERROR from the gateway: the verification of one message failed (evidence-channels.md,
-# Trace evidence conventions: interim convention of gap G-4).
+# VERIFICATION from the gateway: the verification of one message failed (evidence-channels.md,
+# Trace evidence conventions; ADR-035, which replaced the interim DEVICE_ERROR carrier).
 KEY_VERIFICATION: Final = "verification"
 VERIFICATION_FAILED: Final = "failed"
 VERIFICATIONS: Final = (VERIFICATION_FAILED,)
@@ -179,9 +179,8 @@ PAYLOAD_KEYS: Final[Mapping[EventKind, frozenset[str]]] = MappingProxyType(
         EventKind.INTAKE: frozenset(),
         EventKind.ROBOT_TASK: frozenset({KEY_TASK, KEY_OUTCOME, KEY_PATIENT_ID}),
         EventKind.NODE_STATE: frozenset({KEY_STATE, KEY_COMMANDED}),
-        EventKind.DEVICE_ERROR: frozenset(
-            {KEY_ERROR_CODE, KEY_VERIFICATION, KEY_SUBJECT}
-        ),
+        EventKind.DEVICE_ERROR: frozenset({KEY_ERROR_CODE}),
+        EventKind.VERIFICATION: frozenset({KEY_VERIFICATION, KEY_SUBJECT}),
         EventKind.MEASUREMENT_MISSED: frozenset(),
     }
 )
@@ -193,10 +192,8 @@ REQUIRED_ALTERNATIVES: Final[Mapping[EventKind, tuple[frozenset[str], ...]]] = (
     MappingProxyType(
         {
             EventKind.NODE_STATE: (frozenset({KEY_STATE}),),
-            EventKind.DEVICE_ERROR: (
-                frozenset({KEY_ERROR_CODE}),
-                frozenset({KEY_VERIFICATION, KEY_SUBJECT}),
-            ),
+            EventKind.DEVICE_ERROR: (frozenset({KEY_ERROR_CODE}),),
+            EventKind.VERIFICATION: (frozenset({KEY_VERIFICATION, KEY_SUBJECT}),),
         }
     )
 )
@@ -282,12 +279,4 @@ def check_payload(kind: object, payload: object) -> None:
         raise VocabularyError(
             f"payload of a {kind.value} event needs "
             + " or ".join(str(sorted(a)) for a in alternatives)
-        )
-    if (
-        kind is EventKind.DEVICE_ERROR
-        and KEY_ERROR_CODE in keys
-        and (KEY_VERIFICATION in keys or KEY_SUBJECT in keys)
-    ):
-        raise VocabularyError(
-            "a device error carries an error code or a failed verification, not both"
         )

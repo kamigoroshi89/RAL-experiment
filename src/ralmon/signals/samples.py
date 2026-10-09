@@ -18,7 +18,7 @@ from ralmon.signals.trace_types import Event, EventKind, Sample
 from ralmon.signals.units import TimeMs
 
 # Events that are signals: the four impulses of section 2.1. MEASUREMENT_MISSED,
-# NODE_STATE, ROBOT_TASK and DEVICE_ERROR are evidence for the attribution layer, not
+# NODE_STATE, ROBOT_TASK, DEVICE_ERROR and VERIFICATION are evidence for the attribution layer, not
 # signals (section 2.1, `meas` row; 02-interfaces.md#evidencevector).
 _EVENT_SIGNAL: Final[Mapping[EventKind, SignalId]] = MappingProxyType(
     {
