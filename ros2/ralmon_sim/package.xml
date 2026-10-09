@@ -15,12 +15,26 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <!-- WS07-T02: world, robot and Nav2 bring-up (sim_ward.launch.py) and the pure scenario module. -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch_pal</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>pal_gazebo_worlds</exec_depend>
+  <exec_depend>tiago_pro_gazebo</exec_depend>
+  <exec_depend>tiago_pro_bringup</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <!-- Packages of later tasks (WS07-T03 and WS05-T09). An exec_depend on a package that is not in
        the workspace does not stop a build of ralmon_sim alone, so the build does not need them. -->
   <exec_depend>ralmon_sim_msgs</exec_depend>
   <exec_depend>ralmon_ros</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
+  <test_depend>rosgraph_msgs</test_depend>
+  <test_depend>gazebo_msgs</test_depend>
+  <test_depend>tf2_ros_py</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

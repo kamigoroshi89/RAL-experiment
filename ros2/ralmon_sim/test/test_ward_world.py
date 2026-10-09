@@ -928,7 +928,7 @@ def test_named_pipe_is_refused_without_blocking(tmp_path: Path) -> None:
     def run() -> None:
         try:
             ws.load_scenario(fifo)
-        except BaseException as exc:  # recorded and checked by the main thread
+        except BaseException as exc:  # noqa: BLE001 (recorded, checked by the main thread)
             outcome.append(exc)
 
     worker = threading.Thread(target=run, daemon=True)
@@ -1634,9 +1634,7 @@ def shipped_grid() -> ws.OccupancyGrid:
 def header_comment() -> str:
     lines = []
     for line in SCENARIO_PATH.read_text(encoding="utf-8").splitlines():
-        if line.startswith("#"):
-            lines.append(line)
-        elif line.strip() == "" and lines:
+        if line.startswith("#") or (line.strip() == "" and lines):
             lines.append(line)
         else:
             break
@@ -1712,12 +1710,14 @@ def test_every_door_connected_to_dock_in_free_space() -> None:
     ]
 
 
-def test_door_poses_are_distinct_and_far_enough_from_each_other() -> None:
+def test_door_poses_are_further_apart_than_twice_the_goal_tolerance() -> None:
+    # Nav2's goal tolerance is 0.25 m (config/nav2_params.yaml): two door poses closer than twice
+    # that could not be told apart by "the robot is within the tolerance of this pose"
     scenario = shipped()
     points = [(room.door.x, room.door.y) for room in scenario.rooms]
     for i, a in enumerate(points):
         for b in points[i + 1 :]:
-            assert math.dist(a, b) > 1.0
+            assert math.dist(a, b) > 0.5
 
 
 def test_shipped_pose_names_are_the_frozen_list() -> None:
@@ -2154,6 +2154,7 @@ POSE_MARGIN_M = 0.5
 CLOCK_ADVANCE_S = 1.0
 WALL_GUARD_FACTOR = 10
 ACTIVE_STATE = 3  # lifecycle_msgs/State.PRIMARY_STATE_ACTIVE
+ROBOT_MODEL_NAME = "tiago-pro"  # the model name used by sim_ward.launch.py (and by PAL)
 NAV2_LIFECYCLE_NODES = (
     "map_server",
     "amcl",
@@ -2168,6 +2169,8 @@ class Stack:
 
     def __init__(self, scenario: ws.WardScenario, handle: Any) -> None:
         import rclpy
+        import rclpy.qos
+        from gazebo_msgs.msg import ModelStates
         from nav2_msgs.action import NavigateToPose
         from rclpy.action import ActionClient
         from rosgraph_msgs.msg import Clock
@@ -2180,13 +2183,29 @@ class Stack:
         self.node = rclpy.create_node("ward_world_test")
         self.sim_time_ns = 0
         self.clock_messages = 0
-        self.node.create_subscription(Clock, "/clock", self._on_clock, 10)
+        # gazebo_ros publishes /clock best effort: a default (reliable) subscription never matches
+        self.node.create_subscription(
+            Clock, "/clock", self._on_clock, rclpy.qos.qos_profile_sensor_data
+        )
+        # ground truth: the pose of the robot model in the world (world plugin gazebo_ros_state)
+        self.truth: tuple[float, float] | None = None
+        self.node.create_subscription(
+            ModelStates,
+            "/gazebo/model_states",
+            self._on_model_states,
+            rclpy.qos.qos_profile_sensor_data,
+        )
         self.nav = ActionClient(self.node, NavigateToPose, "navigate_to_pose")
         self.NavigateToPose = NavigateToPose
 
     def _on_clock(self, msg: Any) -> None:
         self.sim_time_ns = msg.clock.sec * 1_000_000_000 + msg.clock.nanosec
         self.clock_messages += 1
+
+    def _on_model_states(self, msg: Any) -> None:
+        if ROBOT_MODEL_NAME in msg.name:
+            position = msg.pose[msg.name.index(ROBOT_MODEL_NAME)].position
+            self.truth = (position.x, position.y)
 
     @property
     def sim_ms(self) -> int:
@@ -2278,6 +2297,13 @@ class Stack:
         outcome = "succeeded" if status == GoalStatus.STATUS_SUCCEEDED else "failed"
         return outcome, self.sim_ms - started_ms, status
 
+    def localisation_error(self) -> float:
+        """Distance in metres between the AMCL estimate and the model pose (nan when unknown)."""
+        estimate = self.robot_pose()
+        if estimate is None or self.truth is None:
+            return float("nan")
+        return math.dist(estimate, self.truth)
+
     def robot_pose(self) -> tuple[float, float] | None:
         """Latest map-frame position of the robot (AMCL estimate through tf), or None."""
         import tf2_ros
@@ -2291,7 +2317,7 @@ class Stack:
             transform = self._tf_buffer.lookup_transform(
                 "map", "base_footprint", Time()
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 (tf2 raises several types before the first transform)
             return None
         t = transform.transform.translation
         return (t.x, t.y)
@@ -2366,6 +2392,7 @@ def wait_for_navigation(stack: Stack) -> None:
         wall_s,
         "a map->base_footprint transform",
     )
+    stack.wait_until(lambda: stack.truth is not None, wall_s, "/gazebo/model_states")
 
 
 @pytest.mark.ros
@@ -2373,10 +2400,9 @@ def test_robot_reaches_every_room_door(ward_stack: Stack) -> None:
     stack = ward_stack
     wait_for_navigation(stack)
     scenario = stack.scenario
-    start = stack.robot_pose()
-    assert start is not None
-    assert math.dist(start, (scenario.dock.x, scenario.dock.y)) < POSE_MARGIN_M, (
-        "robot is not at the dock"
+    assert stack.truth is not None
+    assert math.dist(stack.truth, (scenario.dock.x, scenario.dock.y)) < POSE_MARGIN_M, (
+        "the robot is not at the dock"
     )
     # the farthest door first, from the dock: its time is the dry-drive time of the scenario header
     ordered = sorted(
@@ -2387,34 +2413,55 @@ def test_robot_reaches_every_room_door(ward_stack: Stack) -> None:
     )
     for index, room in enumerate(ordered):
         outcome, used_ms, _ = stack.navigate(room.door, scenario.nav_goal_timeout_ms)
+        stack.spin_for(1.0)
         print(
-            f"NAV room={room.room_id} outcome={outcome} sim_ms={used_ms} first_leg={index == 0}"
+            f"NAV room={room.room_id} outcome={outcome} sim_ms={used_ms} first_leg={index == 0} "
+            f"amcl_error_m={stack.localisation_error():.2f}"
         )
         assert outcome == "succeeded", (
             f"{room.room_id}: {outcome} after {used_ms} sim ms"
         )
         assert used_ms <= scenario.nav_goal_timeout_ms
-        here = stack.robot_pose()
-        assert here is not None
-        assert math.dist(here, (room.door.x, room.door.y)) < POSE_MARGIN_M, room.room_id
-    # and into the bedside pose of one room, as the robot task layer will do
-    outcome, used_ms, _ = stack.navigate(
-        ordered[0].bedside, scenario.nav_goal_timeout_ms
-    )
-    print(f"NAV bedside room={ordered[0].room_id} outcome={outcome} sim_ms={used_ms}")
-    assert outcome == "succeeded"
+        # the answer of Nav2 rests on the AMCL pose; the model pose in the world is the test
+        assert stack.truth is not None
+        assert math.dist(stack.truth, (room.door.x, room.door.y)) < POSE_MARGIN_M, (
+            f"{room.room_id}: Nav2 reports success but the robot is at {stack.truth}"
+        )
+
+
+@pytest.mark.ros
+def test_robot_reaches_the_bedside_pose_of_every_room(ward_stack: Stack) -> None:
+    """The robot task layer (WS07-T04) navigates to the bedside pose: through the door, room to room."""
+    stack = ward_stack
+    wait_for_navigation(stack)
+    scenario = stack.scenario
+    for room in scenario.rooms:
+        outcome, used_ms, _ = stack.navigate(room.bedside, scenario.nav_goal_timeout_ms)
+        stack.spin_for(1.0)
+        print(
+            f"NAV bedside room={room.room_id} outcome={outcome} sim_ms={used_ms} "
+            f"amcl_error_m={stack.localisation_error():.2f}"
+        )
+        assert outcome == "succeeded", (
+            f"{room.room_id}: {outcome} after {used_ms} sim ms"
+        )
+        assert stack.truth is not None
+        assert (
+            math.dist(stack.truth, (room.bedside.x, room.bedside.y)) < POSE_MARGIN_M
+        ), f"{room.room_id}: Nav2 reports success but the robot is at {stack.truth}"
 
 
 @pytest.mark.ros
 def test_unreachable_pose_goal_does_not_succeed(ward_stack: Stack) -> None:
     stack = ward_stack
     wait_for_navigation(stack)
+    target = stack.scenario.unreachable_pose
     outcome, used_ms, status = stack.navigate(
-        stack.scenario.unreachable_pose, stack.scenario.nav_goal_timeout_ms
+        target, stack.scenario.nav_goal_timeout_ms
     )
     print(f"NAV unreachable outcome={outcome} sim_ms={used_ms} status={status}")
     assert outcome in {"rejected", "failed", "timeout"}
     assert outcome != "succeeded"
-    here = stack.robot_pose()
-    pose_ = stack.scenario.unreachable_pose
-    assert here is None or math.dist(here, (pose_.x, pose_.y)) > POSE_MARGIN_M
+    stack.spin_for(1.0)
+    assert stack.truth is not None
+    assert math.dist(stack.truth, (target.x, target.y)) > POSE_MARGIN_M

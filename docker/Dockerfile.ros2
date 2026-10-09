@@ -49,6 +49,14 @@ RUN mkdir -p /opt/ralmon_overlay/src \
 RUN python3 -m pip install --upgrade "numpy<2" hypothesis ruff mypy types-PyYAML \
  && ln -s /usr/bin/pytest-3 /usr/local/bin/pytest
 
+# Display for the Gazebo Classic sensors (WS07-T02): the laser scans of the PAL robots exist only when an
+# X display is present (ros2/ralmon_sim/doc/availability.md, Reproduction step 8). Xvfb with Mesa
+# software rendering (llvmpipe) gives one without a GPU; x11-utils provides xdpyinfo to wait for it.
+# Placed after the overlay and the Python tools so that the cached layers above are reused.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri x11-utils \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY docker/ros-entrypoint.sh /ros-entrypoint.sh
 RUN chmod +x /ros-entrypoint.sh
 

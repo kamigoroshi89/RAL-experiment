@@ -11,7 +11,7 @@ user. Nothing here changes the plan or the contracts; see ADR-031. The ROS 2 ima
 | `lint` | `ralmon-dev` | `ruff check`, `ruff format --check`, `mypy src/ralmon` |
 | `plan` | `ralmon-dev` | `python3 tools/check_plan.py` |
 | `bib` | `ralmon-dev` | `python3 tools/check_bib.py --schema` |
-| `ros2` (profile `ros2`) | `ralmon-ros2:humble` (`ros:humble-ros-base`, Ubuntu 22.04, Python 3.10; Gazebo Classic 11 with `gazebo_ros_pkgs`, `ros_gz_bridge` for the Fortress fallback, Nav2, PAL TIAGo and TIAGo Pro simulation, LTTng, CycloneDDS, `tc`; an overlay with `tracetools` built against LTTng and the AWS hospital world; Python dev tools) | WS07 and WS10 work; also the proof that the core runs on Python 3.10 |
+| `ros2` (profile `ros2`) | `ralmon-ros2:humble` (`ros:humble-ros-base`, Ubuntu 22.04, Python 3.10; Gazebo Classic 11 with `gazebo_ros_pkgs`, `ros_gz_bridge` for the Fortress fallback, Nav2, PAL TIAGo and TIAGo Pro simulation, Xvfb, LTTng, CycloneDDS, `tc`; an overlay with `tracetools` built against LTTng and the AWS hospital world; Python dev tools) | WS07 and WS10 work; also the proof that the core runs on Python 3.10 |
 
 ## Commands
 
@@ -26,6 +26,8 @@ docker compose --profile ros2 build ros2  # 4.4 GB; first build downloads ROS pa
 docker compose --profile ros2 run --rm ros2               # shell in the sourced Humble environment
 docker compose --profile ros2 run --rm ros2 pytest -q     # the core suite under Python 3.10
 (cd ros2 && colcon build --packages-select ralmon_sim)    # inside the container
+docker compose --profile ros2 run --rm -T ros2 pytest ros2/ralmon_sim/test/test_ward_world.py -q -m ros
+                                          # the ward world, robot and Nav2 headless (5 minutes)
 bash ros2/ralmon_sim/scripts/check_sim_env.sh             # inside the container
 ```
 
@@ -39,9 +41,11 @@ host user differs, put `UID=...` and `GID=...` in a `.env` file (listed in `.git
 
 - LaTeX (the paper excerpts of the WS01 documents were compiled on the host with `pdflatex`).
 - `data/raw/` (never copied, never committed; mount it if a task needs it).
-- A display. Gazebo Classic needs one for the laser and camera sensors; the checks of WS07-T01
-  used `Xvfb` with Mesa software rendering installed in a throw-away root container (see
-  `ros2/ralmon_sim/doc/availability.md`, Reproduction step 8). Xvfb is not in the image.
+- A display server running. Gazebo Classic needs a display for the laser and camera sensors; the image
+  has `Xvfb` with Mesa software rendering (added by WS07-T02) and the fixture `display_env` of
+  `ros2/ralmon_sim/test/conftest.py` starts one when `DISPLAY` is not set. The checks of WS07-T01 had
+  installed `Xvfb` in a throw-away root container (see `ros2/ralmon_sim/doc/availability.md`,
+  Reproduction step 8).
 - The capability `NET_ADMIN`: `tc netem` works only in a container started with
   `--cap-add NET_ADMIN` as root; the `ros2` service has neither (WS07-T05 decides).
 - A user entry for the host uid: Gazebo Classic printed `Error getting username: no matching

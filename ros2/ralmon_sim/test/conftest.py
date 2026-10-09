@@ -214,7 +214,7 @@ class BackgroundLaunch:
     def __init__(self, args: list[str], log_path: Path, env: dict[str, str]) -> None:
         self.args = list(args)
         self.log_path = log_path
-        self._log = open(log_path, "w")  # closed in stop()
+        self._log = open(log_path, "w")  # noqa: SIM115 (closed in stop)
         self.process = subprocess.Popen(
             self.args,
             stdout=self._log,
@@ -275,7 +275,10 @@ def background_launch(
     def start(
         args: list[str], env: dict[str, str] | None = None, name: str = "launch"
     ) -> BackgroundLaunch:
-        log_dir = tmp_path_factory.mktemp(name)
+        # RALMON_SIM_LOG_DIR keeps the log of the simulation after the run (a debugging aid)
+        kept = os.environ.get("RALMON_SIM_LOG_DIR")
+        log_dir = Path(kept) if kept else tmp_path_factory.mktemp(name)
+        log_dir.mkdir(parents=True, exist_ok=True)
         handle = BackgroundLaunch(
             args, log_dir / (name + ".log"), {**os.environ, **(env or {})}
         )
