@@ -75,3 +75,7 @@ Field meanings: `devices_emulated` lists each device with the `SignalId` values 
 ### Hand-over from ADR-035 (accepted by gab, 2026-10-09)
 
 A frame that fails the authentication check (field `authentication_mode`) is published by the bridge as an `Event` of kind `verification` (`source` the gateway, payload `verification` = `failed`, `subject` = the device), never as a `device_error`, which carries only the cuff `error_code`. The bridge publishes an `auth` Sample only for a dispense frame whose verification passed; a device that cannot verify emits no `auth` (`#trace-schema` 0.2.0, rules 5 and 6; payload keys from the conventions table of `docs/models/evidence-channels.md`).
+
+### Possible thesis student (gab, 2026-10-09)
+
+This task may be carried out by a bachelor thesis student under the supervision of gab (proposal A, in the untracked folder `tesista/`; the choice between proposals A and B is still open). Until gab decides, no agent creates or edits `hardware/emulated_devices/`, `hardware/dispenser/` or `tests/hardware/` (the pytest tests of the decoder and recorder that proposal A adds beyond the files listed above). The bridge publishes through a provisional adapter on `/ralmon_lab/*` until WS05-T09 provides the message types of `/ralmon/*`; the `ralmon` version pinned for the student must include ADR-035 (`#trace-schema` 0.2.0).
