@@ -4256,3 +4256,33 @@ def test_the_order_of_the_latent_events_does_not_matter() -> None:
         label([EVENT_RECORDS["resp"]], latent=backward, injections=[record]) == expected
     )
     assert ideal_observation(backward, PLAN_ID) == ideal_observation(forward, PLAN_ID)
+
+
+def test_a_collection_that_claims_a_huge_length_is_refused_before_it_is_read() -> None:
+    latent = make_latent(measurements=(T(12),))
+    with pytest.raises(IdealObservationError, match="more than"):
+        ideal_observation(latent, PLAN_ID, signals=GrowingList())  # type: ignore[arg-type]
+    for bad in (GrowingList(), GrowingList([1])):
+        with pytest.raises(LabellingError, match="more than"):
+            label_latent_day(
+                latent, make_plan(), bad, [], Stub(), CFG, None, MODE_SCHEDULED,
+                registry=F0, templates=LIBRARY,
+            )  # fmt: skip
+        with pytest.raises(LabellingError, match="more than"):
+            label_latent_day(
+                latent, make_plan(), [], bad, Stub(), CFG, None, MODE_SCHEDULED,
+                registry=F0, templates=LIBRARY,
+            )  # fmt: skip
+        with pytest.raises(LabellingError, match="more than"):
+            label_latent_day(
+                latent, make_plan(), [], [], Stub(), CFG, None, MODE_SCHEDULED,
+                registry=F0, templates=bad,
+            )  # fmt: skip
+        with pytest.raises(RunnerError, match="more than"):
+            label(run_fn=lambda *a, _b=bad, **k: _b)
+        with pytest.raises(LabellingError, match="more than"):
+            label(latent=clone_with(latent, samples=bad))
+        with pytest.raises(LabellingError, match="more than"):
+            label(latent=clone_with(latent, events=bad))
+        with pytest.raises(LabellingError, match="more than"):
+            label(plan=clone_with(make_plan(), instances=bad))

@@ -435,6 +435,10 @@ def _wanted_signals(signals: object) -> frozenset[str]:
     known = {s.value for s in SignalId}
     derived = {d.output.value for d in default_derived_signals()}
     wanted: set[str] = set()
+    if (
+        len(signals) > MAX_TEMPLATES
+    ):  # the length is read before the collection is iterated
+        raise IdealObservationError(f"signals has more than {MAX_TEMPLATES} items")
     for name in tuple(signals):
         plain = _text(name, "a template signal", IdealObservationError)
         if plain not in known:
