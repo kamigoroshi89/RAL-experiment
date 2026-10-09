@@ -14,6 +14,8 @@ import math
 from collections.abc import Sequence
 from typing import Final
 
+from ralmon.monitor._text import converting
+from ralmon.monitor.config import MonitorInputError
 from ralmon.spec import Rho, RhoKind
 
 __all__ = [
@@ -71,21 +73,25 @@ def deterministic_rho() -> Rho:
     )
 
 
+@converting(MonitorInputError)
 def range_band_rho(x: float, low: float, high: float, sd: float) -> Rho:
     """Band ``[low, high]`` violated by the measured value ``x``: the two disjoint regions add (item 2)."""
     return _measured(_phi((low - x) / sd) + _phi((x - high) / sd))
 
 
+@converting(MonitorInputError)
 def lower_limit_rho(x: float, limit: float, sd: float) -> Rho:
     """A lower limit (the hold threshold) violated by the measured value ``x`` (item 1)."""
     return _measured(_phi((limit - x) / sd))
 
 
+@converting(MonitorInputError)
 def bounds_rho(pre: float, bound_lower: float, delta: float, sd: float) -> Rho:
     """RESP decided at its anchor step because ``pre < bound_lower + delta`` (item 5)."""
     return _measured(_phi((bound_lower + delta - pre) / sd))
 
 
+@converting(MonitorInputError)
 def difference_rho(
     pre: float, responses: Sequence[float], delta: float, sd: float
 ) -> Rho:

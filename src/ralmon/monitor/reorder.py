@@ -19,24 +19,31 @@ when it is full and the caller reports the input; nothing is dropped silently.
 from __future__ import annotations
 
 import heapq
+import numbers
 from dataclasses import dataclass
 from typing import Final
+
+from ralmon.monitor._text import converting, show
+from ralmon.monitor.config import MonitorInputError
 
 __all__ = ["BufferedInput", "ReorderBuffer", "is_late", "step_of", "watermark_ms"]
 
 _KIND_RANK: Final = {"avail": 0, "sample": 1, "event": 2}
 
 
+@converting(MonitorInputError)
 def step_of(t_ms: int, step_ms: int) -> int:
     """The step that first shows an input with device time ``t_ms``: the ceiling rule ``ceil(t / T_s)``."""
     return (t_ms + step_ms - 1) // step_ms
 
 
+@converting(MonitorInputError)
 def watermark_ms(t_device_ms: int, step_ms: int, delay_ms: int) -> int:
     """The monitor time ``t_{k_up(t_dev)} + D`` at which the step of an input is finalised."""
     return step_of(t_device_ms, step_ms) * step_ms + delay_ms
 
 
+@converting(MonitorInputError)
 def is_late(t_device_ms: int, t_rx_ms: int, step_ms: int, delay_ms: int) -> bool:
     """Whether an input arrived after its watermark; an arrival exactly at the watermark is on time."""
     return t_rx_ms > watermark_ms(t_device_ms, step_ms, delay_ms)
@@ -53,6 +60,22 @@ class BufferedInput:
     order: int = 0  # tie-break among events of one device time (the monitor passes the kind rank)
 
 
+def _is_int(value: object) -> bool:
+    return isinstance(value, numbers.Integral) and not isinstance(value, bool)
+
+
+def _check_entry(entry: object) -> None:
+    if not isinstance(entry, BufferedInput):
+        raise MonitorInputError(f"expected a BufferedInput, got {show(entry)}")
+    if entry.kind not in _KIND_RANK:
+        raise MonitorInputError(f"unknown kind {show(entry.kind)} of a buffered input")
+    for name in ("t_device_ms", "t_rx_ms", "order"):
+        if not _is_int(getattr(entry, name)):
+            raise MonitorInputError(f"{name} of a buffered input must be an integer")
+    if entry.seq is not None and not _is_int(entry.seq):
+        raise MonitorInputError("seq of a buffered input must be an integer or None")
+
+
 class ReorderBuffer:
     """A min-heap of accepted inputs keyed by device time; ``O(log b)`` per push and per release."""
 
@@ -66,8 +89,14 @@ class ReorderBuffer:
     def __len__(self) -> int:
         return len(self._heap)
 
+    @converting(MonitorInputError)
     def push(self, entry: BufferedInput) -> bool:
-        """Buffer ``entry``; ``False`` (and nothing buffered) when the buffer is full."""
+        """Buffer ``entry``; ``False`` (and nothing buffered) when the buffer is full.
+
+        An entry that is not a well-formed ``BufferedInput`` (integer times and order, an integer or
+        ``None`` sequence number, a known kind) raises ``MonitorInputError`` before the heap is touched.
+        """
+        _check_entry(entry)
         if len(self._heap) >= self._capacity:
             return False
         has_seq = entry.seq is not None
@@ -85,6 +114,7 @@ class ReorderBuffer:
         heapq.heappush(self._heap, key)
         return True
 
+    @converting(MonitorInputError)
     def release(self, watermark_ms: int) -> list[BufferedInput]:
         """Remove and return the inputs with device time at most ``watermark_ms``, in order."""
         out: list[BufferedInput] = []

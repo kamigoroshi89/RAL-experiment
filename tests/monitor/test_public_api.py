@@ -113,21 +113,26 @@ def pool() -> list[Any]:
     ]
 
 
-def boundary_functions() -> list[tuple[str, Any]]:
-    out = []
-    for name in sorted(BOUNDARY_MODULES):
+def swept_functions() -> list[tuple[str, Any]]:
+    """Every function in an ``__all__``, every public function defined in a module of the package, and
+    every function reachable from the package root (the stubs of WS05-T08 excepted: they raise
+    ``NotImplementedError`` by design)."""
+    found: dict[int, tuple[str, Any]] = {}
+    for name in sorted(BOUNDARY_MODULES | INTERNAL_MODULES):
+        if name.rsplit(".", 1)[1].startswith("_"):
+            continue  # private modules: helpers that take the error class to raise as an argument
         mod = importlib.import_module(name)
-        for fname in getattr(mod, "__all__", ()):
-            obj = getattr(mod, fname)
-            if inspect.isfunction(obj) and obj.__module__ == name:
-                out.append((f"{name}.{fname}", obj))
-    return out
+        for fname, obj in inspect.getmembers(mod, inspect.isfunction):
+            public = fname in getattr(mod, "__all__", ()) or not fname.startswith("_")
+            if public and obj.__module__ == name:
+                found[id(obj)] = (f"{name}.{fname}", obj)
+    for fname, obj in inspect.getmembers(m, inspect.isfunction):
+        if not hasattr(obj, "__ralmon_stub_owner__"):
+            found.setdefault(id(obj), (f"ralmon.monitor.{fname}", obj))
+    return sorted(found.values(), key=lambda item: item[0])
 
 
-@pytest.mark.parametrize(
-    ("name", "fn"), boundary_functions(), ids=[n for n, _ in boundary_functions()]
-)
-def test_a_boundary_function_raises_only_named_errors(name: str, fn: Any) -> None:
+def fuzz_calls(fn: Any) -> list[tuple[Any, ...]]:
     values = pool()
     rng = random.Random(20261010)
     arity = len(
@@ -145,6 +150,10 @@ def test_a_boundary_function_raises_only_named_errors(name: str, fn: Any) -> Non
             args[position] = value
             calls.append(tuple(args))
     calls += [tuple(rng.choice(values) for _ in range(arity)) for _ in range(1500)]
+    return calls
+
+
+def assert_only_named_errors(name: str, fn: Any, calls: list[tuple[Any, ...]]) -> None:
     for args in calls:
         try:
             fn(*args)
@@ -154,6 +163,96 @@ def test_a_boundary_function_raises_only_named_errors(name: str, fn: Any) -> Non
             pytest.fail(
                 f"{name}{tuple(type(a).__name__ for a in args)}: {type(exc).__name__}: {exc}"
             )
+
+
+def test_the_sweep_finds_the_known_boundary_functions() -> None:
+    names = {name for name, _ in swept_functions()}
+    for expected in (
+        "ralmon.monitor.config.check_config",
+        "ralmon.monitor.formula.render",
+        "ralmon.monitor.formula.resolve_subformula_paths",
+        "ralmon.monitor.parameters.read_value",
+        "ralmon.monitor.reorder.step_of",
+        "ralmon.monitor.measured_rho.range_band_rho",
+        "ralmon.monitor.instances.format_marker",
+        "ralmon.monitor.offline.run_offline_detailed",
+        "ralmon.monitor.evaluator.make_point_evaluator",
+    ):
+        assert expected in names, expected
+
+
+@pytest.mark.parametrize(
+    ("name", "fn"), swept_functions(), ids=[n for n, _ in swept_functions()]
+)
+def test_a_function_raises_only_named_errors(name: str, fn: Any) -> None:
+    assert_only_named_errors(name, fn, fuzz_calls(fn))
+
+
+def test_the_methods_of_the_classes_raise_only_named_errors() -> None:
+    from ralmon.monitor.reorder import BufferedInput, ReorderBuffer
+
+    buffer = ReorderBuffer(100)
+    for label, method in (
+        ("ReorderBuffer.push", buffer.push),
+        ("ReorderBuffer.release", buffer.release),
+    ):
+        assert_only_named_errors(label, method, fuzz_calls(method))
+    assert_only_named_errors("BufferedInput", BufferedInput, fuzz_calls(BufferedInput))
+
+
+INTERNAL_CLASSES = {  # built by the monitor from validated values; their methods are the per-step path
+    "ralmon.monitor.instances.CountEndInstance",
+    "ralmon.monitor.instances.CountLimitInstance",
+    "ralmon.monitor.instances.EngineContext",
+    "ralmon.monitor.instances.HoldInstance",
+    "ralmon.monitor.instances.Instance",
+    "ralmon.monitor.instances.IntInstance",
+    "ralmon.monitor.instances.RangeInstance",
+    "ralmon.monitor.instances.RespInstance",
+    "ralmon.monitor.instances.SchedInstance",
+    "ralmon.monitor.instances.StepView",
+    "ralmon.monitor.instances.SysInstance",
+    "ralmon.monitor.instances.WitnessTracker",
+}
+FUZZED_CLASSES = {  # fuzzed here, in test_inputs.py or in test_field_fuzz.py
+    "ralmon.monitor.core.StreamingMonitor",
+    "ralmon.monitor.core.ChannelAvailability",
+    "ralmon.monitor.core.MonitorStats",
+    "ralmon.monitor.core.RejectedInput",
+    "ralmon.monitor.core.Monitor",
+    "ralmon.monitor.evaluator.PointEvaluator",
+    "ralmon.monitor.formula.Formula",
+    "ralmon.monitor.formula.Node",
+    "ralmon.monitor.formula.PathTable",
+    "ralmon.monitor.offline.OfflineResult",
+    "ralmon.monitor.reorder.BufferedInput",
+    "ralmon.monitor.reorder.ReorderBuffer",
+    "ralmon.monitor.config.MonitorConfig",
+    "ralmon.monitor.forecast.Forecast",
+    "ralmon.monitor.forecast.Forecaster",
+    "ralmon.monitor.verdict.RobustnessInterval",
+    "ralmon.monitor.verdict.VerdictRecord",
+    "ralmon.monitor.verdict.VerdictState",
+    "ralmon.monitor.verdict.Rho",
+    "ralmon.monitor.verdict.RhoKind",
+}
+
+
+def test_every_class_of_an_all_is_classified() -> None:
+    classes = set()
+    for name in sorted(BOUNDARY_MODULES | INTERNAL_MODULES):
+        if name.rsplit(".", 1)[1].startswith("_"):
+            continue
+        mod = importlib.import_module(name)
+        for cname in getattr(mod, "__all__", ()):
+            obj = getattr(mod, cname)
+            if inspect.isclass(obj) and not issubclass(obj, BaseException):
+                classes.add(f"{obj.__module__}.{obj.__name__}")
+    # Rho and RhoKind are defined in ralmon.spec and re-exported
+    classes -= {"ralmon.spec.verdict.Rho", "ralmon.spec.verdict.RhoKind"}
+    unclassified = {c for c in classes if c not in INTERNAL_CLASSES | FUZZED_CLASSES}
+    unclassified = {c for c in unclassified if not c.startswith("ralmon.spec.")}
+    assert not unclassified, sorted(unclassified)
 
 
 def test_the_methods_of_the_parsed_formula_raise_only_named_errors() -> None:

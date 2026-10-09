@@ -20,7 +20,7 @@ import math
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from ralmon.monitor._text import as_int, show
+from ralmon.monitor._text import as_int, converting, show
 from ralmon.signals import MS_PER_HOUR, DurationMs
 
 __all__ = [
@@ -76,6 +76,7 @@ class MonitorConfig:
     registry_version: str
 
 
+@converting(MonitorConfigError)
 def check_config(config: object) -> MonitorConfig:
     """Validate a ``MonitorConfig`` (CG-12) and return it; raise ``MonitorConfigError`` otherwise.
 

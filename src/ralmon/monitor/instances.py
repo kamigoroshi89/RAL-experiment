@@ -32,7 +32,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Final
 
-from ralmon.monitor.config import MonitorInvariantError
+from ralmon.monitor._text import converting
+from ralmon.monitor.config import MonitorInputError, MonitorInvariantError
 from ralmon.monitor.formula import GUARD_OF, PathTable
 from ralmon.monitor.measured_rho import (
     bounds_rho,
@@ -78,6 +79,7 @@ _CHANNEL_UNAVAILABLE_INTAKE: Final = "channel_unavailable:intake"
 _VALUE_UNDEFINED_PRESENCE: Final = "value_undefined:presence"
 
 
+@converting(MonitorInputError)
 def format_marker(entries: Sequence[str]) -> str | None:
     """``undecidable: <reason>:<signal>`` with the entries in the canonical order, joined by commas."""
     if not entries:

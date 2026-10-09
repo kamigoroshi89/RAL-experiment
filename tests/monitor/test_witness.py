@@ -11,8 +11,9 @@ for a safe one: a trace that carries no availability mark and no zero-valued pre
 output of the benchmark generator, WS04-T06 test 11) keeps the level of the last robot visit for the
 rest of the day, so every later dispense with an old enough sample is witnessed. ``docs/formal/02-
 templates.md`` section 4.7 and TG-9 state that a witness that has left needs an explicit ``0`` sample
-or an availability mask. ``MonitorStats.presence_level_older_than_window_steps`` counts the steps at
-which that happens.
+or an availability mask. ``MonitorStats.presence_samples_without_availability_marks`` is the gate (non-zero
+exactly when presence samples were used and no mark for ``presence`` ever arrived);
+``presence_level_older_than_window_steps`` is information only.
 """
 
 from __future__ import annotations
@@ -272,3 +273,85 @@ def test_the_point_evaluator_shares_the_documented_hazard_of_a_trace_without_mar
     inputs.samples.append(smp("presence", hhmm(7, 0), 1.0))
     inputs.events.append(evt("dispense", hhmm(21, 0)))
     assert point_value(inputs, hhmm(21, 0)) == INT_WINDOW
+
+
+# ---------------------------------------------------------------------------------------------
+# the gate: presence samples were accepted and no availability mark for presence ever arrived
+# ---------------------------------------------------------------------------------------------
+
+
+def test_presence_samples_without_any_availability_mark_are_counted() -> None:
+    mon = make_monitor()
+    for minute in (0, 10, 20):
+        mon.push_sample(smp("presence", hhmm(7, minute), 1.0))
+    mon.advance(hhmm(8, 0))
+    assert mon.stats().presence_samples_without_availability_marks == 3
+
+
+def test_a_presence_mark_clears_the_gate_whenever_it_arrives() -> None:
+    mon = make_monitor()
+    mon.push_sample(smp("presence", hhmm(7, 0), 1.0))
+    mon.push_sample(smp("presence", hhmm(7, 10), 1.0))
+    mon.advance(hhmm(7, 30))
+    assert mon.stats().presence_samples_without_availability_marks == 2
+    mon.push_availability(
+        SignalId.PRESENCE, True, hhmm(7, 40), hhmm(7, 40)
+    )  # a mark, of any value
+    mon.advance(hhmm(8, 0))
+    assert mon.stats().presence_samples_without_availability_marks == 0
+    mon.push_sample(smp("presence", hhmm(8, 10), 1.0))
+    mon.advance(hhmm(9, 0))
+    assert mon.stats().presence_samples_without_availability_marks == 0
+
+
+def test_an_intake_mark_does_not_clear_the_presence_gate() -> None:
+    mon = make_monitor()
+    mon.push_sample(smp("presence", hhmm(7, 0), 1.0))
+    mon.push_availability(SignalId.INTAKE, False, hhmm(7, 5), hhmm(7, 5))
+    mon.advance(hhmm(8, 0))
+    assert mon.stats().presence_samples_without_availability_marks == 1
+
+
+def test_a_run_without_presence_samples_passes_the_gate() -> None:
+    mon = make_monitor()
+    mon.push_event(evt("dispense", hhmm(7, 0)))
+    mon.advance(hhmm(8, 0))
+    assert mon.stats().presence_samples_without_availability_marks == 0
+
+
+def test_the_gate_counts_samples_that_were_used_not_the_ones_refused_as_late() -> None:
+    mon = make_monitor(d_ms=STEP)
+    mon.push_sample(smp("presence", hhmm(7, 0), 1.0, rx=hhmm(7, 0) + 5 * STEP))  # late
+    mon.advance(hhmm(8, 0))
+    assert mon.stats().late_count == 1
+    assert mon.stats().presence_samples_without_availability_marks == 0
+
+
+def test_the_older_counter_is_information_a_long_visit_alone_makes_it_positive() -> (
+    None
+):
+    """With marks present and a visit longer than int_window the level is older than the window while the
+    robot is co-located (the generator's dwell is 10 minutes, int_window 5): not a stale witness."""
+    mon = make_monitor()
+    mon.push_availability(SignalId.PRESENCE, True, hhmm(7, 0), hhmm(7, 0))
+    mon.push_sample(smp("presence", hhmm(7, 0), 1.0))
+    mon.push_availability(SignalId.PRESENCE, False, hhmm(7, 10), hhmm(7, 10))
+    mon.advance(hhmm(8, 0))
+    stats = mon.stats()
+    assert stats.presence_samples_without_availability_marks == 0
+    assert stats.presence_level_older_than_window_steps == 4  # steps 07:06 to 07:09
+
+
+def test_known_divergence_with_the_extractor_of_evidence_channels() -> None:
+    """ADR-054, consequences: the extractor holds the level across the outage and reads
+    `witness.robot_present` False here (so EX-9 invariant I2 expects VIOLATED); the monitor, which clears
+    the level of an earlier episode, says PENDING with `value_undefined:presence` (invariant I4 then fails
+    for the pair). Pinned so that closing the divergence is a visible decision."""
+    mon = make_monitor()
+    mon.push_sample(smp("presence", hhmm(6, 0), 0.0))
+    mon.push_availability(SignalId.PRESENCE, False, hhmm(6, 10), hhmm(6, 10))
+    mon.push_availability(SignalId.PRESENCE, True, hhmm(20, 50), hhmm(20, 50))
+    mon.push_event(evt("dispense", hhmm(21, 0)))
+    rec = int_record(mon.advance(hhmm(21, 0)), hhmm(21, 0))
+    assert rec.state.value == "pending"
+    assert rec.undecidable == "undecidable: value_undefined:presence"

@@ -75,3 +75,9 @@ Write these first. Values are fixtures, not results.
 - `for s in 0 1 2 3 4; do for f in config.yaml metrics.json git_rev.txt; do test -f outputs/main/$s/$f || echo "missing $s/$f"; done; done` prints nothing.
 - `python -m ralmon.eval.analysis --check outputs/main` exits 0.
 - `grep -c '"b5_failure_found"' outputs/main/0/metrics.json` prints 1 and `grep -c 'declared_not_distinguishable' outputs/main/0/metrics.json` prints at least 2.
+
+## Notes
+
+### Hand-over (worker, 2026-10-09, from the WS05-T04 review, round 2)
+
+No INT-based result on a generated day is evidence until ADR-054 is decided (the presence level of the last robot visit is read at every later dispense when the trace has no availability mark and no zero). Gate on `run_offline_detailed(...).stats.presence_samples_without_availability_marks`: it must be 0 (or the trace must carry the explicit zeros of option (a)), and report it when it is not. `presence_level_older_than_window_steps` is information only and is positive even on a correct trace, because a robot visit (10 minutes in the generator) is longer than `int_window` (5).

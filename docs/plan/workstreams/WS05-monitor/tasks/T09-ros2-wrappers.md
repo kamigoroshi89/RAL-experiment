@@ -96,6 +96,6 @@ From the repository root; steps needing ROS 2 run in the workspace sourced as in
 
 ## Notes
 
-### Hand-over from the WS05-T04 review (orchestrator, 2026-10-10)
+### Hand-over (worker, 2026-10-09, from the WS05-T04 review)
 
 (1) The availability of `presence` and `intake` must come from the robot `NODE_STATE` report with `payload.colocated` (H-MASK, H-INIT: a run starts with the robot not co-located) through `StreamingMonitor.push_availability(signal, available, t_device_ms, t_rx_ms)`, for both channels; ADR-054 (proposed) recommends it, and the offline path (`run_offline`, WS05-T08) must produce the same mask. Marking `presence` unavailable ends its held level. The owner of the `colocated` report is still open (WS04-T06 Fix round 1, M2). (2) The task text says `rsm_node` catches only `PlanIntegrityError` and `PlanVersionError`; `load` can also raise `PlanFeasibilityError` (a `MonitorConfigError`, not a subclass of those two: a plan that is trusted but cannot run, for example an anchor in the finalised past or a window off the grid), so catch `MonitorConfigError` as well, log it by type and keep the previous plan. (3) `advance` can raise `MonitorInvariantError` (an internal check, never for valid input); do not swallow it as a bad argument. (4) Load the plan before the first measurement or dispense: anchors that arrive with no plan create no instance and are counted in `stats().anchors_without_plan`.

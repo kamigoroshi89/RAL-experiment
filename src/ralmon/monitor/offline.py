@@ -21,7 +21,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ralmon.monitor._text import as_int, converting, show
+from ralmon.monitor._text import MAX_TIME_MS, as_int, converting, show
 from ralmon.monitor.config import (
     T_DAY_MS,
     MonitorConfig,
@@ -131,6 +131,17 @@ def _run(
         )
     samples = _items(day.samples, Sample, "samples")
     events = _items(day.events, Event, "events")
+    k_day = T_DAY_MS // cfg.step_ms
+    first_step = (
+        as_int(
+            day.day_index,
+            "day_index",
+            MonitorInputError,
+            low=0,
+            high=MAX_TIME_MS // T_DAY_MS - 1,
+        )
+        * k_day
+    )
     if registry is None:
         try:
             registry = load_registry(step_ms=cfg.step_ms)
@@ -153,6 +164,7 @@ def _run(
         forecaster=forecaster,
         verifier=verifier,
     )
+    monitor._start_at(first_step)  # the days of a patient lie on one continuing axis
     monitor.load(plan)
     # inputs in the order of arrival; at one receive time samples come before events (a pressure with
     # the device time of a dispense is pre-dose, M5), then the order of the day
@@ -162,7 +174,7 @@ def _run(
     arrivals.sort(key=lambda a: a[:3])
     records: list[VerdictRecord] = []
     pointer = 0
-    for k in range(T_DAY_MS // cfg.step_ms + 1):
+    for k in range(first_step, first_step + k_day + 1):
         t = k * cfg.step_ms + cfg.reorder_delay_ms
         while pointer < len(arrivals) and arrivals[pointer][0] <= t:
             item = arrivals[pointer][3]

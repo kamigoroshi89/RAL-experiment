@@ -143,8 +143,16 @@ def _render_expr(expr: Expr | str) -> str:
     return out
 
 
+@converting(MonitorConfigError)
 def render(node: Node) -> str:
-    """The canonical text of a node: binary operands that are not atoms are parenthesised."""
+    """The canonical text of a node: binary operands that are not atoms are parenthesised.
+
+    Public by name; an argument that is not a ``Node`` raises ``MonitorConfigError``.
+    """
+    return _render(node)
+
+
+def _render(node: Node) -> str:
     op = node.op
     if op == "ind":
         return str(node.name)
@@ -153,7 +161,7 @@ def render(node: Node) -> str:
         return f"{_render_expr(node.left)} {node.cmp} {_render_expr(node.right)}"
 
     def wrap(child: Node) -> str:
-        text = render(child)
+        text = _render(child)
         return text if child.op in ("ind", "cmp") else f"({text})"
 
     if op == "not":
@@ -340,7 +348,7 @@ class Formula:
 
     @property
     def text(self) -> str:
-        return render(self.root)
+        return _render(self.root)
 
     @converting(MonitorInputError)
     def node_at(self, indices: Sequence[int]) -> Node:
@@ -348,7 +356,7 @@ class Formula:
         for index in indices:
             if not 0 <= index < len(node.kids):
                 raise MonitorInputError(
-                    f"path: node {render(node)!r} has no child {index}"
+                    f"path: node {_render(node)!r} has no child {index}"
                 )
             node = node.kids[index]
         return node
@@ -365,7 +373,7 @@ class Formula:
 
 
 def _find(node: Node, text: str, path: tuple[int, ...]) -> tuple[int, ...] | None:
-    if render(node) == text:
+    if _render(node) == text:
         return path
     for index, child in enumerate(node.kids):
         found = _find(child, text, (*path, index))
@@ -461,7 +469,7 @@ def _resolve_one(template: Template, path: str) -> str:
             raise MonitorInputError(
                 f"path {show(path)}: unknown element {show(element)}"
             )
-    return render(formula.node_at(indices))
+    return _render(formula.node_at(indices))
 
 
 @converting(MonitorInputError, MonitorConfigError)

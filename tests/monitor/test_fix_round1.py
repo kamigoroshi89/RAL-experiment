@@ -280,7 +280,7 @@ def test_the_eviction_of_dedup_keys_is_counted(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_a_day_end_sample_of_the_generator_is_ignored_and_counted() -> None:
-    """`day_end` is the monitor's own calendar impulse (docs/formal/01 section 2.2); WS04-T06 test 8
+    """`day_end` is the monitor's own calendar impulse (docs/formal/01 section 2.1); WS04-T06 test 8
     puts one in every generated day, and a refusal would abort `run_offline` on that day."""
     mon = make_monitor()
     mon.push_sample(smp("day_end", T_DAY, 1.0))
