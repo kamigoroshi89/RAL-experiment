@@ -14,7 +14,7 @@ import random
 from typing import Any
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 import ralmon.monitor as m
@@ -35,7 +35,7 @@ from .helpers import (
     make_config,
     make_plan,
 )
-from .scenarios import Scenario, scenarios
+from .scenarios import SETTINGS, Scenario, scenarios
 
 REG = load_f0()
 LIB = load_lib(REG)
@@ -98,11 +98,6 @@ def test_run_offline_equals_manual_stream_feed_on_the_worked_day() -> None:
         assert tuple(got) == want
         assert len(want) > 1000  # SCHED refinement records included
         assert got[-1].t_eval_ms <= T_DAY
-
-
-SETTINGS = settings(
-    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-)
 
 
 @SETTINGS

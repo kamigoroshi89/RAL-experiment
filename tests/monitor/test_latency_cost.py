@@ -24,6 +24,8 @@ from .helpers import (
     load_f0,
     load_lib,
     make_monitor,
+    override_row,
+    registry_variant,
     smp,
 )
 
@@ -32,14 +34,40 @@ LIB = load_lib(REG)
 TICK = hhmm(9, 0)
 
 
-def many_sched(count: int) -> Any:
-    """``count`` identical SCHED instances: ticks 1 ms apart, all visible at step 541."""
-    return make_monitor(REG, sched=tuple(TICK + 1 + i for i in range(count)))
+LONG_WINDOW = 72_000_000.0  # 1200 steps: the instances below stay active for the whole measurement
 
 
-def per_sample_cost(instances: int, steps: int) -> float:
+@pytest.fixture(scope="module")
+def long_registry(tmp_path_factory: pytest.TempPathFactory) -> Any:
+    return registry_variant(
+        tmp_path_factory.mktemp("long"),
+        overrides=[override_row("sched_window", 1_800_000.0, LONG_WINDOW)],
+    )
+
+
+def many_sched(registry: Any, count: int) -> Any:
+    """``count`` identical SCHED instances: ticks 1 ms apart, all visible at step 541, each active for
+    1200 steps (their own ``sched_window``)."""
+    from ralmon.spec import CarePlan, TemplateId, TemplateInstance
+
+    instances = tuple(
+        TemplateInstance(
+            TemplateId.SCHED,
+            f"sched@{TICK + 1 + i}",
+            {"sched_window": LONG_WINDOW},
+            TICK + 1 + i,
+        )
+        for i in range(count)
+    )
+    plan = CarePlan(
+        "plan-1", "pathway", "p-1", registry.version(), instances, (), 1, None
+    )
+    return make_monitor(registry, plan=plan)
+
+
+def per_sample_cost(registry: Any, instances: int, steps: int) -> float:
     """Node updates per ingested sample over ``steps`` steps with one sample per step."""
-    mon = many_sched(instances)
+    mon = many_sched(registry, instances)
     first = 545
     mon.advance(first * STEP)
     before = mon.stats().node_updates
@@ -47,11 +75,20 @@ def per_sample_cost(instances: int, steps: int) -> float:
     for k in range(first + 1, first + 1 + steps):
         mon.push_sample(smp("bp", k * STEP, 120.0))
         mon.advance(k * STEP)
+    assert (
+        mon.stats().active_instances == instances
+    )  # still active: the trace did not shorten the work
     return (mon.stats().node_updates - before) / steps
 
 
-def test_node_updates_per_sample_are_linear_in_active_instances() -> None:
-    cost = {(a, n): per_sample_cost(a, n) for a in (1, 10, 100) for n in (10, 800)}
+def test_node_updates_per_sample_are_linear_in_active_instances(
+    long_registry: Any,
+) -> None:
+    cost = {
+        (a, n): per_sample_cost(long_registry, a, n)
+        for a in (1, 10, 100)
+        for n in (10, 800)
+    }
     for a in (1, 10, 100):
         # independent of the trace length: 10 steps and 800 steps cost the same per sample
         assert cost[(a, 10)] == pytest.approx(cost[(a, 800)]), a

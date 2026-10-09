@@ -13,7 +13,7 @@ import random
 from typing import Any
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 import ralmon.monitor as m
@@ -37,15 +37,12 @@ from .helpers import (
     registry_variant,
     smp,
 )
-from .scenarios import Scenario, futures, scenarios
+from .scenarios import SETTINGS, Scenario, futures, scenarios
 
 REG = load_f0()
 LIB = load_lib(REG)
 D = 30_000
 TICK = hhmm(9, 0)
-SETTINGS = settings(
-    max_examples=30, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-)
 
 
 def sched_monitor(d_ms: int = D, **kwargs: Any) -> Any:
@@ -555,6 +552,22 @@ def test_buffer_orders_by_device_time_with_pressure_before_dispense_on_ties() ->
         "dispense-30",
     ]  # M5: the sample first
     assert buf.release(10**9) == []
+
+
+def test_buffer_orders_events_of_one_device_time_by_kind_not_by_arrival() -> None:
+    from ralmon.monitor.reorder import BufferedInput, ReorderBuffer
+
+    buf = ReorderBuffer(10)
+    buf.push(BufferedInput(10, 1, "event", "dispense", None, None, 1))  # arrived first
+    buf.push(BufferedInput(10, 2, "event", "measurement", None, None, 0))
+    buf.push(BufferedInput(10, 3, "event", "tick", None, None, 3))
+    buf.push(BufferedInput(10, 4, "event", "intake", None, None, 2))
+    assert [x.item for x in buf.release(10)] == [
+        "measurement",
+        "dispense",
+        "intake",
+        "tick",
+    ]
 
 
 def test_buffer_ties_follow_seq_then_receive_time() -> None:

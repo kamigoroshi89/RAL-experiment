@@ -12,7 +12,7 @@ import math
 from typing import Any
 
 import pytest
-from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import assume, given
 from hypothesis import strategies as st
 
 import ralmon.monitor as m
@@ -34,7 +34,7 @@ from .helpers import (
     smp,
     step_values,
 )
-from .scenarios import Scenario, oracle_formulas, oracle_params, scenarios
+from .scenarios import SETTINGS, Scenario, oracle_formulas, oracle_params, scenarios
 
 REG = load_f0()
 LIB = load_lib(REG)
@@ -367,10 +367,18 @@ def test_sched_value_is_graded_after_the_decision_step() -> None:
     ev = evaluator(TemplateId.SCHED, hhmm(9, 0))
     inputs = Inputs()
     inputs.events.append(evt("measurement", hhmm(9, 51), source="cuff"))
-    out = feed(ev, inputs, 592)
+    values = step_values(inputs, 592)
+    out = []
+    guards = []
+    for k in range(593):
+        out.append(ev.step(k * STEP, values[k]))
+        guards.append(ev.guard_failed)
     assert out[570] == -INF and out[580] == -INF
+    assert (
+        guards[570] == guards[580] == "no_measurement_after_tick"
+    )  # the value is -inf because of the guard
     assert out[591] == -1_260_000.0 and out[592] == -1_260_000.0
-    assert ev.guard_failed == "no_measurement_after_tick"
+    assert guards[591] is None  # a finite graded value is not a failed guard
 
 
 def test_a_b0_value_is_defined_at_the_anchor_and_kept() -> None:
@@ -513,9 +521,6 @@ def test_steps_are_consecutive_from_zero() -> None:
         ev.step(0, {})  # no repeat
 
 
-SETTINGS = settings(
-    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-)
 PARAMS = oracle_params()
 FORMULAS = oracle_formulas(LIB)
 

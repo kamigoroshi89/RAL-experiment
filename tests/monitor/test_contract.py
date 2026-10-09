@@ -51,7 +51,8 @@ def fields_of(header: str) -> list[tuple[str, str]]:
 
 
 def norm_type(text: str) -> str:
-    return re.sub(r"\s+", " ", text.strip())
+    """The type text with one space between tokens and double quotes (Python 3.14 unparses with single)."""
+    return re.sub(r"\s+", " ", text.strip()).replace("'", '"')
 
 
 def test_verdict_record_prefix_equals_the_contract_text_field_by_field() -> None:

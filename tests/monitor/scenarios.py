@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from hypothesis import HealthCheck, settings
 from hypothesis import strategies as st
 
 from tests.fixtures.monitor import oracle
@@ -137,6 +138,11 @@ class Scenario:
         )
 
 
+# derandomised (tests/conftest.py loads the profile), small, bounded: the property tests of this package
+SETTINGS = settings(
+    max_examples=30, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+)
+
 # -- oracle adapters -----------------------------------------------------------------------------
 
 
@@ -160,9 +166,11 @@ def oracle_formulas(lib: Any) -> Mapping[str, str]:
 N_SECONDS = 330 * 60  # the scenario inputs lie in the first 5.5 hours (330 steps)
 
 
-def _times(max_size: int) -> st.SearchStrategy[tuple[int, ...]]:
+def _times(
+    max_size: int, horizon: int = N_SECONDS
+) -> st.SearchStrategy[tuple[int, ...]]:
     return st.lists(
-        st.integers(0, N_SECONDS), min_size=0, max_size=max_size, unique=True
+        st.integers(0, horizon), min_size=0, max_size=max_size, unique=True
     ).map(lambda xs: tuple(sorted(x * 1000 for x in xs)))
 
 
@@ -179,9 +187,10 @@ def scenarios(
     with_drops: bool = True,
     with_unavailability: bool = True,
     with_day_end: bool = True,
+    horizon_s: int = N_SECONDS,
 ) -> Scenario:
     low, high = (BP_LOWER, BP_UPPER) if in_domain else (30.0, 280.0)
-    m_times = draw(_times(max_meas))
+    m_times = draw(_times(max_meas, horizon_s))
     meas = []
     for t in m_times:
         drops = (
@@ -203,23 +212,25 @@ def scenarios(
         )
     taken = {m.t for m in meas}
     standalone = tuple(
-        (t, draw(half_units(low, high))) for t in draw(_times(2)) if t not in taken
+        (t, draw(half_units(low, high)))
+        for t in draw(_times(2, horizon_s))
+        if t not in taken
     )
-    dispenses = draw(_times(3))
-    auths = tuple(t for t in draw(_times(2)))
-    presence_t = draw(_times(4))
+    dispenses = draw(_times(3, horizon_s))
+    auths = tuple(t for t in draw(_times(2, horizon_s)))
+    presence_t = draw(_times(4, horizon_s))
     presence = tuple((t, draw(st.sampled_from([0.0, 1.0]))) for t in presence_t)
-    intakes = draw(_times(2))
-    ticks = draw(st.lists(st.integers(0, N_SECONDS // 2), max_size=2, unique=True))
+    intakes = draw(_times(2, horizon_s))
+    ticks = draw(st.lists(st.integers(0, horizon_s // 2), max_size=2, unique=True))
     unav_p: tuple[tuple[int, int], ...] = ()
     unav_i: tuple[tuple[int, int], ...] = ()
     if with_unavailability:
         unav_p = tuple(
             draw(
                 st.lists(
-                    st.tuples(st.integers(0, 320), st.integers(0, 30)).map(
-                        lambda ab: (ab[0], ab[0] + ab[1])
-                    ),
+                    st.tuples(
+                        st.integers(0, max(horizon_s // 60, 1)), st.integers(0, 30)
+                    ).map(lambda ab: (ab[0], ab[0] + ab[1])),
                     max_size=2,
                 )
             )
@@ -227,9 +238,9 @@ def scenarios(
         unav_i = tuple(
             draw(
                 st.lists(
-                    st.tuples(st.integers(0, 320), st.integers(0, 30)).map(
-                        lambda ab: (ab[0], ab[0] + ab[1])
-                    ),
+                    st.tuples(
+                        st.integers(0, max(horizon_s // 60, 1)), st.integers(0, 30)
+                    ).map(lambda ab: (ab[0], ab[0] + ab[1])),
                     max_size=1,
                 )
             )

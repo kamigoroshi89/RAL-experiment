@@ -12,7 +12,7 @@ import math
 from typing import Any
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 from tests.fixtures.monitor import oracle
@@ -29,6 +29,7 @@ from .helpers import (
     registry_variant,
 )
 from .scenarios import (
+    SETTINGS,
     Meas,
     Scenario,
     futures,
@@ -41,9 +42,6 @@ REG = load_f0()
 LIB = load_lib(REG)
 PARAMS = oracle_params()
 FORMULAS = oracle_formulas(LIB)
-SETTINGS = settings(
-    max_examples=30, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-)
 
 
 def engine(scn: Scenario, last: int, registry: Any = REG) -> list[Any]:
@@ -90,6 +88,29 @@ def test_closed_forms_equal_the_structural_recursion(
             r.instance_key,
             k,
         )
+
+
+@SETTINGS
+@given(scenarios(horizon_s=1200, max_meas=4), st.integers(0, 330), st.data())
+def test_closed_forms_equal_the_structural_recursion_when_the_events_crowd_the_same_steps(
+    scn: Scenario, cut: int, data: st.DataObject
+) -> None:
+    """Twenty minutes: several events, samples and marks share a step (multiplicity, A0, ties)."""
+    records = engine(scn, cut)
+    insts = oracle_instances(scn)
+    trace = scn.to_trace()
+    steps = sorted({cut, data.draw(st.integers(0, cut))})
+    grids = {k: oracle.grid_for(trace, PARAMS, k, list(insts.values())) for k in steps}
+    for r in records:
+        k = r.t_eval_ms // STEP
+        if k in grids:
+            lo, hi = oracle.interval(
+                trace, PARAMS, FORMULAS, insts[r.instance_key], k, grids[k]
+            )
+            assert (r.sigma_interval.lo, r.sigma_interval.hi) == (lo, hi), (
+                r.instance_key,
+                k,
+            )
 
 
 @SETTINGS
@@ -267,3 +288,8 @@ def test_infinite_endpoints_normalise_to_the_unit_interval() -> None:
     rec2 = by_key(engine(scn2, 550))[f"sched@{9 * 3_600_000}"][-1]
     assert rec2.sigma_norm_interval[0] == -1.0
     assert rec2.sigma_norm_interval[1] == pytest.approx(0.6333333333333333)
+
+
+def test_the_property_tests_are_derandomised_and_bounded() -> None:
+    assert SETTINGS.derandomize is True and SETTINGS.database is None
+    assert SETTINGS.max_examples <= 60

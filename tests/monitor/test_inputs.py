@@ -119,7 +119,7 @@ BAD_VALUES: list[Any] = [
     Hostile(),
 ]
 BAD_SEQ: list[Any] = [True, 1.5, "1", 10**400, [1], Hostile()]
-BAD_TEXT: list[Any] = [None, 5, b"x", Hostile(), HostileStr("x"), ["x"]]
+BAD_TEXT: list[Any] = [None, 5, b"x", Hostile(), ["x"]]
 
 
 def fresh() -> Any:
@@ -303,7 +303,7 @@ def broken_plans() -> list[tuple[str, Any]]:
         ("not a plan", x) for x in (None, 5, "plan", {"care_plan_id": "x"}, Hostile())
     ]
     fields: dict[str, list[Any]] = {
-        "care_plan_id": [None, 5, b"x", Hostile(), HostileStr("x"), ""],
+        "care_plan_id": [None, 5, b"x", Hostile(), ""],
         "pathway_template_id": [None, 5, Hostile()],
         "patient_id": [None, 5, Hostile()],
         "registry_version": [None, 5, Hostile()],
@@ -329,8 +329,8 @@ def broken_plans() -> list[tuple[str, Any]]:
             [10**400],
             Hostile(),
         ],
-        "plan_version": [None, True, 1.5, "1", -1, 10**400, Hostile(), HostileInt(1)],
-        "signature": [5, b"x", Hostile(), HostileStr("x")],
+        "plan_version": [None, True, 1.5, "1", -1, 10**400, Hostile()],
+        "signature": [5, b"x", Hostile()],
     }
     for name, values in fields.items():
         for v in values:
@@ -503,6 +503,12 @@ def test_hostile_numeric_subclasses_are_accepted_or_refused_by_name_never_escape
             dataclasses.replace(evt("dispense", 0), seq=HostileInt(3))
         ),
         lambda: mon.advance(HostileInt(5)),
+        lambda: mon.push_event(
+            dataclasses.replace(evt("dispense", 0), source=HostileStr("x"))
+        ),
+        lambda: mon.load(
+            dataclasses.replace(make_plan(REG), care_plan_id=HostileStr("x"))
+        ),
         lambda: m.StreamingMonitor(
             make_config(REG), REG, LIB, buffer_capacity=HostileInt(3)
         ),

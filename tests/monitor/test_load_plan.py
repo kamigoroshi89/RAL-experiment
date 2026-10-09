@@ -242,7 +242,7 @@ def test_a_registry_without_a_step_cannot_give_the_derived_latency_names(
 @pytest.mark.parametrize("bad", [None, "registry", object(), 3])
 def test_the_registry_must_be_a_registry(bad: Any) -> None:
     with pytest.raises(m.MonitorConfigError):
-        monitor(registry=bad)
+        monitor(registry=bad, config=make_config(REG))
 
 
 def test_the_bounds_must_be_a_proper_interval() -> None:
@@ -536,7 +536,8 @@ def test_an_infeasible_plan_is_rejected_naming_the_parameter(
     ranged: Any, instance: TemplateInstance, match: str
 ) -> None:
     mon = monitor(registry=ranged, lib=load_lib(ranged), config=make_config(ranged))
-    with pytest.raises(m.PlanFeasibilityError, match=match):
+    # a non-finite value is not a feasibility question: the plan cannot be read (PlanIntegrityError)
+    with pytest.raises((m.PlanFeasibilityError, PlanIntegrityError), match=match):
         mon.load(plan_with(ranged, instance))
 
 

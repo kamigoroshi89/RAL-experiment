@@ -14,7 +14,7 @@ from itertools import pairwise
 from typing import Any
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 import ralmon.monitor as m
@@ -36,7 +36,7 @@ from .helpers import (
     mark_unavailable,
     smp,
 )
-from .scenarios import Scenario, scenarios
+from .scenarios import SETTINGS, Scenario, scenarios
 
 INF = math.inf
 REG = load_f0()
@@ -294,7 +294,7 @@ def is_path_of_allowed_graph(states: list[Any]) -> bool:
     return True
 
 
-@settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@SETTINGS
 @given(scenarios(), st.integers(10, 330))
 def test_verdict_states_follow_allowed_transitions(scn: Scenario, last: int) -> None:
     mon = make_monitor(REG, sched=scn.ticks, day_end=scn.day_end_anchors())
@@ -307,7 +307,7 @@ def test_verdict_states_follow_allowed_transitions(scn: Scenario, last: int) -> 
         assert is_path_of_allowed_graph([r.state for r in recs]), key
 
 
-@settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@SETTINGS
 @given(scenarios(), st.integers(10, 330))
 def test_definitive_records_are_never_revised(scn: Scenario, last: int) -> None:
     """ADR-048 (b): state, rho, decided_at_ms and the markers never change; the interval may refine."""
