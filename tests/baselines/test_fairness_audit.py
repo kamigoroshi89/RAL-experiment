@@ -21,6 +21,7 @@ hold in the documented-difference form that the hand-overs of WS06-T01 and WS06-
 
 from __future__ import annotations
 
+import ast
 import inspect
 import math
 import re
@@ -65,6 +66,7 @@ from tests.baselines.conftest import (
     AUDIT_STEP_MS,
     AUDIT_TAIL_MS,
     AUDIT_TIMING,
+    AUDIT_Z_THRESHOLD,
     CALIB_DROPS,
     T_DAY_MS,
     Audit,
@@ -146,8 +148,10 @@ def test_baselines_exported_and_named(all_baselines: dict[str, BaselineBase]) ->
 def test_shared_timing_configuration(
     all_baselines: dict[str, BaselineBase], audit: Audit
 ) -> None:
-    """Test 2. All five carry the same ``step_ms``, ``reorder_delay_ms`` and ``tail_ms``, and the first two equal the
-    ``MonitorConfig`` of the proposed method of the same experiment."""
+    """Test 2 (a check of the FIXTURE's construction: the configuration each baseline carries). All five carry the
+    same ``step_ms``, ``reorder_delay_ms`` and ``tail_ms``, and the first two equal the ``MonitorConfig`` of the
+    proposed method of the same experiment. That the baselines USE it is checked by
+    ``test_effective_timing_matches_the_configuration``."""
     config = audit.proposed.config
     assert (config.step_ms, config.reorder_delay_ms) == (AUDIT_STEP_MS, AUDIT_DELAY_MS)
     timings = {name: det.timing for name, det in all_baselines.items()}
@@ -176,6 +180,139 @@ def test_audit_flags_a_delay_that_is_not_a_multiple_of_the_step(
         templates=audit.setup.templates,
     )
     assert any("multiple" in problem for problem in report.problems)
+
+
+def test_effective_timing_matches_the_configuration(audit: Audit) -> None:
+    """The timing that each baseline's run effectively uses, not the one it carries. B2 and B4 deliver a sample at
+    ``t_device + D`` on the grid (their residual rows show the delivery step); B1, B3 and B5 detect the violation of the
+    one-violation day at ``t_eval + D`` (a mutant that runs a baseline with ``D = 0`` or another step fails here); B3 and
+    B5 reach a deadline that closes 3 h plus ``D`` after a late dose, which needs the tail of the configuration."""
+    for name in ("B2", "B4"):
+        det = audit.setup.detectors[name]
+        det.run(audit.days.test, audit.plan, None)
+        rows = det.residuals  # type: ignore[attr-defined]
+        assert len(rows) > 90, name
+        assert {r.t_ms - r.t_device_ms for r in rows} == {AUDIT_DELAY_MS}, name
+        assert all(r.t_ms % AUDIT_STEP_MS == 0 for r in rows), name
+    plan = make_full_plan(audit.setup.registry, sched_steps=(), day_end=False, ticks=())
+    day = _single_violation_day()
+    for name in ("B1", "B3", "B5"):
+        out = audit.setup.detectors[name].run(day, plan, None)
+        assert [d.t_ms for d in out] == [100 * STEP + AUDIT_DELAY_MS], name
+    evening = next(
+        r for r in audit.probe_results if r.probe.label == "deadline after midnight"
+    )
+    for name in ("B3", "B5"):
+        det = audit.setup.detectors[name]
+        times = {
+            d.t_ms for d in det.run(evening.probe.perturbed, evening.probe.plan, None)
+        }
+        assert (1380 + 180 + 2) * STEP in times, name  # dose + delta2 + D
+        assert max(times) <= AUDIT_TAIL_MS + T_DAY_MS
+
+
+def test_b1_detections_on_the_audit_day_match_the_hand_derivation(
+    audit: Audit,
+) -> None:
+    """B1 on the test day, by hand (delay two steps, so every time is the step plus 2): 08:00 pressure 150 is above the
+    band (R1, step 482); 09:10 pressure 95 is below it (R1, 552); the dose at 09:15 follows a pressure of 95, below the
+    hold threshold (R2, 557); the third dose of the day, at 10:05, exceeds the limit of two (R4, 607); the 14:00 scheduled
+    measurement has none in its window (R3, deadline 14:30, 872). The dose at 08:05 follows 150 and is silent. This kills
+    a B1 without the dispense rules, without the delay, or with another window."""
+    out = audit.setup.detectors["B1"].run(audit.days.test, audit.plan, None)
+    assert [d.t_ms // STEP for d in out] == [482, 552, 557, 607, 872]
+
+
+def test_b2_scale_threshold_and_z_rule(audit: Audit) -> None:
+    """B2's residual scale is that of the calibration days (the pressure of each falls by its drop, persistence forecast:
+    residual -drop), the alarm rule is ``|z| > z_threshold`` with the configured threshold, and the forest threshold is
+    fixed by ``fit`` (a run on another day does not move it)."""
+    import numpy as np
+
+    b2 = audit.setup.detectors["B2"]
+    assert isinstance(b2, B2AnomalyDetection)
+    residuals = -np.asarray(CALIB_DROPS, dtype=float)
+    scale = b2.residual_scales["bp"]
+    assert scale.n == len(CALIB_DROPS)
+    assert scale.mean == pytest.approx(float(residuals.mean()))
+    assert scale.std == pytest.approx(float(residuals.std()))  # population
+    out = b2.run(audit.days.test, audit.plan, None)
+    threshold = b2.iforest_threshold
+    assert threshold is not None
+    flagged = [r for r in b2.residuals if r.alarm]
+    assert flagged
+    scaled = [r for r in b2.residuals if r.z is not None]
+    assert {r.signal for r in scaled} == {
+        "bp"
+    }  # only blood pressure has calibration residuals in the fixture
+    assert len(scaled) == 4  # five pressures on the test day, the first has no residual
+    for row in scaled:
+        assert row.z is not None
+        assert row.alarm == (abs(row.z) > AUDIT_Z_THRESHOLD)
+    assert not any(r.alarm for r in b2.residuals if r.z is None)
+    assert {r.t_ms for r in flagged} <= {d.t_ms for d in out}
+    other = response_day(8.5, "other")
+    b2.run(other, audit.setup.plan_for_day(other), None)
+    assert b2.iforest_threshold == threshold
+
+
+def test_baseline_sources_name_no_normalisation_parameter() -> None:
+    """A baseline that reads ``scale_*``, ``priority_*`` or ``max_latency_*`` through a registry that the read log does
+    not wrap would escape the logs; the string constants of the sources (docstrings excluded) hold none of them."""
+    files = sorted((SRC / "baselines").glob("b*.py")) + [
+        SRC / "baselines" / "raw_robustness.py"
+    ]
+    assert len(files) == 8  # b1, b2, b2_features, b3, b4, b5, base, raw_robustness
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        docstrings = set()
+        for node in ast.walk(tree):
+            if isinstance(
+                node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            ):
+                body = node.body
+                if (
+                    body
+                    and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                ):
+                    docstrings.add(id(body[0].value))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docstrings
+            ):
+                for prefix in ("scale_", "priority_", "max_latency_"):
+                    assert prefix not in node.value, (path.name, node.value)
+
+
+def test_audit_requires_the_alpha_of_the_proposed_method(audit: Audit) -> None:
+    """The level of the proposed method has no silent default: a config without ``alpha`` is an ``AuditError``."""
+    from dataclasses import replace
+
+    proposed = replace(
+        audit.proposed, config=replace(audit.proposed.config, alpha=None)
+    )
+    with pytest.raises(AuditError, match="alpha"):
+        run_audit(
+            [],
+            audit.days,
+            audit.plan,
+            audit.setup.registry,
+            templates=audit.setup.templates,
+            proposed=proposed,
+        )
+
+
+def test_matrix_states_what_it_cannot_show(audit: Audit) -> None:
+    """The generated matrix says that the proposed method's column is a stand-in built from K and the monitor's reads
+    (a name of K that the monitor did not read shows as read), and that the evidence cell of a baseline is true by
+    construction of the harness, so it tests the harness and cannot discriminate a baseline."""
+    text = render_markdown(audit.report)
+    assert "stand-in" in text and "OursDetector" in text
+    assert "not a log of reads per row" in text
+    assert "by construction" in text and "cannot discriminate" in text
 
 
 # ---- 3, 4 no latent, no ground truth, no labels --------------------------------------------------------------------
@@ -804,6 +941,16 @@ _TESTS_OF_THE_TASK = (
 )
 
 
+_EXTRA_TESTS = (
+    "test_effective_timing_matches_the_configuration",
+    "test_b1_detections_on_the_audit_day_match_the_hand_derivation",
+    "test_b2_scale_threshold_and_z_rule",
+    "test_baseline_sources_name_no_normalisation_parameter",
+    "test_audit_requires_the_alpha_of_the_proposed_method",
+    "test_matrix_states_what_it_cannot_show",
+)
+
+
 def _sections(text: str) -> dict[str, str]:
     parts = re.split(r"^## (.+)$", text, flags=re.MULTILINE)
     return {parts[i]: parts[i + 1] for i in range(1, len(parts), 2)}
@@ -824,10 +971,16 @@ def test_audit_note_complete() -> None:
     findings = [
         line for line in sections["Findings"].splitlines() if line.startswith("- F")
     ]
-    assert len(findings) >= 8
+    assert len(findings) >= 25
     for line in findings:
         assert re.match(r"^- F[0-9]+ \[(closed|accepted|escalated)\]: ", line), line
     assert not re.search(r"^- F[0-9]+ \[open\]", text, flags=re.MULTILINE)
+    # decisions that the T01 Notes keep open for gab are not closed, and the accepted ones state a direction
+    for number in (19, 20):
+        assert any(line.startswith(f"- F{number} [escalated]") for line in findings)
+    for line in findings:
+        if re.match(r"^- F[0-9]+ \[accepted\]", line):
+            assert "Direction:" in line, line
     joined = "\n".join(findings)
     for topic in (
         "calibration target",
@@ -838,10 +991,14 @@ def test_audit_note_complete() -> None:
         "ADR-061",
         "ADR-062",
         "D2",
+        "D4",
+        "approved range",
+        "[t0, t0 + 24 h)",
+        "scikit-learn",
     ):
         assert topic in joined, topic
-    # the checks table names every test of the task
-    for name in _TESTS_OF_THE_TASK:
+    # the checks table names every test of the task and the extras
+    for name in (*_TESTS_OF_THE_TASK, *_EXTRA_TESTS):
         assert name in sections["Checks"], name
     # the conclusion states the conditions under which each comparison is legitimate
     conclusion = sections["Conclusion for WS08-T02"]
@@ -854,8 +1011,13 @@ def test_audit_note_complete() -> None:
         "step_ms",
         "reorder_delay_ms",
         "tail_ms",
+        "latency convention",
+        "contamination",
+        "D4",
+        "re-run",
     ):
         assert topic in conclusion, topic
+    assert "resolved" in sections["Scope and method"]  # the mapping of the status tags
     # what the audit does not prove
     assert "not a sandbox" in sections["Scope and method"]
 
