@@ -79,3 +79,9 @@ Write these first. Values are fixtures with dummy parameters, not clinical claim
 - `for id in shift A6; do n=$(ls outputs/$id/*/metrics.json | wc -l); test "$n" -ge 5 || echo "$id has $n seeds"; done` prints nothing.
 - `python -m ralmon.eval.analysis --check outputs/shift outputs/A6` exits 0.
 - `grep -A2 '"cohort_shift"' outputs/shift/0/metrics.json` shows either `"status": "not_run"` with `"blocked_on": "WS04-T13"` or a completed result with the two conditions `<a>_to_<b>` and `<b>_to_<a>` named after the two prior sources.
+
+## Notes
+
+### Hand-over (worker, 2026-10-10, from WS06-T06)
+
+Test 18 assumes that B4 or B5 may expose no per-episode predictions. `B5ConformalSTL` exposes them: after `fit`, `calibration_episodes` (raw robustness, not normalised; `CalibrationEpisode.sigma_hat` and `sigma_true` hold `rho_hat` and the measured raw robustness of the instance on the observed day) and `n_calibration_episodes`, `n_censored`; after `run`, `predictions`, a tuple of `B5Prediction(keys, template, t_ms, sigma_hat, quantile, emitted, sigma_true)` with `sigma_true` the measured raw robustness of the same group (`None` while undecided or not finite). The error event of the contract (alert emitted and `sigma_true >= 0`) can be counted from them; widths are in raw units of the template, so a comparison with `ours` needs a per-template reading (variant `B5-per-template`) or the band margin as the common scale. The level is `alpha` itself, with no allocation over the instances of a day (deviation D10 in `notes/B5-deviations.md`), which matters for the false predictive alarms per patient-day that this task also reports.

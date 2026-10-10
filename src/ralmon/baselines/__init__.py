@@ -7,8 +7,8 @@ from ralmon.baselines._stubs import (
     B2AnomalyDetection,
     B3PlainSTL,
     B4ConformalOnly,
-    B5ConformalSTL,
 )
+from ralmon.baselines.b5_conformal_stl import B5ConformalSTL
 from ralmon.baselines.base import Detector
 
 __all__ = [
