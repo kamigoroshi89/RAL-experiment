@@ -30,8 +30,8 @@ monitor creates it. Decided at the anchor means ``H = 0`` (equation (2) with no 
 COUNT (limit) and INT have no predictive part and the decision is the sign of the measured raw robustness. RESP is
 the only template whose open part is a continuous signal that the forecaster can predict: at the activation step the
 forecast of ``bp`` and the measurement ticks of the plan complete the trace. SCHED and COUNT (day end) depend on
-events and counters, which the trajectory model of the paper (real-valued states, Section 2, p. 4) does not predict,
-so they get no predictive part (D2).
+events and counters; the task text gives them no predictive part (D2). The paper is predictor-agnostic (Section 2.2,
+p. 5), so this is the task's reading and not a property of the published method.
 
 Aggregation. ``"conjunction"`` (name ``B5``): the robustness of a conjunction is the minimum of the conjuncts
 (Appendix A, p. 24), so the instances evaluated at the same step are combined by the minimum of their raw values,

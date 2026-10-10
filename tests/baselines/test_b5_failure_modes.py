@@ -209,8 +209,8 @@ class CountingForecaster:
 
 
 def test_failure_sparse_sampling_no_predictive_part_for_event_templates() -> None:
-    """COUNT, SCHED and INT are events and counters: the trajectory model of the paper (real-valued states, Section 2,
-    p. 4) has no event predictor, so B5 has no prediction for them and decides only on the measured prefix."""
+    """COUNT, SCHED and INT are events and counters: by the task text (test 15) B5 has no prediction for them and decides
+    only on the measured prefix. The paper is predictor-agnostic (Section 2.2, p. 5); this is the task's reading (D2)."""
     decide = 8
     templates = templ(TemplateId.SCHED, TemplateId.COUNT, TemplateId.INT)
 

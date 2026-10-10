@@ -574,6 +574,21 @@ def test_b5_with_a_reorder_delay_decides_at_the_same_device_steps_shifted_by_the
     ]  # the deadline step, final D later
 
 
+def test_b5_accepts_an_exact_fraction_level() -> None:
+    """``alpha`` may be the exact per-test level of ``BonferroniAllocation.per_test_exact`` (D10): the same decisions as
+    the float of the same decimal value."""
+    from fractions import Fraction
+
+    from ralmon.conformal import BonferroniAllocation
+
+    level = BonferroniAllocation().per_test_exact(0.4, 2)  # exactly 1/5
+    assert level == Fraction(1, 5)
+    day = dispense_day(150.0, 100.0)
+    exact = fitted_worked(alpha=level)
+    plain = fitted_worked(alpha=0.2)
+    assert pairs(run(exact, day)) == pairs(run(plain, day)) == [(ACT * STEP, 4.0)]
+
+
 # ---- 6. only the public calibrator API -------------------------------------------------------------
 
 
