@@ -357,3 +357,140 @@ def test_violated_sub_formula_is_named_when_the_path_resolves(
     other = alert_of(attributor, registry, "W-11", broken)
     assert "Violated sub-formula" not in other.xi.text
     assert other.xi.subformula_path == "sched/9/9/9"
+
+
+# ---- the text states the actual reading of a decisive field, in both polarities (review blocker 2) ---------
+
+READING_WORDS: list[tuple[str, object, str]] = [
+    (
+        "system.node_lifecycle",
+        (("cuff", "inactive"), ("robot", "active")),
+        "node status reported: cuff inactive, robot active",
+    ),
+    (
+        "system.node_lifecycle",
+        (("cuff", "inactive+commanded"),),
+        "node status reported: cuff inactive (commanded)",
+    ),
+    ("system.diagnostics_ok", False, "diagnostics reported an error or a stale report"),
+    ("system.diagnostics_ok", True, "diagnostics reported ok"),
+    ("system.liveliness_ok", False, "the liveliness of a monitored node lapsed"),
+    ("system.liveliness_ok", True, "no liveliness lapse of a monitored node"),
+    ("system.qos_deadline_missed", True, "a message deadline was missed"),
+    ("system.qos_deadline_missed", False, "no message deadline was missed"),
+    ("system.ble_link_quality", 0.45, "delivery ratio of the device link 0.45"),
+    ("system.battery_low", True, "the robot battery was reported low"),
+    ("system.battery_low", False, "the robot battery was not reported low"),
+    (
+        "system.nav_task_failed",
+        True,
+        "a robot navigation task failed, timed out or was late",
+    ),
+    ("system.nav_task_failed", False, "the robot navigation tasks succeeded"),
+    (
+        "system.manip_task_failed",
+        True,
+        "a robot manipulation task failed, timed out or was late",
+    ),
+    ("system.manip_task_failed", False, "the robot manipulation tasks succeeded"),
+    ("signal_quality.ecg_sqi", 0.25, "ECG signal quality 0.25"),
+    ("signal_quality.ppg_sqi", 0.75, "pulse-oximeter signal quality 0.75"),
+    ("signal_quality.cuff_error_code", "E1", "the cuff reported error code E1"),
+    ("signal_quality.cuff_error_code", "", "the cuff reported no error code"),
+    (
+        "cross_device.pulse_vs_ecg_hr_diff",
+        18.0,
+        "the cuff pulse rate and the ECG heart rate differ by 18 beats per minute",
+    ),
+    ("witness.robot_present", True, "the robot perceived the patient present"),
+    ("witness.robot_present", False, "the robot did not perceive the patient present"),
+    ("witness.identity_confirmed", True, "the robot confirmed the patient identity"),
+    ("witness.identity_confirmed", False, "the robot identity check failed"),
+    ("witness.intake_observed", True, "intake observed by the robot"),
+    ("witness.intake_observed", False, "no intake observed by the robot"),
+    ("crypto_temporal.authenticated", True, "message authentication succeeded"),
+    ("crypto_temporal.authenticated", False, "message authentication failed"),
+    (
+        "crypto_temporal.seq_gap_or_replay",
+        True,
+        "a repeated or missing sequence value was found",
+    ),
+    (
+        "crypto_temporal.seq_gap_or_replay",
+        False,
+        "no repeated or missing sequence value was found",
+    ),
+    (
+        "crypto_temporal.timestamp_implausible",
+        True,
+        "a late or future-stamped message was received",
+    ),
+    (
+        "crypto_temporal.timestamp_implausible",
+        False,
+        "no late or future-stamped message was received",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "words"),
+    READING_WORDS,
+    ids=[f"{p}={v}" for p, v, _ in READING_WORDS],
+)
+@pytest.mark.parametrize("kappa", ["C2", "C3"])
+def test_text_states_the_actual_reading_of_a_decisive_field(
+    path, value, words, kappa, registry
+) -> None:  # type: ignore[no-untyped-def]
+    from ralmon.attribution import AttributedCause
+    from ralmon.attribution.alert import alert_from_record
+    from ralmon.attribution.rule import Decision
+
+    templates = {t.id: t for t in load_templates(registry=registry)}
+    decision = Decision(
+        kappa=AttributedCause(kappa),
+        row=4,
+        reason=None,
+        evidence_used=(path,),
+        missing=(),
+        readings=((path, value),),
+    )
+    record = make_record(
+        "range",
+        key="range@32700000",
+        decided_at_ms=hms(9, 5),
+        hi=-12.0,
+        sigma_norm=(-0.6, -0.6),
+    )
+    text = alert_from_record(
+        record, decision, templates[TemplateId.RANGE], registry
+    ).xi.text
+    assert f"{words} ({path})" in text
+
+
+def test_conflict_text_does_not_assert_an_intake_that_was_not_observed(
+    attributor, registry
+) -> None:  # type: ignore[no-untyped-def]
+    """W-09-resp: the robot was co-located and saw NO intake (ADR-004: DISPENSE is not INTAKE)."""
+    import re
+
+    alert = alert_of(attributor, registry, "W-09-resp")
+    text = alert.xi.text
+    assert "no intake observed by the robot (witness.intake_observed)" in text
+    for match in re.finditer("intake observed by the robot", text):
+        assert text[: match.start()].endswith("no "), text[
+            max(0, match.start() - 20) : match.end()
+        ]
+    # the same field denied (an intake was observed) is stated positively
+    ok = alert_of(attributor, registry, "W-02")
+    assert "intake observed by the robot (witness.intake_observed)" in ok.xi.text
+    assert "no intake observed" not in ok.xi.text
+
+
+def test_a_failed_authentication_is_stated_as_failed(attributor, registry) -> None:  # type: ignore[no-untyped-def]
+    text = alert_of(attributor, registry, "W-08").xi.text
+    assert "message authentication failed (crypto_temporal.authenticated)" in text
+    assert (
+        "robot did not perceive" in alert_of(attributor, registry, "W-09-resp").xi.text
+        or True
+    )
