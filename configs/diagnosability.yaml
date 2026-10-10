@@ -1,0 +1,1086 @@
+# Diagnosability matrix of the Attribution contract (WS02-T05).
+# Machine-readable companion of docs/models/diagnosability-hazards.md. Technical, pre-clinical: no clinical claim.
+# Qualitative entries only: no rate and no clinical value appears here; rates are measured on the benchmark by WS08.
+schema_version: "0.1.0"
+contract: "02-interfaces.md#attribution"
+sources:
+  - "docs/source/analisi.md section 4.5 (matrix rows 1 to 10, threat model), 4.8 (claim reformulations), 4.9 items 1, 4 and 5, 3.5 (standards), 5.6 (ablation A4), 10 (fourth objection)"
+  - "docs/source/review.md R3 weaknesses 4 and 5; meta-review (AE-5)"
+  - "docs/models/attribution-rule.md (worked cases W-01 to W-15, decision table, transition table under A4)"
+  - "docs/models/fault-model.md (subtype vocabulary, fault-to-evidence table, effects on templates)"
+  - "docs/models/threat-model.md (subtype vocabulary, attack-to-evidence table, time as an attack vector)"
+  - "docs/models/evidence-channels.md (channel identifiers, A4 mask, contract gaps)"
+  - "docs/plan/03-decisions.md (ADR-001, ADR-002, ADR-003, ADR-004, ADR-032, ADR-034, ADR-040, ADR-044)"
+vocabulary:
+  distinguishable: [distinguishable, conditional, partial, not_distinguishable]
+  result: [distinguishable, partial, not_distinguishable]
+  kappa: [C1, C2, C3, UNDETERMINED, NO_ALERT]
+  true_class: [C1, C2, C3]
+  template_id: [range, sched, hold, count, resp, sys, int]
+  availability: [available, unavailable]
+  channels: [CH-PROV, CH-SYS-WARD, CH-SYS-ROBOT, CH-SQI, CH-XDEV, CH-WIT, CH-CRYPTO, CH-DISP]
+  proposed_channels: [CH-DISP]
+  a4_when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+  default_deployment: >-
+    The unauthenticated deployment U of threat-model.md: every channel is available and message
+    authentication is not deployed, so crypto_temporal.authenticated is None while the sequence and time
+    fields of CH-CRYPTO are readings. The profile is assumed to provide the channels of the exclusion
+    set, otherwise C1 is unreachable (attribution-rule.md OP-AR-1, ADR-044 proposed). An outcome whose
+    when-set maps CH-CRYPTO to available describes the authenticated deployment A. An unavailable
+    channel means that all of its fields are None. A channel listed in proposed_channels feeds no field
+    of contract 0.1.0; an outcome whose when-set maps it to available is the verdict of analisi §4.5 and
+    is not reproducible by the rule of attribution-rule.md.
+  row_verdict: >-
+    distinguishable: the true class is attributed in the default outcome; conditional: distinguishable
+    only when the channels or capability named in the row are present, otherwise partial; partial: even
+    with the channels the table can only abstain with a candidate set, for part of the cases;
+    not_distinguishable (declared limit): at least one outcome that removes no channel attributes the
+    event to the class it masquerades as, with no channel able to contradict it. declared_limit is true
+    exactly for not_distinguishable rows.
+  expected_kappa: >-
+    A list; several values mean that the result depends on residual evidence, on the template that is
+    violated, or on whether a violation is raised (NO_ALERT: no alert is produced, WS08 counts the event
+    as undetected and not as an attribution error).
+contract_gaps:
+  - id: G-1
+    ec_id: EC-GAP-1
+    text: "No field carries the dispenser content change or the interval between openings, although the double take and the bounce depend on them. Proposed group dispenser and channel CH-DISP."
+    rows: [DX-06, DX-07, DX-22]
+    adr: ADR-032
+  - id: G-2
+    ec_id: EC-GAP-2
+    text: "The key of the evidence mapping, the node scope of the scalar system fields and the meaning of system.battery_low and witness.robot_present are not stated in the contract; resolved as decisions D-1, D-2 and D-10 of evidence-channels.md."
+    rows: [DX-03, DX-05, DX-15, DX-16, DX-17]
+    adr: ADR-033
+  - id: G-3
+    ec_id: EC-GAP-3
+    text: "crypto_temporal.seq_gap_or_replay mixes a loss (a C2 symptom) and a replay (a C3 symptom); interim reading through system.ble_link_quality."
+    rows: [DX-08, DX-09, DX-13, DX-14, DX-23]
+    adr: ADR-034
+  - id: G-4
+    ec_id: EC-GAP-4
+    text: "Event payload keys and the per-message verification outcome were not defined in the trace schema; closed by the accepted ADR-035 (trace evidence conventions and EventKind.VERIFICATION)."
+    rows: [DX-08, DX-09, DX-10]
+    adr: ADR-035
+  - id: G-5
+    ec_id: EC-GAP-5
+    text: "No task owned the step that builds an EvidenceVector from an observed day; resolved without a contract change (owner WS05-T07)."
+    rows: []
+    adr: null
+  - id: G-6
+    ec_id: EC-GAP-6
+    text: "No field carries clock health, so clock_skew is not told from timestamp_manipulation and a skew inside the bound is invisible; accepted as a declared limit, no field proposed."
+    rows: [DX-18, DX-19, DX-26]
+    adr: null
+  - id: G-7
+    ec_id: EC-GAP-7
+    text: "The device battery has no field; the device battery fault is read as ble_dropout or process_kill of the device (declared limit)."
+    rows: [DX-13, DX-15]
+    adr: null
+  - id: G-8
+    ec_id: EC-GAP-8
+    text: "No contract object carries the device profile (capabilities, lease, deadline) that the derivation needs; C1 is unreachable in a profile that does not declare the exclusion channels."
+    rows: [DX-01, DX-02, DX-19, DX-20]
+    adr: ADR-036
+  - id: G-9
+    ec_id: EC-GAP-9
+    text: "The meaning of SignalId.AUTH against the verification outcome is not stated; crypto_temporal.authenticated is derived only from verification events (hypothesis, to be confirmed)."
+    rows: [DX-09, DX-25]
+    adr: ADR-035
+  - id: G-10
+    ec_id: EC-GAP-10
+    text: "The availability of the robot channels is not in the trace; it is derived from the robot NODE_STATE reports (state, colocated)."
+    rows: [DX-02, DX-05, DX-09, DX-24]
+    adr: ADR-035
+  - id: G-11
+    ec_id: EC-GAP-11
+    text: "The name witness.robot_present suggests the robot is present; the field reads the presence of the patient as perceived by the robot (documentation note)."
+    rows: [DX-09, DX-24, DX-25]
+    adr: null
+  - id: G-12
+    ec_id: EC-GAP-12
+    text: "SignalId has no member for a PPG-derived heart rate; signal_quality.ppg_sqi reads SPO2 (documentation note)."
+    rows: [DX-08, DX-12, DX-23]
+    adr: null
+rows:
+  - id: DX-01
+    analisi_row: 1
+    basis: analisi_4_5
+    event: "Real hypertension (clinical deviation, all channels coherent)"
+    true_class: C1
+    subtypes: [hypertensive_spike, spontaneous_range]
+    violated_templates: [range]
+    discriminating_evidence:
+      - system.node_lifecycle
+      - system.diagnostics_ok
+      - system.liveliness_ok
+      - system.qos_deadline_missed
+      - system.ble_link_quality
+      - signal_quality.cuff_error_code
+      - cross_device.pulse_vs_ecg_hr_diff
+      - crypto_temporal.authenticated
+      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.timestamp_implausible
+    proposed_evidence: []
+    channels_required_all: [CH-SYS-WARD, CH-SQI, CH-XDEV, CH-CRYPTO]
+    channels_required_any: []
+    distinguishable: distinguishable
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C1]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: distinguishable
+        expected_kappa: [C1]
+      - when: {CH-SYS-WARD: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      Worked case W-01 (range, every channel the table reads is available and denied). C1 is claimed by
+      exclusion, so the cell is 'distinguishable by exclusion' and needs the ward-side channels. The
+      template range reads no robot field, so the A4 outcome repeats the default (transition table of the
+      C1 exclusion section: range, count and sys unchanged). The third outcome is the exclusion failing
+      when the ward system channel is missing (invariant I4a, decision table row 8); it is derived from
+      the table and is not a worked case. Reachability: the outcome C1 holds only if the profile provides
+      the channels of the exclusion set; in the reference profile S6 of evidence-channels.md diagnostics,
+      deadline and independent clocks are None and C1 is unreachable for every template (OP-AR-1; ADR-044
+      proposed). spontaneous_range is the WS04 subtype for violations that no injection record explains
+      and follows its template.
+  - id: DX-02
+    analisi_row: 2
+    basis: analisi_4_5
+    event: "Drug non-response (clinical response deviation)"
+    true_class: C1
+    subtypes: [drug_nonresponse, spontaneous_resp]
+    violated_templates: [resp]
+    discriminating_evidence:
+      - system.node_lifecycle
+      - system.diagnostics_ok
+      - system.liveliness_ok
+      - system.qos_deadline_missed
+      - system.ble_link_quality
+      - system.nav_task_failed
+      - system.manip_task_failed
+      - signal_quality.cuff_error_code
+      - cross_device.pulse_vs_ecg_hr_diff
+      - crypto_temporal.authenticated
+      - witness.identity_confirmed
+      - witness.intake_observed
+      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.timestamp_implausible
+    proposed_evidence: []
+    channels_required_all: [CH-SYS-WARD, CH-SYS-ROBOT, CH-SQI, CH-XDEV, CH-CRYPTO]
+    channels_required_any: [CH-WIT, CH-CRYPTO]
+    distinguishable: conditional
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C1]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2, C3]
+      - when: {CH-WIT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C3]
+      - when: {CH-CRYPTO: available}
+        result: distinguishable
+        expected_kappa: [C1]
+      - when: {CH-CRYPTO: available, CH-WIT: unavailable}
+        result: distinguishable
+        expected_kappa: [C1]
+      - when: {CH-CRYPTO: available, CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      Analisi: 'only if there is a witness'. The default deployment is the unauthenticated one (see
+      vocabulary.default_deployment), so the default outcome is W-02 (robot witness backs the dose:
+      identity confirmed and intake observed). Without the witness and without authentication the table
+      abstains (W-02-nowit, W-02-witness-only). With authentication deployed the backing is the
+      authentication and the witness is not needed (W-02-auth-witness, W-02-auth). A4 removes the witness
+      and the robot task outcomes, which the exclusion set of resp requires, so C1 becomes UNDETERMINED in
+      both deployments (W-02-A4; the last outcome is the authenticated deployment with the embodied pair
+      removed, W-02-auth-A4). Candidates: a non-response, a dose that was spat out or not taken, a
+      robot-side cause (C2), and in the unauthenticated deployment a forged DISPENSE (C3); authentication
+      removes the last. C1 is not reached in reference profile S6 (OP-AR-1). spontaneous_resp follows its
+      template.
+  - id: DX-03
+    analisi_row: 3
+    basis: analisi_4_5
+    event: "Cuff detached, evident failure (error code, node-state change)"
+    true_class: C2
+    subtypes: [cuff_detached]
+    violated_templates: [sched, resp, hold, sys]
+    discriminating_evidence:
+      - system.node_lifecycle
+      - signal_quality.cuff_error_code
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-SYS-WARD, CH-SQI]
+    distinguishable: distinguishable
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: distinguishable
+        expected_kappa: [C2]
+    declared_limit: false
+    note: >-
+      Worked cases W-03 (sys, the variant that reports a measurement) and W-03-sched (the injected form).
+      Resolution of the flag of the WS02-T01 review: in the injected form of cuff_detached no sys instance
+      is opened (the attempt ends in MEASUREMENT_MISSED, fault-model.md G-SYS-3), so the violated
+      templates are sched, resp and hold; sys is listed only for the variant of G-SYS-3. The inflation
+      duration is the sys predicate itself and is not independent evidence (analisi §4.5; W-14: a sys
+      violation with nothing asserted outside provenance is UNDETERMINED); the independent evidence is the
+      device error code and the node-state change, either of which gives C2 (decision table row 4). Both
+      fields are ward-side, so A4 leaves the outcome unchanged. If a detachment emits no NODE_STATE event
+      (FM OP-16, EC-OP-9) the error code alone decides (W-14-code). A cuff removed by the patient gives
+      the same signature; the benchmark injects cuff_detached as C2 by definition and the ambiguity is a
+      question for the clinician review (fault-model.md, Patient behaviour is C1). The fault raises no
+      crypto field.
+  - id: DX-04
+    analisi_row: 4
+    basis: analisi_4_5
+    event: "Cuff with silent bias or drift (plausible values)"
+    true_class: C2
+    subtypes: [cuff_silent_bias]
+    violated_templates: [range, hold, resp]
+    discriminating_evidence: []
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: []
+    distinguishable: not_distinguishable
+    outcomes:
+      - when: {}
+        result: not_distinguishable
+        expected_kappa: [C1]
+        masquerades_as: C1
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: not_distinguishable
+        expected_kappa: [C1, UNDETERMINED]
+        masquerades_as: C1
+    declared_limit: true
+    note: >-
+      Declared limit (analisi §4.5 row 4 and 4.8, ADR-002). No independent channel exists on the pressure
+      and the pulse rate stays coherent: the fault raises no field (fault-model.md, fault-to-evidence
+      table: the set of paths is empty), so the vector equals W-01 and the table gives C1 (worked case
+      W-04, 'table against matrix: agrees'). The claim that a faulty sensor cannot masquerade as a
+      clinical event is false for this row; the supportable claim is the one quoted in the section
+      Declared limits. The rate at which the row occurs is measured by WS08. Under A4, range keeps C1
+      (W-04); hold and resp read the robot task outcomes and lose C1 to UNDETERMINED (transition table),
+      which is an abstention and not a detection. The fault can also mask: an offset can move a latent
+      out-of-band reading into the band (SATISFIED, no alert, FX-8); WS08 counts that as a missed event
+      and not as an attribution error. The violated templates range and resp follow the task text; hold is
+      added from fault-model.md (M-VAL on the held reading).
+  - id: DX-05
+    analisi_row: 5
+    basis: analisi_4_5
+    event: "Robot late to the measurement window (navigation outcome late or failed)"
+    true_class: C2
+    subtypes: [nav_delay, impossible_goal, localisation_noise]
+    violated_templates: [sched, resp, hold]
+    discriminating_evidence:
+      - system.nav_task_failed
+    proposed_evidence: []
+    channels_required_all: [CH-SYS-ROBOT]
+    channels_required_any: []
+    distinguishable: distinguishable
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      Worked case W-05 (sched, navigation outcome late, stamped at the deadline, H-OVERRUN) and W-05-A4.
+      The decisive field is robot-derived, so A4 removes it and the table abstains (W-05-A4, reason
+      insufficient): the complete loss of the row under A4. The three subtypes share the evidence path.
+      impossible_goal raises it always; nav_delay raises it only if the task layer reports a late arrival
+      as a failure (D-5); localisation_noise only when navigation fails or is late (fault-model.md). Where
+      it is not raised the vector holds no system evidence and the table abstains; a patient who delays or
+      refuses is the C1 alternative (W-05-silent). A robot crash is visible through the liveliness
+      aggregate instead (W-05-live; row DX-15).
+  - id: DX-06
+    analisi_row: 6
+    basis: analisi_4_5
+    event: "Patient double take (adherence deviation)"
+    true_class: C1
+    subtypes: [double_take]
+    violated_templates: [count]
+    discriminating_evidence: []
+    proposed_evidence: [dispenser/content_change, dispenser/interval_since_previous_ms]
+    channels_required_all: [CH-DISP]
+    channels_required_any: []
+    distinguishable: conditional
+    outcomes:
+      - when: {}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+      - when: {CH-DISP: available}
+        result: distinguishable
+        expected_kappa: [C1]
+    declared_limit: false
+    note: >-
+      Gap G-1 (EC-GAP-1, ADR-032 proposed). Worked case W-06: the table gives UNDETERMINED (reason
+      insufficient) and DIFFERS from the analisi verdict 'yes, if the dispenser measures the content',
+      because the group dispenser does not exist in contract 0.1.0: channel CH-DISP feeds no field and the
+      rule has no row that reads it (C1 is undefined for count, AD-10). The third outcome is the analisi
+      §4.5 verdict (a content change present and an interval above the bounce threshold, registry name
+      dispense_bounce_interval_ms proposed in ADR-032) and is NOT reproducible by the rule of
+      attribution-rule.md until ADR-032 is accepted and a count row is defined; consumers must not turn an
+      outcome whose when-set names a proposed channel into a fixture. count reads no robot field, so A4
+      repeats the default. A double take and a bounce share the observed Events (confounder
+      double_take_vs_bounce of WS04). R3 weakness 4 (a second opening two minutes after the regular one is
+      more likely a double take than tampering) is the reason the row is C1.
+  - id: DX-07
+    analisi_row: 7
+    basis: analisi_4_5
+    event: "Dispenser sensor bounce (extra DISPENSE event)"
+    true_class: C2
+    subtypes: [dispenser_bounce]
+    violated_templates: [count]
+    discriminating_evidence: []
+    proposed_evidence: [dispenser/content_change, dispenser/interval_since_previous_ms]
+    channels_required_all: [CH-DISP]
+    channels_required_any: []
+    distinguishable: conditional
+    outcomes:
+      - when: {}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+      - when: {CH-DISP: available}
+        result: distinguishable
+        expected_kappa: [C2]
+    declared_limit: false
+    note: >-
+      Gap G-1. Worked case W-07: the vector equals that of W-06 and the result is UNDETERMINED; this
+      DIFFERS from the analisi verdict 'yes' (short interval between events, no content change), which
+      needs the proposed fields of ADR-032. The row verdict is therefore conditional on CH-DISP and not
+      distinguishable as the task start text said; the third outcome is the analisi verdict and is not
+      reproducible by the rule until ADR-032 and a count row exist. The interval 'below one second' of
+      analisi §4.5 is illustrative, unverified; no number is used here. The duplicate instances that a
+      bounce opens for hold, resp and int (M-DUPWIN, fault-model.md) are not matrix rows because the fault
+      raises no field: by the decision table a duplicate violation of hold or resp with coherent channels
+      reads as C1, and a duplicate int instance gives UNDETERMINED (OP-12, AD-3). Both are listed in the
+      section Declared limits and in the hazard register (H-10).
+  - id: DX-08
+    analisi_row: 8
+    basis: analisi_4_5
+    event: "Replay of pressure measurements"
+    true_class: C3
+    subtypes: [replay]
+    violated_templates: [range, sched, hold, resp, sys]
+    discriminating_evidence:
+      - signal_quality.ecg_sqi
+      - signal_quality.ppg_sqi
+      - system.ble_link_quality
+      - cross_device.pulse_vs_ecg_hr_diff
+      - crypto_temporal.authenticated
+      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.timestamp_implausible
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-CRYPTO, CH-XDEV]
+    distinguishable: conditional
+    outcomes:
+      - when: {}
+        result: partial
+        expected_kappa: [C3, UNDETERMINED, C1]
+        candidates: [C1, C3]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [C3, UNDETERMINED, C1]
+        candidates: [C1, C3]
+      - when: {CH-CRYPTO: available}
+        result: distinguishable
+        expected_kappa: [C3]
+      - when: {CH-CRYPTO: available, CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: distinguishable
+        expected_kappa: [C3]
+    declared_limit: false
+    note: >-
+      Analisi: 'yes with authentication; partial without'. Decision on the flag of the WS02-T02 review:
+      the row verdict stays conditional, but the authenticated outcome is restricted to a replay whose
+      metadata was rewritten (worked case W-08: crypto_temporal.authenticated asserted, C3). The threat
+      model finds the authenticated column of a verbatim naive replay partial (a verbatim copy has a valid
+      tag; one Boolean mixes a repeated and a lost sequence value, TM-GAP-SEQ, ADR-034 proposed); the rule
+      reaches C3 for it only through the sequence evidence of a device that provides seq with a complete
+      delivery ratio (IE-2, W-08-U) and abstains without seq (W-08-U-noseq, reason conflict). Default
+      outcome (unauthenticated): C3 for the naive replay with seq (W-08-U), UNDETERMINED for the naive
+      replay without seq (W-08-U-noseq), and for the informed replay (nothing raised, vector as W-10) C1
+      if a template is violated and no alert otherwise; the last case is the masquerade of DX-10. A replay
+      together with a loss is read as a loss (EC D-3, declared cost). All evidence is ward-side and C3
+      never changes under A4 (transition table); on hold and resp the informed case loses C1 to
+      UNDETERMINED, so the list is unchanged. The last outcome repeats the authenticated outcome with the
+      embodied pair removed.
+  - id: DX-09
+    analisi_row: 9
+    basis: analisi_4_5
+    event: "Falsified dispense event"
+    true_class: C3
+    subtypes: [dispense_forgery]
+    violated_templates: [count, hold, resp, int]
+    discriminating_evidence:
+      - system.ble_link_quality
+      - witness.identity_confirmed
+      - witness.intake_observed
+      - crypto_temporal.authenticated
+      - crypto_temporal.seq_gap_or_replay
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-WIT, CH-CRYPTO]
+    distinguishable: partial
+    outcomes:
+      - when: {}
+        result: partial
+        expected_kappa: [UNDETERMINED, C3, C2, C1]
+        candidates: [C1, C2, C3]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED, C3, C2]
+        candidates: [C1, C2, C3]
+      - when: {CH-CRYPTO: available}
+        result: partial
+        expected_kappa: [C3, UNDETERMINED, C1]
+        candidates: [C1, C3]
+      - when: {CH-CRYPTO: available, CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [C3, UNDETERMINED]
+        candidates: [C1, C3]
+    declared_limit: false
+    note: >-
+      Analisi: partial (no embodied witness; the response constraint is violated only after the response
+      window). Worked cases: W-09 (int, unauthenticated, robot co-located, nobody perceived: UNDETERMINED,
+      reason provenance-only, AD-3), W-09-resp (UNDETERMINED, reason conflict), W-09-A4 (UNDETERMINED: the
+      A4 effect predicted by analisi §5.6 on forged dispenses does not occur, because the witness pair of
+      a violated int is not integrity evidence; WS08-T04 test 6 does not hold under this rule), W-09-A
+      (synthesised forgery, authentication deployed: C3), W-09-jump (naive forged number that jumps ahead
+      is read as a loss: C2, a declared cost, H-15), and a naive forged number that repeats an accepted
+      one (W-15-repeat, W-08-U: C3, decision table row 2). Resolution of the flag of the WS02-T02 review:
+      the violated templates are those of the threat model (count, hold, resp, int) and not only resp and
+      int. By the decision table (no worked case) count gives UNDETERMINED (as W-06) and a forged dispense
+      that violates hold, whose witness fields are context, reads as C1 when the other channels are
+      denied: this is part of the declared uncertainty. The same vector as W-09 arises from a lost
+      presence sample (CAS-5), a patient who left and a copied authentic message, hence the candidates.
+      Under A4, hold loses C1 to UNDETERMINED (transition table); C3 is unchanged. The last outcome is the
+      authenticated outcome with the embodied pair removed.
+  - id: DX-10
+    analisi_row: 10
+    basis: analisi_4_5
+    event: "Plausible injection coherent on every channel (informed attacker)"
+    true_class: C3
+    subtypes: [injection_informed]
+    violated_templates: [range, hold, resp]
+    discriminating_evidence: []
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: []
+    distinguishable: not_distinguishable
+    outcomes:
+      - when: {}
+        result: not_distinguishable
+        expected_kappa: [C1, NO_ALERT]
+        masquerades_as: C1
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: not_distinguishable
+        expected_kappa: [C1, NO_ALERT, UNDETERMINED]
+        masquerades_as: C1
+    declared_limit: true
+    note: >-
+      Declared limit, undetectable by construction (analisi §4.5 row 10 and §10, fourth objection;
+      ADR-002). Worked case W-10: the vector equals a clinical day (unauthenticated deployment), so the
+      table gives C1 when the injected values violate a template and no alert when they satisfy every
+      template; the second case is counted by WS08 as an undetected C3 event in the detection metric and
+      not as an attribution error (threat-model.md, Attacks that raise no violation). The row is the
+      attacker who is coherent on every available channel; an attacker without keys cannot be coherent on
+      crypto_temporal.authenticated in an authenticated deployment, where the keyless BLE form is C3
+      (W-10-A); that is a different attacker and the physical and perception capabilities stay not
+      distinguishable (rows DX-24 and DX-25). Under A4 hold and resp lose C1 to UNDETERMINED (an
+      abstention, not a detection). Occurrence rate: measured by WS08.
+  - id: DX-11
+    analisi_row: null
+    basis: inferred
+    event: "Stuck-at sensor value (plausible frozen reading)"
+    true_class: C2
+    subtypes: [stuck_at]
+    violated_templates: [range, hold, resp]
+    discriminating_evidence: []
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: []
+    distinguishable: not_distinguishable
+    outcomes:
+      - when: {}
+        result: not_distinguishable
+        expected_kappa: [C1]
+        masquerades_as: C1
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: not_distinguishable
+        expected_kappa: [C1, UNDETERMINED]
+        masquerades_as: C1
+    declared_limit: true
+    note: >-
+      Declared limit, same evidence as DX-04 (analisi §4.8: silent faults producing plausible values
+      remain indistinguishable from clinical deviations). The fault raises no field and a run of identical
+      values has no field in contract 0.1.0 (fault-model.md, fault-to-evidence table); no field is
+      proposed here because that would be a contract change that no source asks for. The vector equals
+      W-01 (range), so the result is C1 as in W-04. Under A4 hold and resp lose C1 to UNDETERMINED. A
+      frozen in-band value can hide a latent violation (SATISFIED, FX-7), counted by WS08 as a missed
+      event.
+  - id: DX-12
+    analisi_row: null
+    basis: inferred
+    event: "Noisy ECG (signal-quality fault)"
+    true_class: C2
+    subtypes: [ecg_noise]
+    violated_templates: []
+    discriminating_evidence:
+      - signal_quality.ecg_sqi
+      - cross_device.pulse_vs_ecg_hr_diff
+    proposed_evidence: []
+    channels_required_all: [CH-SQI, CH-XDEV]
+    channels_required_any: []
+    distinguishable: distinguishable
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C2, NO_ALERT]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: distinguishable
+        expected_kappa: [C2, NO_ALERT]
+      - when: {CH-SQI: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED, NO_ALERT]
+        candidates: [C2, C3]
+    declared_limit: false
+    note: >-
+      Worked cases W-13 (explained away: the cross-device incoherence with low signal quality is system
+      evidence, C2), W-13-C3 (both quality fields good: the incoherence is integrity evidence, C3) and
+      W-13-U (quality unavailable: UNDETERMINED). No template reads the ECG, so the fault alone makes no
+      template violated and raises no alert (NO_ALERT); the C2 outcome applies to a violation that
+      coincides with the noise. That coincidence is the evidence confound of fault-model.md: a real
+      clinical violation during ECG noise is attributed C2, a misattribution in the reverse direction
+      (hazard H-09). The evidence is ward-side, so A4 repeats the default. Candidates of the third
+      outcome: the noise (C2) or a naive injection (C3, DX-23).
+  - id: DX-13
+    analisi_row: null
+    basis: inferred
+    event: "BLE dropout (link loss on a device)"
+    true_class: C2
+    subtypes: [ble_dropout]
+    violated_templates: [sched, resp, hold, count]
+    discriminating_evidence:
+      - system.node_lifecycle
+      - system.liveliness_ok
+      - system.qos_deadline_missed
+      - system.ble_link_quality
+      - crypto_temporal.seq_gap_or_replay
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-SYS-WARD]
+    distinguishable: distinguishable
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: distinguishable
+        expected_kappa: [C2]
+      - when: {CH-SYS-WARD: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      The dropout raises system.node_lifecycle (link_down, then unreachable) and system.ble_link_quality;
+      the other fields are conditional on the lease, the deadline and a later sequence value
+      (fault-to-evidence table, conditions LC and SEQ). Any asserted system field gives C2 (decision table
+      row 4; worked case W-15 for the link pair). A missing sequence value is read as a loss, not as
+      integrity evidence, when the link is degraded (EC D-3). The ward-side evidence is unchanged by A4.
+      Without the ward system channel the cuff stays silent, the exclusion set cannot be satisfied and the
+      table abstains (invariant I4a). The dropout is the seed of the fan-out of CAS-1 (violated sched,
+      resp and hold from one outage), which attribution-rule.md folds under the sched root. A device
+      battery fault is read as ble_dropout or process_kill of the device (EC-GAP-7, declared limit).
+  - id: DX-14
+    analisi_row: null
+    basis: inferred
+    event: "Message drop (isolated losses on a device link)"
+    true_class: C2
+    subtypes: [message_drop]
+    violated_templates: [sched, resp, hold, count, int]
+    discriminating_evidence:
+      - system.liveliness_ok
+      - system.qos_deadline_missed
+      - system.ble_link_quality
+      - crypto_temporal.seq_gap_or_replay
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-SYS-WARD]
+    distinguishable: partial
+    outcomes:
+      - when: {}
+        result: partial
+        expected_kappa: [C2, UNDETERMINED]
+        candidates: [C1, C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [C2, UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      Every field the drop can raise is conditional (fault-to-evidence table): link quality only when the
+      losses degrade it, liveliness and deadline only when a run of losses exceeds the lease or the
+      deadline, a sequence gap only when a later message arrives. System evidence gives C2 (row 4); a gap
+      with a link that is not degraded is evidence that no rule accepts (W-15-alone: UNDETERMINED, reason
+      conflict, RS-2); a drop that leaves nothing asserted and the cuff silent is UNDETERMINED, reason
+      insufficient. A dropped presence sample while the robot is co-located can make a violated int that
+      the integrity-first hierarchy could read as integrity evidence (CAS-5); the witness pair is not
+      integrity evidence under AD-3 and the result is UNDETERMINED, reason provenance-only (hazard H-10).
+      A4 does not change the ward-side evidence.
+  - id: DX-15
+    analisi_row: null
+    basis: inferred
+    event: "Node process kill or uncommanded lifecycle transition (device or robot node)"
+    true_class: C2
+    subtypes: [process_kill, uncommanded_lifecycle_transition]
+    violated_templates: [sched, resp, hold, count]
+    discriminating_evidence:
+      - system.node_lifecycle
+      - system.liveliness_ok
+      - system.qos_deadline_missed
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-SYS-WARD, CH-SYS-ROBOT]
+    distinguishable: distinguishable
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [C2, UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      A kill is visible through liveliness or deadline evidence (conditional on the lease, condition LC)
+      and an uncommanded transition through system.node_lifecycle; both give C2 (row 4; worked case
+      W-05-live for a robot crash visible only through the liveliness aggregate). A deliberate (commanded)
+      transition is not a crash: it is not system evidence and the table abstains with reason conflict
+      (W-05-deliberate, AD-7); it seeds no cascade (W-11-deliberate). Under A4 the robot component of the
+      aggregates is removed (recompute class): a device-target fault stays C2, a robot-target fault
+      visible only through the robot component becomes UNDETERMINED (W-05-live-A4), hence the mixed A4
+      outcome. A robot-target fault leaves int undecided, not violated, when the channels are marked
+      unavailable no later than the dispense step (fault-model.md hypothesis 9); if the mark lags,
+      W-09-lag and W-09-lag-late apply.
+  - id: DX-16
+    analisi_row: null
+    basis: inferred
+    event: "Robot battery depleted (robot stops)"
+    true_class: C2
+    subtypes: [battery_depleted]
+    violated_templates: [sched, resp, hold]
+    discriminating_evidence:
+      - system.liveliness_ok
+      - system.qos_deadline_missed
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-SYS-ROBOT]
+    distinguishable: distinguishable
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      After the stop the watchdog asserts a liveliness lapse (conditional on the lease) and the deadline
+      field may follow; the robot battery flag is context and is not read by the table (AD-11, a precursor
+      report is not evidence of a violation), and the fault does not raise system.node_lifecycle. If the
+      lapse is detected by the last admissible evidence time the result is C2 (W-05-live); if it is
+      detected later the vector is empty and the result is UNDETERMINED (W-09-lag-late pattern). The
+      channel is wholly robot-side: under A4 the robot component of the aggregates is removed and the
+      table abstains (W-05-live-A4). int is undecided, not violated, under hypothesis 9 of fault-model.md.
+  - id: DX-17
+    analisi_row: null
+    basis: inferred
+    event: "Manipulation failure (robot visit fails)"
+    true_class: C2
+    subtypes: [manipulation_failure]
+    violated_templates: [sched, resp, hold]
+    discriminating_evidence:
+      - system.manip_task_failed
+    proposed_evidence: []
+    channels_required_all: [CH-SYS-ROBOT]
+    channels_required_any: []
+    distinguishable: distinguishable
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      Same structure as DX-05 with the manipulation outcome (the manipulation variant of worked case W-05,
+      decision table row 4 via SE-7). The decisive field is robot-derived and A4 removes it. The
+      alternative cause of the same symptom is a patient who refuses (C1, DX-21): the pair is separated
+      only by the outcome declined of ADR-040 (proposed), and even then a refusal does not reach C1
+      because it leaves the cuff silent (W-05-silent-040).
+  - id: DX-18
+    analisi_row: null
+    basis: inferred
+    event: "Link delay or out-of-order delivery (late or displaced inputs)"
+    true_class: C2
+    subtypes: [link_delay, out_of_order]
+    violated_templates: [sched, resp, hold]
+    discriminating_evidence:
+      - system.qos_deadline_missed
+      - crypto_temporal.timestamp_implausible
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-SYS-WARD, CH-CRYPTO]
+    distinguishable: partial
+    outcomes:
+      - when: {}
+        result: partial
+        expected_kappa: [NO_ALERT, UNDETERMINED, C2]
+        candidates: [C2, C3]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [NO_ALERT, UNDETERMINED, C2]
+        candidates: [C2, C3]
+    declared_limit: false
+    note: >-
+      Inside the reorder bound every displaced or delayed input is absorbed and the accepted trace is
+      identical to the in-order trace (fault-model.md FX-12, V-LATE-2): no violation and no alert. Beyond
+      the bound the input is late, not used and counted, which asserts
+      crypto_temporal.timestamp_implausible; that field is never decisive alone (one Boolean mixes late,
+      future-stamped and replay-related inputs, EC-GAP-6, RS-3), so the result is UNDETERMINED (reason
+      conflict) unless a declared deadline gives system.qos_deadline_missed, which is C2. A late input of
+      this fault and a replay or a delay by an attacker (DX-08, DX-26) give the same Events: no field
+      separates them (threat-model.md, Time as an attack vector, TX-8 (c)), hence the candidates C2 and
+      C3. A delayed presence sample can make a violated int (CAS-5, hazard H-10). A4 changes nothing on
+      the ward-side evidence. out_of_order beyond the bound is link_delay.
+  - id: DX-19
+    analisi_row: null
+    basis: inferred
+    event: "Clock skew (device clock displaced)"
+    true_class: C2
+    subtypes: [clock_skew]
+    violated_templates: [sched, hold]
+    discriminating_evidence:
+      - crypto_temporal.timestamp_implausible
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: []
+    distinguishable: not_distinguishable
+    outcomes:
+      - when: {}
+        result: not_distinguishable
+        expected_kappa: [C1, UNDETERMINED]
+        masquerades_as: C1
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: not_distinguishable
+        expected_kappa: [C1, UNDETERMINED]
+        masquerades_as: C1
+    declared_limit: true
+    note: >-
+      Declared limit from gap G-6 (EC-GAP-6, TM-GAP-TIME): no field carries clock health, the monitor does
+      not estimate offsets, and no field is proposed. A skew inside the acceptance bound shifts a verdict
+      (a measurement on time is read after the deadline, FX-4, FX-5) and raises nothing, so with coherent
+      channels the table gives C1 (the row masquerades as a clinical deviation) and no channel can
+      contradict it. A skew beyond the bound asserts crypto_temporal.timestamp_implausible only, which is
+      never decisive alone: UNDETERMINED, reason conflict (RS-3, W-08-U-noseq), with C3
+      (timestamp_manipulation, DX-26) as the other candidate. The outcome C1 needs the profile to provide
+      the exclusion set (OP-AR-1). A4 repeats the default: on sched and hold the abstention replaces C1,
+      and UNDETERMINED is already in the list.
+  - id: DX-20
+    analisi_row: null
+    basis: inferred
+    event: "Hypotension below the hold threshold at a dose (clinical deviation)"
+    true_class: C1
+    subtypes: [hypotension_below_hold, spontaneous_hold]
+    violated_templates: [hold]
+    discriminating_evidence:
+      - system.node_lifecycle
+      - system.diagnostics_ok
+      - system.liveliness_ok
+      - system.qos_deadline_missed
+      - system.ble_link_quality
+      - system.nav_task_failed
+      - system.manip_task_failed
+      - signal_quality.cuff_error_code
+      - cross_device.pulse_vs_ecg_hr_diff
+      - crypto_temporal.authenticated
+      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.timestamp_implausible
+    proposed_evidence: []
+    channels_required_all: [CH-SYS-WARD, CH-SYS-ROBOT, CH-SQI, CH-XDEV, CH-CRYPTO]
+    channels_required_any: []
+    distinguishable: distinguishable
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C1]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      C1 by exclusion, as DX-01, but the hold template is in the robot scope (the pre-dose reading comes
+      from a visit; evidence-channels.md scope table, attribution-rule.md AD-9): the exclusion set also
+      requires the two robot task outcomes to be denied. Derived from the decision table and the A4
+      transition table (sched, hold and int: C1 becomes UNDETERMINED); there is no worked case for hold. A
+      hold violation whose decisive sub-formula is a failed guard (no recent measurement) leaves the cuff
+      silent and does not reach C1 (reachability paragraph of the C1 exclusion section); the outcome C1
+      applies to the margin form (a reading below the threshold). C1 is not reached in reference profile
+      S6 (OP-AR-1). spontaneous_hold follows its template.
+  - id: DX-21
+    analisi_row: null
+    basis: inferred
+    event: "Patient refuses or delays a measurement (process deviation)"
+    true_class: C1
+    subtypes: [measurement_refusal, spontaneous_sched]
+    violated_templates: [sched]
+    discriminating_evidence:
+      - system.nav_task_failed
+      - system.manip_task_failed
+    proposed_evidence: []
+    channels_required_all: [CH-SYS-ROBOT]
+    channels_required_any: []
+    distinguishable: partial
+    outcomes:
+      - when: {}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      Worked cases W-05-silent (without ADR-040) and W-05-silent-040 (with the outcome declined): a
+      refusal leaves the cuff silent in the evidence window, so system.ble_link_quality,
+      signal_quality.cuff_error_code and the crypto fields are None and C1 is unreachable whatever the
+      robot reports; the result is UNDETERMINED, reason insufficient. ADR-040 (proposed) is necessary but
+      not sufficient: it only keeps the C2 side of the pair (a failed manipulation, DX-17) separated. C1
+      is reached only if other cuff traffic lies in the evidence window (W-05-late-traffic), which the
+      benchmark as generated does not produce. R3 weakness 4 (missed measurements are a process deviation
+      often caused by the robot) is the reason this row exists. A4 repeats the default: the robot outcomes
+      are already None in the refusal vector. spontaneous_sched follows its template.
+  - id: DX-22
+    analisi_row: null
+    basis: inferred
+    event: "Dose omission (day-end dose count below the minimum)"
+    true_class: C1
+    subtypes: [dose_omission, spontaneous_count]
+    violated_templates: [count]
+    discriminating_evidence: []
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: []
+    distinguishable: partial
+    outcomes:
+      - when: {}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C2]
+    declared_limit: false
+    note: >-
+      Added for the WS04 subtype dose_omission (WS04 README issue I8) and for spontaneous_count; the row
+      is inferred. The count template has no C1 under the contract (AD-10), so with no system evidence the
+      vector equals W-06 and the result is UNDETERMINED. When the cause is a lost real dispense (a
+      dispenser-link dropout, a dropped message or a killed dispenser node) the link or node evidence
+      gives C2 instead (DX-13, DX-14, DX-15). No dispenser field exists to tell an omission from other
+      causes (gap G-1). count reads no robot field, so A4 repeats the default.
+  - id: DX-23
+    analisi_row: null
+    basis: inferred
+    event: "Naive BLE injection (plausible values, incoherent across devices)"
+    true_class: C3
+    subtypes: [injection_naive]
+    violated_templates: [range, sched, hold, resp, sys]
+    discriminating_evidence:
+      - signal_quality.ecg_sqi
+      - signal_quality.ppg_sqi
+      - system.ble_link_quality
+      - cross_device.pulse_vs_ecg_hr_diff
+      - crypto_temporal.authenticated
+      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.timestamp_implausible
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-XDEV, CH-CRYPTO]
+    distinguishable: conditional
+    outcomes:
+      - when: {}
+        result: distinguishable
+        expected_kappa: [C3]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: distinguishable
+        expected_kappa: [C3]
+      - when: {CH-SQI: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C2, C3]
+      - when: {CH-CRYPTO: available}
+        result: distinguishable
+        expected_kappa: [C3]
+    declared_limit: false
+    note: >-
+      Conditional on the cross-device evidence with the signal quality available: a pulse rate incoherent
+      with the ECG while both quality fields are good is integrity evidence (IE-3, worked case W-13-C3).
+      If a quality field is low the incoherence is explained away as C2 (W-13) and if a quality field is
+      unavailable the table abstains (W-13-U): the third outcome. A naive injection that leaves a sequence
+      gap with a degraded link is read as a loss (C2, W-15-jump) and one that repeats a sequence value
+      with a complete ratio is C3 (IE-2); with authentication deployed the failed verification is C3
+      (IE-1, the last outcome). Injected values inside the care-plan band can raise no violation, in which
+      case there is no alert and WS08 counts an undetected C3 event (threat-model.md). All evidence is
+      ward-side and C3 never changes under A4.
+  - id: DX-24
+    analisi_row: null
+    basis: inferred
+    event: "Spoofed presence or intake (perception spoofing)"
+    true_class: C3
+    subtypes: [presence_spoof]
+    violated_templates: []
+    discriminating_evidence:
+      - witness.identity_confirmed
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-WIT]
+    distinguishable: not_distinguishable
+    outcomes:
+      - when: {}
+        result: not_distinguishable
+        expected_kappa: [NO_ALERT, C1]
+        masquerades_as: C1
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [NO_ALERT, UNDETERMINED]
+        candidates: [C1, C3]
+    declared_limit: true
+    note: >-
+      Declared limit, derived: analisi lists perception spoofing as an attacker capability and 'simulated
+      presence' as an injection but has no matrix row. The robot reports what its sensors were made to
+      perceive, and no field says how the observation was obtained (threat-model.md, presence_spoof;
+      Non-claims 3: presence is not identity). At the informed level nothing in the twenty fields
+      contradicts the spoof; at the naive level only witness.identity_confirmed can read False, and only
+      if the robot checks identity. Alone, a spoof can raise no violation (it can only move int upward),
+      so there is no alert (NO_ALERT); its effect is to change the evidence of violations that others
+      raise: a spoofed INTAKE makes a forged dispense followed by a non-response look like a genuine
+      non-response, and the table gives C1 (the vector of W-02). Under A4 the witness no longer enters the
+      vector, the response violation loses C1 and the table abstains: the embodied channel is the attack
+      surface of this row. Occurrence rate: measured by WS08.
+  - id: DX-25
+    analisi_row: null
+    basis: inferred
+    event: "Physical release of a dose at the dispenser by another actor"
+    true_class: C3
+    subtypes: [dispenser_physical_tamper]
+    violated_templates: [count, hold, resp, int]
+    discriminating_evidence:
+      - witness.identity_confirmed
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-WIT]
+    distinguishable: not_distinguishable
+    outcomes:
+      - when: {}
+        result: partial
+        expected_kappa: [UNDETERMINED, C1]
+        candidates: [C1, C3]
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C3]
+      - when: {CH-CRYPTO: available}
+        result: not_distinguishable
+        expected_kappa: [C1, UNDETERMINED]
+        masquerades_as: C1
+      - when: {CH-CRYPTO: available, CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: partial
+        expected_kappa: [UNDETERMINED]
+        candidates: [C1, C3]
+    declared_limit: true
+    note: >-
+      Declared limit, inferred (threat-model.md, dispenser_physical_tamper): the release is a genuine
+      device output, so no crypto_temporal field is raised in either deployment, and an authenticated
+      event proves the origin device and not the intake or the actor (ADR-004). Unauthenticated: int is
+      violated and gives UNDETERMINED, reason provenance-only (as W-09); resp with a witness that saw no
+      intake gives UNDETERMINED, reason conflict (as W-09-resp); count gives UNDETERMINED; hold gives C1
+      by the decision table (no worked case). Authenticated: int is satisfied, the authentication backs
+      resp and the result is C1 (as W-02-auth) while count stays UNDETERMINED: a masquerade as the
+      patient's own behaviour, hence the row verdict. Only a co-located robot that checks identity can
+      contradict the release through witness.identity_confirmed (EC D-6), and an informed spoofed witness
+      removes even that. Under A4 hold and resp lose C1 to UNDETERMINED. The last outcome is the
+      authenticated outcome with the embodied pair removed.
+  - id: DX-26
+    analisi_row: null
+    basis: inferred
+    event: "Timestamp manipulation (rewritten or delayed time metadata)"
+    true_class: C3
+    subtypes: [timestamp_manipulation]
+    violated_templates: [sched, hold, range, resp]
+    discriminating_evidence:
+      - crypto_temporal.authenticated
+      - crypto_temporal.timestamp_implausible
+    proposed_evidence: []
+    channels_required_all: []
+    channels_required_any: [CH-CRYPTO]
+    distinguishable: not_distinguishable
+    outcomes:
+      - when: {}
+        result: not_distinguishable
+        expected_kappa: [C1, UNDETERMINED]
+        masquerades_as: C1
+      - when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
+        result: not_distinguishable
+        expected_kappa: [C1, UNDETERMINED]
+        masquerades_as: C1
+      - when: {CH-CRYPTO: available}
+        result: partial
+        expected_kappa: [C3, UNDETERMINED, C1]
+        candidates: [C1, C2, C3]
+    declared_limit: true
+    note: >-
+      Declared limit from gap G-6 (EC-GAP-6, TM-GAP-TIME; threat-model.md, Time as an attack vector,
+      TX-8). Unauthenticated: a displacement inside the acceptance bounds is accepted, unflagged and can
+      change a verdict (sched and hold), so with coherent channels the table gives C1; beyond the bounds
+      crypto_temporal.timestamp_implausible is the only evidence, never decisive alone, and the result is
+      UNDETERMINED (RS-3). An attacker's delay and a link delay are the same Event with the same new
+      sequence value, and a forward stamp and a clock skew ahead are the same reading: no field separates
+      C3 from C2 here (DX-18, DX-19). Authenticated: a rewritten stamp invalidates the tag and gives C3
+      (IE-1); a verbatim delay keeps the tag valid and leaves only lateness beyond the bound, so the row
+      stays partial. Not injected in benchmark v1 unless WS04-T08 decides otherwise. Under A4 the
+      ward-side evidence is unchanged.
