@@ -325,7 +325,8 @@ class Matching:
         Without arguments the result has one row with the totals and ``days = n_days``. With ``event_days`` (the unit of
         each ground-truth event, in the order of ``gt``), ``det_days`` (the unit of each detection, in the order of
         ``det``) and ``n_units`` the result has ``n_units`` rows of one day each: a pair and a missed event belong to
-        the unit of the event, a duplicate and a false alarm to the unit of the detection.
+        the unit of the event, a duplicate and a false alarm to the unit of the detection; a detection with the unit ``-1``
+        is in no unit (the runner puts the unscored tail day there) and a duplicate or false alarm of it is not counted.
         """
         if event_days is None and det_days is None and n_units is None:
             rows = 1
@@ -337,9 +338,12 @@ class Matching:
             if len(event_days) != len(self.gt) or len(det_days) != len(self.det):
                 raise ValueError("event_days and det_days must align with gt and det")
             rows, ev, dt = n_units, list(event_days), list(det_days)
-            for u in (*ev, *dt):
+            for u in ev:
                 if not 0 <= u < rows:
                     raise ValueError(f"unit {u} is outside 0..{rows - 1}")
+            for u in dt:
+                if not -1 <= u < rows:
+                    raise ValueError(f"unit {u} is outside -1..{rows - 1}")
         table = np.zeros((rows, len(COLUMNS)), dtype=np.float64)
         table[:, _COL["days"]] = self.n_days if rows == 1 else 1.0
         for i, event in enumerate(self.gt):
@@ -357,9 +361,11 @@ class Matching:
             elif p.attribution in ("answered", "abstained") and p.label is not None:
                 table[u, _COL[f"conf_{cls}_{p.label.value}"]] += 1
         for i in self.false_alarm_index:
-            table[dt[i], _COL["false_alarms"]] += 1
+            if dt[i] >= 0:
+                table[dt[i], _COL["false_alarms"]] += 1
         for i in self.duplicate_index:
-            table[dt[i], _COL["duplicates"]] += 1
+            if dt[i] >= 0:
+                table[dt[i], _COL["duplicates"]] += 1
         return table
 
 
@@ -522,7 +528,7 @@ def table_early_fraction(total: Table) -> float:
 
 def _confusion(total: Table) -> dict[tuple[str, str], int]:
     return {
-        (t, p): int(round(float(total[_COL[f"conf_{t}_{p}"]])))
+        (t, p): round(float(total[_COL[f"conf_{t}_{p}"]]))
         for t in CLASSES
         for p in LABEL_COLUMNS
     }
@@ -827,7 +833,7 @@ def _percentiles(stats: NDArray[np.float64], level: float) -> tuple[float, float
     finite = stats[~np.isnan(stats)]
     if finite.size == 0:
         return math.nan, math.nan
-    lo, hi = np.percentile(finite, [100 * (1 - level) / 2, 100 * (1 + level) / 2])
+    lo, hi = np.quantile(finite, [(1 - level) / 2, (1 + level) / 2])
     return float(lo), float(hi)
 
 

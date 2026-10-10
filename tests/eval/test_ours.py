@@ -13,6 +13,11 @@ import types
 from typing import Any
 
 import pytest
+
+from ralmon.attribution import AttributedCause
+from ralmon.benchmark import BenchmarkDay, LatentDay, ObservedDay, open_benchmark
+from ralmon.conformal import SplitConformal
+from ralmon.eval import OursDetector, build_detector
 from ralmon.eval.ours import PipelineComponents
 from ralmon.eval.runner import (
     ConfigError,
@@ -20,11 +25,6 @@ from ralmon.eval.runner import (
     load_experiment,
     make_environment,
 )
-
-from ralmon.attribution import AttributedCause
-from ralmon.benchmark import BenchmarkDay, LatentDay, ObservedDay, open_benchmark
-from ralmon.conformal import SplitConformal
-from ralmon.eval import OursDetector, build_detector
 from ralmon.monitor import (
     MonitorConfig,
     PersistenceForecaster,
@@ -76,21 +76,42 @@ def range_plan(registry: Any) -> CarePlan:
     )
 
 
-def out_of_band_day() -> ObservedDay:
-    """One measurement at 10:00 with a pressure of 165 (above the band), a coherent cuff, nothing else."""
-    t = ms(10)
+def node_state(t: int, source: str, state: str, **payload: Any) -> Event:
+    return Event(EventKind.NODE_STATE, t, t, source, {"state": state, **payload}, None)
+
+
+def device_profile() -> Any:
+    """The profile of the worked day (H-W6): every capability of the cuff declared, the dispenser and the robot supervised."""
+    from tests.fixtures.monitor.worked_day import world
+
+    return world().profile
+
+
+def out_of_band_day(day_index: int = 0, t: int = ms(12, 24)) -> ObservedDay:
+    """One measurement above the band at 12:24 with coherent channels: every node reports active, the sequence numbers
+    continue, a pulse rate and an ECG heart rate agree (the conditions of the worked case W-01)."""
+    o = day_index * T
+    t = o + t
     samples = (
-        Sample("bp", t, t, 165.0, None, None),
-        Sample("cuff_health", t, t, 1.0, None, None),
-        Sample("inflation_ms", t, t, 40_000.0, None, None),
+        Sample("bp", t, t, 152.0, 102, None),
+        Sample("cuff_health", t, t, 1.0, 102, None),
+        Sample("inflation_ms", t, t, 45_000.0, 102, None),
+        Sample("hr_pulse", t, t, 72.0, 102, None),
+        Sample("hr_ecg", t - STEP, t - STEP, 70.0, None, 0.9),
     )
-    events = (Event(EventKind.MEASUREMENT, t, t, "dev", {}, None),)
-    return ObservedDay("px", 0, 0, samples, events, "plan-1")
+    events = (
+        node_state(o, "cuff", "active", diagnostics="ok"),
+        node_state(o, "dispenser", "active", diagnostics="ok"),
+        node_state(o, "robot", "active", colocated=False),
+        Event(EventKind.MEASUREMENT, t, t, "cuff", {}, 102),
+    )
+    return ObservedDay("px", day_index, 0, samples, events, "plan-1")
 
 
 def make_ours(registry: Any, templates: Any, **kw: Any) -> OursDetector:
     cfg = kw.pop("config", None) or config(registry)
     components = kw.pop("components", PipelineComponents(use_forecaster=False))
+    kw.setdefault("profile", device_profile())
     return OursDetector(cfg, registry, templates, components=components, **kw)
 
 
@@ -108,7 +129,7 @@ def test_ours_emits_c1_alert_for_out_of_band_measurement(
     assert alert.verdict == VerdictState.VIOLATED  # type: ignore[attr-defined]
     assert alert.label == AttributedCause.C1_CLINICAL
     assert alert.t_ms == ms(
-        10
+        12, 24
     )  # decided at the measurement (ADR-041: t_ms is decided_at_ms)
 
 
@@ -124,6 +145,7 @@ def test_ours_name_and_default_components(registry: Any, templates: Any) -> None
     evidence = {"k": object()}
     assert c.evidence_transform(evidence, 0) is evidence  # identity
     ours = make_ours(registry, templates, components=c, config=config(registry))
+    ours.fit([], [])
     day = out_of_band_day()
     first = ours.run(day, range_plan(registry), None)
     assert [a.xi.instance_key for a in c.rank(first, {})] == [
@@ -346,24 +368,13 @@ def test_ours_with_history_keeps_the_history_out_of_the_alerts(
 ) -> None:
     ours = make_ours(registry, templates)
     ours.fit([], [])
-    t = T + ms(10)
-    day2 = ObservedDay(
-        "px",
-        1,
-        0,
-        (
-            Sample("bp", t, t, 165.0, None, None),
-            Sample("cuff_health", t, t, 1.0, None, None),
-        ),
-        (Event(EventKind.MEASUREMENT, t, t, "dev", {}, None),),
-        "plan-1",
-    )
     plan = range_plan(registry)
-    alone = ours.run(day2, plan, None)
-    with_history = ours.run(day2, plan, None, history=[out_of_band_day()])
+    day1 = out_of_band_day(1, ms(15))
+    alone = ours.run(day1, plan, None)
+    with_history = ours.run(day1, plan, None, history=[out_of_band_day(0)])
     # the out-of-band measurement of day 0 was decided in day 0: replayed, not reported for day 1
-    assert [a.t_ms for a in alone] == [t]
-    assert [a.t_ms for a in with_history] == [t]
+    assert [a.t_ms for a in alone] == [T + ms(15)]
+    assert [a.t_ms for a in with_history] == [T + ms(15)]
 
 
 def test_the_evidence_transform_sees_the_extracted_evidence_once_per_run(

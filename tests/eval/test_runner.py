@@ -21,6 +21,10 @@ import pytest
 import yaml
 from hypothesis import given
 from hypothesis import strategies as st
+
+from ralmon.attribution import Detection
+from ralmon.benchmark import LatentDay, ObservedDay
+from ralmon.eval import runner
 from ralmon.eval.runner import (
     ConfigError,
     GuardError,
@@ -35,10 +39,6 @@ from ralmon.eval.runner import (
     run_experiment,
     split_patients,
 )
-
-from ralmon.attribution import Detection
-from ralmon.benchmark import LatentDay, ObservedDay
-from ralmon.eval import runner
 from tests.eval.helpers import (
     C1,
     C2,
