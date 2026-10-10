@@ -213,7 +213,7 @@ Code and tests are complete on the branch `ws08-t01-runner-metrics`; `status` st
 | `grep -rnE 'np\.random\.(seed\|rand\|randn\|randint)\|default_rng\(\)\|time\.time\|datetime\.now' src/ralmon/eval` | 1 (prints nothing) |
 | `grep -rnE 'LatentDay\|GroundTruthEvent' src/ralmon/eval/ours.py` | 1 (prints nothing) |
 | `.venv/bin/pytest tests/test_public_api.py -q` | 0 |
-| `.venv/bin/pytest -q` (full) | see the line below |
+| `.venv/bin/pytest -q` (full; 6184 passed, 1 skipped, the skip is not from this task) | 0 |
 | `python3 tools/check_plan.py` | 0 |
 
-FULL_SUITE_PLACEHOLDER
+The smoke run writes `<out>/smoke/0/{config.yaml, git_rev.txt, metrics.json}`; its `meta.guards` shows `b1_rules_active == [R1, R2, R3, R4]` and the flags `FIXTURE_ONLY`, `ADR063_INT_SYS_COMPARISON`, `B1_MINIMAL`, `CLOSING_STEP_C1_ONLY`, `LATENCY_CONVENTION_OPEN`, `CONTAMINATION_POLICY_OPEN`, `SCORES_NOT_RANKED`.
