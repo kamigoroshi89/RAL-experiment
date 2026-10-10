@@ -862,6 +862,14 @@ def test_b4_calibrator_tied_to_no_model_is_refused() -> None:
     b4.fit([], [bench([60, 61])])
     with pytest.raises(StaleCalibratorError):
         b4.run(hr([60, 70]), PLAN, None)
+    # "calibrated for no particular model" is refused even when the forecaster has no version either (None == None
+    # must not pass for a match)
+    forecaster = StubForecaster()
+    forecaster.version = None  # type: ignore[assignment]
+    nameless = make_b4(forecaster=forecaster, factory=lambda: Untied(5.0))
+    nameless.fit([], [bench([60, 61])])
+    with pytest.raises(StaleCalibratorError):
+        nameless.run(hr([60, 70]), PLAN, None)
 
 
 def test_b4_fraction_alpha_goes_through_an_allocation_exactly() -> None:

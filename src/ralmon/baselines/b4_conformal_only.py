@@ -52,6 +52,9 @@ days are unlabelled: an anomaly injected in a calibration day inflates the quant
 shared with any conformal method that does not use labels. Days of one patient are not independent and the harness does
 not check the split by patient beyond the labels it is given. The allocated level is taken from
 ``allocation.per_test_exact`` (a ``Fraction``, WS05-T06 hand-over) when the allocation has it, else from ``per_test``.
+An allocation takes a float total, read as its decimal literal: a ``Fraction`` ``alpha`` is passed to it only when it is
+exactly such a literal (``Fraction(1, 20)`` is ``0.05``); any other ``Fraction`` with an allocation is a ``ValueError``,
+never a rounded float.
 
 What B4 knows. A forecaster, the quantile of residual magnitudes, and the samples of the monitored signals. Nothing
 else: no band, no hold threshold, no window, no schedule, no template, no plan parameter (the plan is not read, so
@@ -276,12 +279,13 @@ class B4ConformalOnly(BaselineBase):
         if allocation is None:
             level: object = self._alpha
         else:
+            total = self._float_total(self._alpha)
             exact = getattr(allocation, "per_test_exact", None)
             n_tests = len(self._signals)
             level = (
-                exact(self._alpha, n_tests)
+                exact(total, n_tests)
                 if exact is not None
-                else allocation.per_test(self._alpha, n_tests)  # type: ignore[arg-type]
+                else allocation.per_test(total, n_tests)
             )
         self._level: Level = _check_level(level, "the allocated level")
         self._forecaster = forecaster
@@ -294,6 +298,24 @@ class B4ConformalOnly(BaselineBase):
         self._n_episodes: dict[str, int] = {}
         self._residuals: tuple[B4Residual, ...] = ()
         self._run_stats: B4RunStats | None = None
+
+    @staticmethod
+    def _float_total(alpha: Level) -> float:
+        """``alpha`` as the float an allocation takes (``AlphaAllocation.per_test(alpha_total: float, ...)``).
+
+        An allocation reads its float as the decimal literal. A ``Fraction`` is converted only if it IS that literal
+        (``Fraction(1, 20)`` is ``0.05``); any other ``Fraction`` would be rounded silently, which moves a quantile rank
+        (the WS05-T06 trap), so it is refused by name.
+        """
+        if isinstance(alpha, float):
+            return alpha
+        value = float(alpha)
+        if Fraction(repr(value)) != alpha:
+            raise ValueError(
+                f"alpha = {alpha} is a Fraction that is not the decimal literal of a float, and an allocation takes "
+                "a float: give a float alpha with the allocation, or a Fraction alpha without one"
+            )
+        return value
 
     @staticmethod
     def _resolve_signals(
