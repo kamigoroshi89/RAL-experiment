@@ -3,7 +3,7 @@ id: WS05-T08
 title: "Predictive integration and run_offline end to end"
 workstream: WS05-monitor
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS05-T05", "WS05-T06", "WS05-T07", "WS01-T08"]
 critical_path: true
 non_negotiable: false
