@@ -178,9 +178,12 @@ BASELINE_NAMES: Final[tuple[str, ...]] = (
     "B3",
     "B4",
     "B5",
+    "B5-per-template",
     "B5-bonferroni",
 )
-_ALPHA_BASELINES: Final[frozenset[str]] = frozenset({"B4", "B5", "B5-bonferroni"})
+_ALPHA_BASELINES: Final[frozenset[str]] = frozenset(
+    {"B4", "B5", "B5-per-template", "B5-bonferroni"}
+)
 _OURS_NAME: Final = re.compile(r"ours(-[A-Za-z0-9]+)*")
 _EXPERIMENT_ID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 _EXTENSIONS: Final[tuple[str, ...]] = (
@@ -1040,18 +1043,23 @@ def _build_baseline(name: str, env: DetectorEnvironment, alpha: float | None) ->
         return B3PlainSTL(env.templates, env.registry, timing=timing)
     if name.startswith("B2"):
         spec = _params_dict(env.params, "B2")
-        for key in ("z_threshold", "score_quantile"):
+        mode = {"B2": "both", "B2-residual": "residual", "B2-iforest": "iforest"}[name]
+        # a parameter that the mode does not use is refused by the baseline, so only the used ones are passed
+        needed = {
+            "residual": ("z_threshold",),
+            "iforest": ("score_quantile",),
+            "both": ("z_threshold", "score_quantile"),
+        }[mode]
+        for key in needed:
             _need(
                 key in spec,
                 f"detector_params.B2.{key} is required (no default, none tuned on the test split)",
             )
-        mode = {"B2": "both", "B2-residual": "residual", "B2-iforest": "iforest"}[name]
         kwargs: dict[str, Any] = {
             "mode": mode,
-            "z_threshold": spec["z_threshold"],
-            "score_quantile": spec["score_quantile"],
             "seed": env.seed,
             "timing": timing,
+            **{key: spec[key] for key in needed},
         }
         if mode != "iforest":
             kwargs["signals"] = spec.get("signals")
@@ -1089,16 +1097,20 @@ def _build_baseline(name: str, env: DetectorEnvironment, alpha: float | None) ->
             "detector_params.B5-bonferroni.n_tests is required",
         )
         level = BonferroniAllocation().per_test_exact(alpha, spec["n_tests"])
-    return B5ConformalSTL(
+    built = B5ConformalSTL(
         env.templates,
         env.registry,
         forecaster,
         SplitConformal,
         alpha=level,
-        aggregation=spec.get("aggregation", "conjunction"),
+        aggregation="per_template" if name == "B5-per-template" else "conjunction",
         timing=timing,
         plan_for_day=env.plan_for_day,
     )
+    built.name = (
+        name  # the variant at the allocated level is a B5 run under its own name
+    )
+    return built
 
 
 # ---- hooks -----------------------------------------------------------------------------------------------------------
