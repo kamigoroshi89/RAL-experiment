@@ -209,12 +209,12 @@ parameters:
     note: "Probability that a dispenser sensor bounce produces a spurious DISPENSE event (C2 fault, analisi §5.1 item 3). The human supplies the value and its source_ref."
   - parameter: ble_dropout_rate_per_h
     unit: "1/h"
-    value: null
+    value: 0.0104
     dist: null
-    source_ref: null
-    source_type: null
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed; upper envelope only: Nunes T, Gaspar L, Faria JN, Portugal D, Lopes T, Fernandes P, Tavakoli M, Med Biol Eng Comput 2024;62(12):3815-3840, doi:10.1007/s11517-024-03155-3, Results (paragraph of Fig. 11, MTBF)"
+    source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
+    rationale: "Design choice of composition, not a measurement; proposal accepted by gab 2026-10-10, not reviewed. 0.0104 per hour per device is 0.25 windows per device-day (0.25 / 24, arithmetic of the research agent), about one window per patient-day over the four BLE devices, chosen so that ble_dropout does not dominate the C2 class. The only measured rates are for body-worn BLE stickers on mobile hospital patients (Nunes et al. 2024: 'For the 24-h patients, the MTBF is around the 6-h mark', about 0.167 per hour, an upper envelope and not a value for a fixed bedside cuff or a room dispenser). Sweep values (not values of this row): 0.0417 per hour (1 per device-day) and 0.167 per hour. Measurement on the WS07 and WS10 hardware remains the proper source. Not clinically reviewed."
     note: "Rate per hour of BLE link dropouts (C2 fault, analisi §5.1 item 3). The human supplies the value and its source_ref."

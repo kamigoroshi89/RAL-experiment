@@ -133,7 +133,8 @@ def test_integer_rows_are_integers() -> None:
         value = injection_rows()[name].value
         assert isinstance(value, int) and not isinstance(value, bool), name
         assert 1 <= value <= T_DAY_MS, name
-    assert isinstance(rows["inflation_ms_sd"].value, float)
+    # real-valued rows (the loader accepts an int literal such as 3000 for a float field)
+    assert isinstance(rows["inflation_ms_sd"].value, int | float)
     assert isinstance(rows["pulse_error_sd_bpm"].value, float)
     assert isinstance(prior_rows()["ble_dropout_rate_per_h"].value, float)
 
@@ -155,7 +156,8 @@ def test_block1_sensitivities_are_in_the_rationale_only() -> None:
     rows = design_rows()
     assert "14000" in flat(rows["inflation_ms_sd"].rationale)
     assert "5.9" in flat(rows["pulse_error_sd_bpm"].rationale)
-    assert "30-45" in flat(rows["inflation_ms_nominal"].source_ref)
+    assert "30 - 45 sec (on deflation)" in flat(rows["inflation_ms_nominal"].rationale)
+    assert "zoll.com" in flat(rows["inflation_ms_nominal"].source_ref)
 
 
 def test_ble_rate_is_a_design_choice_with_its_envelope() -> None:

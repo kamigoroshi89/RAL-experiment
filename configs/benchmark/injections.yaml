@@ -425,36 +425,36 @@ confounders:
 parameters:
   - parameter: ble_dropout_duration_short
     unit: "ms"
-    value: null
+    value: 120000
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed; anchors: Bluetooth Core Specification v5.4 (2023-01-31) Vol 6 Part B section 4.5.2 (supervision timeout at most 32 s); Breteler MJM et al., BMJ Open 2018, doi:10.1136/bmjopen-2017-020162, Methods (data-loss gap thresholds of 2 min, 15 min, 1 hour and 4 hours); registry sched_window 30 min (ADR-068)"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
+    rationale: "Design choice (scenario grid, no measured distribution of dropout durations); proposal accepted by gab 2026-10-10, not reviewed. 120000 ms is 2 min, the shortest gap threshold of Breteler et al. 2018, well above the 32 s supervision timeout cap: with the 30 min sched_window of registry 0.2.1 (ADR-068) a few monitor steps long. Anchors: Bluetooth Core Specification 5.4 Vol 6 Part B 4.5.2, 'connSupervisionTimeout shall be a multiple of 10 ms in the range 100 ms to 32.0 s', so a link is declared lost after at most 32 s; Breteler et al. 2018 gap thresholds of 2 min, 15 min, 1 hour. Registry 0.2.1 sched_window is 30 min (ADR-068) and the monitor step is 1 min. Not clinically reviewed."
     note: "Level short of the window duration of ble_dropout, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one BLE dropout window of the link of one device (the BLE connection is lost for the whole window; nothing the device sends arrives). The count of windows per day comes from DeviceErrorModel.ble_dropout_rate_per_h; the duration is a design level. When WS07-T03 sets the liveliness lease of the device profile the human may restate the levels against it (a window shorter than the lease raises neither liveliness nor deadline evidence, condition LC of docs/models/fault-model.md). No value has been chosen by an agent."
   - parameter: ble_dropout_duration_medium
     unit: "ms"
-    value: null
+    value: 900000
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed; anchors: Bluetooth Core Specification v5.4 (2023-01-31) Vol 6 Part B section 4.5.2 (supervision timeout at most 32 s); Breteler MJM et al., BMJ Open 2018, doi:10.1136/bmjopen-2017-020162, Methods (data-loss gap thresholds of 2 min, 15 min, 1 hour and 4 hours); registry sched_window 30 min (ADR-068)"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
+    rationale: "Design choice (scenario grid, no measured distribution of dropout durations); proposal accepted by gab 2026-10-10, not reviewed. 900000 ms is 15 min, the middle gap threshold of Breteler et al. 2018 and half the 30 min sched_window of registry 0.2.1 (ADR-068). Anchors: Bluetooth Core Specification 5.4 Vol 6 Part B 4.5.2, 'connSupervisionTimeout shall be a multiple of 10 ms in the range 100 ms to 32.0 s', so a link is declared lost after at most 32 s; Breteler et al. 2018 gap thresholds of 2 min, 15 min, 1 hour. Registry 0.2.1 sched_window is 30 min (ADR-068) and the monitor step is 1 min. Not clinically reviewed."
     note: "Level medium of the window duration of ble_dropout, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one BLE dropout window of the link of one device (the BLE connection is lost for the whole window; nothing the device sends arrives). The count of windows per day comes from DeviceErrorModel.ble_dropout_rate_per_h; the duration is a design level. When WS07-T03 sets the liveliness lease of the device profile the human may restate the levels against it (a window shorter than the lease raises neither liveliness nor deadline evidence, condition LC of docs/models/fault-model.md). No value has been chosen by an agent."
   - parameter: ble_dropout_duration_long
     unit: "ms"
-    value: null
+    value: 3600000
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed; anchors: Bluetooth Core Specification v5.4 (2023-01-31) Vol 6 Part B section 4.5.2 (supervision timeout at most 32 s); Breteler MJM et al., BMJ Open 2018, doi:10.1136/bmjopen-2017-020162, Methods (data-loss gap thresholds of 2 min, 15 min, 1 hour and 4 hours); registry sched_window 30 min (ADR-068)"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
+    rationale: "Design choice (scenario grid, no measured distribution of dropout durations); proposal accepted by gab 2026-10-10, not reviewed. 3600000 ms is 1 h, the third gap threshold of Breteler et al. 2018 and two sched_windows of 30 min (registry 0.2.1, ADR-068), so a long window always spans a scheduled measurement window. Anchors: Bluetooth Core Specification 5.4 Vol 6 Part B 4.5.2, 'connSupervisionTimeout shall be a multiple of 10 ms in the range 100 ms to 32.0 s', so a link is declared lost after at most 32 s; Breteler et al. 2018 gap thresholds of 2 min, 15 min, 1 hour. Registry 0.2.1 sched_window is 30 min (ADR-068) and the monitor step is 1 min. Not clinically reviewed."
     note: "Level long of the window duration of ble_dropout, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one BLE dropout window of the link of one device (the BLE connection is lost for the whole window; nothing the device sends arrives). The count of windows per day comes from DeviceErrorModel.ble_dropout_rate_per_h; the duration is a design level. When WS07-T03 sets the liveliness lease of the device profile the human may restate the levels against it (a window shorter than the lease raises neither liveliness nor deadline evidence, condition LC of docs/models/fault-model.md). No value has been chosen by an agent."
   - parameter: stuck_at_duration_short
     unit: "ms"
