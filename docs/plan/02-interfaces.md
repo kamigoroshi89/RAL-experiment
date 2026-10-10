@@ -458,7 +458,7 @@ Additions of 0.2.0 (ADR-058):
 
 ## Monitor
 
-Version 0.2.0 (ADR-053, ADR-046). Owner WS05. Consumers: WS06, WS07, WS08. Sources: analisi §4.7 (online monitoring), §4.1 (samples), §4.9 items 1 and 2.
+Version 0.3.0 (ADR-060: the meaning of `alpha`, the prediction rule, `StaleCalibratorError`, `build_calibration_episodes`; 0.2.0 was ADR-053 and ADR-046). Owner WS05. Consumers: WS06, WS07, WS08. Sources: analisi §4.7 (online monitoring), §4.1 (samples), §4.9 items 1 and 2.
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -466,7 +466,7 @@ class MonitorConfig:
     step_ms: DurationMs                 # T_s
     reorder_delay_ms: DurationMs        # maximum reorder buffer delay
     predictive: bool                    # emit PREDICTED_VIOLATION
-    alpha: float | None
+    alpha: float | None                 # the TOTAL level of a patient-day, split over the tests of the plan (ADR-060); required if predictive
     variant: Literal["likely", "possible"]
     registry_version: str
 
@@ -486,6 +486,8 @@ def run_offline(day: ObservedDay, plan: CarePlan, config: MonitorConfig, calibra
 Rules: `advance` is causal (no look-ahead); processing cost per sample is O(number of active template instances) and the bound is reported. The monitor separates verdicts from attribution: it emits `VerdictRecord`s; the `Attribution` step turns violated records into alerts.
 
 Rules of 0.2.0 (ADR-053, ADR-046). (1) `registry` defaults to `load_registry(step_ms=config.step_ms)`, `templates` to `load_templates(registry=registry)`; a signed plan without a `verifier` raises `PlanIntegrityError`; a caller that passes the five positional arguments keeps working. (2) `history` holds the accepted observed days that precede `day` for the same patient, in order of day index, on the continuing axis (`#time-and-units`); they are replayed first and the verdicts of the steps before the first step of `day` are not returned. The history needed is `H = max(T_day, largest window parameter)`. With an empty `history` the run starts with empty state: a counter over 24 h can only under-count, so a VIOLATED verdict stays sound and a SATISFIED one can be wrong. (3) `StreamingMonitor` offers, outside the `Monitor` protocol, `push_availability(signal, available, t_device_ms, t_rx_ms)` (the availability of the robot channels `presence` and `intake`, ordered with the inputs and late by the same rule), `late_inputs()`, `rejected_inputs()`, `stats()` and `close()`; `run_offline_detailed(...)` takes the same arguments as `run_offline` and returns an `OfflineResult` (the records plus those diagnostics). (4) `make_point_evaluator(template, instance, registry, step_ms, *, anchor_kind=None) -> PointEvaluator` is the entry point of the baselines B3 and B5; `PointEvaluator.step(t_ms, values) -> float | None` returns the raw robustness at the decision step and `None` before it (ADR-053 (c) has the details).
+
+Rules of 0.3.0 (ADR-060). (5) **Predictive mode.** `predictive=True` requires `alpha`, a calibrator and a forecaster (`MonitorConfigError` at construction) and a calibrator calibrated for `forecaster.model_version` (`StaleCalibratorError` at construction and on every `advance`; `calibrated_for is None` is refused). With `predictive=False` both are ignored and the records are those of the measured-only monitor (ablation A2). (6) **Prediction rule.** An instance that has a predictive path (a SCHED instance of the plan if the forecaster supports `meas`, a RESP instance created at a scheduled dispense if it supports `bp`) gets exactly one prediction, at its activation step, and only if its record there is PENDING. If the calibrator emits, the step emits the PENDING record and then a PREDICTED_VIOLATION record with the same `t_eval_ms`; the state is sticky until the measured prefix decides it, the interval fields are those of the measured prefix, `rho` is `PREDICTED` with `Rho.alpha` the per-test level, `predicted_sigma_norm = clip(sigma_hat + q, -1, 1)` and `decided_at_ms` is `None`. The forecast never produces VIOLATED or SATISFIED. (7) **Allocation.** The per-test level is `alpha / n_tests` (exact fraction, `BonferroniAllocation`), `n_tests` being the largest number of tests of one calendar day of the loaded plan; `stats()` reports `n_tests`, `per_test_alpha`, the predictions made, emitted and uninformative, and the reason of every skipped prediction. (8) **Horizon.** The time to the deadline of the instance, plus the scale of the template when its unit is milliseconds. (9) `build_calibration_episodes(days: Sequence[ObservedTrace], plans: Sequence[CarePlan], config: MonitorConfig, forecaster: Forecaster, *, registry=None, templates=None) -> tuple[list[CalibrationEpisode], int]` returns the calibration episodes of the observed days, on the same code path as the monitor, and the number of tested instances whose value is undefined on the day (`n_censored`). `sigma_true` is the observed completion; no latent day can be passed. (10) `StreamingMonitor.push_sample` also accepts the robot-state signals `nav_eta_ms` and `task_queue_ms` (kept for the forecaster, read by no template).
 
 ## Alert
 

@@ -171,7 +171,6 @@ def test_missing_evidence_entry_is_all_unavailable(template: str, registry) -> N
 
 def test_empty_evidence_vector_has_provenance_only(registry) -> None:  # type: ignore[no-untyped-def]
     from ralmon.attribution.evidence import EVIDENCE_PATHS, empty_evidence, get_evidence
-
     from ralmon.spec import TemplateKind
 
     for template in TemplateId:

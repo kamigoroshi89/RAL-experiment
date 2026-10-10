@@ -6,8 +6,10 @@ reorder buffer. ``advance(t)`` finalises the steps ``k <= floor((t - D) / T_s)``
 the inputs of the step in device-time order, updates the summaries and the derived signals (a clock
 sample at every step), creates the instances anchored by the released events, evaluates every active
 instance by its closed form, applies the verdict rule and emits one record per active instance.
-Definitive verdicts come from the measured prefix only (ADR-008); there is no forecaster and no
-conformal code here, and ``predictive=True`` is refused until WS05-T08.
+Definitive verdicts come from the measured prefix only (ADR-008). With ``predictive=True`` an instance that
+has a predictive path gets one prediction at its activation step (``predictive.py``, ADR-060): the step may
+move it from PENDING to PREDICTED_VIOLATION, and nothing else; the forecast and the conformal calibrator are
+used there and nowhere else, and a definitive record is a function of the measured prefix alone.
 
 Additive to the contract ``Monitor`` Protocol (ahead of the contract, ADR-029 and ADR-048): the methods
 ``push_availability`` (the availability mask of the robot channels, CG-6; the trace has none, ADR-035),
@@ -20,10 +22,11 @@ from __future__ import annotations
 import bisect
 import math
 from collections import deque
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
+from ralmon.conformal import ConformalCalibrator
 from ralmon.monitor._text import (
     MAX_SEQ,
     MAX_TIME_MS,
@@ -67,6 +70,11 @@ from ralmon.monitor.parameters import (
     read_latency,
     read_overrides,
     read_value,
+)
+from ralmon.monitor.predictive import (
+    PredictionPoint,
+    Predictor,
+    StaleCalibratorError,
 )
 from ralmon.monitor.reorder import (
     BufferedInput,
@@ -130,6 +138,10 @@ _PLAIN_SAMPLES: Final = frozenset(
         SignalId.HR_ECG,
         SignalId.HR_PULSE,
         SignalId.SPO2,
+        # the robot state that the deadline forecaster reads (ADR-057); no template reads it, the monitor keeps
+        # it for the forecaster (predictive.py)
+        SignalId.NAV_ETA,
+        SignalId.TASK_QUEUE,
     }
 )
 _ROBOT_CHANNELS: Final = frozenset({SignalId.PRESENCE, SignalId.INTAKE})
@@ -228,7 +240,21 @@ class MonitorStats:
     reports that were used, not those refused as late, duplicate or after finalisation (those are in the
     counters and lists of the refusals). ``colocated_reports_ignored`` is the number of ``NODE_STATE``
     events that carry a ``colocated`` key and were not used because the source is not the robot or the
-    value is not a ``bool``; they are also in ``ignored_events``."""
+    value is not a ``bool``; they are also in ``ignored_events``.
+
+    The predictive counters (ADR-060) are zero or empty without ``predictive=True``. ``n_tests`` is the largest
+    number of predictive tests of one calendar day of the plan (the instances that have a predictive path) and
+    ``per_test_alpha`` the level of each, ``alpha / n_tests`` (``None`` when there is no test).
+    ``predictions_made`` counts the calls of the calibrator, ``predictions_emitted`` the PREDICTED_VIOLATION
+    transitions, ``predictions_uninformative`` the emitted predictions of rho 0.0 (the variant "possible" at a
+    level below ``1 / (n + 1)``: the lower quantile is minus infinity and the alert carries no information).
+    ``prediction_skips`` lists ``(reason, count)`` for the instances that were not predicted:
+    ``no_forecast_coverage`` (the forecaster does not support the signal of the template), ``resp_beyond_plan``
+    (a dispense that the plan does not schedule: it has no test of the union bound), ``decided_at_activation``,
+    ``insufficient_history`` (the forecaster has no basis), ``invalid_forecast`` (a path that is not the one
+    asked for or not finite), ``undefined_completion`` (an open position in the completed trace) and
+    ``no_test_allocated``. A small ``per_test_alpha`` makes the finite-sample quantile infinite and silences the
+    early warning: ``predictions_made`` with no ``predictions_emitted`` shows it."""
 
     node_updates: int
     retained_samples: int
@@ -256,6 +282,12 @@ class MonitorStats:
     plan_instances_before_start: int = 0
     availability_reports: int = 0
     colocated_reports_ignored: int = 0
+    n_tests: int = 0
+    per_test_alpha: float | None = None
+    predictions_made: int = 0
+    predictions_emitted: int = 0
+    predictions_uninformative: int = 0
+    prediction_skips: tuple[tuple[str, int], ...] = ()
 
 
 def _seq_of(instance: Instance) -> int:
@@ -320,14 +352,14 @@ class StreamingMonitor:
     ``colocated`` key is read (the robot lifecycle state is evidence for the attribution layer).
     """
 
-    @converting(MonitorConfigError)
+    @converting(MonitorConfigError, StaleCalibratorError)
     def __init__(
         self,
         config: MonitorConfig,
         registry: Any,
         templates: Sequence[Template],
         *,
-        calibrator: object | None = None,
+        calibrator: ConformalCalibrator | None = None,
         forecaster: Forecaster | None = None,
         verifier: PlanVerifier | None = None,
         template_ids: Collection[TemplateId] | None = None,
@@ -335,12 +367,13 @@ class StreamingMonitor:
         buffer_capacity: int = DEFAULT_BUFFER_CAPACITY,
     ) -> None:
         cfg = check_config(config)
+        self._cfg = cfg
         self._step = cfg.step_ms
         self._delay = cfg.reorder_delay_ms
         self._k_day = T_DAY_MS // self._step
         self._registry = registry
-        # accepted and never called: the predictive mode is WS05-T08 (the forecaster cannot change a
-        # definitive verdict, Lemma 9)
+        # used only by the predictive step (ADR-060): a definitive verdict never depends on them (Lemma 9),
+        # and with ``predictive=False`` they are accepted and never called (ablation A2)
         self._calibrator = calibrator
         self._forecaster = forecaster
         self._read_registry_basics(registry, cfg)
@@ -390,6 +423,15 @@ class StreamingMonitor:
             {tid: build_path_table(tid) for tid in self._templates},
         )
         self._overrides = read_overrides(registry)
+        self._pred: Predictor | None = None
+        if cfg.predictive:
+            self._pred = Predictor(
+                config=cfg,
+                ctx=self._ctx,
+                templates=self._templates,
+                forecaster=forecaster,
+                calibrator=calibrator,
+            )
         # state
         self._closed = False
         self._k_f = -1
@@ -656,15 +698,23 @@ class StreamingMonitor:
         mark = ChannelAvailability(channel, available, t_dev, t_rx)
         self._ingest("avail", mark, t_dev, t_rx, None, None, ((channel,), available))
 
-    @converting(MonitorInputError, MonitorInvariantError)
+    @converting(MonitorInputError, MonitorInvariantError, StaleCalibratorError)
     def advance(self, t_ms: TimeMs) -> tuple[VerdictRecord, ...]:
         """Finalise the steps up to ``floor((t_ms - D) / T_s)`` and return their records, in step order.
 
         Causal: only inputs with ``t_device_ms <= t_ms - D`` are used. ``t_ms`` must not decrease; the
         same time again returns no record. A call that would finalise more than ``MAX_STEPS_PER_ADVANCE``
         steps, or emit more than ``MAX_RECORDS_PER_ADVANCE`` records, is refused before any state changes.
+
+        In predictive mode the activation step of an instance with a predictive path emits two records for it,
+        PENDING then PREDICTED_VIOLATION with the same ``t_eval_ms``, when the prediction is emitted. A calibrator
+        that is not calibrated for the current model version raises ``StaleCalibratorError`` before anything is
+        done. An exception of the forecaster other than ``InsufficientHistoryError`` (which only skips the
+        prediction) or of the calibrator is raised as ``MonitorInputError`` with the original chained.
         """
         self._check_open()
+        if self._pred is not None:
+            self._pred.check_fresh()  # refused before any state changes (WS05 decision D10)
         t = as_int(t_ms, "t_ms", MonitorInputError)
         if self._last_advance is not None and t < self._last_advance:
             raise MonitorInputError(
@@ -708,6 +758,26 @@ class StreamingMonitor:
             )
         self._k_start = k0
         self._k_f = k0 - 1
+
+    @converting(MonitorConfigError)
+    def _enable_recording(self, recorder: Callable[[PredictionPoint], None]) -> None:
+        """Run the predictive step with ``recorder`` in place of the calibrator (package-private; used by
+        ``build_calibration_episodes``): every prediction that would be tested is handed to ``recorder`` with its
+        ``sigma_hat`` and nothing is emitted. The same code path as the deployment, so the episodes are the
+        scores of the monitor. Only before the first plan."""
+        self._check_open()
+        if self._plan_loaded or self._k_f != self._k_start - 1:
+            raise MonitorConfigError(
+                "recording can only be enabled before the first plan"
+            )
+        self._pred = Predictor(
+            config=self._cfg,
+            ctx=self._ctx,
+            templates=self._templates,
+            forecaster=self._forecaster,
+            calibrator=None,
+            recorder=recorder,
+        )
 
     def _day_end_keys_closing_at(self, step: int) -> frozenset[str]:
         """Keys of the day-end COUNT instances of the loaded plan whose closing step is ``step``.
@@ -754,6 +824,7 @@ class StreamingMonitor:
                 if self._presence_marks == 0 or self._first_mark_is_report
                 else 0
             ),
+            **(self._pred.counters() if self._pred is not None else {}),
             node_updates=self._nodes,
             retained_samples=len(self._buffer) + len(self._dispense_steps),
             retained_dedup_keys=len(self._seen),
@@ -1006,6 +1077,21 @@ class StreamingMonitor:
         self._scheduled = {}
         for step, instance in planned:
             self._scheduled.setdefault(step, []).append(instance)
+            if self._pred is not None and isinstance(instance, SchedInstance):
+                instance.awaits_prediction = True
+        if self._pred is not None:
+            self._pred.on_plan(
+                schedule=read.schedule,
+                sched_anchors=[
+                    st.anchor for st in built.statics if st.template is TemplateId.SCHED
+                ],
+                sched_counted=[
+                    st.anchor
+                    for st in built.statics
+                    if st.template is TemplateId.SCHED
+                    and step_of(st.anchor, self._step) >= self._k_start
+                ],
+            )
         self._dyn_params = {tid: dict(p) for tid, p in built.params.items()}
         self._int_window_steps = self._int_window_in_steps()
         self._plan_loaded = True
@@ -1075,10 +1161,22 @@ class StreamingMonitor:
             self._stale_presence += (
                 1  # a level older than the window still in force (ADR-054)
             )
+        if self._pred is not None:
+            self._pred.trim(t_k)
         survivors: list[Instance] = []
         for instance in self._active:
-            out.append(instance.step(k, view))
+            record = instance.step(k, view)
+            out.append(record)
             self._nodes += 1
+            if instance.awaits_prediction:
+                # the one prediction of the instance, at its activation step (ADR-060); the step may add a
+                # second record, PREDICTED_VIOLATION, after the PENDING one
+                instance.awaits_prediction = False
+                if self._pred is not None:
+                    predicted = self._pred.test(instance, record, k, view.bp)
+                    if predicted is not None:
+                        out.append(predicted)
+                        self._records += 1
             if instance.finished(k):
                 self._active_keys.discard(instance.key)
                 if isinstance(instance, CountEndInstance):
@@ -1120,6 +1218,8 @@ class StreamingMonitor:
                 signal.value, entry.t_device_ms, entry.t_rx_ms, value, entry.seq, None
             )
             self._feed(sample)
+            if self._pred is not None:
+                self._pred.observe(sample)
             if signal is SignalId.BP:
                 self._bp = value
                 if not self._bound_lower <= value <= self._bound_upper:
@@ -1213,6 +1313,8 @@ class StreamingMonitor:
                 instance = IntInstance(
                     ctx, template, key, self._seq, anchor_ms, k, params
                 )
+            if self._pred is not None and tid is TemplateId.RESP:
+                instance.awaits_prediction = True
             bisect.insort(self._active, instance, key=_seq_of)
             self._active_keys.add(key)
 
@@ -1227,6 +1329,7 @@ class _PlanRead:
     care_plan_id: str
     plan_version: int
     instances: tuple[TemplateInstance, ...]
+    schedule: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1265,8 +1368,10 @@ def _read_plan(plan: object) -> _PlanRead:
         raise PlanIntegrityError(
             f"schedule must be a list or a tuple, got {show(plan.schedule)}"
         )
-    for i, tick in enumerate(plan.schedule):
+    ticks = [
         as_int(tick, f"schedule[{i}]", PlanIntegrityError)
+        for i, tick in enumerate(plan.schedule)
+    ]
     if plan.signature is not None and not isinstance(plan.signature, str):
         raise PlanIntegrityError(
             f"signature must be a str or None, got {show(plan.signature)}"
@@ -1302,4 +1407,4 @@ def _read_plan(plan: object) -> _PlanRead:
                 value, f"{where}.param_values[{name!r}]", PlanIntegrityError
             )
         out.append(TemplateInstance(item.template, key, values, anchor))
-    return _PlanRead(care_plan_id, version, tuple(out))
+    return _PlanRead(care_plan_id, version, tuple(out), tuple(ticks))

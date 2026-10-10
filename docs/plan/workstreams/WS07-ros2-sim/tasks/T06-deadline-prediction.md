@@ -73,3 +73,9 @@ Write these first. Fixtures use fakes that implement the Protocols of `#forecast
 - `PYTHONPATH=ros2/ralmon_sim python -m ralmon_sim.deadline_prediction --config ros2/ralmon_sim/config/experiments/ws07_deadline.yaml --seed 0` exits 0 after the runs of step 6 and writes `outputs/ws07-deadline/0/metrics.json`.
 - `python -c "import json; m = json.load(open('outputs/ws07-deadline/0/metrics.json')); assert {'n_cal', 'n_test', 'n_dropped_unobserved', 'alpha_grid', 'lead_times_ms'} <= set(m)"` exits 0.
 - `test -f outputs/ws07-deadline/0/config.yaml && test -f outputs/ws07-deadline/0/git_rev.txt` exits 0, and `grep -nE 'TO''DO|TB''D|lo''rem|[?][?][?]' ros2/ralmon_sim/config/experiments/ws07_deadline.yaml` prints nothing.
+
+## Notes
+
+### Hand-over from WS05-T08 (worker, 2026-10-10)
+
+Step 1 asks whether a public helper builds `CalibrationEpisode` objects: it does. `ralmon.monitor.build_calibration_episodes(days, plans, config, forecaster, *, registry=None, templates=None)` returns `(episodes, n_censored)` for SCHED and RESP instances, on the same code path as the monitor (ADR-060): `sigma_hat` at the activation step (the lead time is zero, so a declared lead before the deadline needs the local code or a later extension), `sigma_true` from the accepted observed inputs by the point evaluator. The sigma convention is the normalised raw robustness of the point evaluator; `Forecast.mean[k]` predicts `t_from_ms + (k + 1) * step_ms`, and the horizon the monitor passes is the time to the deadline plus the scale of the template for SCHED.

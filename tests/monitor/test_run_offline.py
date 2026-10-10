@@ -285,20 +285,6 @@ def test_run_offline_with_the_real_defaults_loads_and_runs() -> None:
     )  # no instance in a day without input and without static instances
 
 
-def test_predictive_run_is_refused_until_ws05_t08() -> None:
-    config = make_config(REG, predictive=True, alpha=0.1)
-    with pytest.raises(m.MonitorConfigError, match="added by WS05-T08"):
-        m.run_offline(
-            day_of(Inputs()),
-            make_plan(REG),
-            config,
-            None,
-            None,
-            registry=REG,
-            templates=LIB,
-        )
-
-
 # ---------------------------------------------------------------------------------------------
 # test 29 and the isolation of the monitor: no ground truth, no look-ahead into other packages
 # ---------------------------------------------------------------------------------------------
@@ -315,8 +301,10 @@ def test_monitor_sources_do_not_reference_ground_truth() -> None:
             assert name not in text, f"{path.name} mentions {name}"
 
 
-def test_monitor_imports_only_signals_and_spec_of_the_package() -> None:
-    allowed = {"signals", "spec"}
+def test_monitor_imports_only_signals_spec_and_conformal_of_the_package() -> None:
+    # WS05-T08: the predictive step uses the allocation and the calibrator type of ``ralmon.conformal``; the
+    # attribution, baselines, evaluation and benchmark packages stay out (the layering test has the full graph)
+    allowed = {"signals", "spec", "conformal"}
     seen: set[str] = set()
     for path in sorted(SRC_MONITOR.rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

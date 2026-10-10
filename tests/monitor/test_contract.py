@@ -204,12 +204,11 @@ def test_done_when_names_and_stub_owners() -> None:
     ]
     for name in names:
         assert not hasattr(getattr(m, name), "__ralmon_stub_owner__"), name
-    # only the two names of WS05-T08 remain placeholders
+    # WS05-T08 moved the last two placeholders: no name of ralmon.monitor is a placeholder any more
     stubs = sorted(
         n for n in m.__all__ if hasattr(getattr(m, n), "__ralmon_stub_owner__")
     )
-    assert stubs == ["StaleCalibratorError", "build_calibration_episodes"]
-    assert all(getattr(m, n).__ralmon_stub_owner__ == "WS05-T08" for n in stubs)
+    assert stubs == []
 
 
 def test_rho_is_the_single_definition_of_spec() -> None:

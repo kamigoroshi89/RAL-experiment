@@ -146,12 +146,6 @@ def test_the_plan_registry_version_must_equal_the_loaded_registry() -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_config_rejects_predictive_until_ws05_t08() -> None:
-    config = make_config(REG, predictive=True, alpha=0.2)
-    with pytest.raises(m.MonitorConfigError, match="added by WS05-T08"):
-        monitor(config=config)
-
-
 def test_monitor_config_is_a_plain_dataclass_with_the_contract_fields() -> None:
     assert [f.name for f in dataclasses.fields(m.MonitorConfig)] == [
         "step_ms",

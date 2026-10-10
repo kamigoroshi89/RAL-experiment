@@ -139,6 +139,7 @@ class _Evaluator:
         kind: str,
         params: Mapping[str, float],
         ctx: EngineContext,
+        first_step: int = 0,
     ) -> None:
         self._template = template
         self._ctx = ctx
@@ -149,7 +150,7 @@ class _Evaluator:
         self._k_a = -(-anchor_ms // ctx.step_ms)
         self._witness = WitnessTracker()
         self._view = StepView(self._witness)
-        self._next = 0
+        self._next = first_step
         self._last_meas = -1
         self._instance: Instance | None = None
         self._value: float | None = None
@@ -258,6 +259,24 @@ class _Evaluator:
                     self._frozen = True
         self._next += 1
         return self._value
+
+
+def _evaluator_from(
+    template: Template,
+    anchor_ms: int,
+    kind: str,
+    params: Mapping[str, float],
+    ctx: EngineContext,
+    first_step: int,
+) -> PointEvaluator:
+    """A point evaluator that starts at grid step ``first_step`` (package-private; used by the predictive step).
+
+    The parameters were validated when the plan was loaded and ``ctx`` is the one of the monitor, so nothing is
+    read from a registry here. ``first_step`` must be the creation step of the instance (the step of its anchor
+    for SCHED and RESP): no earlier step is needed by those two templates, and starting there makes a prediction
+    cost the length of its window and not the position of the instant on the continuing axis of the patient.
+    """
+    return _Evaluator(template, anchor_ms, kind, params, ctx, first_step)
 
 
 @converting(MonitorConfigError)

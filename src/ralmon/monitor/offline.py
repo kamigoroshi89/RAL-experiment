@@ -29,11 +29,12 @@ that wants each instance decided once keys its records by ``(instance_key, t_eva
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
 from itertools import islice
 from typing import Any
 
+from ralmon.conformal import CalibrationEpisode, ConformalCalibrator
 from ralmon.monitor._text import MAX_TIME_MS, as_int, converting, show
 from ralmon.monitor.config import (
     T_DAY_MS,
@@ -45,6 +46,11 @@ from ralmon.monitor.config import (
 )
 from ralmon.monitor.core import MonitorStats, RejectedInput, StreamingMonitor
 from ralmon.monitor.forecast import Forecaster
+from ralmon.monitor.predictive import (
+    PredictionPoint,
+    StaleCalibratorError,
+    _observed_sigma_true,
+)
 from ralmon.monitor.verdict import VerdictRecord
 from ralmon.signals import Event, ObservedTrace, Sample
 from ralmon.spec import (
@@ -57,7 +63,12 @@ from ralmon.spec import (
     load_templates,
 )
 
-__all__ = ["OfflineResult", "run_offline", "run_offline_detailed"]
+__all__ = [
+    "OfflineResult",
+    "build_calibration_episodes",
+    "run_offline",
+    "run_offline_detailed",
+]
 
 # algorithmic: the most days a ``history`` may span before ``day`` (from its first day to ``day``). The
 # history needed is H = max(T_day, largest window parameter) (docs/formal/01 section 5.5, item 4), which
@@ -83,13 +94,17 @@ class OfflineResult:
 
 
 @converting(
-    MonitorInputError, MonitorConfigError, PlanIntegrityError, MonitorInvariantError
+    MonitorInputError,
+    MonitorConfigError,
+    PlanIntegrityError,
+    MonitorInvariantError,
+    StaleCalibratorError,
 )
 def run_offline(
     day: ObservedTrace,
     plan: CarePlan,
     config: MonitorConfig,
-    calibrator: object | None,
+    calibrator: ConformalCalibrator | None,
     forecaster: Forecaster | None,
     *,
     registry: Any | None = None,
@@ -105,10 +120,10 @@ def run_offline(
     day index not smaller than the one of ``day`` or not increasing, longer than ``MAX_HISTORY_DAYS``, or
     with an item that is not an observed day.
 
-    ``forecaster`` is typed as in the contract; ``calibrator`` is ``object | None`` where the contract says
-    ``ConformalCalibrator | None``, because this package may import only ``ralmon.signals`` and
-    ``ralmon.spec`` (the type returns with WS05-T08). Both are accepted and never called: the predictive
-    mode is WS05-T08 (``config.predictive`` is refused until then), so any object is accepted and ignored.
+    With ``config.predictive`` the run is predictive (ADR-060): ``calibrator`` and ``forecaster`` are required,
+    ``config.alpha`` is the total level of the patient-day and the calibrator must be calibrated for
+    ``forecaster.model_version`` (``StaleCalibratorError`` otherwise). Without it both are accepted and never
+    called, and the records are those of the measured-only monitor (ablation A2).
     ``registry``, ``templates``, ``verifier`` and ``history`` are the keyword-only arguments of the
     contract (ADR-053, ADR-046; see the module docstring). The late and rejected inputs and the counters of the run are not reachable from here: use
     ``run_offline_detailed``.
@@ -127,13 +142,17 @@ def run_offline(
 
 
 @converting(
-    MonitorInputError, MonitorConfigError, PlanIntegrityError, MonitorInvariantError
+    MonitorInputError,
+    MonitorConfigError,
+    PlanIntegrityError,
+    MonitorInvariantError,
+    StaleCalibratorError,
 )
 def run_offline_detailed(
     day: ObservedTrace,
     plan: CarePlan,
     config: MonitorConfig,
-    calibrator: object | None,
+    calibrator: ConformalCalibrator | None,
     forecaster: Forecaster | None,
     *,
     registry: Any | None = None,
@@ -156,16 +175,36 @@ def run_offline_detailed(
     )
 
 
+def _defaults(cfg: MonitorConfig, registry: Any | None, templates: Any | None) -> Any:
+    """The registry and the template library of a run: the arguments, else the defaults of ADR-053."""
+    if registry is None:
+        try:
+            registry = load_registry(step_ms=cfg.step_ms)
+        except RegistryError as exc:
+            raise MonitorConfigError(
+                f"the default registry cannot be loaded: {exc}"
+            ) from exc
+    if templates is None:
+        try:
+            templates = load_templates(registry=registry)
+        except TemplateLibraryError as exc:
+            raise MonitorConfigError(
+                f"the default template library cannot be loaded: {exc}"
+            ) from exc
+    return registry, templates
+
+
 def _run(
     day: ObservedTrace,
     plan: CarePlan,
     config: MonitorConfig,
-    calibrator: object | None,
+    calibrator: ConformalCalibrator | None,
     forecaster: Forecaster | None,
     registry: Any | None,
     templates: Any | None,
     verifier: PlanVerifier | None,
     history: Sequence[ObservedTrace],
+    recorder: Callable[[PredictionPoint], None] | None = None,
 ) -> OfflineResult:
     cfg = check_config(config)
     if not isinstance(day, ObservedTrace):
@@ -187,20 +226,7 @@ def _run(
     run_from = (
         earlier[0][0] if earlier else day_index
     ) * k_day  # the first step that is run
-    if registry is None:
-        try:
-            registry = load_registry(step_ms=cfg.step_ms)
-        except RegistryError as exc:
-            raise MonitorConfigError(
-                f"the default registry cannot be loaded: {exc}"
-            ) from exc
-    if templates is None:
-        try:
-            templates = load_templates(registry=registry)
-        except TemplateLibraryError as exc:
-            raise MonitorConfigError(
-                f"the default template library cannot be loaded: {exc}"
-            ) from exc
+    registry, templates = _defaults(cfg, registry, templates)
     monitor = StreamingMonitor(
         cfg,
         registry,
@@ -210,6 +236,10 @@ def _run(
         verifier=verifier,
     )
     monitor._start_at(run_from)  # the days of a patient lie on one continuing axis
+    if recorder is not None:
+        monitor._enable_recording(
+            recorder
+        )  # calibration: the predictive step records, it does not emit
     monitor.load(plan)
     # the day-end obligation that closes the previous day sits at this day's first step: that day's own
     # run decided it. Only a run that replays a history knows the previous day; without one it stays
@@ -328,3 +358,97 @@ def _read_history(
             f"more than the {MAX_HISTORY_DAYS} a run replays"
         )
     return earlier
+
+
+@converting(
+    MonitorInputError,
+    MonitorConfigError,
+    PlanIntegrityError,
+    MonitorInvariantError,
+)
+def build_calibration_episodes(
+    days: Sequence[ObservedTrace],
+    plans: Sequence[CarePlan],
+    config: MonitorConfig,
+    forecaster: Forecaster,
+    *,
+    registry: Any | None = None,
+    templates: Any | None = None,
+) -> tuple[list[CalibrationEpisode], int]:
+    """The calibration episodes of the observed days: ``(episodes, n_censored)`` (ADR-060).
+
+    ``plans[i]`` is the care plan of ``days[i]`` (a patient with several days repeats the plan). Each day is
+    run through the same ``StreamingMonitor`` code path as a deployment, with the predictive step recording
+    in place of the calibrator: the ``sigma_hat`` of an episode is the normalised robustness of the instance
+    on the trace completed by the forecaster at the activation step, clipped into the interval of its record,
+    exactly the value the monitor passes to the calibrator. An episode exists for each instance that has a
+    predictive path and is PENDING at its activation step (the calibration set is the set of tested instances,
+    docs/formal/06 section 4.2 item 4), and ``sigma_true`` is the normalised robustness of the instance on the
+    complete observed day computed with the point evaluator (the accepted observed inputs only: a late
+    measurement counts as lateness, as in G-SCHED-3, and the trace is never replaced by a latent one; this
+    function has no parameter that could carry a latent day, and the monitor never receives one).
+
+    An instance whose value is not defined on the day (its window closes after the last step of the day, or an
+    open position keeps it undefined) makes no episode and is counted in ``n_censored``; so are not the
+    instances without a predictive path or whose forecaster had no basis, which are not episodes of any test.
+    The episodes are returned in day order, then in activation order. ``config.predictive``, ``alpha`` and the
+    variant are not used (the level is the business of the calibrator that will be fitted on the episodes, and
+    ``fit(..., model_version=forecaster.model_version)`` ties it to the model). The reorder delay is that of
+    ``config``; nothing is read from the days but their samples and events.
+    """
+    cfg = check_config(config)
+    day_list = _sequence(days, "days")
+    plan_list = _sequence(plans, "plans")
+    if len(day_list) != len(plan_list):
+        raise MonitorInputError(
+            f"plans must hold one care plan per day: {len(plan_list)} plans for {len(day_list)} days"
+        )
+    registry, templates = _defaults(cfg, registry, templates)
+    k_day = T_DAY_MS // cfg.step_ms
+    episodes: list[CalibrationEpisode] = []
+    censored = 0
+    for n, (day, plan) in enumerate(zip(day_list, plan_list, strict=True)):
+        points: list[PredictionPoint] = []
+        _run(
+            day,
+            plan,
+            replace(cfg, predictive=False),
+            None,
+            forecaster,
+            registry,
+            templates,
+            None,
+            (),
+            recorder=points.append,
+        )
+        samples = _items(day.samples, Sample, f"days[{n}].samples")
+        events = _items(day.events, Event, f"days[{n}].events")
+        last_step = (day.day_index + 1) * k_day
+        for point in points:
+            sigma_true = _observed_sigma_true(
+                point,
+                samples,
+                events,
+                reorder_delay_ms=cfg.reorder_delay_ms,
+                last_step=last_step,
+            )
+            if sigma_true is None:
+                censored += 1
+                continue
+            episodes.append(
+                CalibrationEpisode(
+                    day.patient_id,
+                    day.day_index,
+                    point.template.id,
+                    point.sigma_hat,
+                    sigma_true,
+                )
+            )
+    return episodes, censored
+
+
+def _sequence(value: object, what: str) -> list[Any]:
+    """``value`` as a list (a list or a tuple), else ``MonitorInputError``."""
+    if not isinstance(value, (list, tuple)):
+        raise MonitorInputError(f"{what} must be a list or a tuple, got {show(value)}")
+    return list(value)
