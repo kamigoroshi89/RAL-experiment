@@ -187,7 +187,7 @@ def _patch_scaling(monkeypatch: pytest.MonkeyPatch) -> int:
     for module in list(sys.modules.values()):
         if not getattr(module, "__name__", "").startswith("ralmon."):
             continue
-        for name, original in zip(("normalise", "rank_alerts"), originals):
+        for name, original in zip(("normalise", "rank_alerts"), originals, strict=True):
             if getattr(module, name, None) is original:
                 monkeypatch.setattr(module, name, boom)
                 patched += 1

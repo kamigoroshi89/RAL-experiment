@@ -23,14 +23,25 @@ Public names (the contract that WS06-T04 describes, extended where the point eva
   harness batches with the signal construction of ``ralmon.signals`` (held signals, one-step impulse counts, the
   derived signals fed in device-time order with a clock sample at every step; the construction of the monitor
   tests, ``step_values``). The step ``j`` is final at ``j * step_ms + delay_ms`` as in ``run_offline``, and an input
-  that arrives after its step is final is late and dropped, as in the monitor. The level of
-  ``presence`` is the held level of the last sample: the construction of ADR-054 (a level per co-location episode,
-  an unavailable channel) is not done, so an INT result on a generated day is not evidence until ADR-054 is decided.
+  that arrives after its step is final is late and dropped, as in the monitor.
+
+  The robot channels follow ADR-054 (b), accepted 2026-10-09, as ``StreamingMonitor.push_event`` applies it: a
+  ``NODE_STATE`` event of source ``robot`` with a boolean ``payload.colocated`` is an availability mark of both
+  ``presence`` and ``intake``, ordered before the samples of its device time. The level of ``presence`` belongs to
+  one co-location episode: ``None`` while the channel is down (as ``intake``, never a zero), absent (undefined)
+  from the step at which it returns until the first sample of the new episode, and cleared by the first mark of
+  the run if that mark is a report. A trace with no report is read as before (the channels are available until
+  marked, the level is held for the rest of the day, the documented hazard), and
+  ``presence_samples_without_availability_marks`` is the gate of that hazard with the definition of
+  ``MonitorStats``: the presence samples applied before the first mark. A result that rests on the INT template is
+  evidence only if the gate is 0; the grid has no ``push_availability`` (an ``ObservedDay`` carries no
+  availability stream).
 """
 
 from __future__ import annotations
 
 import heapq
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Final, Protocol, runtime_checkable
@@ -63,8 +74,9 @@ _HELD: Final = (
     SignalId.BP.value,
     SignalId.CUFF_HEALTH.value,
     SignalId.INFLATION_MS.value,
-    SignalId.PRESENCE.value,
 )
+_ROBOT_SOURCE: Final = "robot"  # the source of the NODE_STATE reports of the robot node
+_KEY_COLOCATED: Final = "colocated"
 _IMPULSES: Final = (
     SignalId.MEAS.value,
     SignalId.DISPENSE.value,
@@ -176,6 +188,19 @@ _EVENT_RANK: Final = {
 }
 
 
+def _report_of(item: Sample | Event) -> bool | None:
+    """The ``colocated`` flag of a report of the robot that marks its channels, else ``None`` (ADR-054 (b))."""
+    if (
+        isinstance(item, Event)
+        and item.kind is EventKind.NODE_STATE
+        and item.source == _ROBOT_SOURCE
+    ):
+        flag = item.payload.get(_KEY_COLOCATED)
+        if isinstance(flag, bool):
+            return flag
+    return None
+
+
 class SignalGrid:
     """Builds the ``values`` of each step of the device-time grid from the harness batches.
 
@@ -197,6 +222,14 @@ class SignalGrid:
         self._delay = delay_ms
         self._origin = origin_ms
         self._held: dict[str, float] = {}
+        self._presence = (
+            math.nan
+        )  # the level of the current co-location episode (NaN: undefined)
+        self._presence_off = False
+        self._intake_off = False
+        self._marks = 0
+        self.availability_reports = 0
+        self.presence_samples_without_availability_marks = 0
         self._derived: list[DerivedSignal] = list(default_derived_signals())
         self._derived_last: dict[str, float] = {}
         self._pending: list[tuple[tuple[int, ...], int, Sample | Event]] = []
@@ -209,10 +242,14 @@ class SignalGrid:
         has_seq = item.seq is not None
         secondary = item.seq if item.seq is not None else item.t_rx_ms
         if isinstance(item, Sample):
+            return (device, 1, 0, 0 if has_seq else 1, secondary)
+        if (
+            _report_of(item) is not None
+        ):  # an availability mark goes before a sample (reorder buffer)
             return (device, 0, 0, 0 if has_seq else 1, secondary)
         return (
             device,
-            1,
+            2,
             _EVENT_RANK.get(item.kind, 0),
             0 if has_seq else 1,
             secondary,
@@ -259,22 +296,50 @@ class SignalGrid:
                 applied.append(item)
                 if item.signal in _HELD:
                     self._held[item.signal] = item.value
+                elif item.signal == SignalId.PRESENCE.value:
+                    self._presence = item.value
+                    if self._marks == 0:
+                        self.presence_samples_without_availability_marks += 1
                 elif item.signal == SignalId.AUTH.value:
                     counts[SignalId.AUTH.value] += 1
                 if item.signal != SignalId.AUTH.value:
                     self._feed(
                         replace(item, t_device_ms=device, t_rx_ms=item.t_rx_ms - origin)
                     )
+            elif (colocated := _report_of(item)) is not None:
+                self._mark(colocated)
             else:
                 self._event(item, device, counts, measurements, dispenses)
         self._feed(Sample(_CLOCK_SIGNAL, limit, limit, 0.0, None, None))
         values: dict[str, float | None] = dict(self._held)
         for name in _IMPULSES:
             values[name] = float(counts[name])
+        # the robot channels: None while the channel is down, never a zero; the level of presence is absent while
+        # it is undefined (ADR-054)
+        if self._intake_off:
+            values[SignalId.INTAKE.value] = None
+        if self._presence_off:
+            values[SignalId.PRESENCE.value] = None
+            self._presence = (
+                math.nan
+            )  # the level belongs to one episode: a step that is down clears it
+        elif not math.isnan(self._presence):
+            values[SignalId.PRESENCE.value] = self._presence
         values.update(self._derived_last)
         return GridStep(
             j, values, tuple(measurements), tuple(dispenses), tuple(applied)
         )
+
+    def _mark(self, available: bool) -> None:
+        """A ``colocated`` report: the mark of both robot channels (``StreamingMonitor._apply``)."""
+        if self._marks == 0:
+            self._presence = (
+                math.nan
+            )  # the first mark is a report: a level held from before it is no episode
+        self._presence_off = not available
+        self._intake_off = not available
+        self._marks += 1
+        self.availability_reports += 1
 
     def _event(
         self,
