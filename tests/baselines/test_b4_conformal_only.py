@@ -717,10 +717,27 @@ def test_b4_a_late_input_is_dropped_like_the_monitor_does() -> None:
     out = b4.run(observed(samples), PLAN, None)
     assert times(out) == [at(30)]  # |70 - 60| = 10 > 5
     assert b4.run_stats.late_inputs == 1
+    # received one step after the step where it is final (stamped 20, received 21): late, the exact boundary
+    just_late = [smp("hr_ecg", 10, 60), smp("hr_ecg", 20, 200, rx_step=21)]
+    assert b4.run(observed(just_late), PLAN, None) == ()
+    assert b4.run_stats.late_inputs == 1
     # received exactly at the step where it is final: delivered, not late
     on_time = [smp("hr_ecg", 10, 60), smp("hr_ecg", 20, 200, rx_step=20)]
     assert times(b4.run(observed(on_time), PLAN, None)) == [at(20)]
     assert b4.run_stats.late_inputs == 0
+
+
+def test_b4_lateness_rule_includes_the_reorder_delay() -> None:
+    # reorder delay of 2 steps: a sample stamped at step 20 is final at step 22 (watermark 20 + 2). Received at 22 it is
+    # delivered; received at 23 it is late (the rule of the monitor, ceil(t_dev / T_s) * T_s + D).
+    timing = TimingConfig(STEP, 2 * STEP, 0)
+    b4 = fitted(5.0, timing=timing)
+    on_time = [smp("hr_ecg", 10, 60), smp("hr_ecg", 20, 90, rx_step=22)]
+    assert times(b4.run(observed(on_time), PLAN, None)) == [at(22)]
+    assert b4.run_stats.late_inputs == 0
+    late = [smp("hr_ecg", 10, 60), smp("hr_ecg", 20, 90, rx_step=23)]
+    assert b4.run(observed(late), PLAN, None) == ()
+    assert b4.run_stats.late_inputs == 1
 
 
 def test_b4_does_not_deduplicate_inputs_but_a_duplicate_has_no_residual() -> None:
