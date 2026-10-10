@@ -3,7 +3,7 @@ id: WS06-T03
 title: B2 anomaly detection (forecast residual and isolation forest)
 workstream: WS06-baselines
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS06-T01", "WS05-T05"]
 critical_path: true
 non_negotiable: false
