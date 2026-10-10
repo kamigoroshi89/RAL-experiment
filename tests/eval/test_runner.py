@@ -13,6 +13,7 @@ import sys
 import types
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -43,6 +44,7 @@ from tests.eval.helpers import (
     C1,
     C2,
     C3,
+    MINI,
     SMOKE,
     UND,
     T,
@@ -786,3 +788,190 @@ def test_a_changed_copy_of_the_config_does_not_change_the_loaded_one() -> None:
     snapshot = copy.deepcopy((config, options_))
     runner.dump_experiment(config, options_)
     assert (config, options_) == snapshot
+
+
+# ---- the real pipeline on the mini benchmark -------------------------------------------------------------------------
+# Seed 0 splits the six virtual patients as calibration p01, p04 and test p03, p06 (the first run of the split helper,
+# pinned here; the test of the split itself is above). With the total level 0.9 and one test per day the per-test level is
+# 0.9. By hand (the fixture days of tests/fixtures/eval/build_mini_benchmark.py):
+# * the response template (RESP) of the dose at 08:05 is the one instance with a predictive path, persistence forecast of
+#   the pressure: the forecast shows no fall, so sigma_hat = -1 (clipped) on every day;
+# * p01 responds (125 to 115, sigma_true = 0.0), p04 does not (125 to 124, sigma_true = -0.45): the four calibration scores
+#   R = sigma_true - sigma_hat are 1.0, 1.0, 0.55, 0.55; n = 4;
+# * level 0.9: k = ceil(5 * 0.1) = 1, q = 0.55, so sigma_hat + q = -0.45 < 0 and every test episode is warned;
+#   rho = m / (n + 1) with m = #{R_i < 1} = 2, so rho = 0.4 for all four predictions (p03 two days, p06 two days);
+# * outcomes: p03 does not respond (violated, True), p06 responds (satisfied, False);
+# * ECE with 5 bins: all four in the bin [0.4, 0.6): mean rho 0.4, observed rate 0.5, |0.4 - 0.5| = 0.1;
+# * alert level 1 - P(emitted and sigma_true >= 0) = 1 - 2/4 = 0.5 (p06 has sigma_true = 0.0 >= 0), nominal 1 - 0.9 = 0.1;
+#   band level P(sigma_true <= -1 + 0.55) = P(sigma_true <= -0.45) = 2/4 (p03 only).
+
+
+def real_document(**options: Any) -> dict[str, Any]:
+    doc = smoke_document()
+    doc["detectors"] = ["ours"]
+    doc["alpha"] = 0.9
+    doc["monitor"]["alpha"] = 0.9
+    doc["run_options"]["alpha_grid"] = [0.9]
+    doc["run_options"]["n_bootstrap"] = 40
+    doc["run_options"].update(options)
+    return doc
+
+
+@pytest.fixture(scope="module")
+def real_run(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    tmp = tmp_path_factory.mktemp("real")
+    d = run_doc(tmp, real_document(), None)[0]
+    return read_metrics(d)
+
+
+def test_real_pipeline_split_and_predictions(real_run: dict[str, Any]) -> None:
+    run = real_run["analysis"]["run"]
+    assert run["split"]["calibration"] == ["p01", "p04"] and run["split"]["test"] == [
+        "p03",
+        "p06",
+    ]
+    ours = run["ours"]["ours"]
+    assert ours["predictive"] is True and ours["alpha_total"] == 0.9
+    assert ours["n_calibration_episodes"] == 4 and ours["n_censored_calibration"] == 0
+    assert ours["n_test_episodes"] == 4 and ours["n_tests_per_day"] == {"1": 4}
+
+
+def test_real_pipeline_ece_and_reliability(real_run: dict[str, Any]) -> None:
+    ece = real_run["expected_calibration_error"]["ours"]
+    assert ece["value"] == pytest.approx(0.1)
+    assert ece["n_predictions"] == 4 and ece["n_unresolved"] == 0 and ece["bins"] == 5
+    bins = ece["reliability_bins"]
+    assert [b["n"] for b in bins] == [0, 0, 4, 0, 0]
+    assert bins[2]["mean_rho"] == pytest.approx(0.4) and bins[2][
+        "observed_rate"
+    ] == pytest.approx(0.5)
+    assert bins[0]["mean_rho"] is None  # an empty bin is undefined, not zero
+    assert set(ece) >= SCALAR_KEYS
+
+
+def test_real_pipeline_coverage_in_distribution(real_run: dict[str, Any]) -> None:
+    (entry,) = real_run["empirical_coverage"]["ours"]["in_distribution"]
+    assert entry["alpha"] == 0.9
+    assert entry["nominal"] == pytest.approx(0.1)
+    assert entry["alert_level"] == pytest.approx(0.5)
+    assert entry["band_level"] == pytest.approx(0.5)
+    (width,) = real_run["mean_interval_width"]["ours"]["in_distribution"]
+    assert (
+        width["alpha"] == 0.9 and width["value"] is None
+    )  # the two-sided band needs a level of at most 1/2
+
+
+def test_real_pipeline_latency_and_detection(real_run: dict[str, Any]) -> None:
+    # a decision on the grid with a reorder delay of 0 is emitted at the instant it is decidable: latency 0
+    assert real_run["latency_percentiles"]["ours"] == {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+    }
+    # the fixture truth holds 2 events of the two test patients (p03: a missed measurement that the observed day does not
+    # show, a day-end count that it does): one is matched, by an alert whose cause the rule leaves undetermined
+    assert real_run["per_class_prf"]["ours"]["C1"]["recall"]["value"] == pytest.approx(
+        0.5
+    )
+    assert (
+        real_run["analysis"]["run"]["recall_by_subtype"]["ours"]["C1/dose_omission"][
+            "recall"
+        ]
+        == 1.0
+    )
+
+
+def test_real_pipeline_run_is_deterministic(tmp_path: Path) -> None:
+    a = run_doc(tmp_path, real_document(), None, out="a")[0]
+    b = run_doc(tmp_path, real_document(), None, out="b")[0]
+    assert (a / "metrics.json").read_bytes() == (b / "metrics.json").read_bytes()
+
+
+def test_the_registry_that_cannot_feed_the_attribution_is_refused_before_the_run(
+    tmp_path: Path,
+) -> None:
+    doc = real_document()
+    doc["run_options"]["registry"] = (
+        None  # configs/registry/hypertension.yaml: lacks the evidence thresholds (OPF-6)
+    )
+    doc["run_options"]["allow_fixture_only"] = False
+    real_version = yaml.safe_load(
+        Path("configs/registry/hypertension.yaml").read_text(encoding="utf-8")
+    )["registry_version"]
+    doc["monitor"]["registry_version"] = str(real_version)
+    with pytest.raises(ConfigError, match="registry"):
+        run_doc(tmp_path, doc, None)
+
+
+def test_history_ours_changes_only_the_proposed_method_and_is_reported(
+    tmp_path: Path,
+) -> None:
+    doc = real_document(history="ours")
+    d = run_doc(tmp_path, doc, None)[0]
+    m = read_metrics(d)
+    assert m["analysis"]["run"]["policies"]["history"] == "ours"
+    assert m["meta"]["guards"]["facts"]["history"] == "ours"
+
+
+def test_calibration_days_without_injected_events(tmp_path: Path) -> None:
+    doc = real_document(calibration_days="without_injected")
+    m = read_metrics(run_doc(tmp_path, doc, None)[0])
+    cal = m["analysis"]["run"]["calibration"]
+    # seed 0 calibrates on p01 and p04; p04 day 1 holds the injected C2 event stuck_at: three days are left
+    assert (
+        cal["n_calibration_days"] == 4
+        and cal["n_with_injected_event"] == 1
+        and cal["n_used"] == 3
+    )
+
+
+def test_twins_include_adds_them_to_the_test_population(tmp_path: Path) -> None:
+    doc = hand_document()
+    doc["run_options"]["twins"] = "include"
+    m = read_metrics(run_doc(tmp_path, doc, factory_for(SCRIPT))[0])
+    assert m["meta"]["n_test_patients"] == 8 and m["meta"]["n_test_patient_days"] == 14
+    assert "TWINS_IN_HEADLINE" in {f["id"] for f in m["meta"]["guards"]["flags"]}
+
+
+def test_required_analysis_keys_are_checked(tmp_path: Path) -> None:
+    doc = hand_document()
+    doc["run_options"]["required_analysis"] = ["run.split", "b5_failure_found"]
+    with pytest.raises(ConfigError, match="b5_failure_found"):
+        run_doc(tmp_path, doc, factory_for(SCRIPT))
+    doc["run_options"]["required_analysis"] = ["run.split", "run.closing_step.n_events"]
+    assert run_doc(tmp_path, doc, factory_for(SCRIPT), out="ok")
+
+
+def test_b1_vacuity_is_a_hard_failure_of_a_real_run(tmp_path: Path) -> None:
+    """A plan without the RANGE, HOLD and COUNT parameter records makes B1 silent: the run is refused (F9)."""
+    import shutil
+
+    bench = tmp_path / "bench"
+    shutil.copytree(MINI, bench)
+    for plan_file in (bench / "plans").glob("*.json"):
+        plan = json.loads(plan_file.read_text(encoding="utf-8"))
+        plan["instances"] = [i for i in plan["instances"] if i["anchor_ms"] is not None]
+        plan_file.write_text(json.dumps(plan), encoding="utf-8")
+    doc = smoke_document()
+    doc["benchmark_manifest"] = str(bench)
+    doc["detectors"] = ["B1"]
+    with pytest.raises(GuardError, match="B1_VACUOUS"):
+        run_doc(tmp_path, doc, None)
+    assert (
+        not list((tmp_path / "out").rglob("metrics.json"))
+        if (tmp_path / "out").exists()
+        else True
+    )
+
+
+def test_device_profile_is_built_from_the_configuration() -> None:
+    config, opts = load_experiment(SMOKE)
+    params = {
+        **opts.detector_params,
+        "ours": {"device_profile": {"cuff": {"authenticates": True, "seq": True}}},
+    }
+    env = runner.make_environment(config, replace(opts, detector_params=params), 0)
+    assert env.profile is not None
+    assert env.profile.caps("cuff").authenticates is True  # type: ignore[attr-defined]
+    assert env.profile.caps("robot").authenticates is False  # type: ignore[attr-defined]
+    assert runner.make_environment(config, opts, 0).profile is None

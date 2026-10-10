@@ -156,6 +156,10 @@ TRUTH: dict[tuple[str, int], tuple[GroundTruthEvent, ...]] = {
     ("p08", 0): (_gt(C2, "dispenser_bounce", ms(20), group="double_take_vs_bounce"),),
 }
 
+# patients whose pressure does not fall after the dose (the response at 10:00 is 124 instead of 115): the calibration
+# episodes of the response template then show a violation, so that a conformal calibrator built on them emits warnings
+NON_RESPONDERS: frozenset[str] = frozenset({"p03", "p04"})
+
 # observed anomalies: the 14:00 pressure of the patients whose day carries the C1 spike of the truth
 SPIKE_DAYS: frozenset[tuple[str, int]] = frozenset({("p01", 0), ("p05", 0)})
 
@@ -187,7 +191,7 @@ def observed_day(patient: str, day: int, *, plan_id: str) -> ObservedDay:
         _sample("cuff_health", o + ms(8), 1.0),
         _sample("inflation_ms", o + ms(8), 40_000.0),
         _sample("presence", o + ms(8, 3), 1.0),
-        _sample("bp", o + ms(10), 115.0),
+        _sample("bp", o + ms(10), 124.0 if patient in NON_RESPONDERS else 115.0),
         _sample("bp", o + ms(14), 165.0 if spike else 122.0),
         _sample("cuff_health", o + ms(14), 1.0),
         _sample("inflation_ms", o + ms(14), 40_000.0),
@@ -218,7 +222,7 @@ def latent_day(patient: str, day: int) -> LatentDay:
     spike = (patient, day) in SPIKE_DAYS
     samples = (
         _sample("bp", o + ms(8), 125.0),
-        _sample("bp", o + ms(10), 115.0),
+        _sample("bp", o + ms(10), 124.0 if patient in NON_RESPONDERS else 115.0),
         _sample("bp", o + ms(14), 165.0 if spike else 122.0),
     )
     return LatentDay(patient, day, 0, samples, ())

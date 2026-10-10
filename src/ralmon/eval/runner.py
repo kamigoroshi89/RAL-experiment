@@ -73,7 +73,7 @@ from typing import Any, Final
 import numpy as np
 import yaml
 
-from ralmon.attribution import Detection, extract_evidence
+from ralmon.attribution import Detection, RuleAttributor, extract_evidence
 from ralmon.baselines import (
     B1StaticThresholds,
     B2AnomalyDetection,
@@ -91,6 +91,7 @@ from ralmon.benchmark import split_patients as _builder_split_patients
 from ralmon.conformal import BonferroniAllocation, SplitConformal
 from ralmon.eval.metrics import (
     CLASSES,
+    STREAM_BOOTSTRAP,
     LABEL_COLUMNS,
     MatchConfig,
     Matching,
@@ -1366,7 +1367,11 @@ def _coverage_blocks(
     """The in-distribution coverage and mean interval width of the split calibrator over the test episodes.
 
     For each total level the per-test level of a day is ``alpha / n_tests`` (ADR-060), computed in exact arithmetic;
-    episodes of one level are scored together, and the levels are pooled by the number of episodes.
+    episodes of one level are scored together, and the levels are pooled by the number of episodes. ``alert_level`` is the
+    empirical form of Proposition 1 (``1 - P(alert emitted and sigma_true >= 0)``), ``nominal`` the pooled ``1 - level``
+    it is compared with, ``band_level`` the share of episodes with ``sigma_true <= sigma_hat + q``. The width is that of the
+    two-sided band ``[sigma_hat + q^lo, sigma_hat + q]`` clipped to [-1, 1], which exists for a per-test level of at
+    most one half (above it the two quantiles cross): the value is then ``None``.
     """
     calibrator = detector.calibrator
     if calibrator is None or calibrator.mode != "split" or not episodes:
@@ -1388,6 +1393,7 @@ def _coverage_blocks(
         if not total:
             continue
         alert = band = nominal = 0.0
+        two_sided = True
         intervals: list[tuple[float, float]] = []
         levels: list[float] = []
         for level, group in sorted(groups.items()):
@@ -1400,10 +1406,16 @@ def _coverage_blocks(
             alert += weight * empirical_coverage(preds, truth, float(level))
             band += weight * residual_coverage([e.sigma_hat for e in group], truth, q)
             nominal += weight * (1.0 - float(level))
-            low = lower(level) if callable(lower) else -math.inf
-            intervals.extend(
-                (max(-1.0, e.sigma_hat + low), min(1.0, e.sigma_hat + q)) for e in group
-            )
+            if level > Fraction(1, 2) or not callable(lower):
+                two_sided = (
+                    False  # the lower and the upper quantile cross above one half
+                )
+            else:
+                low = lower(level)
+                intervals.extend(
+                    (max(-1.0, e.sigma_hat + low), min(1.0, e.sigma_hat + q))
+                    for e in group
+                )
             levels.append(float(level))
         coverage.append(
             {
@@ -1416,7 +1428,11 @@ def _coverage_blocks(
         widths.append(
             {
                 "alpha": alpha,
-                "value": sum(hi - lo for lo, hi in intervals) / len(intervals),
+                "value": (
+                    sum(hi - lo for lo, hi in intervals) / len(intervals)
+                    if two_sided and len(intervals) == total
+                    else None
+                ),
             }
         )
         notes["per_alpha"].append(
@@ -1443,6 +1459,35 @@ def _subtype_recall(matching: Matching) -> dict[str, Any]:
         k: {**v, "recall": v["n_matched"] / v["n_events"]}
         for k, v in sorted(out.items())
     }
+
+
+def _preflight_registry(env: DetectorEnvironment, names: Sequence[str]) -> None:
+    """Fail before the run, not in the middle of it, when the registry cannot feed the proposed method.
+
+    The attribution layer needs the evidence thresholds of ``docs/models`` (open point OPF-6: the registry 0.2.0 lacks seven
+    of them) and a priority for every template whose violation can become an alert (``priority_sys`` and ``priority_int``
+    are unset in 0.2.0): a run that reaches such an alert would stop with an error after hours of computation.
+    """
+    if not any(n.startswith("ours") for n in names):
+        return
+    try:
+        RuleAttributor(env.registry, env.templates)
+    except Exception as exc:  # RegistryError: a name the rule or the extractor requests
+        raise ConfigError(
+            f"the registry cannot feed the attribution layer of the proposed method: {exc}"
+        ) from exc
+    unset = getattr(env.registry, "unset_names", None)
+    if callable(unset):
+        needed = {
+            n
+            for t in env.templates
+            for n in (t.priority_param, t.scale_param, t.max_verdict_latency_param)
+        }
+        missing = sorted(needed & set(unset()))
+        if missing:
+            raise ConfigError(
+                f"the registry has unset rows that the proposed method needs: {missing}"
+            )
 
 
 def _validate_plans(env: DetectorEnvironment, plans: Mapping[str, CarePlan]) -> None:
@@ -1742,6 +1787,7 @@ def _run_seed(
         for d in reader_obs.days(p):
             lookup(reader_obs.observed(p, d))
     _validate_plans(env, plans)
+    _preflight_registry(env, config.detectors)
     instances = _fit_all(config, options, env, factory, train_days, calib_days)
     test_days = {
         p: [reader_obs.observed(p, d) for d in reader_obs.days(p)]
@@ -1904,7 +1950,7 @@ def _run_seed(
             matchings,
             tables,
             units,
-            np.random.default_rng([seed, 4]),
+            np.random.default_rng([seed, STREAM_BOOTSTRAP]),
             env,
             reader_obs,
             reader_full,
@@ -2067,6 +2113,7 @@ def _ours_block(
         "n_calibration_episodes": detector.n_calibration_episodes,
         "n_censored_calibration": detector.n_censored_calibration,
         "n_test_episodes": len(episodes),
+        "n_censored_test": sum(r.n_censored for r in done),
         "n_tests_per_day": {str(k): v for k, v in sorted(n_tests.items())},
         "prediction_skips": dict(sorted(skips.items())),
         "rejected_inputs": dict(sorted(rejected.items())),

@@ -298,8 +298,12 @@ class OursDetector:
         return self._predictive
 
     def at_alpha(self, alpha: float) -> OursDetector:
-        """A sibling at another total level that shares the fitted forecaster and calibrator (the calibrator is
-        level-agnostic: only the level given to ``predict`` changes). Adaptive per-patient forks are not shared."""
+        """A sibling at another total level that shares the fitted forecaster and the calibration episodes.
+
+        The split calibrator is level-agnostic (only the level given to ``predict`` changes), so it is shared. An adaptive
+        calibrator takes its target level from ``fit``, so the sibling gets a new one fitted on the same episodes at the
+        new level. Adaptive per-patient forks are never shared.
+        """
         if not self._fitted:
             raise RuntimeError("at_alpha needs a fitted detector")
         other = copy.copy(self)
@@ -308,6 +312,17 @@ class OursDetector:
         )
         other._forks = {}
         other.last_run = None
+        calibrator = self._calibrator
+        if (
+            calibrator is not None
+            and calibrator.mode == "adaptive"
+            and self._forecaster is not None
+        ):
+            fresh = self._components.calibrator_factory()
+            fresh.fit(
+                self._episodes, alpha, model_version=self._forecaster.model_version
+            )
+            other._calibrator = fresh
         return other
 
     # -- fit ----------------------------------------------------------------------------------------------------
