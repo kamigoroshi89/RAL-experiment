@@ -213,8 +213,10 @@ class MonitorStats:
     one per instance evaluation, one per step summary and one per released input.
 
     ``presence_samples_without_availability_marks`` is the GATE for the presence hazard of ADR-054: it is
-    the number of presence samples used by the run when no availability mark for ``presence`` was ever
-    applied, and 0 as soon as one was (``push_availability`` of ``presence``, any value). A result that
+    the number of presence samples used by the run before the first availability mark for ``presence``, when
+    that mark is absent or is a ``NODE_STATE colocated`` report (a sample used before the first report
+    belongs to no episode that a report opened); when the first mark was given by ``push_availability`` it
+    is 0 as soon as that mark was applied, any value (the harness form, CG-6). A result that
     rests on the INT template is evidence only if it is 0, or if the trace carries the explicit zeros of
     option (a) of ADR-054. ``presence_level_older_than_window_steps`` is INFORMATION, not a gate: the
     number of finalised steps at which the level in force is 1.0, the channel is available and the sample
@@ -304,8 +306,12 @@ class StreamingMonitor:
     ``colocated``, or from another source, or with a ``colocated`` that is not a ``bool``, is not a mark
     (``ignored_events``; ``colocated_reports_ignored`` when it carried the key). Reading of H-INIT: the
     channels are available until the first mark (a monitor cannot know at step 0 that the trace will carry
-    reports, and a trace without any must give the records it always gave); before the first arrival there
-    is no presence sample, so the level is undefined and no old level can witness a dispense.
+    reports, and a trace without any must give the records it always gave), but when the first mark of
+    the run is a report the presence level held from before it is cleared (a sample used before the first
+    report does not witness a later dispense, and the gate counts it); a first report that is an arrival
+    also makes the level undefined until a sample of the new episode, a first report that is a departure
+    makes the channels unavailable. Before the first arrival, on a trace that has reports, the INT marker
+    can therefore be ``value_undefined:presence`` where strict H-INIT gives ``channel_unavailable:presence``.
     HAZARD, not a feature: a trace with no availability mark (no ``colocated`` report) and no zero-valued
     presence sample keeps the level of the last robot visit for the rest of the day, so INT is satisfied by
     an old sample (docs/formal/02 section 4.7, TG-9); ``stats().presence_samples_without_availability_marks``
@@ -439,8 +445,11 @@ class StreamingMonitor:
         self._unplanned = 0
         self._stale_presence = 0
         self._presence_step = -1
-        self._presence_samples = 0
+        self._presence_samples = (
+            0  # presence samples used before the first presence mark
+        )
         self._presence_marks = 0
+        self._first_mark_is_report = False
         self._reports = 0
         self._colocated_ignored = 0
         self._k_start = 0
@@ -741,7 +750,9 @@ class StreamingMonitor:
             anchors_without_plan=self._unplanned,
             presence_level_older_than_window_steps=self._stale_presence,
             presence_samples_without_availability_marks=(
-                self._presence_samples if self._presence_marks == 0 else 0
+                self._presence_samples
+                if self._presence_marks == 0 or self._first_mark_is_report
+                else 0
             ),
             node_updates=self._nodes,
             retained_samples=len(self._buffer) + len(self._dispense_steps),
@@ -1085,13 +1096,20 @@ class StreamingMonitor:
         data: Any = entry.data
         if kind == "avail":
             channels, available = data
+            from_report = isinstance(entry.item, Event)
             for channel in channels:
                 if channel is SignalId.PRESENCE:
+                    if from_report and self._presence_marks == 0:
+                        # the first mark of the run is a co-location report (H-INIT): a level held from
+                        # before it belongs to no episode that a report opened and does not count, and
+                        # the samples used before it stay counted by the gate
+                        self._first_mark_is_report = True
+                        self._presence = _NAN
                     self._presence_off = not available
                     self._presence_marks += 1
                 else:
                     self._intake_off = not available
-            if isinstance(entry.item, Event):
+            if from_report:
                 self._reports += (
                     1  # a co-location report, applied as the mask of both channels
                 )
@@ -1113,7 +1131,8 @@ class StreamingMonitor:
             elif signal is SignalId.PRESENCE:
                 self._presence = value
                 self._presence_step = k
-                self._presence_samples += 1
+                if self._presence_marks == 0:
+                    self._presence_samples += 1
             elif signal is SignalId.AUTH:
                 self._auth_n += 1
             return

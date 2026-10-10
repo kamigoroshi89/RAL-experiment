@@ -165,3 +165,7 @@ Produced: `injection.py` (machinery: specs, canonical order, pipeline, ground-tr
 Deviations: one file outside "File toccati" (`measurement.py`, see the completion note, and its `assign_device_seq` fixed in round 1).
 Impact on dependents: WS04-T09 still waits for WS04-T08 (`ready`); WS04-T11 and WS04-T10 wait for their other dependencies. Open hand-overs: `resolve_magnitude` signature (above), the robot `NODE_STATE colocated` report still has no owner (proposed WS04-T11), the four recorded limitations above.
 Open MINOR: none beyond the recorded limitations.
+
+### Hand-over from WS05-T11 (worker, 2026-10-10)
+
+The monitor reads the availability of the robot channels from `NODE_STATE` reports with a boolean `payload.colocated` of source `robot`, not from the robot `state`. The robot-lifecycle injections of this task (`NODE_STATE` `inactive` / `unreachable` of the robot) therefore do not mask the channels in the monitor by themselves: if they must, the injector writes `colocated` false at the window start and true at its end (and keeps the arrival report of the visit that follows), or an ADR makes the monitor read `state` (the "active" half of H-MASK is not applied by WS05-T11). A removed first arrival report of a day makes the presence samples before the next report count in `presence_samples_without_availability_marks`.

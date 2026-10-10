@@ -10,11 +10,12 @@ Reading chosen for H-INIT ("the robot channels are unavailable until a status re
 is co-located"). A streaming monitor cannot know at step 0 whether the trace will carry reports, and a
 trace without reports (every golden case, every trace written before the reports existed) must give the
 records it gave before. So the mask starts as the monitor always started it, "available until marked", and
-the first report is the first mark. This changes nothing that H-INIT is about: before the first arrival
-the robot has sent no ``presence`` sample, so the level is undefined (``value_undefined:presence``) and an
-old level cannot witness a dispense; what differs is only the name of the marker before the first arrival
-(``value_undefined`` instead of ``channel_unavailable``). ``test_before_the_first_report_the_channels_are_
-available`` states it.
+the first report is the first mark; when that first mark is a report, the presence level held from before
+it is cleared (a sample used before the first report belongs to no episode that a report opened) and the
+gate counts the sample. What differs from strict H-INIT is then only the name of the marker before the
+first arrival (``value_undefined:presence`` instead of ``channel_unavailable:presence``).
+``test_before_the_first_report_the_channels_are_available`` and ``test_a_level_held_from_before_the_first_
+arrival_report_does_not_witness`` state it; marks given by ``push_availability`` keep their reading.
 
 Fixture-only: registry F0, ``step_ms = 60000`` (fixture arithmetic, ADR-027).
 """
