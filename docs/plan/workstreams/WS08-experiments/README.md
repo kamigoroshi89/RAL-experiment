@@ -129,7 +129,7 @@ These rules bind T02 to T07. A result that contradicts a hypothesis of analisi Â
 | id | title | owner | status | depends_on |
 |---|---|---|---|---|
 | WS08-T01 | Experiment runner, config and metrics module | agent | blocked | WS04-T11, WS06-T01, WS05-T08, WS05-T11 |
-| WS08-T02 | Main experiment: B1-B5 versus proposed method | agent | blocked | WS08-T01, WS06-T07 |
+| WS08-T02 | Main experiment: B1-B5 versus proposed method | agent | blocked | WS08-T01, WS06-T07, WS04-T16 |
 | WS08-T03 | Ablations A1, A2, A3, A5, A7 | agent | blocked | WS08-T02 |
 | WS08-T04 | Ablation A4: embodied channel removed | agent | blocked | WS08-T02, WS02-T05 |
 | WS08-T05 | Distribution shift and A6: split versus adaptive conformal | agent | blocked | WS08-T02 |
