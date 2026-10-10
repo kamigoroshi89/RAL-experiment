@@ -9,10 +9,6 @@ from __future__ import annotations
 from ralmon._stub import stub_class
 
 
-@stub_class("WS06-T01")
-class Detector: ...
-
-
 @stub_class("WS06-T02")
 class B1StaticThresholds: ...
 

@@ -3,7 +3,7 @@ id: WS06-T01
 title: Detector protocol implementation and common harness
 workstream: WS06-baselines
 owner: agent
-status: ready
+status: done
 depends_on: ["WS05-T01", "WS04-T01", "WS05-T03", "WS05-T07"]
 critical_path: true
 non_negotiable: false
@@ -94,3 +94,33 @@ ADR-027 (fixture registry `configs/registry/fixture.yaml`, FIXTURE-ONLY rows, cr
 ### Hand-over from the WS05-T03 review (orchestrator, 2026-10-09)
 
 WS05-T03 (`ralmon.spec`, branch `ws05-t03-spec-package`, status `in_progress` when this note was written) is implemented. (1) Where this task says to load the F0 copy or the fixture registry, `load_registry(path, step_ms=..., allow_fixture_only=True)` is required: without the flag the first run raises a `RegistryError` that names the FIXTURE-ONLY rows (ADR-027); the shared file is `configs/registry/fixture.yaml` (version 0.0.0) and the test-owned copy is `tests/fixtures/spec/registry_f0.yaml`. (2) The real registry (0.2.0) has three unset names (`priority_sys`, `priority_int`, `bound_dose_count_upper`): `get()` raises `UnsetParameterError` (a `RegistryError`) for them while `load_templates` still succeeds, so ranking SYS and INT alerts, or reading the dose-count bound, must be handled explicitly or done with the fixture registry.
+
+### Completion note (agent, 2026-10-10; status left `in_progress` for the orchestrator; review fixes MINOR-1 to MINOR-6 below)
+
+Branch `ws06-t01-detector-harness`; commits `WS06-T01: add failing tests` (red: `ModuleNotFoundError: ralmon.baselines.base`) and `WS06-T01: add detector base, causal step iterator and access guards`. Verified: `pytest tests/baselines -q` 45 passed (exit 0); `ruff check src tests`, `ruff format --check src tests`, `mypy src/ralmon` exit 0; `from ralmon.baselines import Detector` exit 0; the `grep` on `base.py` prints nothing (exit 1 of grep); full `pytest -q` 5487 passed, 1 skipped; `tests/test_public_api.py` 143 passed; `python3 tools/check_plan.py` OK.
+
+Public surface for T02 to T07 (module docstrings are the specification):
+- `ralmon.baselines.base`: `Detector` (verbatim plus `runtime_checkable`), `BaselineBase(timing, *, access_policy=None, access_log=None, read_log=None)` with attributes `timing`, `access_policy`, `access_log`, `read_log`, `is_fitted`, abstract `_fit(train, calib)` and `_run(day, plan)`, helper `_steps(day, plan)`; `TimingConfig`, `StepBatch` (with `inputs()`), `iter_steps(day, timing, end_ms, *, start_ms=None)`, `evaluation_end_ms(day, plan, tail_ms)`, `rising_edges`, the four exceptions.
+- `ralmon.baselines.access`: `Split`, `AccessPolicy`, `AccessLog` (`records`, `denied`, `reads(field=, split=)`, `fields(split)`, `clear`), `AccessRecord`, `GuardedDay`, `ReadLog` (`registry_reads`, `param_reads`, `all_names`, `clear`), `AuditedRegistry(inner, log=None)`, `LoggedMapping`, `logged_plan`. These helpers are not in the public API table; `__init__.py` still exports the five baseline stubs (they stay in `_stubs.py` until T02 to T06).
+- `run` wraps the plan with `logged_plan(plan, self.read_log)` itself; a baseline that reads the registry must build `AuditedRegistry(registry, detector.read_log)` (pass the same `ReadLog` through the `read_log=` argument) for the two logs to meet.
+
+Decisions where the sources were silent or differ (conservative reading):
+1. `Detector.run` has no `history` (ADR-046 leaves it open). Not implemented; ADR-061 (proposed [DA-CONFERMARE]) proposes the keyword; `Package public API` and `#detector` untouched (no version bump). Until decided, baselines run one day at a time. `iter_steps` already works on the continuing axis (default start `day_index * 24 h`).
+2. Grid time is a monitor time (task test 8): step `t` sees device times up to `t - reorder_delay_ms`. `run_offline` calls `advance(k*T_s + D)`, which sees device times up to `k*T_s`. So with `D > 0` a baseline detection time is the monitor `t_eval_ms` plus `D` (rounded up to the grid). Equal only for `D = 0`.
+3. `BaselineBase.run` has `evidence` defaulting to `None` (compatible with the protocol). It checks `ObservedDay` first (`LeakageError`), then fitted state.
+4. Test 19 uses `"bp_band_low"` instead of the placeholder `"x"` and test 21 checks the stub names against the entries of both `hypertension.yaml` and `fixture.yaml` (ADR-027), using `delta2` for the 30 min window because `sched_window` is unset in the real registry.
+5. `evaluation_end_ms` also floors at the start of the day (`day_index * 24 h`) and reads `plan.schedule` as ticks of the day; a multi-day plan whose ticks lie on the continuing axis would extend a run to its last tick (not corrected here). Within a batch events are ordered with the monitor's kind order (measurement, dispense, intake, tick) before `seq`.
+6. A refused `GuardedDay` read goes to `AccessLog.denied`, not to `records`. A read allowed only by `AccessPolicy(calib_latent=True)` has `by_exception=True`. `CarePlan.schedule` reads are not logged (only `param_values`).
+7. Additional tests beyond the 21 (failed fit, `fit` type check, timing validation, continuing axis, delivery exactly once, no-latent-name scan of `base.py`, denied log) are in the same files.
+
+Review fixes (agent, 2026-10-10), commits `WS06-T01: failing test for named fit errors; exact-boundary and refit-failure tests` and the fix commit that follows it:
+- MINOR-1: `access.py` and `base.py` docstrings now state that the guards defend against accidents and leave an audit log, not a sandbox, and list the known routes of a deliberate cheat (not hardened). One cheap hardening done test-first: `fit` refuses a day object listed in both `train_days` and `calib_days` (`LeakageError`). Two distinct objects of one patient are still not detected.
+- MINOR-2: the `base.py` docstring no longer says that causality "is that of `Monitor.advance`": it lists three differences (late inputs are delivered, not excluded; no deduplication by (source, name, seq); no rejection of future stamps), says the net direction is unclear and that mirroring them is open for gab. Hand-over to WS06-T07.
+- MINOR-3: `fit` raises `LeakageError` (not `TypeError`) for an item that is not a `BenchmarkDay`; test added.
+- MINOR-4: the fairness consequence is in the Consequences of ADR-061; hand-over to WS08-T01 (no `history` for the proposed method in a comparison until ADR-061 is accepted, or report both).
+- MINOR-5: exact-boundary tests (-1, 0, +1 ms) for the receive time and for the device-time horizon, samples and events. Mutated in a /tmp copy: `t + 1` and `t - 1` on the receive bound, `horizon + 1` and `horizon - 1` on both heaps are each killed by one failing test.
+- MINOR-6: `test_failed_fit_leaves_the_detector_not_fitted` fits successfully first and then refits with a failing `_fit`; the mutation that drops `self._fitted = False` before `_fit` is killed (the first-fit-fails case is kept as a second test).
+
+### Post-task review (2026-10-10)
+
+Produced: `ralmon.baselines.Detector` (runtime-checkable protocol), `BaselineBase` with a causal step iterator, and the access guards of `access.py`, 49 tests; ADR-061 (the `history` input of `Detector.run`, proposed, `[DA-CONFERMARE]`; `#detector` stays 0.1.0 until accepted). Independent review: PASS, no blocker; causality checked on 3000 random days with reorder delays up to 90 s (no sample seen before its time); the guards were attacked with adversarial detectors and the results are stated in the docstrings: they are a defence against accidents plus an audit log, not a sandbox. Six minors fixed (docs, a named error, a day listed in both train and calibration is refused, exact +-1 ms boundary tests, a refit-failure test); 12 of 16 mutations were killed by the original tests and the surviving ones are now killed. Open for gab: ADR-061; whether `iter_steps` should mirror the monitor's treatment of late inputs, duplicates and future stamps (baselines currently see late inputs the monitor excludes, do not deduplicate and do not reject future stamps; net direction unclear); whether latency comparisons are shifted by the reorder delay D (a baseline's detection time is the monitor's `t_eval_ms` plus D). Dependents: WS06-T02 to T06 run one day at a time until ADR-061 is accepted; WS06-T07 asserts `access_log.denied` is empty and documents the asymmetries; WS08-T01 does not pass `history` to the proposed method in a comparison until ADR-061 is accepted, or reports both variants.

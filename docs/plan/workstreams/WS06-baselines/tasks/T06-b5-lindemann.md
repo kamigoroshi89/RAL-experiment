@@ -3,7 +3,7 @@ id: WS06-T06
 title: B5 conformal STL predictive monitoring after Lindemann et al. 2023, with failure analysis
 workstream: WS06-baselines
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS06-T01", "WS05-T03", "WS05-T06", "WS05-T04", "WS05-T05", "WS00-T08"]
 critical_path: true
 non_negotiable: true

@@ -8,8 +8,8 @@ from ralmon.baselines._stubs import (
     B3PlainSTL,
     B4ConformalOnly,
     B5ConformalSTL,
-    Detector,
 )
+from ralmon.baselines.base import Detector
 
 __all__ = [
     "B1StaticThresholds",

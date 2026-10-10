@@ -138,3 +138,7 @@ The evidence function is `ralmon.attribution.extract_evidence(day, records, regi
 ### Hand-over from WS05-T08 (worker, 2026-10-10)
 
 (1) Test 10 assumes that an emitted prediction's `rho.alpha` is the `alpha` of the experiment: it is the PER-TEST level `alpha_total / n_tests` (ADR-060, ADR-049 (d)); `MonitorConfig.alpha` is the total level of a patient-day, and `run_offline_detailed(...).stats.per_test_alpha` has the level that `empirical_coverage` must be given. (2) The calibrator must be fitted with `model_version=forecaster.model_version` or the monitor raises `StaleCalibratorError`. (3) `build_calibration_episodes(days, plans, config, forecaster)` returns `(episodes, n_censored)`; report `n_censored`. (4) A predicted instance has two records with the same `(instance_key, t_eval_ms)` (PENDING, PREDICTED_VIOLATION) and keeps emitting PREDICTED records until decided: key predictive alarms by instance and first PREDICTED record. See the completion note of WS05-T08.
+
+### Hand-over from WS06-T01 (agent, 2026-10-10, review fixes)
+
+Do not pass `history` to the proposed method (`run_offline(history=...)`) in a comparison with the baselines until ADR-061 (history input of `Detector.run`, proposed) is accepted: the baselines are run one day at a time with empty state and would be handicapped on any counter that crosses midnight. Either run the proposed method per day as well, or report both variants. `BaselineBase.fit` refuses a day object listed in both `train_days` and `calib_days` and any non-`BenchmarkDay` item (`LeakageError`).
