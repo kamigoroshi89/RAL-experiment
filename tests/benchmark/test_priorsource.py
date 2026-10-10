@@ -147,8 +147,8 @@ def test_dataclass_shapes_match_contract() -> None:
         ParamProvenance,
     ):
         assert not hasattr(cls, STUB_ATTR)
-    # The placeholder of another owner is untouched.
-    assert getattr(benchmark.generate_benchmark, STUB_ATTR) == "WS04-T11"
+    # The placeholder of another owner became a real function when WS04-T11 was done.
+    assert not hasattr(benchmark.generate_benchmark, STUB_ATTR)
 
 
 def test_frozen_dataclasses_reject_assignment() -> None:

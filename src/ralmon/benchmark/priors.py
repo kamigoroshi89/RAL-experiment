@@ -73,6 +73,7 @@ DESIGN_RELPATHS: Final = (
     "configs/benchmark/generator_design.yaml",
     "configs/benchmark/care_plans.yaml",
     "configs/benchmark/injections.yaml",
+    "configs/benchmark/default.yaml",
 )
 TABLE_RELPATH: Final = "docs/benchmark/parameter-provenance.md"
 BEGIN_MARKER: Final = "<!-- BEGIN GENERATED -->"

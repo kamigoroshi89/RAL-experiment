@@ -3,7 +3,7 @@ id: WS04-T14
 title: "OPTIONAL: second pathology (diabetes, simglucose)"
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS04-T11"]
 critical_path: false
 non_negotiable: false
