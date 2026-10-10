@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import math
 import re
 import time
 from typing import Any
@@ -416,3 +417,16 @@ def test_samples_with_nan_or_infinite_values_are_refused() -> None:
     f = m.PersistenceForecaster(STEP)
     with pytest.raises(ValueError):
         f.predict([Sample("hr_ecg", 0, 0, float("nan"), None, None)], mins(1), 60_000)
+
+
+def test_a_path_that_overflows_is_refused_not_returned() -> None:
+    # x[k+1] = 2 x[k] (FIXTURE-ONLY): from 1e300 the iterated path passes the float range
+    ar = make_ar(1)
+    ar.fit([dense_day("hr_ecg", [2.0**k for k in range(21)])])
+    assert ar.coefficients("hr_ecg")[0] == pytest.approx(2.0, rel=1e-6)
+    history = [smp("hr_ecg", mins(9), 1e300)]
+    assert all(
+        math.isfinite(v) for v in ar.predict(history, mins(9), 120_000).mean
+    )  # a short path is fine
+    with pytest.raises(ValueError):
+        ar.predict(history, mins(9), 100 * STEP)

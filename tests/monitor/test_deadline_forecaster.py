@@ -201,3 +201,22 @@ def test_other_signal_is_unsupported() -> None:
         f.predict(state_at_nine(), hhmm(9), 600_000, signal="bp")
     out = f.predict(state_at_nine(), hhmm(9), 600_000, signal="meas")
     assert out.signal == "meas"
+
+
+def test_a_delay_that_overflows_is_refused_with_a_named_error() -> None:
+    f = zero_bias()
+    # both finite, but their sum is not representable: no bare OverflowError
+    with pytest.raises(ValueError):
+        f.predict(robot(hhmm(9), 1e308, 1e308), hhmm(9), 600_000)
+    for eta, queue in (
+        (float("inf"), 0.0),
+        (0.0, float("inf")),
+        (float("nan"), float("nan")),
+    ):
+        with pytest.raises(ValueError):
+            f.predict(robot(hhmm(9), eta, queue), hhmm(9), 600_000)
+
+
+def test_a_huge_but_finite_delay_gives_an_all_zero_path() -> None:
+    out = zero_bias().predict(robot(hhmm(9), 1e300, 0.0), hhmm(9), 600_000)
+    assert list(out.mean) == [0.0] * 10
