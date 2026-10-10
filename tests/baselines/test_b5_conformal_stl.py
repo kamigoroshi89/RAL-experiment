@@ -158,8 +158,14 @@ def calibration_days(
     ]
 
 
+#: Residual of the training day, far outside the worked residuals (-3 to 8): if the training day reached the
+#: calibration, the 11 scores would have ``k = ceil(12 * 0.8) = 10`` and the constant would be 8 instead of 6.
+TRAIN_RESIDUAL = 500.0
+
+
 def train_days() -> list[BenchmarkDay]:
-    return [bench(observed([smp("bp", 0, 100.0)], patient="train"))]
+    """One training day with a dispense and a distinctive score ``R = TRAIN_RESIDUAL`` (see above)."""
+    return [bench(dispense_day(100.0, 100.0 - TRAIN_RESIDUAL, patient="train"))]
 
 
 # ---- stubs -----------------------------------------------------------------------------------------
@@ -275,6 +281,18 @@ class FixedCalibrator:
 
     def update(self, sigma_hat: float, sigma_true: float) -> None:
         pass
+
+
+class FitSpyForecaster(PersistenceForecaster):
+    """Persistence that records the patients of the days handed to ``fit``."""
+
+    def __init__(self, step_ms: int) -> None:
+        super().__init__(step_ms)
+        self.fitted_on: list[list[str]] = []
+
+    def fit(self, train_days: Sequence[Any]) -> None:
+        self.fitted_on.append([d.patient_id for d in train_days])
+        super().fit(train_days)
 
 
 def make_b5(
@@ -618,6 +636,26 @@ def test_b5_uses_calibrator_public_api_only() -> None:
     assert spy._inner.calibrated_for == "persistence-1"
 
 
+def test_b5_trains_the_forecaster_on_train_days_and_calibrates_on_calib_days_only() -> (
+    None
+):
+    """The training day carries a dispense with score ``TRAIN_RESIDUAL``: it would show in the episodes (and move the
+    constant from 6 to 8) if it were used for calibration; the forecaster must see the training days and nothing else."""
+    forecaster = FitSpyForecaster(STEP)
+    b5 = make_b5(forecaster=forecaster)
+    b5.fit(train_days(), calibration_days(WORKED_RESIDUALS))
+    assert forecaster.fitted_on == [
+        ["train"]
+    ]  # exactly the training days, no calibration day
+    assert b5.n_calibration_episodes == len(WORKED_RESIDUALS)
+    assert "train" not in {e.patient_id for e in b5.calibration_episodes}
+    assert all(
+        e.sigma_true - e.sigma_hat != TRAIN_RESIDUAL for e in b5.calibration_episodes
+    )
+    run(b5, dispense_day(150.0, 100.0))
+    assert b5.predictions[0].quantile == 6.0
+
+
 def test_b5_refuses_a_calibrator_older_than_the_forecaster() -> None:
     class Moving(PersistenceForecaster):
         version = "persistence-1"
@@ -913,6 +951,18 @@ def test_b5_control_dense_exchangeable_days() -> None:
     assert (
         alerts / 2000 >= 0.05
     )  # not vacuous: the predictive part does fire on this population
+    # Direct coverage of equation (3), p. 7: P(R <= C) on the test days, R = rho_true - rho_hat = x_20 - x_40. The
+    # tolerance is three binomial standard errors of a proportion near 1 - alpha with n = 2000 test days
+    # (sqrt(0.1 * 0.9 / 2000) = 0.0067, tolerance 0.0201); it does not include the sampling of the 200 calibration
+    # days, which the fixed seed fixes (measured 0.9185, nominal 0.9).
+    (record,) = b5.predictions
+    assert record.quantile is not None
+    covered = sum(
+        d.samples[ACT_DENSE].value - d.samples[n_steps].value <= record.quantile
+        for d in tests
+    )
+    tolerance = 3.0 * math.sqrt(alpha * (1.0 - alpha) / 2000)
+    assert covered / 2000 >= 1.0 - alpha - tolerance
 
 
 # ---- the raw robustness adapter and the signal grid (module shared with WS06-T04) -------------------------
