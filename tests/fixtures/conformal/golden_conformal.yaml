@@ -1,0 +1,153 @@
+# Copies of the golden cases of docs/formal/golden/conformal.yaml used by the tests of WS05-T06:
+# C-1 (quantiles), C-2 (variant likely, alpha star, rho), C-3 (variant possible, lower quantile),
+# C-4 (exact ranks versus floating point), C-5 (minimum calibration size, allocation, no alert at n = 9).
+# C-6 and C-7 (measured and deterministic rho) belong to WS05-T04 and are not copied.
+# Each case keeps its `id` and `source`. All numbers are FIXTURE-ONLY arithmetic with no clinical meaning.
+# Levels are decimal literals (docs/formal/06-rho-proposition1.md section 4.4).
+cases:
+  - id: C-1
+    contract: ["02-interfaces.md#conformal-calibrator"]
+    source: "plan fixture (WS01-T06 task text, case C-1; the scores are FIXTURE-ONLY); the same scores are the calibrator fixture of V-PRED-1 (verdicts.yaml)"
+    fixture: {registry: F0, f0_rows: {}}
+    inputs:
+      scores_sorted: [-0.30, -0.22, -0.18, -0.12, -0.05, 0.00, 0.04, 0.09, 0.15]
+      n: 9
+      levels: [0.05, 0.1, 0.2, 0.3]
+    expected:
+      upper_quantile:
+        - {alpha: 0.05, rank: 10, value: .inf}
+        - {alpha: 0.1, rank: 9, value: 0.15}
+        - {alpha: 0.2, rank: 8, value: 0.09}
+        - {alpha: 0.3, rank: 7, value: 0.04}
+      lower_quantile:
+        - {alpha: 0.05, rank: 0, value: -.inf}
+        - {alpha: 0.1, rank: 1, value: -0.30}
+        - {alpha: 0.2, rank: 2, value: -0.22}
+        - {alpha: 0.3, rank: 3, value: -0.18}
+      exact_coverage_identity: {alpha: 0.2, k: 8, p_new_score_at_most_q: "8/10", p_new_score_exceeds_q: "2/10"}
+    hand_calculation: "n = 9, n + 1 = 10. Upper quantile, k = ceil(10 (1 - alpha)): alpha 0.05 gives ceil(9.5) = 10 > 9, so +inf; alpha 0.1 gives ceil(9) = 9, the 9th smallest score 0.15; alpha 0.2 gives ceil(8) = 8, the 8th smallest 0.09; alpha 0.3 gives ceil(7) = 7, the 7th smallest 0.04. Lower quantile, j = floor(10 alpha): alpha 0.05 gives floor(0.5) = 0, below the first score, so -inf; alpha 0.1 gives 1, the smallest score -0.30; alpha 0.2 gives 2, the 2nd smallest -0.22; alpha 0.3 gives 3, the 3rd smallest -0.18. Coverage identity (an identity about the procedure, not about the number 0.09): if the ten scores (nine calibration scores and one new score) are exchangeable and have no ties, the new score is at most the 8th smallest of the calibration scores with probability exactly k / (n + 1) = 8/10, over the joint draw of the calibration set and of the new score; the probability that it exceeds that quantile is 2/10. With ties the probability of exceeding is at most 2/10 (Proposition 1, section 5)."
+
+  - id: C-2
+    contract: ["02-interfaces.md#conformal-calibrator", "02-interfaces.md#verdict"]
+    source: "plan fixture (WS01-T06 task text, case C-2); the case sigma_hat = -1/3 is the calibrator part of V-PRED-1 (verdicts.yaml)"
+    fixture: {registry: F0, f0_rows: {}}
+    inputs:
+      scores_sorted: [-0.30, -0.22, -0.18, -0.12, -0.05, 0.00, 0.04, 0.09, 0.15]
+      n: 9
+      alpha: 0.2
+      variant: likely
+      q: 0.09
+      sigma_hat: [-0.15, -0.05, -0.40, 0.30, -0.3333333333333333]
+    expected:
+      predictions:
+        - sigma_hat: -0.15
+          sigma_hat_plus_q: -0.06
+          emitted: true
+          m: 8
+          alpha_star: "2/10"
+          one_minus_alpha_star: 0.8
+          rho: {kind: predicted, value: 0.8, alpha: 0.2, guarantee: "marginal over patient episodes under exchangeability", assumptions: ["calibration unit is the patient episode; calibration and test episodes are exchangeable", "forecaster and normalisation are fixed before calibration and independent of the calibration and test episodes", "one designated prediction instant per episode, with the same rule for calibration and test episodes", "calibrator fitted on the current model version"]}
+        - sigma_hat: -0.05
+          sigma_hat_plus_q: 0.04
+          emitted: false
+          m: 7
+          alpha_star: "3/10"
+          one_minus_alpha_star: 0.7
+          rho: null
+        - sigma_hat: -0.40
+          sigma_hat_plus_q: -0.31
+          emitted: true
+          m: 9
+          alpha_star: "1/10"
+          one_minus_alpha_star: 0.9
+          rho: {kind: predicted, value: 0.9, alpha: 0.2, guarantee: "marginal over patient episodes under exchangeability", assumptions: ["calibration unit is the patient episode; calibration and test episodes are exchangeable", "forecaster and normalisation are fixed before calibration and independent of the calibration and test episodes", "one designated prediction instant per episode, with the same rule for calibration and test episodes", "calibrator fitted on the current model version"]}
+        - sigma_hat: 0.30
+          sigma_hat_plus_q: 0.39
+          emitted: false
+          m: 0
+          alpha_star: "10/10"
+          one_minus_alpha_star: 0.0
+          rho: null
+        - sigma_hat: -0.3333333333333333
+          sigma_hat_plus_q: -0.2433333333333333
+          emitted: true
+          m: 9
+          alpha_star: "1/10"
+          one_minus_alpha_star: 0.9
+          rho: {kind: predicted, value: 0.9, alpha: 0.2, guarantee: "marginal over patient episodes under exchangeability", assumptions: ["calibration unit is the patient episode; calibration and test episodes are exchangeable", "forecaster and normalisation are fixed before calibration and independent of the calibration and test episodes", "one designated prediction instant per episode, with the same rule for calibration and test episodes", "calibrator fitted on the current model version"]}
+    hand_calculation: "Variant likely at alpha 0.2, n = 9: k = ceil(10 * 0.8) = 8, q = 0.09 (C-1). An alert is emitted iff sigma_hat + q < 0. m = #{i : sigma_hat + R_i < 0} = #{R_i < -sigma_hat} (strict); alpha_star = (n + 1 - m) / (n + 1) = (10 - m) / 10; rho = 1 - alpha_star = m / 10. The alert is emitted at level alpha iff m >= k = ceil(10 (1 - alpha)) iff alpha >= alpha_star (section 4 of the document); the emission and alpha_star agree in every row. sigma_hat = -0.15: -0.15 + 0.09 = -0.06 < 0, emitted; -sigma_hat = 0.15, scores strictly below 0.15 are the first eight (0.15 itself is not), m = 8, alpha_star = (10 - 8) / 10 = 0.2 (equal to alpha: emitted at the boundary), rho = 0.8. sigma_hat = -0.05: -0.05 + 0.09 = 0.04 >= 0, not emitted; scores below 0.05: -0.30, -0.22, -0.18, -0.12, -0.05, 0.00, 0.04, so m = 7, alpha_star = 0.3 > 0.2 (it would be emitted at level 0.3, where q = 0.04 and -0.05 + 0.04 < 0), 1 - alpha_star = 0.7, and rho is null because nothing is emitted. sigma_hat = -0.40: -0.40 + 0.09 = -0.31 < 0, emitted; all nine scores are below 0.40, m = 9, alpha_star = 1/10 = 0.1, rho = 0.9 (the largest value possible with n = 9: n / (n + 1)). sigma_hat = +0.30: 0.30 + 0.09 = 0.39 >= 0, not emitted; no score is below -0.30 (-0.30 is not strictly below itself), m = 0: the set of levels in (0, 1) at which an alert would be emitted is empty, alpha_star is set to 1 (convention of section 4) and 1 - alpha_star = 0. sigma_hat = -1/3 (V-PRED-1): -0.3333 + 0.09 = -0.2433 < 0, emitted; all nine scores are below 1/3, m = 9, alpha_star = 0.1, rho = 0.9, Rho.alpha = 0.2 (the configured level)."
+
+  - id: C-3
+    contract: ["02-interfaces.md#conformal-calibrator", "02-interfaces.md#verdict"]
+    source: "plan fixture (WS01-T06 task text, case C-3); contract rule 2 of #verdict and analisi §4.4 use the symmetric form sigma_hat - q"
+    fixture: {registry: F0, f0_rows: {}}
+    inputs:
+      scores_sorted: [-0.30, -0.22, -0.18, -0.12, -0.05, 0.00, 0.04, 0.09, 0.15]
+      n: 9
+      alpha: 0.2
+      variant: possible
+      q_lower: -0.22
+      q_upper: 0.09
+      sigma_hat: [0.15, 0.25]
+    expected:
+      predictions:
+        - sigma_hat: 0.15
+          sigma_hat_plus_q_lower: -0.07
+          sigma_hat_minus_q_upper: 0.06
+          emitted_lower_quantile_form: true
+          emitted_symmetric_form: false
+          m: 3
+          one_minus_alpha_star: 0.3
+        - sigma_hat: 0.25
+          sigma_hat_plus_q_lower: 0.03
+          sigma_hat_minus_q_upper: 0.16
+          emitted_lower_quantile_form: false
+          emitted_symmetric_form: false
+          m: 1
+          one_minus_alpha_star: 0.1
+    hand_calculation: "Variant possible at alpha 0.2, n = 9: lower rank j = floor(10 * 0.2) = 2, q_lower = the 2nd smallest score = -0.22 (C-1); upper rank k = 8, q_upper = 0.09. Proposition 1b (section 5): an alert is emitted iff sigma_hat + q_lower < 0, and then P(sigma_tilde < 0 and no alert) <= alpha. sigma_hat = +0.15: 0.15 + (-0.22) = -0.07 < 0, emitted; the symmetric form of the contract, sigma_hat - q_upper = 0.15 - 0.09 = +0.06 >= 0, is not emitted: the two forms disagree because the scores are not symmetric about zero (-q_upper = -0.09 differs from q_lower = -0.22). sigma_hat = +0.25: 0.25 - 0.22 = +0.03 >= 0 and 0.25 - 0.09 = +0.16 >= 0, neither form emits. For the value of Rho (section 2: the same definition for both variants, alpha_star defined with the upper quantile): sigma_hat = 0.15: scores strictly below -0.15 are -0.30, -0.22, -0.18, so m = 3 and 1 - alpha_star = 3/10 = 0.3 (a possible-variant alert can carry a small value, and an alert emitted at the miss level alpha 0.2 with value 0.3 < 1 - alpha is not an inconsistency: the guarantee of the variant bounds missed violations, not the value); sigma_hat = 0.25: only -0.30 is below -0.25, m = 1, 0.1; not emitted."
+
+  - id: C-4
+    contract: ["02-interfaces.md#conformal-calibrator"]
+    source: "plan fixture (WS01-T06 task text, case C-4); the extra keys rank_from_binary_value_of_alpha record a finding of this task (section 4 of the document)"
+    fixture: {registry: F0, f0_rows: {}}
+    inputs:
+      scores_sorted: [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.20, 0.21, 0.22, 0.23, 0.24, 0.25, 0.26, 0.27, 0.28, 0.29, 0.30, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37, 0.38, 0.39, 0.40, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48, 0.49, 0.50, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58, 0.59, 0.60, 0.61, 0.62, 0.63, 0.64, 0.65, 0.66, 0.67, 0.68, 0.69, 0.70, 0.71, 0.72, 0.73, 0.74, 0.75, 0.76, 0.77, 0.78, 0.79, 0.80, 0.81, 0.82, 0.83, 0.84, 0.85, 0.86, 0.87, 0.88, 0.89, 0.90, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99]
+      n: 99
+    expected:
+      upper:
+        alpha: 0.41
+        alpha_exact: "41/100"
+        exact_rank: 59
+        exact_value: 0.59
+        float_product: 59.00000000000001
+        float_rank: 60
+        float_value: 0.60
+        rank_from_binary_value_of_alpha: 60
+      lower:
+        alpha: 0.29
+        alpha_exact: "29/100"
+        exact_rank: 29
+        exact_value: 0.29
+        float_product: 28.999999999999996
+        float_rank: 28
+        float_value: 0.28
+        rank_from_binary_value_of_alpha: 28
+    hand_calculation: "R_i = i/100 for i = 1..99, n = 99, n + 1 = 100, so the i-th smallest score is i/100. Upper quantile at alpha = 41/100: k = ceil(100 * (1 - 41/100)) = ceil(100 * 59/100) = ceil(59) = 59, value 0.59. In binary floating point 1 - 0.41 = 0.59 and 100 * 0.59 evaluates to 59.00000000000001, whose ceiling is 60, value 0.60: one rank too high (a quantile one score too conservative). Lower quantile at alpha = 29/100: j = floor(100 * 29/100) = floor(29) = 29, value 0.29; the floating-point product 100 * 0.29 evaluates to 28.999999999999996, whose floor is 28, value 0.28: one rank too low. The expected values are the exact ones (59 and 0.59; 29 and 0.29). Finding: converting the float alpha to an exact fraction does not repair this, because the binary double nearest to 0.41 is 0.40999999999999997558... (below 41/100) and the one nearest to 0.29 is 0.28999999999999998001... (below 29/100): exact arithmetic on those binary values gives again 60 and 28 (keys rank_from_binary_value_of_alpha). The level must be read as the decimal literal, 41/100 and 29/100, for example with Fraction(repr(alpha))."
+
+  - id: C-5
+    contract: ["02-interfaces.md#conformal-calibrator"]
+    source: "plan fixture (WS01-T06 task text, case C-5); the allocation is analisi §4.4 caveat 3 (alpha_per_test = alpha_total / n_tests)"
+    fixture: {registry: F0, f0_rows: {}}
+    inputs:
+      levels: [0.05, 0.005]
+      alpha_total: 0.05
+      n_tests: 10
+      n_small: 9
+    expected:
+      minimum_n:
+        - {alpha: 0.05, alpha_exact: "1/20", n_min: 19}
+        - {alpha: 0.005, alpha_exact: "1/200", n_min: 199}
+      allocation: {alpha_total_exact: "1/20", n_tests: 10, alpha_per_test_exact: "1/200", alpha_per_test: 0.005, n_min: 199}
+      small_n: {n: 9, alpha: 0.05, upper_rank: 10, upper_quantile: .inf, lower_rank: 0, lower_quantile: -.inf, alert_possible: false}
+    hand_calculation: "The upper quantile is finite iff k = ceil((n + 1)(1 - alpha)) <= n, that is (n + 1)(1 - alpha) <= n (k is the least integer at least (n + 1)(1 - alpha), so k <= n iff (n + 1)(1 - alpha) <= n), that is n + 1 - alpha (n + 1) <= n, that is alpha (n + 1) >= 1, that is n >= 1/alpha - 1; as n is an integer, n >= ceil(1/alpha) - 1. The lower quantile is finite iff floor((n + 1) alpha) >= 1 iff (n + 1) alpha >= 1, the same condition. alpha = 1/20: n_min = 20 - 1 = 19 (at n = 18 the rank is ceil(19 * 19/20) = ceil(18.05) = 19 > 18; at n = 19 it is ceil(20 * 19/20) = 19 <= 19). alpha = 1/200: n_min = 200 - 1 = 199. Allocation: alpha_total = 1/20 over n_tests = 10 gives alpha_per_test = (1/20) / 10 = 1/200 = 0.005 and n_min = 199. With n = 9 and alpha = 0.05 the upper rank is ceil(10 * 0.95) = 10 > 9, the quantile is +inf, sigma_hat + q < 0 never holds, so no predicted alert is ever emitted at that level (C-1); the lower quantile is -inf and the variant possible would flag every episode (zero miss probability, no information)."
