@@ -46,37 +46,37 @@ parameters:
     note: "Time between the two DISPENSE events of a double take, integer ms, at least 1. The only qualitative constraint (analisi §4.5 rows 6 and 7): a double take must be clearly separated from a sub-second sensor bounce of the dispenser, so the gap must be well above one second. It must also be shorter than every slot of the schedule (the interval from a dose tick to the next dose tick, or to the day end), which the model checks against the schedule, and longer than intake_lag_ms. The human supplies the value and its rationale, expressed against the bounce interval. No value has been chosen by an agent."
   - parameter: inflation_ms_nominal
     unit: "ms"
-    value: null
+    value: 30000
     dist: null
-    source_ref: "device documentation or validation study of the cuff, to be named by the human (ADR-038 gap G5); no value chosen by an agent"
+    source_ref: "Beard J, Pichard K, Attebery JE, Yapici HO, Coffeng R, Med Devices (Auckl) 2025;18:241-246, doi:10.2147/MDER.S520615, Table 2 (seven monitors on blood-pressure simulators, means 19.23 to 51.06 s); ZOLL X Series Technical Specifications, 2015, NIBP block, https://www.zoll.com/-/media/LegacyMedia/uploadedfiles/public_site/products/x_series/9656_0235_xseries_spec_us-pdf.ashx"
     source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T06
-    rationale: null
-    note: "Nominal duration of one cuff inflation, integer ms in [0, 86 400 000]. The reading of a robot visit is stamped arrival + inflation. The registry holds only the minimum cuff_inflation_min: a fault-free draw is raised to that minimum and every raise is counted, so that a fault-free day cannot violate the system template by construction of the generator. The human supplies the value, its source and checks it against the registry minimum. No value has been chosen by an agent."
+    rationale: "Literature-anchored proposal (Group 1 desk research of 2026-10-10, block 1), proposal accepted by gab 2026-10-10, not reviewed; source opened by the research agent, not by gab; WEAK. 30000 ms is the median of the seven device means of Beard et al. 2025 Table 2 (29.97 s, arithmetic of the research agent), where the time is 'the total time between test start and measurement display to the user', on simulators at 120 mmHg and 80 bpm, three runs per device; the ZOLL X Series sheet gives 'Typical Measurement Time: 30 - 45 sec (on deflation)' (one vendor). In this generator 'inflation' is the whole arrival-to-reading cycle (the reading is stamped arrival + inflation), not the inflation phase alone, and the sources report the whole cycle. Not below the registry cuff_inflation_min (15000 ms) and below bound_inflation_ms_upper (180000 ms). The cuff of the lab demo is not named: replace the value by its manual figure. Authors of Beard et al. are GE Healthcare staff, one of the seven devices is theirs. Not clinically reviewed."
+    note: "Nominal duration of one cuff inflation, integer ms in [0, 86 400 000]. The reading of a robot visit is stamped arrival + inflation. The registry holds only the minimum cuff_inflation_min: a fault-free draw is raised to that minimum and every raise is counted, so that a fault-free day cannot violate the system template by construction of the generator. This value is a proposal accepted by gab on 2026-10-10 and not reviewed; sources opened by the research agent, not by gab; the source_ref and rationale fields give the source and the reasoning."
   - parameter: inflation_ms_sd
     unit: "ms"
-    value: null
+    value: 3000
     dist: null
-    source_ref: "device documentation or validation study of the cuff, to be named by the human (ADR-038 gap G5); no value chosen by an agent"
+    source_ref: "Beard J, Pichard K, Attebery JE, Yapici HO, Coffeng R, Med Devices (Auckl) 2025;18:241-246, doi:10.2147/MDER.S520615, Table 2, column Mean +/- SD (s), n = 3 runs per device"
     source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T06
-    rationale: null
-    note: "Standard deviation of the cuff inflation duration, ms, at least 0 (0 makes every fault-free inflation equal to the nominal one). The draw is Gaussian, rounded to integer ms and raised to the registry minimum cuff_inflation_min (the Gaussian family is a declared simplification). The human supplies the value and its source. No value has been chosen by an agent."
+    rationale: "Literature-anchored proposal (Group 1 desk research of 2026-10-10, block 1), proposal accepted by gab 2026-10-10, not reviewed; source opened by the research agent, not by gab; WEAK. 3000 ms is the median of the seven within-device SDs of Beard et al. 2025 Table 2 (0.71, 2.55, 2.57, 3.03, 3.35, 3.48 and 14.32 s; median 3.03 s, arithmetic of the research agent), n = 3 runs per device on a simulator without patient motion, so it likely underestimates the visit-to-visit variability in patients; no source for that was found. Sensitivity (not a value of this row): 14000 ms, the largest within-device SD (iPM12); with nominal 30000 ms about 14% of the draws would then be raised to cuff_inflation_min and each raise is counted by the generator (arithmetic of the research agent). Same cycle-not-phase reading as inflation_ms_nominal. Not clinically reviewed."
+    note: "Standard deviation of the cuff inflation duration, ms, at least 0 (0 makes every fault-free inflation equal to the nominal one). The draw is Gaussian, rounded to integer ms and raised to the registry minimum cuff_inflation_min (the Gaussian family is a declared simplification). This value is a proposal accepted by gab on 2026-10-10 and not reviewed; sources opened by the research agent, not by gab; the source_ref and rationale fields give the source and the reasoning."
   - parameter: pulse_error_sd_bpm
     unit: "bpm"
-    value: null
+    value: 2.1
     dist: null
-    source_ref: "device documentation or validation study of the cuff pulse rate, to be named by the human (ADR-038 gap G4); no value chosen by an agent"
+    source_ref: "Palatini P, Lazzaretto I, Fontana U, Fania C, J Hypertens 2022 (PMID 34992196), doi:10.1097/HJH.0000000000002998, Abstract (Microlife WatchBP O3, 36 participants, reference: pulse palpation by two observers)"
     source_type: published_literature
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T06
-    rationale: null
-    note: "Standard deviation of the error of the pulse rate reported by the cuff against the clean ECG heart rate of the same instant, bpm, at least 0 (Gaussian, declared simplification). The cross-device check that compares the two rates reads this difference, so the value matters for the C3 evidence. The human supplies the value and its source. No value has been chosen by an agent."
+    rationale: "Literature-anchored proposal (Group 1 desk research of 2026-10-10, block 1), proposal accepted by gab 2026-10-10, not reviewed; source opened by the research agent, not by gab; WEAK. Abstract of Palatini et al. 2022: 'At rest, the mean device-observer HR difference was 0.9 +/- 2.1 bpm', so the SD is 2.1 bpm; the reference is palpation, not ECG, and the generator draws the cuff pulse as the clean ECG heart rate of the same instant plus this error. Sensitivity (not a value of this row): 5.9 bpm, derived by the research agent (arithmetic: (13.1 - (-9.9)) / 3.92) from the limits of agreement of the ECG row of Sobieraj P et al., J Clin Hypertens 2024;26(12):1402-1410, doi:10.1111/jch.14892, Table 4; there ECG and cuff were sequential, not simultaneous, so that figure includes true heart-rate change. No study with simultaneous ECG was found. Not clinically reviewed."
+    note: "Standard deviation of the error of the pulse rate reported by the cuff against the clean ECG heart rate of the same instant, bpm, at least 0 (Gaussian, declared simplification). The cross-device check that compares the two rates reads this difference, so the value matters for the C3 evidence. This value is a proposal accepted by gab on 2026-10-10 and not reviewed; sources opened by the research agent, not by gab; the source_ref and rationale fields give the source and the reasoning."
   - parameter: robot_dwell_ms
     unit: "ms"
     value: null
