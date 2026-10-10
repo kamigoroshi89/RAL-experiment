@@ -355,7 +355,10 @@ def test_metrics_json_top_level_keys(hand_run: dict[str, Any]) -> None:
     assert m["meta"]["coverage_qualifier"] == (
         "marginal over patient episodes under exchangeability; calibration unit: patient episode"
     )
-    assert m["meta"]["bootstrap"] == {
+    boot = m["meta"]["bootstrap"]
+    assert {
+        k: boot[k] for k in ("n_resamples", "level", "unit", "headline_interval")
+    } == {
         "n_resamples": 100,
         "level": 0.95,
         "unit": "patient_day",

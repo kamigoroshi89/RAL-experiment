@@ -39,8 +39,12 @@ rules than R1 to R4 on some plan). A HARD failure in a ``headline`` run and a FL
 ``FIXTURE_ONLY`` (a fixture-only benchmark or registry), ``REORDER_DELAY_NOT_A_MULTIPLE_OF_STEP`` (F10),
 ``TAIL_DAY_MISSING`` (ADR-066), ``INT_GATE`` (``presence_samples_without_availability_marks`` positive, ADR-054, F21),
 ``ADR063_INT_SYS_COMPARISON`` (B3 or B5 next to the proposed method, ADR-063, F7), ``HISTORY_ASYMMETRY`` (history only for
-the proposed method, ADR-061, F12) and ``TWINS_IN_HEADLINE``. A decision that gab accepted is named in
-``run_options.accepted_decisions`` and lifts its guard (ADR-063, ADR-061). Flags only: ``B1_MINIMAL`` (F8),
+the proposed method, ADR-061, F12) and ``TWINS_IN_HEADLINE``, ``INT_GATE_UNKNOWN`` (the verdict runner reports no counters), ``TIMING_TAIL_TOO_SHORT`` (the tail
+of the baselines is shorter than RESP delta2 plus the reorder delay and the day-end COUNT convention),
+``ALPHA_BELOW_CALIBRATION_RESOLUTION`` (min alpha below 1 / (n + 1), E6) and ``NO_DEVICE_PROFILE``. A decision that gab accepted is named in
+``run_options.accepted_decisions`` and lifts its guard only if it is an ADR of ``docs/plan/03-decisions.md`` whose Status
+starts with ``accepted`` (the table ``GUARD_DECISIONS``: ADR-063, ADR-061); D2, F19 and F20 have no ADR yet and cannot be
+named. Flags only: ``B1_MINIMAL`` (F8),
 ``B5_NOT_PAPER_COMPARISON`` (D2, F6), ``CLOSING_STEP_C1_ONLY``, ``LATENCY_CONVENTION_OPEN`` (F20), ``CONTAMINATION_POLICY_OPEN``
 (F19), ``SCORES_NOT_RANKED`` (F13: no AUROC or AP is computed for B1 or B4) and ``B2_IFOREST_NOT_STRONGEST`` (F14). All of
 them are in ``meta.guards``.
@@ -62,6 +66,7 @@ import argparse
 import importlib
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -99,12 +104,14 @@ from ralmon.eval.metrics import (
     STREAM_BOOTSTRAP,
     MatchConfig,
     Matching,
+    bin_index,
     bootstrap_weights,
-    ci_from_weights,
+    ci_with_report,
     empirical_coverage,
     expected_calibration_error,
     latency_percentiles,
     match_events,
+    min_bootstrap_resamples,
     per_class_prf,
     reliability_bins,
     residual_coverage,
@@ -130,7 +137,8 @@ from ralmon.monitor import (
     StreamingMonitor,
     VerdictState,
 )
-from ralmon.spec import CarePlan, load_registry, load_templates
+from ralmon.signals import MS_PER_HOUR
+from ralmon.spec import CarePlan, RegistryError, load_registry, load_templates
 
 __all__ = [
     "ConfigError",
@@ -158,6 +166,9 @@ __all__ = [
 T_DAY_MS: Final[int] = (
     86_400_000  # algorithmic: 24 h, the day of the continuing axis (ADR-053 (h))
 )
+#: The most earlier days a run of the monitor replays (``ralmon.monitor.offline.MAX_HISTORY_DAYS``, not exported by the
+#: package root; ``tests/eval/test_review_minors.py`` checks that the two are equal).
+MAX_HISTORY_DAYS: Final[int] = 14
 COVERAGE_QUALIFIER: Final[str] = (
     "marginal over patient episodes under exchangeability; calibration unit: patient episode"
 )
@@ -269,7 +280,8 @@ class RunOptions:
     * ``calibration_days``: ``all`` or ``without_injected`` (F19: drop the calibration days with an injected event).
     * ``registry`` / ``allow_fixture_only``: the registry file (None: ``configs/registry/hypertension.yaml``) and the
       permission to load a fixture-only one.
-    * ``accepted_decisions``: ids of the decisions that gab accepted (``ADR-063``, ``ADR-061``, ``D2``, ``F19``, ``F20``).
+    * ``accepted_decisions``: ADR ids that are accepted in ``docs/plan/03-decisions.md`` (checked); the table ``GUARD_DECISIONS``
+      says which guard each lifts.
     * ``detector_params``: operating parameters of the detectors (``timing_tail_ms``, ``forecaster``, ``B2``, ``B4``, ``B5``,
       ``B5-bonferroni``, ``ours``); none has a default.
     """
@@ -389,7 +401,7 @@ def load_experiment(path: str | Path) -> tuple[ExperimentConfig, RunOptions]:
         isinstance(manifest, str) and manifest != "",
         "benchmark_manifest must be a path",
     )
-    manifest_path = str((base / manifest).resolve())
+    manifest_path = _resolve_path(base, manifest)
     detectors = doc["detectors"]
     _need(
         isinstance(detectors, list)
@@ -541,6 +553,12 @@ def _parse_options(doc: Any, base: Path) -> RunOptions:
         "run_options.n_bootstrap must be a positive integer",
     )
     ci_level = _level(doc["ci_level"], "run_options.ci_level")
+    least = min_bootstrap_resamples(ci_level)
+    _need(
+        doc["n_bootstrap"] >= least,
+        f"run_options.n_bootstrap {doc['n_bootstrap']} is below {least}, the fewest resamples for a "
+        f"{ci_level} percentile interval (one replicate in each tail)",
+    )
     _need(
         _is_int(doc["ece_bins"]) and doc["ece_bins"] >= 1,
         "run_options.ece_bins must be a positive integer",
@@ -575,6 +593,7 @@ def _parse_options(doc: Any, base: Path) -> RunOptions:
         isinstance(accepted, list) and all(isinstance(a, str) for a in accepted),
         "accepted_decisions must be a list of ids",
     )
+    validate_accepted_decisions(accepted)
     params = doc.get("detector_params", {})
     _need(isinstance(params, Mapping), "run_options.detector_params must be a mapping")
     return RunOptions(
@@ -590,15 +609,52 @@ def _parse_options(doc: Any, base: Path) -> RunOptions:
         twins=choice("twins", _TWINS),
         baseline_time=choice("baseline_time", _BASELINE_TIME),
         calibration_days=choice("calibration_days", _CALIB_DAYS),
-        registry=None if registry is None else str((base / registry).resolve()),
+        registry=None if registry is None else _resolve_path(base, registry),
         allow_fixture_only=allow,
         accepted_decisions=tuple(accepted),
         detector_params=dict(params),
     )
 
 
-def dump_experiment(config: ExperimentConfig, options: RunOptions) -> str:
-    """The resolved configuration as YAML (sorted keys): ``load_experiment`` of the dump gives equal objects."""
+def _resolve_path(base: Path, value: str) -> str:
+    """A path of a configuration file: absolute as it is; relative against the directory of the file when it exists
+    there, else against the repository root (where ``dump_experiment`` writes the paths inside the repository)."""
+    path = Path(value)
+    if path.is_absolute():
+        return str(path.resolve())
+    here = (base / path).resolve()
+    if here.exists():
+        return str(here)
+    root = _repo_root()
+    if root is not None and (root / path).exists():
+        return str((root / path).resolve())
+    return str(here)
+
+
+def _portable(value: str, base: Path | None) -> str:
+    """A path as written to an output: relative to the repository root when inside it, else relative to ``base`` (the
+    directory of the file that holds it) when given, else as it is. No user name and no absolute path of the machine
+    reaches ``config.yaml`` for a benchmark and a registry of the repository."""
+    path = Path(value)
+    if not path.is_absolute():
+        return value
+    root = _repo_root()
+    if root is not None:
+        try:
+            return path.resolve().relative_to(root).as_posix()
+        except ValueError:
+            pass
+    if base is not None:
+        return Path(os.path.relpath(path, base)).as_posix()
+    return value
+
+
+def dump_experiment(
+    config: ExperimentConfig, options: RunOptions, *, base: Path | None = None
+) -> str:
+    """The resolved configuration as YAML (sorted keys): ``load_experiment`` of the dump gives equal objects.
+
+    Paths are written by ``_portable``; ``base`` is the directory of the file the text will be written to."""
     monitor = None
     if config.monitor is not None:
         m = config.monitor
@@ -623,14 +679,16 @@ def dump_experiment(config: ExperimentConfig, options: RunOptions) -> str:
         "twins": options.twins,
         "baseline_time": options.baseline_time,
         "calibration_days": options.calibration_days,
-        "registry": options.registry,
+        "registry": None
+        if options.registry is None
+        else _portable(options.registry, base),
         "allow_fixture_only": options.allow_fixture_only,
         "accepted_decisions": list(options.accepted_decisions),
         "detector_params": dict(options.detector_params),
     }
     document = {
         "experiment_id": config.experiment_id,
-        "benchmark_manifest": config.benchmark_manifest,
+        "benchmark_manifest": _portable(config.benchmark_manifest, base),
         "detectors": list(config.detectors),
         "seeds": list(config.seeds),
         "split": dict(config.split),
@@ -664,6 +722,91 @@ def split_patients(
 # ---- guards ----------------------------------------------------------------------------------------------------------
 
 
+# ---- decisions that lift a guard -----------------------------------------------------------------------------------------
+
+DECISIONS_RELPATH: Final = "docs/plan/03-decisions.md"
+_ADR_ID: Final = re.compile(r"ADR-\d{3}")
+_ADR_HEADING: Final = re.compile(r"##\s+(ADR-\d+)\b")
+_ADR_STATUS: Final = re.compile(r"-\s+\*\*Status\.\*\*\s*(.*)")
+#: The one table that says which accepted decision lifts which guard. ``None``: the decision has no ADR yet (D2 and F6
+#: for the B5 of the paper, F19 for the calibration days, F20 for the latency convention), so the flag cannot be lifted
+#: until an ADR is recorded, accepted and named here.
+GUARD_DECISIONS: Final[Mapping[str, str | None]] = {
+    "ADR063_INT_SYS_COMPARISON": "ADR-063",
+    "HISTORY_ASYMMETRY": "ADR-061",
+    "B5_NOT_PAPER_COMPARISON": None,
+    "CONTAMINATION_POLICY_OPEN": None,
+    "LATENCY_CONVENTION_OPEN": None,
+}
+
+
+def _repo_root() -> Path | None:
+    """The repository root (the directory that holds ``docs/plan/03-decisions.md``), None for an installed package."""
+    root = Path(__file__).resolve().parents[3]
+    return root if (root / DECISIONS_RELPATH).is_file() else None
+
+
+def adr_statuses(path: Path | None = None) -> dict[str, str]:
+    """``{"ADR-063": "proposed [DA-CONFERMARE] ...", ...}`` from the decisions file (the text after ``**Status.**`` of
+    each ``## ADR-NNN`` section, empty when the section has none). ``ConfigError`` when the file cannot be found."""
+    target = path
+    if target is None:
+        root = _repo_root()
+        target = None if root is None else root / DECISIONS_RELPATH
+    if target is None or not target.is_file():
+        raise ConfigError(
+            f"cannot check run_options.accepted_decisions: the decisions file {DECISIONS_RELPATH} was not found "
+            f"(looked at {target})"
+        )
+    statuses: dict[str, str] = {}
+    current: str | None = None
+    for line in target.read_text(encoding="utf-8").splitlines():
+        heading = _ADR_HEADING.match(line)
+        if heading:
+            current = heading.group(1)
+            statuses[current] = ""
+            continue
+        status = _ADR_STATUS.match(line)
+        if status and current is not None and statuses[current] == "":
+            statuses[current] = status.group(1).strip()
+    return statuses
+
+
+def validate_accepted_decisions(names: Sequence[str]) -> frozenset[str]:
+    """The names of ``run_options.accepted_decisions`` that are accepted ADRs of the decisions file.
+
+    A name must be an ADR id (``ADR-063``) whose section exists in ``docs/plan/03-decisions.md`` and whose Status line
+    starts with ``accepted``; anything else (a malformed or unknown id, a decision that is not an ADR such as ``D2``,
+    ``F19`` or ``F20``, an ADR that is still proposed) is a ``ConfigError``.
+    """
+    if not names:
+        return frozenset()
+    statuses = adr_statuses()
+    for name in names:
+        if _ADR_ID.fullmatch(name) is None or name not in statuses:
+            raise ConfigError(
+                f"accepted_decisions: {name!r} is not an ADR of {DECISIONS_RELPATH}: "
+                "record the decision as an accepted ADR first"
+            )
+        if not statuses[name].startswith("accepted"):
+            raise ConfigError(
+                f"accepted_decisions: {name} is not accepted (Status: {statuses[name][:60]!r}): "
+                "record the decision as an accepted ADR first"
+            )
+    return frozenset(names)
+
+
+def _lifted(guard_id: str, accepted: frozenset[str]) -> bool:
+    decision = GUARD_DECISIONS[guard_id]
+    return decision is not None and decision in accepted
+
+
+def required_tail_ms(delta2_ms: int, reorder_delay_ms: int) -> int:
+    """The shortest ``TimingConfig.tail_ms`` of the audit Conclusion for WS08-T02: the longest window (RESP ``delta2``) plus
+    the reorder delay, and long enough for the run to reach the day-end COUNT (the audit uses the day and one hour)."""
+    return max(delta2_ms + reorder_delay_ms, T_DAY_MS + MS_PER_HOUR)
+
+
 @dataclass(frozen=True, slots=True)
 class Guard:
     id: str
@@ -685,6 +828,12 @@ class RunFacts:
     history: str = "none"
     twins: str = "exclude"
     n_seeds: int = 0
+    has_device_profile: bool = False
+    timing_tail_ms: int | None = None
+    required_tail_ms: int | None = None
+    int_gate_unknown: tuple[str, ...] = ()
+    min_alpha: float | None = None
+    calibration_episodes: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -701,7 +850,7 @@ def evaluate_guards(facts: RunFacts, options: RunOptions) -> GuardReport:
     """The guards of the fairness audit for a run (module docstring): which fail hard and which are flags."""
     hard: list[Guard] = []
     flags: list[Guard] = []
-    accepted = set(options.accepted_decisions)
+    accepted = validate_accepted_decisions(options.accepted_decisions)
     names = facts.detectors
     baselines = [n for n in names if not n.startswith("ours")]
     has_ours = any(n.startswith("ours") for n in names)
@@ -746,14 +895,18 @@ def evaluate_guards(facts: RunFacts, options: RunOptions) -> GuardReport:
     if (
         has_ours
         and any(n.startswith(("B3", "B5")) for n in names)
-        and "ADR-063" not in accepted
+        and not _lifted("ADR063_INT_SYS_COMPARISON", accepted)
     ):
         conditional(
             "ADR063_INT_SYS_COMPARISON",
             "B3 and B5 are silent on INT and SYS violations that the monitor reports: no C3/INT or SYS comparison "
             "between the proposed method and B3 or B5 (ADR-063, F7)",
         )
-    if facts.history != "none" and baselines and "ADR-061" not in accepted:
+    if (
+        facts.history != "none"
+        and baselines
+        and not _lifted("HISTORY_ASYMMETRY", accepted)
+    ):
         conditional(
             "HISTORY_ASYMMETRY",
             "only the proposed method gets the earlier days of the patient while the baselines run one day at a time (ADR-061, F12)",
@@ -763,6 +916,42 @@ def evaluate_guards(facts: RunFacts, options: RunOptions) -> GuardReport:
             "TWINS_IN_HEADLINE",
             "the confounder twins are a different population (single-day pairs): decide before counting them in a headline (ADR-067)",
         )
+    if facts.int_gate_unknown:
+        conditional(
+            "INT_GATE_UNKNOWN",
+            f"the verdict runner of {sorted(facts.int_gate_unknown)} reports no counters, so the INT gate of ADR-054 "
+            "is unknown, not passed",
+        )
+    if (
+        baselines
+        and facts.timing_tail_ms is not None
+        and facts.required_tail_ms is not None
+        and facts.timing_tail_ms < facts.required_tail_ms
+    ):
+        conditional(
+            "TIMING_TAIL_TOO_SHORT",
+            f"timing_tail_ms {facts.timing_tail_ms} is shorter than {facts.required_tail_ms} (RESP delta2 plus the "
+            "reorder delay, and the day-end COUNT convention of the audit): the baselines stop before their deadlines",
+        )
+    too_few = {
+        n: k
+        for n, k in facts.calibration_episodes.items()
+        if facts.min_alpha is not None
+        and Fraction(repr(float(facts.min_alpha))) < Fraction(1, k + 1)
+    }
+    if too_few:
+        conditional(
+            "ALPHA_BELOW_CALIBRATION_RESOLUTION",
+            f"the smallest alpha {facts.min_alpha} is below 1 / (n + 1) for the calibration sets {too_few}: the "
+            "finite-sample quantile is infinite, nothing is emitted and the coverage is vacuous (E6)",
+        )
+    if has_ours and not facts.has_device_profile:
+        conditional(
+            "NO_DEVICE_PROFILE",
+            "no device capability profile is declared (run_options.detector_params.ours.device_profile): every "
+            "capability is absent and the attribution answers UNDETERMINED; the profile of the benchmark devices is an "
+            "open decision",
+        )
     if "B1" in names:
         flags.append(
             Guard(
@@ -770,7 +959,9 @@ def evaluate_guards(facts: RunFacts, options: RunOptions) -> GuardReport:
                 "B1 is the minimal threshold baseline, per class only; no RESP, SYS or INT rule (F8)",
             )
         )
-    if any(n.startswith("B5") for n in names) and "D2" not in accepted:
+    if any(n.startswith("B5") for n in names) and not _lifted(
+        "B5_NOT_PAPER_COMPARISON", accepted
+    ):
         flags.append(
             Guard(
                 "B5_NOT_PAPER_COMPARISON",
@@ -784,14 +975,14 @@ def evaluate_guards(facts: RunFacts, options: RunOptions) -> GuardReport:
             "instant of the tail day is not scored (builder.md, open decision)",
         )
     )
-    if baselines and "F20" not in accepted:
+    if baselines and not _lifted("LATENCY_CONVENTION_OPEN", accepted):
         flags.append(
             Guard(
                 "LATENCY_CONVENTION_OPEN",
                 "the baselines report t_eval + D and the monitor t_eval: a delay comparison needs a decided time convention (F20)",
             )
         )
-    if "F19" not in accepted:
+    if not _lifted("CONTAMINATION_POLICY_OPEN", accepted):
         flags.append(
             Guard(
                 "CONTAMINATION_POLICY_OPEN",
@@ -1328,16 +1519,30 @@ def _num(x: float) -> float | None:
 
 @dataclass(slots=True)
 class _Weights:
+    """The bootstrap replicates of a seed: patient-days (``days``) and patients (``patients``, None when there is a single
+    patient and the cluster bootstrap has nothing to resample). ``nan`` collects, per labelled interval, the number of
+    replicates in which the statistic was undefined (they are left out of the interval, never silently)."""
+
     days: np.ndarray
-    patients: np.ndarray
+    patients: np.ndarray | None
     level: float
+    nan: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def scalar(
-        self, table: np.ndarray, stat: Callable[[np.ndarray], float]
+        self,
+        table: np.ndarray,
+        stat: Callable[[np.ndarray], float],
+        label: str = "",
     ) -> dict[str, Any]:
         total = table.sum(axis=0)
-        lo, hi = ci_from_weights(table, stat, self.days, self.level)
-        clo, chi = ci_from_weights(table, stat, self.patients, self.level)
+        lo, hi, n_day = ci_with_report(table, stat, self.days, self.level)
+        n_cluster = 0
+        if self.patients is None:
+            clo = chi = math.nan
+        else:
+            clo, chi, n_cluster = ci_with_report(table, stat, self.patients, self.level)
+        if label and (n_day or n_cluster):
+            self.nan[label] = {"day": n_day, "cluster": n_cluster}
         return {
             "value": _num(stat(total)),
             "ci_lo": _num(lo),
@@ -1381,7 +1586,7 @@ def _ece_table(
     table = np.zeros((len(per_unit), 3 * bins), dtype=np.float64)
     for u, items in enumerate(per_unit):
         for rho, hit in items:
-            b = min(int(rho * bins), bins - 1)
+            b = bin_index(rho, bins)
             table[u, 3 * b] += 1
             table[u, 3 * b + 1] += rho
             table[u, 3 * b + 2] += 1.0 if hit else 0.0
@@ -1493,8 +1698,8 @@ def _subtype_recall(matching: Matching) -> dict[str, Any]:
 def _preflight_registry(env: DetectorEnvironment, names: Sequence[str]) -> None:
     """Fail before the run, not in the middle of it, when the registry cannot feed the proposed method.
 
-    The attribution layer needs the evidence thresholds of ``docs/models`` (open point OPF-6: the registry 0.2.0 lacks seven
-    of them) and a priority for every template whose violation can become an alert (``priority_sys`` and ``priority_int``
+    The attribution layer needs the evidence thresholds of ``docs/models`` (open point OPF-6: the registry 0.2.0 lacks some
+    of them; the error names those still missing) and a priority for every template whose violation can become an alert (``priority_sys`` and ``priority_int``
     are unset in 0.2.0): a run that reaches such an alert would stop with an error after hours of computation.
     """
     if not any(n.startswith("ours") for n in names):
@@ -1562,6 +1767,19 @@ def _truth_events(
     return events, len(closing)
 
 
+def _at_shared_step(item: Detection) -> bool:
+    """A detection at the closing step of a day, which is also the first step of the next one (ADR-064)."""
+    return item.t_ms > 0 and item.t_ms % T_DAY_MS == 0
+
+
+def _shared_key(item: Detection) -> tuple[Any, ...]:
+    """What makes two detections at a shared step the same: the instance and the instant for an alert, the instant,
+    the label and the score for another detection."""
+    if isinstance(item, Alert):
+        return ("alert", item.xi.instance_key, item.t_ms)
+    return ("detection", item.t_ms, item.label, item.score)
+
+
 def _run_patient(
     inst: _Instance,
     patient: str,
@@ -1581,13 +1799,22 @@ def _run_patient(
         and env.monitor
         else 0
     )
+    previous_shared: set[tuple[Any, ...]] = set()
     for d, obs in enumerate(days):
         plan = env.plan_for_day(obs)
         kwargs: dict[str, Any] = {}
         if options.history == "ours" and is_ours and d > 0:
-            kwargs["history"] = list(days[max(0, d - 14) : d])
+            kwargs["history"] = list(days[max(0, d - MAX_HISTORY_DAYS) : d])
         emitted = detector.run(obs, plan, None, **kwargs)
         inst.stats["n_emitted"] += len(emitted)
+        shared = {_shared_key(x) for x in emitted if _at_shared_step(x)}
+        inst.stats["n_at_shared_step"] += sum(1 for x in emitted if _at_shared_step(x))
+        inst.stats["n_repeating_previous_day"] += sum(
+            1
+            for x in emitted
+            if _at_shared_step(x) and _shared_key(x) in previous_shared
+        )
+        previous_shared = shared
         for item in emitted:
             if shift:
                 item = replace(item, t_ms=max(0, item.t_ms - shift))
@@ -1602,9 +1829,11 @@ def _run_patient(
             run = detector.last_run
             if run is not None:
                 inst.runs[(patient, d)] = run
-                inst.stats["int_gate"] += (
-                    run.presence_samples_without_availability_marks
-                )
+                gate = run.presence_samples_without_availability_marks
+                if gate is None:
+                    inst.stats["int_gate_unknown"] += 1
+                else:
+                    inst.stats["int_gate"] += gate
         else:
             stats = getattr(detector, "run_stats", None)
             rules = getattr(stats, "rules_active", None)
@@ -1697,10 +1926,33 @@ def _write_seed(
     )
     (folder / "metrics.json").write_text(text + "\n", encoding="utf-8")
     (folder / "config.yaml").write_text(
-        dump_experiment(replace(config, seeds=[seed]), options), encoding="utf-8"
+        dump_experiment(replace(config, seeds=[seed]), options, base=folder),
+        encoding="utf-8",
     )
     (folder / "git_rev.txt").write_text(rev + "\n", encoding="utf-8")
     return folder
+
+
+def _tail_of(options: RunOptions) -> int | None:
+    tail = options.detector_params.get("timing_tail_ms")
+    return tail if isinstance(tail, int) and not isinstance(tail, bool) else None
+
+
+def _required_tail(
+    env: DetectorEnvironment, monitor: MonitorConfig | None
+) -> int | None:
+    """``required_tail_ms`` for the registry of the run (RESP ``delta2``; 0 when the registry has none)."""
+    if monitor is None:
+        return None
+    try:
+        delta2 = int(float(env.registry.get("delta2").value))
+    except (
+        RegistryError,
+        ValueError,
+        TypeError,
+    ):  # a registry without the row: the day-end convention decides
+        delta2 = 0
+    return required_tail_ms(delta2, monitor.reorder_delay_ms)
 
 
 def run_experiment(
@@ -1747,6 +1999,14 @@ def run_experiment(
         history=options.history,
         twins=options.twins,
         n_seeds=len(config.seeds),
+        has_device_profile=first_env.profile is not None,
+        timing_tail_ms=_tail_of(options),
+        required_tail_ms=_required_tail(first_env, monitor),
+        min_alpha=(
+            min(options.alpha_grid)
+            if any(baseline_has_alpha(n) for n in config.detectors)
+            else None
+        ),
     )
     evaluate_guards(static, options).raise_if_failed()
     folders: list[Path] = []
@@ -1836,22 +2096,39 @@ def _run_seed(
         for i in instances
         if i.main and i.stats["int_gate"]
     }
-    facts = replace(static, b1_rules_active=b1_rules, int_gate=gates)
+    unknown = tuple(i.name for i in instances if i.main and i.stats["int_gate_unknown"])
+    episodes_n = {
+        i.name: int(i.detector.n_calibration_episodes)
+        for i in instances
+        if i.main and hasattr(i.detector, "n_calibration_episodes")
+    }
+    facts = replace(
+        static,
+        b1_rules_active=b1_rules,
+        int_gate=gates,
+        int_gate_unknown=unknown,
+        calibration_episodes=episodes_n,
+    )
     report = evaluate_guards(facts, options)
     report.raise_if_failed()
 
     truth = {p: _truth_events(reader_full, p) for p in test_patients}
     n_closing = sum(c for _, c in truth.values())
+    patients_of_units = [p for p, _ in units]
+    n_clusters = len(set(patients_of_units))
     weights = _Weights(
         bootstrap_weights(len(units), options.n_bootstrap, seed),
         bootstrap_weights(
-            len(units), options.n_bootstrap, seed, clusters=[p for p, _ in units]
-        ),
+            len(units), options.n_bootstrap, seed, clusters=patients_of_units
+        )
+        if n_clusters >= 2
+        else None,
         options.ci_level,
     )
     metrics: dict[str, dict[str, Any]] = {name: {} for name in METRIC_NAMES}
     detections_info: dict[str, Any] = {}
     fa_kinds: dict[str, Any] = {}
+    shared_steps: dict[str, Any] = {}
     subtype: dict[str, Any] = {}
     ours_info: dict[str, Any] = {}
     outputs: dict[str, Mapping[str, Sequence[Detection]]] = {}
@@ -1886,6 +2163,10 @@ def _run_seed(
         tables[name] = table
         dropped = sum(s.n_dropped_tail for s in scored.values())
         emitted = int(inst.stats["n_emitted"])
+        shared_steps[name] = {
+            "n_at_shared_step": int(inst.stats["n_at_shared_step"]),
+            "n_repeating_previous_day": int(inst.stats["n_repeating_previous_day"]),
+        }
         kinds: Counter[str] = Counter()
         for scored_patient in scored.values():
             kinds.update(scored_patient.false_alarm_kinds)
@@ -1898,7 +2179,9 @@ def _run_seed(
         }
         metrics["per_class_prf"][name] = {
             c: {
-                k: weights.scalar(table, _prf_stat(c, k))
+                k: weights.scalar(
+                    table, _prf_stat(c, k), f"per_class_prf.{name}.{c}.{k}"
+                )
                 for k in ("precision", "recall", "f1")
             }
             for c in (*CLASSES, "any")
@@ -1913,10 +2196,16 @@ def _run_seed(
             "p50": p50,
             "p75": p75,
             "p95": p95,
-            "mean": weights.scalar(table, table_delay_mean),
-            "fraction_early": weights.scalar(table, table_early_fraction),
+            "mean": weights.scalar(
+                table, table_delay_mean, f"detection_delay_ms.{name}.mean"
+            ),
+            "fraction_early": weights.scalar(
+                table, table_early_fraction, f"detection_delay_ms.{name}.fraction_early"
+            ),
         }
-        fa = weights.scalar(table, table_fa_per_day)
+        fa = weights.scalar(
+            table, table_fa_per_day, f"false_alarms_per_patient_day.{name}"
+        )
         fa["n_false_alarms"] = round(float(total[_col("false_alarms")]))
         fa["duplicates_per_patient_day"] = _num(
             float(total[_col("duplicates")]) / float(total[_col("days")])
@@ -1964,6 +2253,15 @@ def _run_seed(
                 "calibration_days": options.calibration_days,
             },
             "recall_by_subtype": subtype,
+            "shared_step_detections": shared_steps,
+            "bootstrap": {
+                "n_replicates": options.n_bootstrap,
+                "n_units": len(units),
+                "n_clusters": n_clusters,
+                "degenerate_days": len(units) < 2,
+                "degenerate_clusters": n_clusters < 2,
+                "nan_replicates": weights.nan,
+            },
             "ours": ours_info,
             "int_gate": gates,
         }
@@ -2031,7 +2329,18 @@ def _meta(
             "n_resamples": options.n_bootstrap,
             "level": options.ci_level,
             "unit": "patient_day",
+            "headline_interval": "cluster",
+            "day_level_interval": (
+                "ci_lo and ci_hi resample patient-days and are reported for reference only: the days of a patient are "
+                "correlated, so that interval is anti-conservative; the headline interval is ci_cluster_lo and "
+                "ci_cluster_hi (patients resampled)"
+            ),
         },
+        "interval_width_note": (
+            "mean_interval_width is the width of the two-sided band [sigma_hat + q_lo, sigma_hat + q] of the split "
+            "calibrator, which has the per-test level alpha' in each tail: its coverage is 1 - 2 alpha', not the "
+            "nominal 1 - alpha' that empirical_coverage.nominal prints next to it; it is null where alpha' > 1/2"
+        ),
         "headline": options.headline,
         "benchmark_version": manifest.benchmark_version,
         "generator_git_rev": manifest.generator_git_rev,
@@ -2060,6 +2369,12 @@ def _meta(
                 "history": facts.history,
                 "twins": facts.twins,
                 "n_seeds": facts.n_seeds,
+                "has_device_profile": facts.has_device_profile,
+                "timing_tail_ms": facts.timing_tail_ms,
+                "required_tail_ms": facts.required_tail_ms,
+                "int_gate_unknown": list(facts.int_gate_unknown),
+                "min_alpha": facts.min_alpha,
+                "calibration_episodes": dict(facts.calibration_episodes),
             },
         },
     }

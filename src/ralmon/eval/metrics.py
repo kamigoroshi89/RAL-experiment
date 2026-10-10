@@ -5,7 +5,7 @@ explicit integer seed and draws from ``numpy.random.default_rng([seed, STREAM_BO
 component, never a generator shared between components). Nothing here reads a clock, the environment or the network.
 
 Matching (E3). ``match_events`` takes the ground-truth events and the detections of one unit (the runner passes the
-whole record of one patient, see the runner docstring) and matches them one to one. The events are taken in onset order;
+whole record of one patient, see the runner docstring) and matches them one to one. The events are taken in the order of their reference instant (``t_ref``, then onset);
 for each the earliest unmatched detection with ``|t_det - t_ref| <= tolerance_ms`` is its match, so an early warning is
 the matched detection. A detection that is not matched but lies in the window of a matched event is a duplicate (neither a
 true positive nor a false alarm); every other unmatched detection is a false alarm and counts in full. Detection is
@@ -33,6 +33,7 @@ import math
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Collection, Hashable, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Final, Literal
 
 import numpy as np
@@ -53,6 +54,7 @@ __all__ = [
     "STREAM_CALIBRATION",
     "STREAM_FORECASTER",
     "STREAM_SPLIT",
+    "BootstrapError",
     "MatchConfig",
     "MatchedPair",
     "Matching",
@@ -61,10 +63,12 @@ __all__ = [
     "accuracy_vs_coverage",
     "attribution_confusion",
     "attribution_macro_f1",
+    "bin_index",
     "bootstrap_ci",
     "bootstrap_statistic",
     "bootstrap_weights",
     "ci_from_weights",
+    "ci_with_report",
     "detection_delay_ms",
     "empirical_coverage",
     "expected_calibration_error",
@@ -73,6 +77,7 @@ __all__ = [
     "latency_percentiles",
     "match_events",
     "mean_interval_width",
+    "min_bootstrap_resamples",
     "paired_bootstrap_ci",
     "paired_ci_from_weights",
     "per_class_prf",
@@ -421,8 +426,9 @@ def match_events(
     matched_windows: list[tuple[int, int]] = []
     matched_gt: set[int] = set()
     tol = cfg.tolerance_ms
-    for g in sorted(range(len(gt_t)), key=lambda i: (gt_t[i].onset_ms, i)):
-        ref = _reference(gt_t[g], cfg)
+    refs = [_reference(e, cfg) for e in gt_t]
+    for g in sorted(range(len(gt_t)), key=lambda i: (refs[i], gt_t[i].onset_ms, i)):
+        ref = refs[g]
         lo = bisect_left(times, ref - tol)
         hi = bisect_right(times, ref + tol)
         chosen = next((p for p in range(lo, hi) if not taken[p]), None)
@@ -676,6 +682,15 @@ class ReliabilityBin:
     observed_rate: float
 
 
+def bin_index(rho: float, bins: int) -> int:
+    """The equal-width bin of ``rho`` on [0, 1]; ``rho = 1`` is in the last bin.
+
+    The product is taken on the decimal literal of ``rho`` (its shortest round-trip form), so that ``0.29`` falls in
+    bin 29 of 100 although ``0.29 * 100`` is just below 29 in floating point.
+    """
+    return min(int(Fraction(repr(float(rho))) * bins), bins - 1)
+
+
 def reliability_bins(
     rho: Sequence[float], outcome: Sequence[bool], bins: int
 ) -> list[ReliabilityBin]:
@@ -690,7 +705,7 @@ def reliability_bins(
     for r, o in zip(rho, outcome, strict=True):
         if math.isnan(r) or not 0.0 <= r <= 1.0:
             raise ValueError(f"rho must lie in [0, 1], got {r!r}")
-        b = min(int(r * bins), bins - 1)
+        b = bin_index(r, bins)
         counts[b] += 1
         rho_sum[b] += r
         hit_sum[b] += 1 if o else 0
@@ -827,14 +842,59 @@ def bootstrap_weights(
     return counts[:, unit_cluster]
 
 
-def _percentiles(stats: NDArray[np.float64], level: float) -> tuple[float, float]:
+class BootstrapError(ValueError):
+    """The bootstrap cannot give an interval worth reporting (too few resamples)."""
+
+
+def min_bootstrap_resamples(level: float) -> int:
+    """The fewest resamples for a percentile interval of ``level``: each tail must hold at least one replicate,
+    ``2 / (1 - level)`` (40 at 0.95, 20 at 0.9). Computed on the decimal literal of ``level``."""
+    gap = 1 - Fraction(repr(float(level)))
+    if not 0 < gap < 1:
+        raise ValueError(f"level must lie in (0, 1), got {level!r}")
+    return math.ceil(2 / gap)
+
+
+def _check_resamples(n_resamples: int, level: float) -> None:
+    need = min_bootstrap_resamples(level)
+    if n_resamples < need:
+        raise BootstrapError(
+            f"{n_resamples} resamples cannot give a {level} percentile interval: at least {need} are needed "
+            "(one replicate in each tail)"
+        )
+
+
+def _percentiles(stats: NDArray[np.float64], level: float) -> tuple[float, float, int]:
+    """The interval of the finite replicates and the number of replicates that were undefined (``nan``)."""
     if not 0.0 < level < 1.0:
         raise ValueError(f"level must lie in (0, 1), got {level!r}")
     finite = stats[~np.isnan(stats)]
+    n_nan = int(stats.size - finite.size)
     if finite.size == 0:
-        return math.nan, math.nan
+        return math.nan, math.nan, n_nan
     lo, hi = np.quantile(finite, [(1 - level) / 2, (1 + level) / 2])
-    return float(lo), float(hi)
+    return float(lo), float(hi), n_nan
+
+
+def ci_with_report(
+    table: NDArray[np.float64],
+    stat: Callable[[NDArray[np.float64]], float],
+    weights: NDArray[np.float64],
+    level: float,
+) -> tuple[float, float, int]:
+    """``(lo, hi, n_nan)``: the percentile interval of ``stat`` applied to the resampled sums ``weights @ table`` (one row
+    per replicate), computed on the replicates where ``stat`` is defined, and the number of replicates where it is not.
+
+    A sample of fewer than two units has no interval (``nan``): resampling one unit returns that unit.
+    """
+    if table.shape[0] != weights.shape[1]:
+        raise ValueError("weights and table disagree on the number of units")
+    _check_resamples(weights.shape[0], level)
+    if table.shape[0] < 2:
+        return math.nan, math.nan, 0
+    sums = weights @ table
+    stats = np.array([stat(row) for row in sums], dtype=np.float64)
+    return _percentiles(stats, level)
 
 
 def ci_from_weights(
@@ -843,12 +903,9 @@ def ci_from_weights(
     weights: NDArray[np.float64],
     level: float,
 ) -> tuple[float, float]:
-    """Percentile interval of ``stat`` applied to the resampled sums ``weights @ table`` (one row per replicate)."""
-    if table.shape[0] != weights.shape[1]:
-        raise ValueError("weights and table disagree on the number of units")
-    sums = weights @ table
-    stats = np.array([stat(row) for row in sums], dtype=np.float64)
-    return _percentiles(stats, level)
+    """The interval of ``ci_with_report`` without the count of undefined replicates."""
+    lo, hi, _ = ci_with_report(table, stat, weights, level)
+    return lo, hi
 
 
 def paired_ci_from_weights(
@@ -861,13 +918,17 @@ def paired_ci_from_weights(
     """Percentile interval of ``stat(a) - stat(b)`` on the same resampled units (the paired bootstrap of ablations)."""
     if table_a.shape != table_b.shape:
         raise ValueError("the two tables must have the same shape")
+    _check_resamples(weights.shape[0], level)
+    if table_a.shape[0] < 2:
+        return math.nan, math.nan
     sums_a = weights @ table_a
     sums_b = weights @ table_b
     stats = np.array(
         [stat(a) - stat(b) for a, b in zip(sums_a, sums_b, strict=True)],
         dtype=np.float64,
     )
-    return _percentiles(stats, level)
+    lo, hi, _ = _percentiles(stats, level)
+    return lo, hi
 
 
 def bootstrap_statistic(
@@ -879,7 +940,14 @@ def bootstrap_statistic(
     seed: int,
     clusters: Sequence[Hashable] | None = None,
 ) -> tuple[float, float]:
-    """``ci_from_weights`` with the weights drawn from ``seed`` (one row of ``table`` per unit)."""
+    """``ci_from_weights`` with the weights drawn from ``seed`` (one row of ``table`` per unit).
+
+    ``BootstrapError`` below ``min_bootstrap_resamples(level)``; ``nan`` for fewer than two units or, with ``clusters``,
+    fewer than two clusters.
+    """
+    _check_resamples(n_resamples, level)
+    if clusters is not None and len(set(clusters)) < 2:
+        return math.nan, math.nan
     weights = bootstrap_weights(table.shape[0], n_resamples, seed, clusters)
     return ci_from_weights(table, stat, weights, level)
 
@@ -927,5 +995,8 @@ def paired_bootstrap_ci(
     if len(a) != len(b):
         raise ValueError("a and b must have the same length")
     ta, tb = _per_unit_table(a), _per_unit_table(b)
+    _check_resamples(n_resamples, level)
+    if clusters is not None and len(set(clusters)) < 2:
+        return math.nan, math.nan
     weights = bootstrap_weights(ta.shape[0], n_resamples, seed, clusters)
     return paired_ci_from_weights(ta, tb, _mean_stat, weights, level)

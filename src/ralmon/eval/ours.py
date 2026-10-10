@@ -192,7 +192,7 @@ class OursRunDetails:
     alpha_total: float | None
     n_tests: int
     per_test_alpha: float | None
-    presence_samples_without_availability_marks: int
+    presence_samples_without_availability_marks: int | None
     prediction_skips: tuple[tuple[str, int], ...]
     rejected_inputs: tuple[RejectedInput, ...]
     latencies_ms: tuple[float, ...]
@@ -500,7 +500,9 @@ class OursDetector:
             cfg.alpha if self._predictive else None,
             0 if stats is None else stats.n_tests,
             None if stats is None else stats.per_test_alpha,
-            0 if stats is None else stats.presence_samples_without_availability_marks,
+            None
+            if stats is None
+            else stats.presence_samples_without_availability_marks,
             () if stats is None else stats.prediction_skips,
             rejected,
             self._latencies(records, cfg.reorder_delay_ms),

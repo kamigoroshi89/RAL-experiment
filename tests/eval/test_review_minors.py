@@ -406,7 +406,7 @@ def test_the_loader_refuses_such_names_at_load_time(tmp_path: Path) -> None:
     doc["run_options"]["accepted_decisions"] = [
         "ADR-066"
     ]  # accepted, and in no guard: recorded, lifts nothing
-    config, opts = load_experiment(write_config(tmp_path / "c.yaml", doc))
+    _, opts = load_experiment(write_config(tmp_path / "c.yaml", doc))
     assert opts.accepted_decisions == ("ADR-066",)
 
 
