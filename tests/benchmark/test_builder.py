@@ -429,13 +429,18 @@ def test_cli_validate_placeholder_exits_2() -> None:
 def test_same_config_and_seed_reproduce_bytes(
     small: tuple[Path, Any, Path], tmp_path: Path
 ) -> None:
-    out, _, _ = small
-    again, _ = build(
-        tmp_path,
-        "again",
-        document=config_document(
-            tmp_path, variants=["nominal_content_robot", "outcome_reported"]
-        ),
+    """The same configuration FILE and seed: the manifest hashes the configuration, so a copy elsewhere differs."""
+    out, _, tmp = small
+    prior = LiteraturePriorSource(
+        tmp / "prior.yaml", strict=False, allow_fixture_only=True
+    )
+    again = tmp_path / "again"
+    generate_benchmark(
+        load_config(tmp / "config.yaml"),
+        prior,
+        again,
+        allow_fixture_only=True,
+        git_rev=GIT_REV,
     )
     first, second = files_of(out), files_of(again)
     assert sorted(first) == sorted(second)
@@ -464,6 +469,8 @@ def test_different_generation_seeds_differ(
         rel
         for rel in sorted(manifest.files)
         if rel.startswith("days/")
+        and rel
+        in other_manifest.files  # the ids are permuted by the seed: a twin may swap places with a virtual id
         and (out / rel).read_bytes() != (other / rel).read_bytes()
     ]
     assert changed, "another generation seed must change the day files"
@@ -1858,7 +1865,8 @@ def test_the_split_rationale_states_targets_not_counts() -> None:
     document = yaml.safe_load(DEFAULT_CONFIG.read_text(encoding="utf-8"))
     row = next(r for r in document["parameters"] if r["parameter"] == "split_fractions")
     text = row["rationale"] + " " + row["note"]
-    assert "100, 50 and 50" not in text
+    assert "TARGETS" in text and "pair" in text
     assert (
-        "target" in text and "pair" in text
-    )  # the fractions are targets; pair units make the patient counts vary
+        "varies with the generation seed" in text
+    )  # the counts per split are not guaranteed
+    assert "open decision for gab" in text

@@ -53,6 +53,7 @@ import json
 import math
 import platform
 import re
+import shutil
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -142,6 +143,7 @@ from ralmon.benchmark.schedule import (
 )
 from ralmon.benchmark.segments import SegmentError, SegmentIndex, SegmentLibrary
 from ralmon.benchmark.trace import (
+    MANIFEST_NAME,
     SPLITS,
     BenchmarkDay,
     GroundTruthEvent,
@@ -180,6 +182,7 @@ __all__ = [
     "BuiltDay",
     "BuiltPatient",
     "CohortSpec",
+    "ObservedViewError",
     "PatientInjections",
     "TruthUnavailableError",
     "generate_benchmark",
@@ -907,6 +910,13 @@ class BuildContext:
             "generator_design": file_sha256(config.generator_design_path),
             "injections": file_sha256(config.injections_path),
         }
+        if config.path is not None:
+            self.design_sha256["config"] = file_sha256(config.path)
+        self.prior_sha256: dict[str, str] = {}
+        for spec in config.cohorts:
+            prior_path = getattr(priors[spec.id], "path", None)
+            if isinstance(prior_path, Path) and prior_path.is_file():
+                self.prior_sha256[spec.id] = file_sha256(prior_path)
         try:
             self.registry = load_registry(
                 config.registry_path,
@@ -1110,10 +1120,41 @@ class BuildContext:
         index = 0
         for spec in self.config.cohorts:
             for _ in range(spec.n_patients):
-                params = self.draw_patient(index, spec.id)
-                units.append((params.patient_id, index, spec.id))
+                units.append((self._label(index, spec.id), index, spec.id))
                 index += 1
         return units
+
+    def _numbers(self) -> list[int]:
+        """The id numbers of all patients, virtual and twin, in one permutation drawn from the seed.
+
+        An id carries no role: a twin has the shape of a virtual patient (``p0042``), twin ids are not larger than
+        virtual ones, and member A is the lower number of its pair in about half of the pairs. The mapping from an id
+        to its role is in the manifest and the truth side only.
+        """
+        cached: list[int] | None = getattr(self, "_number_cache", None)
+        if cached is None:
+            total = self.config.total_patients + 2 * len(self.pair_units())
+            order = stream(
+                self.config.generation_seed, 0, None, StreamPurpose.PATIENT, 1
+            ).permutation(total)
+            cached = [int(x) for x in order]
+            self._number_cache = cached
+        return cached
+
+    def _label(self, slot: int, cohort_id: str) -> str:
+        label = f"p{self._numbers()[slot]:04d}"
+        return f"{cohort_id}-{label}" if len(self.config.cohorts) > 1 else label
+
+    def planned_ids(self) -> tuple[list[str], list[tuple[str, str]]]:
+        """The patient ids of the build: the virtual patients, and the ``(A, B)`` ids of every pair."""
+        virtual = [pid for pid, _, _ in self.patient_units()]
+        first = self.config.cohorts[0].id
+        base = self.config.total_patients
+        members = [
+            (self._label(base + 2 * k, first), self._label(base + 2 * k + 1, first))
+            for k in range(len(self.pair_units()))
+        ]
+        return virtual, members
 
     def draw_patient(
         self, patient_index: int, cohort: str | None = None
@@ -1124,11 +1165,9 @@ class BuildContext:
             self.config.generation_seed, patient_index, None, StreamPurpose.PATIENT
         )
         params = self.cohorts[cohort_id].prior.sample_patient(rng, patient_index)
-        if len(self.config.cohorts) > 1:
-            params = dataclasses.replace(
-                params, patient_id=f"{cohort_id}-{params.patient_id}"
-            )
-        return params
+        return dataclasses.replace(
+            params, patient_id=self._label(patient_index, cohort_id)
+        )
 
     def make_plan(self, patient_id: str, n_days: int) -> CarePlan:
         """The care plan of the whole record: SCHED per tick, day-end COUNT per day, and the B1 records."""
@@ -1697,6 +1736,25 @@ class BuildContext:
                     count += 1
         return out
 
+    def pair_base(
+        self, params: PatientParams, patient_index: int, ordinal: int
+    ) -> PairBase:
+        """The base of a pair member: the arguments the paired design shares (one dose and tick per ordinal)."""
+        cohort = self.cohorts[self.config.cohorts[0].id]
+        n_doses, n_ticks = (
+            len(self.schedule.dose_ticks_ms),
+            len(self.schedule.measurement_ticks_ms),
+        )
+        return PairBase(
+            params, self.schedule, cohort.assembly, self.response_model, cohort.errors,
+            self.measurement, self.jitter, self.library, f"plan-{params.patient_id}",
+            self.config.generation_seed, patient_index,
+            dose_index=ordinal % n_doses if n_doses else 0,
+            measurement_index=ordinal % n_ticks if n_ticks else 0,
+            nominal_bounce_gap_ms=self.design.nominal_bounce_gap_ms,
+            task_deadline_offset_ms=self.sched_window_ms,
+        )  # fmt: skip
+
     def build_pairs(
         self, first_index: int | None = None
     ) -> list[tuple[BuiltPatient, BuiltPatient]]:
@@ -1725,22 +1783,15 @@ class BuildContext:
             ),
             patient_index,
         )
-        ids = {"A": f"{pair_id}-A", "B": f"{pair_id}-B"}
-        n_doses, n_ticks = (
-            len(self.schedule.dose_ticks_ms),
-            len(self.schedule.measurement_ticks_ms),
-        )
+        number = patient_index - self.config.total_patients
+        ids = dict(zip(("A", "B"), self.planned_ids()[1][number], strict=True))
 
         def base_for(member: str) -> PairBase:
-            return PairBase(
-                dataclasses.replace(shared, patient_id=ids[member]), self.schedule, cohort.assembly,
-                self.response_model, cohort.errors, self.measurement, self.jitter, self.library,
-                f"plan-{ids[member]}", self.config.generation_seed, patient_index,
-                dose_index=ordinal % n_doses if n_doses else 0,
-                measurement_index=ordinal % n_ticks if n_ticks else 0,
-                nominal_bounce_gap_ms=self.design.nominal_bounce_gap_ms,
-                task_deadline_offset_ms=self.sched_window_ms,
-            )  # fmt: skip
+            return self.pair_base(
+                dataclasses.replace(shared, patient_id=ids[member]),
+                patient_index,
+                ordinal,
+            )
 
         flag = evaluate_pair(
             group, variant, base_for("A")
@@ -1830,38 +1881,46 @@ class BuildContext:
     ) -> Manifest:
         """Write already built patients and pairs, split them by patient, and write the manifest."""
         writer = _Writer(self, Path(out_dir))
-        units = {p.patient_id: (p,) for p in patients}
-        units.update({a.extra["pair"]: (a, b) for a, b in pairs})  # type: ignore[misc]
-        split = split_patients(
-            units, self.config.split_fractions, self.config.generation_seed
-        )
-        for unit_id, members in units.items():
-            for built in members:
-                writer.add(built, split[unit_id])
-        return writer.finish(git_rev)
+        try:
+            units = {p.patient_id: (p,) for p in patients}
+            units.update({a.extra["pair"]: (a, b) for a, b in pairs})  # type: ignore[misc]
+            split = split_patients(
+                units, self.config.split_fractions, self.config.generation_seed
+            )
+            for unit_id, members in units.items():
+                for built in members:
+                    writer.add(built, split[unit_id])
+            return writer.finish(git_rev)
+        except BaseException:
+            writer.abort()
+            raise
 
     def generate(self, out_dir: str | Path, *, git_rev: str | None = None) -> Manifest:
         """Build and write every patient and pair, one unit at a time (the memory of one patient)."""
         writer = _Writer(self, Path(out_dir))
-        singles = self.patient_units()
-        pairs = self.pair_units()
-        first_pair_index = self.config.total_patients
-        ids = [p for p, _, _ in singles] + [pair_id for pair_id, _, _, _ in pairs]
-        split = split_patients(
-            ids, self.config.split_fractions, self.config.generation_seed
-        )
-        for patient_id, index, cohort_id in singles:
-            params = self.draw_patient(index, cohort_id)
-            writer.add(
-                self.build_patient(params, index, None, cohort=cohort_id),
-                split[patient_id],
+        try:
+            singles = self.patient_units()
+            pairs = self.pair_units()
+            first_pair_index = self.config.total_patients
+            ids = [p for p, _, _ in singles] + [pair_id for pair_id, _, _, _ in pairs]
+            split = split_patients(
+                ids, self.config.split_fractions, self.config.generation_seed
             )
-        for number, (pair_id, group, variant, ordinal) in enumerate(pairs):
-            for built in self.build_pair(
-                pair_id, group, variant, first_pair_index + number, ordinal
-            ):
-                writer.add(built, split[pair_id])
-        return writer.finish(git_rev)
+            for patient_id, index, cohort_id in singles:
+                params = self.draw_patient(index, cohort_id)
+                writer.add(
+                    self.build_patient(params, index, None, cohort=cohort_id),
+                    split[patient_id],
+                )
+            for number, (pair_id, group, variant, ordinal) in enumerate(pairs):
+                for built in self.build_pair(
+                    pair_id, group, variant, first_pair_index + number, ordinal
+                ):
+                    writer.add(built, split[pair_id])
+            return writer.finish(git_rev)
+        except BaseException:
+            writer.abort()
+            raise
 
 
 def _next_counters(stream_: ObservedStream) -> tuple[int, int]:
@@ -1915,15 +1974,32 @@ class _Writer:
         self.root = root
         if root.exists() and (not root.is_dir() or any(root.iterdir())):
             raise BenchmarkConfigError(f"{root} exists and is not an empty directory")
+        self.created = not root.exists()
         root.mkdir(parents=True, exist_ok=True)
         self.files: dict[str, str] = {}
         self.patients: dict[str, dict[str, JsonValue]] = {}
-        self.counts: Counter[str] = Counter()
-        self.tail_counts: Counter[str] = Counter()
-        self.closing_counts: Counter[str] = Counter()
+        # headline counts are the virtual patients'; the confounder twins are counted apart
+        self.counts: dict[bool, Counter[str]] = {False: Counter(), True: Counter()}
+        self.tail_counts: dict[bool, Counter[str]] = {False: Counter(), True: Counter()}
+        self.closing_counts: dict[bool, Counter[str]] = {
+            False: Counter(),
+            True: Counter(),
+        }
+        self.n_patients: dict[bool, int] = {False: 0, True: 0}
+        self.n_days: dict[bool, int] = {False: 0, True: 0}
         self.disabled: set[str] = set()
         self.skipped: Counter[str] = Counter()
-        self.n_patient_days = 0
+
+    def abort(self) -> None:
+        """Remove what this build wrote: the directory if it created it, else only its contents."""
+        if self.created:
+            shutil.rmtree(self.root, ignore_errors=True)
+            return
+        for child in self.root.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
 
     def _record(self, relative: str) -> None:
         self.files[relative] = file_sha256(self.root / relative)
@@ -1960,7 +2036,8 @@ class _Writer:
                 relative,
             ):
                 self._record(rel)
-            counts = self.tail_counts if day.tail else self.counts
+            twin = built.role == ROLE_PAIR
+            counts = self.tail_counts[twin] if day.tail else self.counts[twin]
             start = index * T_DAY_MS
             for event in truth.ground_truth:
                 counts[f"{event.cls.value}/{event.subtype}"] += 1
@@ -1968,8 +2045,9 @@ class _Writer:
                 if (
                     day.tail and event.cls is InjectedClass.C1 and decided == start
                 ):  # the closing step of the last scored day (ADR-066)
-                    self.closing_counts[f"{event.cls.value}/{event.subtype}"] += 1
-        self.n_patient_days += built.n_scored_days
+                    self.closing_counts[twin][f"{event.cls.value}/{event.subtype}"] += 1
+        self.n_patients[built.role == ROLE_PAIR] += 1
+        self.n_days[built.role == ROLE_PAIR] += built.n_scored_days
         self.disabled |= built.disabled_subtypes
         self.skipped.update(built.skipped)
         entry: dict[str, JsonValue] = {
@@ -2017,9 +2095,22 @@ class _Writer:
             "python_version": platform.python_version(),
             "n_scored_days": config.n_days,
             "tail_day": True,
-            "n_patient_days": self.n_patient_days,
-            "tail_event_counts": dict(sorted(self.tail_counts.items())),
-            "closing_step_event_counts": dict(sorted(self.closing_counts.items())),
+            "n_patients": self.n_patients[False],
+            "n_patient_days": self.n_days[False],
+            "n_twin_patients": self.n_patients[True],
+            "n_twin_patient_days": self.n_days[True],
+            "tail_event_counts": dict(sorted(self.tail_counts[False].items())),
+            "closing_step_event_counts": dict(
+                sorted(self.closing_counts[False].items())
+            ),
+            "twin_event_counts": dict(sorted(self.counts[True].items())),
+            "twin_tail_event_counts": dict(sorted(self.tail_counts[True].items())),
+            "twin_closing_step_event_counts": dict(
+                sorted(self.closing_counts[True].items())
+            ),
+            "total_event_counts": dict(
+                sorted((self.counts[False] + self.counts[True]).items())
+            ),
             "cohorts": [c.id for c in config.cohorts],
             "split_fractions": {k: float(v) for k, v in config.split_fractions.items()},
             "registry_version": context.registry.version(),
@@ -2030,6 +2121,7 @@ class _Writer:
                 "authenticating_devices": list(config.authenticating_devices),
             },
             "design_sha256": dict(context.design_sha256),
+            "prior_sha256": dict(context.prior_sha256),
             "history_days": context.history_days,
             "pathway_template_id": config.pathway_template_id,
             "injection_rates": {
@@ -2057,7 +2149,7 @@ class _Writer:
             n_unverified=context.n_unverified_prior + context.n_unverified_design,
             patients=dict(sorted(self.patients.items())),
             files=dict(sorted(self.files.items())),
-            event_counts=dict(sorted(self.counts.items())),
+            event_counts=dict(sorted(self.counts[False].items())),
             settings=settings,
         )
         write_manifest(self.root, manifest)
@@ -2094,21 +2186,63 @@ def generate_benchmark(
 # ---------------------------------------------------------------------------------------------------
 
 
+class ObservedViewError(TraceError):
+    """The observed-only view of a benchmark was asked for truth, latent or generator state."""
+
+
+VIEW_FULL: Final = "full"
+VIEW_OBSERVED: Final = "observed"
+VIEWS: Final = (VIEW_FULL, VIEW_OBSERVED)
+
+
 class BenchmarkReader:
     """Read access to one benchmark directory, as WS06, WS07, WS08 and WS13 use it.
 
-    ``observed`` never touches ``truth/``; ``truth`` raises ``TruthUnavailableError`` when the directory has been
-    removed (an observed-only copy). ``days(patient)`` lists the SCORED days; the tail day (ADR-066) is
-    ``tail_day(patient)`` and is in no count; its events decided at its first step are ``closing_step_truth``.
+    Two views. ``view="full"`` (evaluation code) offers everything. ``view="observed"`` (inference-time code: the
+    monitor, the baselines, anything that fits or runs a detector) offers ONLY the observed days, the care plans, the
+    day lists and the split (``patients`` maps an id to ``split`` and ``cohort``); ``truth``, ``benchmark_day``,
+    ``closing_step_truth``, ``baseline_sbp``, ``manifest``, ``root`` and the role filters raise ``ObservedViewError``,
+    so that such code cannot reach the ground truth, the latent trace, the generator sidecar or the role of a patient.
+
+    ``days(patient)`` lists the SCORED days; the tail day (ADR-066) is ``tail_day(patient)`` and is in no count; its
+    C1 events decided at its first step are ``closing_step_truth``. The twin patients (``role: confounder_pair``) are
+    counted apart from the virtual patients: ``n_patient_days`` defaults to the virtual ones.
     """
 
-    def __init__(self, root: Path, manifest: Manifest) -> None:
-        self.root = root
-        self.manifest = manifest
+    def __init__(self, root: Path, manifest: Manifest, view: str = VIEW_FULL) -> None:
+        if view not in VIEWS:
+            raise BenchmarkConfigError(
+                f"view must be one of {list(VIEWS)}, got {view!r}"
+            )
+        self._root = root
+        self._manifest = manifest
+        self.view = view
+
+    def _full_only(self, what: str) -> None:
+        if self.view != VIEW_FULL:
+            raise ObservedViewError(
+                f"{what} is not available in the observed-only view"
+            )
+
+    @property
+    def root(self) -> Path:
+        self._full_only("root")
+        return self._root
+
+    @property
+    def manifest(self) -> Manifest:
+        self._full_only("the manifest")
+        return self._manifest
 
     @property
     def patients(self) -> Mapping[str, Mapping[str, JsonValue]]:
-        return self.manifest.patients
+        entries = self._manifest.patients
+        if self.view == VIEW_FULL:
+            return entries
+        return {
+            pid: {"split": e["split"], "cohort": e["cohort"]}
+            for pid, e in entries.items()
+        }
 
     def patient_ids(
         self,
@@ -2117,10 +2251,12 @@ class BenchmarkReader:
         role: str | None = None,
         cohort: str | None = None,
     ) -> tuple[str, ...]:
+        if role is not None:
+            self._full_only("a filter by role")
         return tuple(
             sorted(
                 pid
-                for pid, entry in self.patients.items()
+                for pid, entry in self._manifest.patients.items()
                 if (split is None or entry["split"] == split)
                 and (role is None or entry["role"] == role)
                 and (cohort is None or entry["cohort"] == cohort)
@@ -2129,9 +2265,20 @@ class BenchmarkReader:
 
     def _entry(self, patient_id: str) -> Mapping[str, JsonValue]:
         try:
-            return self.patients[patient_id]
+            return self._manifest.patients[patient_id]
         except KeyError:
             raise KeyError(f"no patient {patient_id!r} in the benchmark") from None
+
+    def n_patient_days(self, role: str | None = ROLE_PATIENT) -> int:
+        """Scored patient-days of the patients of ``role`` (default the virtual patients; None: all, twins included)."""
+        self._full_only("the day totals by role")
+        total = 0
+        for entry in self._manifest.patients.values():
+            n = entry["n_scored_days"]
+            assert isinstance(n, int)
+            if role is None or entry["role"] == role:
+                total += n
+        return total
 
     def days(self, patient_id: str) -> tuple[int, ...]:
         """The scored days of a patient (the tail day is not one of them)."""
@@ -2150,27 +2297,31 @@ class BenchmarkReader:
 
     def observed(self, patient_id: str, day_index: int) -> ObservedDay:
         self._check_day(patient_id, day_index)
-        return read_observed_day(self.root, patient_id, day_index)
+        return read_observed_day(self._root, patient_id, day_index)
 
     def truth(self, patient_id: str, day_index: int) -> TruthRecord:
+        self._full_only("the truth")
         self._check_day(patient_id, day_index)
-        if not (self.root / "truth").is_dir():
-            raise TruthUnavailableError(f"{self.root} has no truth directory")
-        return read_truth(self.root, patient_id, day_index)
+        if not (self._root / "truth").is_dir():
+            raise TruthUnavailableError(f"{self._root} has no truth directory")
+        return read_truth(self._root, patient_id, day_index)
 
     def benchmark_day(self, patient_id: str, day_index: int) -> BenchmarkDay:
+        self._full_only("the benchmark day")
         truth = self.truth(patient_id, day_index)
         return BenchmarkDay(
             self.observed(patient_id, day_index), truth.latent, truth.ground_truth
         )
 
     def closing_step_truth(self, patient_id: str) -> tuple[GroundTruthEvent, ...]:
-        """The events of the tail day decided at its first step: the truth of the closing step of the last scored day.
+        """The C1 events of the tail day decided at its first step: the truth of the closing step of the last scored day.
 
         A C1 event is decided at ``end_ms`` (a windowed obligation) or at ``onset_ms`` (a point event); the first step
         of the tail day is the instant ``tail_day * T_day``. The C2 and C3 events of the tail day are injected events of
-        that day, not decisions of the monitor at the shared step, so they are never part of it.
+        that day, not decisions of the monitor at the shared step, so they are never part of it (a C2 or C3 event that
+        starts exactly at that instant is therefore not scored on the last scored day: an open decision, builder.md).
         """
+        self._full_only("the closing-step truth")
         tail = self.tail_day(patient_id)
         if tail is None:
             return ()
@@ -2183,49 +2334,122 @@ class BenchmarkReader:
         )
 
     def baseline_sbp(self, patient_id: str, day_index: int) -> tuple[float, ...]:
-        """The latent baseline pressure of a day before the drug and the pulses (generator sidecar)."""
+        """The latent baseline pressure of a day before the drug and the pulses (generator sidecar, full view only).
+
+        It is generator state: without the truth directory (an observed-only copy) it is refused too.
+        """
+        self._full_only("the latent baseline")
         self._check_day(patient_id, day_index)
-        path = self.root / GENERATOR_DIR / patient_id / f"{day_index}.json"
-        if not path.is_file():
-            raise TruthUnavailableError(f"{path} is missing")
+        path = self._root / GENERATOR_DIR / patient_id / f"{day_index}.json"
+        if not (self._root / "truth").is_dir() or not path.is_file():
+            raise TruthUnavailableError(f"the generator sidecar {path} is unavailable")
         document = json.loads(path.read_text(encoding="utf-8"))
         return tuple(float(x) for x in document["baseline_sbp_mmhg"])
 
     def care_plan(self, care_plan_id: str) -> CarePlan:
         """The plan that an ``ObservedDay.care_plan_id`` names (``KeyError`` if it is unknown)."""
-        return read_care_plan(self.root, care_plan_id)
+        return read_care_plan(self._root, care_plan_id)
 
 
-def open_benchmark(manifest_path: str | Path, verify: bool = False) -> BenchmarkReader:
-    """Open a benchmark directory (or its ``manifest.json``); ``verify=True`` checks every file hash first."""
+def open_benchmark(
+    manifest_path: str | Path, verify: bool = False, view: str = VIEW_FULL
+) -> BenchmarkReader:
+    """Open a benchmark directory (or its ``manifest.json``); ``verify=True`` checks every file first.
+
+    ``view="observed"`` gives the view that a detector or the monitor must be handed (``BenchmarkReader``).
+    """
     path = Path(manifest_path)
     root = path.parent if path.name == "manifest.json" else path
     if verify:
-        verify_manifest(root)
-    return BenchmarkReader(root, read_manifest(root))
+        verify_benchmark(root)
+    return BenchmarkReader(root, read_manifest(root), view)
 
 
-def load_benchmark(manifest_path: str | Path, verify: bool = False) -> BenchmarkReader:
+def load_benchmark(
+    manifest_path: str | Path, verify: bool = False, view: str = VIEW_FULL
+) -> BenchmarkReader:
     """The name of the contract table (``#package-public-api``): the same as ``open_benchmark``."""
-    return open_benchmark(manifest_path, verify)
+    return open_benchmark(manifest_path, verify, view)
+
+
+# The injection vocabulary that no observed file may contain: the fields of an injection record, the names of the
+# subtypes of the three classes and of the confounder groups, the natural-subtype prefix and the template ids. A
+# string of an observed file (a key or a value) equal to one of them, or starting with the prefix, is a leak.
+_LEAK_PARTS: Final = (
+    "latent",
+    "ground_truth",
+    "injection",
+    "spontaneous_",
+    "confounder",
+)
+_RECORD_FIELDS: Final = (
+    "injected", "record_index", "truth_indices", "explains_in_later_days", "realised", "n_changed",
+    "evidence_paths", "confounder_group", "indistinguishable_by_construction", "variant_id", "template_id",
+    "expected_undetectable", "onset_ms", "end_ms", "duration_ms", "magnitude", "magnitude_unit",
+)  # fmt: skip
+
+
+def _leak_words() -> frozenset[str]:
+    from ralmon.benchmark.confounders import GROUPS as groups
+    from ralmon.benchmark.injection import registered_subtypes
+
+    words = {*_RECORD_FIELDS, *groups, *C1_SUBTYPES, "dose_omission"}
+    words |= {t.value for t in TemplateId}
+    for cls in (InjectedClass.C2, InjectedClass.C3):
+        words |= set(registered_subtypes(cls))
+    return frozenset(words)
+
+
+def _strings(node: object) -> Iterable[str]:
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, Mapping):
+        for key, value in node.items():
+            yield str(key)
+            yield from _strings(value)
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            yield from _strings(item)
+
+
+def _check_observed_file(root: Path, relative: str, words: frozenset[str]) -> None:
+    """Parse an observed file strictly (unknown keys, bad types and undeclared payload keys are errors) and scan it."""
+    _, pid, name = relative.split("/")
+    try:
+        day = read_observed_day(root, pid, int(name.removesuffix(".json")))
+        for event in day.events:
+            vocab.check_payload(event.kind, event.payload)
+        document = json.loads((root / relative).read_text(encoding="utf-8"))
+    except (TraceError, vocab.VocabularyError, ValueError, OSError) as exc:
+        raise TraceError(f"{relative}: not a clean observed day: {exc}") from exc
+    for text in _strings(document):
+        if text in words or any(part in text for part in _LEAK_PARTS):
+            raise TraceError(
+                f"{relative}: an observed file names {text!r}, which belongs to the truth side"
+            )
 
 
 def verify_benchmark(root: str | Path) -> int:
-    """Check that every file of the manifest exists with its recorded sha256 and that no observed file leaks truth.
+    """Check a benchmark directory: hashes, no unlisted file, strict observed days, no leaked vocabulary.
 
-    Raises ``ManifestError`` naming the first file that is missing or differs, ``TraceError`` for a leaking observed
-    file. Returns the number of files verified.
+    Raises ``ManifestError`` naming the first file that is missing, unlisted or differs, ``TraceError`` for an
+    observed file that does not parse as an ``ObservedDay`` (an unknown key, an undeclared payload key) or that names
+    latent data, ground truth or the injection vocabulary (record fields, subtype names, template ids). Every observed
+    file is parsed, so the check costs a read of the whole ``days/`` tree. Returns the number of files verified.
     """
     path = Path(root)
     verify_manifest(path)
     manifest = read_manifest(path)
+    on_disk = {
+        p.relative_to(path).as_posix() for p in path.rglob("*") if p.is_file()
+    } - {MANIFEST_NAME}
+    unlisted = sorted(on_disk - set(manifest.files))
+    if unlisted:
+        raise ManifestError(f"file not listed in the manifest: {unlisted[0]}")
+    words = _leak_words()
     for relative in sorted(manifest.files):
         if relative.startswith("days/"):
-            text = (path / relative).read_text(encoding="utf-8")
-            if '"latent"' in text or "ground_truth" in text:
-                raise TraceError(
-                    f"{relative}: an observed file names latent or truth data"
-                )
+            _check_observed_file(path, relative, words)
     for pid, entry in manifest.patients.items():
         tail = entry["tail_day_index"]
         if f"days/{pid}/{tail}.json" not in manifest.files:

@@ -42,22 +42,27 @@ EXIT_PROVENANCE = 3  # algorithmic: the exit code of a provenance error
 
 
 def git_revision(cwd: Path | None = None) -> str:
-    """``git rev-parse HEAD`` of the working tree (``-dirty`` appended if it has changes); ``unknown`` without git."""
-    try:
-        rev = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=cwd,
+    """``git rev-parse HEAD`` of the working tree; ``-dirty`` is appended if the generator may have changed.
+
+    Dirty means: a tracked file has changes, or an untracked file lies under ``src/`` or ``configs/`` (a new module
+    or configuration can change the output). Untracked files elsewhere (scratch notes) do not count. ``unknown``
+    without git.
+    """
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], capture_output=True, text=True, check=True, cwd=cwd
         ).stdout.strip()
-        changes = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=no"],
-            capture_output=True, text=True, check=True, cwd=cwd,
-        ).stdout.strip()  # fmt: skip
+
+    try:
+        rev = git("rev-parse", "HEAD")
+        tracked = git("status", "--porcelain", "--untracked-files=no")
+        untracked = git(
+            "status", "--porcelain", "--untracked-files=all", "--", ":/src", ":/configs"
+        )
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
-    return f"{rev}-dirty" if changes else rev
+    return f"{rev}-dirty" if tracked or untracked else rev
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -135,23 +140,30 @@ def _build(args: argparse.Namespace) -> int:
         allow_fixture_only=args.allow_fixture_only,
         git_rev=revision,
     )
-    scored = manifest.settings["n_patient_days"]
-    pairs = sum(1 for e in manifest.patients.values() if e["role"] == "confounder_pair")
+    settings = manifest.settings
+    twin_counts = settings["twin_event_counts"]
+    assert isinstance(twin_counts, dict)
     print(f"built {args.out}")
     print(
-        f"  benchmark version {manifest.benchmark_version}, generation seed {manifest.generation_seed}, revision {manifest.generator_git_rev}"
+        f"  benchmark version {manifest.benchmark_version}, generation seed {manifest.generation_seed}, "
+        f"revision {manifest.generator_git_rev}"
     )
     print(
-        f"  patients {len(manifest.patients)} ({len(manifest.patients) - pairs} virtual, {pairs} confounder twins)"
+        f"  virtual patients {settings['n_patients']}, scored patient-days {settings['n_patient_days']}, "
+        f"tail days {settings['n_patients']} (unscored, ADR-066)"
     )
     print(
-        f"  scored patient-days {scored}, tail days {len(manifest.patients)} (unscored, ADR-066)"
+        f"  twin patients {settings['n_twin_patients']}, scored twin days {settings['n_twin_patient_days']}, "
+        f"tail days {settings['n_twin_patients']} (unscored); the twins are not in the headline counts"
     )
     print(
-        f"  files {len(manifest.files)}, ground-truth events on scored days {sum(manifest.event_counts.values())}"
+        f"  files {len(manifest.files)}; ground-truth events on scored days of the virtual patients "
+        f"{sum(manifest.event_counts.values())}; events of the twins "
+        f"{sum(twin_counts.values())}"  # type: ignore[arg-type]
     )
     print(
-        f"  prior {manifest.prior_source_name}: fixture_only {str(manifest.fixture_only).lower()}, n_unfilled {manifest.n_unfilled}, n_unverified {manifest.n_unverified}"
+        f"  prior {manifest.prior_source_name}: fixture_only {str(manifest.fixture_only).lower()}, "
+        f"n_unfilled {manifest.n_unfilled}, n_unverified {manifest.n_unverified}"
     )
     return EXIT_OK
 
