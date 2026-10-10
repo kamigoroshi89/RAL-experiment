@@ -95,7 +95,6 @@ from ralmon.baselines.base import (
 )
 from ralmon.benchmark import ObservedDay
 from ralmon.monitor import PlanFeasibilityError
-from ralmon.monitor.parameters import check_alignment
 from ralmon.signals import MS_PER_HOUR, Event, EventKind, Sample, SignalId
 from ralmon.spec import CarePlan, RegistryError, TemplateId, TemplateInstance
 
@@ -287,9 +286,11 @@ class B1StaticThresholds(BaselineBase):
             if not t0 <= anchor < t0 + _T_DAY_MS:
                 continue  # an instance of another day (empty carry-over, ADR-061)
             window = self._number(instance, SCHED_WINDOW)
-            check_alignment(
-                {SCHED_WINDOW: window}, step, f"instance {instance.instance_key!r}"
-            )
+            if not (window >= 0.0 and window.is_integer() and int(window) % step == 0):
+                raise PlanFeasibilityError(
+                    f"instance {instance.instance_key!r}: window parameter {SCHED_WINDOW} = {window} is not a "
+                    f"non-negative multiple of step_ms {step}"
+                )
             checks.append(_Check(anchor, anchor + int(window)))
         checks.sort(key=lambda c: (c.deadline, c.anchor))
         return _Rules(band, hold, limit, tuple(checks))
