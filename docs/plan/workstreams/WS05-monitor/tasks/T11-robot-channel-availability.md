@@ -3,7 +3,7 @@ id: WS05-T11
 title: "Robot-channel availability from NODE_STATE colocated reports (ADR-054 (b))"
 workstream: WS05-monitor
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS05-T10"]
 critical_path: true
 non_negotiable: false

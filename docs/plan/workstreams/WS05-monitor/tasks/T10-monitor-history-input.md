@@ -3,7 +3,7 @@ id: WS05-T10
 title: "Monitor history input: run_offline replays the earlier days of the patient (ADR-046)"
 workstream: WS05-monitor
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS05-T04"]
 critical_path: true
 non_negotiable: false
@@ -74,3 +74,7 @@ Implemented in `src/ralmon/monitor/offline.py` (`history`, `MAX_HISTORY_DAYS = 1
 - Boundary step: the closing step of a day is the first step of the next one. Any other record at that step (an instance carried from the history, or decided exactly there) is returned by both runs; the contract says only that steps before the first step are not returned. Consumers that need "decided once" key by `(instance_key, t_eval_ms)`.
 - Contract text `#monitor` 0.2.0 is consistent with the implementation; the history items are typed `ObservedTrace` in code (the monitor imports only `ralmon.signals` and `ralmon.spec`), as `day` is.
 - Not changed: `Detector` has no history input (WS06-T01, ADR-046 status); `StreamingMonitor` has no history argument (the replay is the cadence of `run_offline`).
+
+### Post-task review (2026-10-10)
+
+Produced: `history` for `run_offline` and `run_offline_detailed` (replay of the earlier days on the continuing axis, output before `day_index * K` suppressed, bounded span `MAX_HISTORY_DAYS = 14`), 23 tests and a hand-computed two-day fixture. Independent review: PASS, no blocker; with `history=()` the output is byte-identical to master on 120 seeded random days. Deviations: two existing tests edited (stale once `history` exists); items typed `ObservedTrace`; the bound is on the span. Dependents: WS04-T15 and WS05-T11 become `ready`; WS04-T15's note on the boundary step is corrected (the two runs can disagree on the record at the shared step, so the owner is the run whose first step is the decision step), which WS04-T15 must settle with an ADR on event ownership across midnight (open point for gab). Open MINOR: the suppression of the previous day's day-end COUNT with a non-empty history is not in the `#monitor` 0.2.0 text (add a sentence at the next bump); `docs/formal/01` item 4 still speaks of negative times (cleanup); the per-field hostile loops of `test_history.py` call only `run_offline_detailed`. Risk: `Detector` still has no history input (WS06-T01).
