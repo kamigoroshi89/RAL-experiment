@@ -1,0 +1,31 @@
+# Smoke experiment of WS08-T01. ILLUSTRATIVE, UNVERIFIED, FIXTURE-ONLY: it runs the pipeline on the hand-written mini
+# benchmark of this directory (6 virtual patients of 2 days, one confounder pair), checks that the plumbing works and
+# produces no result. Every number below is a test value without a source, written here before the run (E9) and
+# never tuned; none is a clinical value. `headline: false`: the runner refuses `headline: true` on a fixture-only
+# benchmark or registry.
+experiment_id: smoke
+benchmark_manifest: mini_benchmark          # relative to this file
+detectors: [B1, B3, ours]
+seeds: [0]
+split: {train: 0.34, calibration: 0.33, test: 0.33}   # 6 patients: 2, 2, 2 (largest remainder)
+match: {tolerance_ms: 60000, time_reference: first_decidable}   # test value: one monitor step
+alpha: 0.5                                   # test value: the calibration set is tiny
+monitor:
+  step_ms: 60000
+  reorder_delay_ms: 0
+  predictive: true
+  alpha: 0.5
+  variant: likely
+  registry_version: "0.0.0"
+run_options:
+  headline: false
+  alpha_grid: [0.5]
+  n_bootstrap: 50                            # test value
+  ci_level: 0.95                             # test value
+  ece_bins: 5                                # test value
+  registry: registry.yaml                    # the fixture registry, relative to this file
+  allow_fixture_only: true
+  required_analysis: []
+  detector_params:
+    timing_tail_ms: 90000000                 # test value: 25 h, long enough for the day-end COUNT
+    forecaster: {continuous: persistence}

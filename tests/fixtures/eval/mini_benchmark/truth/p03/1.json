@@ -1,0 +1,47 @@
+{
+  "behaviour_log": [],
+  "ground_truth": [
+    {
+      "cls": "C1",
+      "confounder_group": null,
+      "end_ms": 172800000,
+      "injected": true,
+      "onset_ms": 172800000,
+      "subtype": "dose_omission",
+      "template_id": "count"
+    }
+  ],
+  "injection_log": [],
+  "latent": {
+    "day_index": 1,
+    "events": [],
+    "patient_id": "p03",
+    "samples": [
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "bp",
+        "t_device_ms": 115200000,
+        "t_rx_ms": 115200000,
+        "value": 125.0
+      },
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "bp",
+        "t_device_ms": 122400000,
+        "t_rx_ms": 122400000,
+        "value": 124.0
+      },
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "bp",
+        "t_device_ms": 136800000,
+        "t_rx_ms": 136800000,
+        "value": 122.0
+      }
+    ],
+    "seed": 0
+  }
+}
