@@ -52,3 +52,9 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 ## ADR-035 accettata (2026-10-09)
 
 - gab ha accettato le convenzioni sulle evidenze della traccia con il nuovo membro `EventKind.VERIFICATION`: una verifica fallita al gateway è un evento `verification` (sorgente il gateway, chiavi `verification` e `subject`) e non viaggia più su `DEVICE_ERROR`, che resta un guasto del dispositivo con il solo `error_code`. Un Sample `auth` esiste solo per un dispense verificato. `#trace-schema` passa a 0.2.0 (membro e regole 5-7); aggiornati `ralmon.signals`, il vocabolario e l'iniettore C3 del benchmark, il confronto dei confondenti e `docs/models/evidence-channels.md` (EC-GAP-4 chiuso). Note di passaggio in WS07-T03 (manca la riga `verification` nella mappatura dei messaggi) e WS10-T02.
+
+## Proprietà del passo di mezzanotte decisa (ADR-064, 2026-10-10)
+
+- gab ha scelto la mossa A: la verità di un evento è il verdetto di una corsa che ha tutti i dati fino all'istante di decisione compreso. Un record deciso al passo condiviso (chiusura del giorno d-1, primo passo del giorno d) appartiene al giorno che inizia lì; eccezione: il COUNT di fine giorno resta al giorno che chiude. Nessuna tolleranza in minuti (le finestre sono già chiuse). WS04-T15 è pronto, con quattro test nuovi nelle sue note.
+- Proposta separata ADR-065 (tempo minimo tra due dosi): oggi la specifica non ha una regola di spaziatura, COUNT limita solo il numero di dosi nelle 24 ore. Nessun valore fissato; fuori dal percorso critico.
+
