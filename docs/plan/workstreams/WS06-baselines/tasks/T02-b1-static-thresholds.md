@@ -3,7 +3,7 @@ id: WS06-T02
 title: B1 static thresholds with simple schedule logic
 workstream: WS06-baselines
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS06-T01", "WS01-T03", "WS05-T02"]
 critical_path: true
 non_negotiable: false
@@ -127,3 +127,7 @@ Changed: `src/ralmon/baselines/b1_static_thresholds.py` (new: `B1StaticThreshold
 Mutants run in copies and killed in this round: `in_day = device >= t0`; `>= -step`; window without the upper bound; day guard `<=` and `t0 <` ; alignment `% step >= 0`; window `> 0.0`.
 
 Verification after review round 1 (exit codes): `pytest tests/baselines/test_b1_static_thresholds.py -q` 0 (81 passed); `pytest tests/baselines -q` 0 (227 passed); `pytest -q` 0 (5669 passed, 1 skipped); `ruff check src tests` 0; `ruff format --check src tests` 0; `mypy src/ralmon` 0; the import line 0; `pytest tests/test_public_api.py -q` 0; `python3 tools/check_plan.py` 0; both Done-when greps print nothing (grep exit 1).
+
+### Post-task review (2026-10-10)
+
+Produced: `B1StaticThresholds` (rules R1 to R4: band, hold threshold, schedule deadline, 24 h dose limit; thresholds read only through the logged registry and plan wrappers), `B1RunStats` with `rules_active`, 81 tests. Independent review: PASS, no blocker. A seeded differential run against the monitor (200 days, two delays, RANGE, HOLD threshold, SCHED, COUNT) shows zero disagreement on clean days, with late inputs and with off-grid times, boundary values included; the remaining disagreements have six known causes (duplicates, sample without MEASUREMENT event and the reverse, stale HOLD, deadline after midnight, M1). The review's M1 (an input stamped within one step before the day) is fixed test-first and re-checked by the orchestrator in a temporary copy (the old rule fails the new test); 2 surviving mutants and the window-alignment drift are now covered. OPEN DECISIONS FOR GAB: (1) B1 is minimal on purpose (no HOLD look-back rule, no day-end minimum-dose rule; with stale dispenses the monitor flags and B1 does not in about a third of the cases), so its recall on missed doses must not be called 'equal clinical knowledge'; the alternative adds R2' and R5 and changes test 13; (2) vacuity: a rule is silent when the plan has no parameter record, so with the monitor's own plan helper `rules_active == ('R3',)`; WS04-T11 must write RANGE, HOLD and COUNT parameter records and WS06-T07 / WS08-T01 must fail unless `rules_active == ("R1","R2","R3","R4")`; (3) B1 is reported per class (RESP, SYS and INT have no rule) and its constant score is one operating point, not an AUROC candidate. Dependents: WS06-T07 (asymmetries M5, M6 listed), WS08-T01, WS08-T02.
