@@ -211,3 +211,20 @@ def test_score_of_a_zero_bound_is_positive_zero(registry_and_templates) -> None:
     record = make_record("range", hi=-0.0, lo=-0.0, sigma_norm=(-0.0, -0.0))
     alert = _alert(record, registry, templates)
     assert str(alert.score) == "0.0"
+
+
+def test_alert_rho_may_be_none_by_contract_and_adr_059() -> None:
+    """The widening of ``Alert.rho`` is in the contract and in a proposed ADR, not only in the code."""
+    import typing
+
+    from ralmon.attribution import Alert
+
+    assert (
+        "rho: Rho | None"
+        in CONTRACT.split("## Alert\n", 1)[1].split("## EvidenceVector", 1)[0]
+    )
+    decisions = (ROOT / "docs" / "plan" / "03-decisions.md").read_text(encoding="utf-8")
+    adr = decisions.split("## ADR-059", 1)[1]
+    assert "[DA-CONFERMARE]" in adr.splitlines()[0]
+    hints = typing.get_type_hints(Alert, include_extras=True)
+    assert type(None) in typing.get_args(hints["rho"])
