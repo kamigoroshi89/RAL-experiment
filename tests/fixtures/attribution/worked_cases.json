@@ -1,0 +1,1627 @@
+{
+ "source": "docs/models/attribution-rule.md, section Worked cases (W-11, the cascade case, is in test_cascades.py)",
+ "cases": [
+  {
+   "id": "W-01",
+   "variant_of": null,
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C1",
+   "decisive": [
+    "system.node_lifecycle",
+    "system.diagnostics_ok",
+    "system.liveliness_ok",
+    "system.qos_deadline_missed",
+    "system.ble_link_quality",
+    "signal_quality.cuff_error_code",
+    "cross_device.pulse_vs_ecg_hr_diff",
+    "crypto_temporal.authenticated",
+    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.timestamp_implausible"
+   ],
+   "reason": null,
+   "row": 5,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-02",
+   "variant_of": null,
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "C1",
+   "decisive": [
+    "system.node_lifecycle",
+    "system.diagnostics_ok",
+    "system.liveliness_ok",
+    "system.qos_deadline_missed",
+    "system.ble_link_quality",
+    "system.nav_task_failed",
+    "system.manip_task_failed",
+    "signal_quality.cuff_error_code",
+    "cross_device.pulse_vs_ecg_hr_diff",
+    "witness.identity_confirmed",
+    "witness.intake_observed",
+    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.timestamp_implausible"
+   ],
+   "reason": null,
+   "row": 5,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "witness.robot_present": true,
+    "witness.identity_confirmed": true,
+    "witness.intake_observed": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-02-A4",
+   "variant_of": "W-02",
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-02-auth",
+   "variant_of": "W-02",
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "C1",
+   "decisive": [
+    "system.node_lifecycle",
+    "system.diagnostics_ok",
+    "system.liveliness_ok",
+    "system.qos_deadline_missed",
+    "system.ble_link_quality",
+    "system.nav_task_failed",
+    "system.manip_task_failed",
+    "signal_quality.cuff_error_code",
+    "cross_device.pulse_vs_ecg_hr_diff",
+    "crypto_temporal.authenticated",
+    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.timestamp_implausible"
+   ],
+   "reason": null,
+   "row": 5,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false,
+    "crypto_temporal.authenticated": true
+   }
+  },
+  {
+   "id": "W-02-nowit",
+   "variant_of": "W-02",
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-02-witness-only",
+   "variant_of": "W-02",
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-02-auth-witness",
+   "variant_of": "W-02",
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "C1",
+   "decisive": [
+    "system.node_lifecycle",
+    "system.diagnostics_ok",
+    "system.liveliness_ok",
+    "system.qos_deadline_missed",
+    "system.ble_link_quality",
+    "system.nav_task_failed",
+    "system.manip_task_failed",
+    "signal_quality.cuff_error_code",
+    "cross_device.pulse_vs_ecg_hr_diff",
+    "crypto_temporal.authenticated",
+    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.timestamp_implausible"
+   ],
+   "reason": null,
+   "row": 5,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "witness.robot_present": true,
+    "witness.identity_confirmed": true,
+    "witness.intake_observed": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false,
+    "crypto_temporal.authenticated": true
+   }
+  },
+  {
+   "id": "W-02-auth-A4",
+   "variant_of": "W-02",
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false,
+    "crypto_temporal.authenticated": true
+   }
+  },
+  {
+   "id": "W-03",
+   "variant_of": null,
+   "template": "sys",
+   "kind": "phi_sys",
+   "kappa": "C2",
+   "decisive": [
+    "system.node_lifecycle",
+    "signal_quality.cuff_error_code"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "inactive"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "E1",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-03-sched",
+   "variant_of": "W-03",
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "C2",
+   "decisive": [
+    "system.node_lifecycle",
+    "signal_quality.cuff_error_code"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "inactive",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "signal_quality.cuff_error_code": "E1",
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-04",
+   "variant_of": null,
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C1",
+   "decisive": [
+    "system.node_lifecycle",
+    "system.diagnostics_ok",
+    "system.liveliness_ok",
+    "system.qos_deadline_missed",
+    "system.ble_link_quality",
+    "signal_quality.cuff_error_code",
+    "cross_device.pulse_vs_ecg_hr_diff",
+    "crypto_temporal.authenticated",
+    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.timestamp_implausible"
+   ],
+   "reason": null,
+   "row": 5,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-05",
+   "variant_of": null,
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "C2",
+   "decisive": [
+    "system.nav_task_failed"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": true,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": true,
+    "system.manip_task_failed": false,
+    "signal_quality.cuff_error_code": "",
+    "crypto_temporal.seq_gap_or_replay": false
+   }
+  },
+  {
+   "id": "W-05-A4",
+   "variant_of": "W-05",
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": true,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.cuff_error_code": "",
+    "crypto_temporal.seq_gap_or_replay": false
+   }
+  },
+  {
+   "id": "W-05-live",
+   "variant_of": "W-05",
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "C2",
+   "decisive": [
+    "system.liveliness_ok"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.cuff_error_code": "",
+    "crypto_temporal.seq_gap_or_replay": false
+   }
+  },
+  {
+   "id": "W-05-live-A4",
+   "variant_of": "W-05",
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": true,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.cuff_error_code": "",
+    "crypto_temporal.seq_gap_or_replay": false
+   }
+  },
+  {
+   "id": "W-05-silent",
+   "variant_of": "W-05",
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": true,
+    "system.nav_task_failed": false
+   }
+  },
+  {
+   "id": "W-05-silent-040",
+   "variant_of": "W-05",
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": true,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false
+   }
+  },
+  {
+   "id": "W-05-late-traffic",
+   "variant_of": "W-05",
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "C1",
+   "decisive": [
+    "system.node_lifecycle",
+    "system.diagnostics_ok",
+    "system.liveliness_ok",
+    "system.qos_deadline_missed",
+    "system.ble_link_quality",
+    "system.nav_task_failed",
+    "system.manip_task_failed",
+    "signal_quality.cuff_error_code",
+    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.timestamp_implausible"
+   ],
+   "reason": null,
+   "row": 5,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": true,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "signal_quality.cuff_error_code": "",
+    "crypto_temporal.seq_gap_or_replay": false,
+    "system.diagnostics_ok": true,
+    "system.qos_deadline_missed": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-05-deliberate",
+   "variant_of": "W-05",
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [
+    "system.node_lifecycle"
+   ],
+   "reason": "conflict",
+   "row": 6,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "inactive+commanded",
+     "robot": "active"
+    },
+    "system.liveliness_ok": true,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "signal_quality.cuff_error_code": "",
+    "crypto_temporal.seq_gap_or_replay": false
+   }
+  },
+  {
+   "id": "W-06",
+   "variant_of": null,
+   "template": "count",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "dispenser": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-07",
+   "variant_of": null,
+   "template": "count",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "dispenser": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-08",
+   "variant_of": null,
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C3",
+   "decisive": [
+    "crypto_temporal.authenticated"
+   ],
+   "reason": null,
+   "row": 1,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": false,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-08-U",
+   "variant_of": "W-08",
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C3",
+   "decisive": [
+    "system.ble_link_quality",
+    "crypto_temporal.seq_gap_or_replay"
+   ],
+   "reason": null,
+   "row": 2,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.timestamp_implausible": true
+   }
+  },
+  {
+   "id": "W-08-U-noseq",
+   "variant_of": "W-08",
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [
+    "crypto_temporal.timestamp_implausible"
+   ],
+   "reason": "conflict",
+   "row": 6,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.timestamp_implausible": true
+   }
+  },
+  {
+   "id": "W-09",
+   "variant_of": null,
+   "template": "int",
+   "kind": "phi_int",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "provenance_only",
+   "row": 7,
+   "fields": {
+    "system.node_lifecycle": {
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "witness.robot_present": false,
+    "witness.intake_observed": false,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-09-A4",
+   "variant_of": "W-09",
+   "template": "int",
+   "kind": "phi_int",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "provenance_only",
+   "row": 7,
+   "fields": {
+    "system.node_lifecycle": {
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-09-A",
+   "variant_of": "W-09",
+   "template": "int",
+   "kind": "phi_int",
+   "kappa": "C3",
+   "decisive": [
+    "crypto_temporal.authenticated"
+   ],
+   "reason": null,
+   "row": 1,
+   "fields": {
+    "system.node_lifecycle": {
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "witness.robot_present": false,
+    "witness.intake_observed": false,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false,
+    "crypto_temporal.authenticated": false
+   }
+  },
+  {
+   "id": "W-09-lag",
+   "variant_of": "W-09",
+   "template": "int",
+   "kind": "phi_int",
+   "kappa": "C2",
+   "decisive": [
+    "system.liveliness_ok"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": false,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "witness.robot_present": false,
+    "witness.intake_observed": false,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-09-lag-late",
+   "variant_of": "W-09",
+   "template": "int",
+   "kind": "phi_int",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "provenance_only",
+   "row": 7,
+   "fields": {
+    "system.node_lifecycle": {
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "witness.robot_present": false,
+    "witness.intake_observed": false,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-09-jump",
+   "variant_of": "W-09",
+   "template": "int",
+   "kind": "phi_int",
+   "kappa": "C2",
+   "decisive": [
+    "system.ble_link_quality"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": {
+     "rel": "below",
+     "param": "ble_link_quality_floor"
+    },
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "witness.robot_present": false,
+    "witness.intake_observed": false,
+    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-09-resp",
+   "variant_of": "W-09",
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [
+    "witness.intake_observed"
+   ],
+   "reason": "conflict",
+   "row": 6,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "system.nav_task_failed": false,
+    "system.manip_task_failed": false,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "witness.robot_present": true,
+    "witness.intake_observed": false,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-10",
+   "variant_of": null,
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C1",
+   "decisive": [
+    "system.node_lifecycle",
+    "system.diagnostics_ok",
+    "system.liveliness_ok",
+    "system.qos_deadline_missed",
+    "system.ble_link_quality",
+    "signal_quality.cuff_error_code",
+    "cross_device.pulse_vs_ecg_hr_diff",
+    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.timestamp_implausible"
+   ],
+   "reason": null,
+   "row": 5,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-10-A",
+   "variant_of": "W-10",
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C3",
+   "decisive": [
+    "crypto_temporal.authenticated"
+   ],
+   "reason": null,
+   "row": 1,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false,
+    "crypto_temporal.authenticated": false
+   }
+  },
+  {
+   "id": "W-12-range",
+   "variant_of": null,
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {}
+  },
+  {
+   "id": "W-12-sched",
+   "variant_of": null,
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {}
+  },
+  {
+   "id": "W-12-hold",
+   "variant_of": null,
+   "template": "hold",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {}
+  },
+  {
+   "id": "W-12-count",
+   "variant_of": null,
+   "template": "count",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {}
+  },
+  {
+   "id": "W-12-resp",
+   "variant_of": null,
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {}
+  },
+  {
+   "id": "W-12-sys",
+   "variant_of": null,
+   "template": "sys",
+   "kind": "phi_sys",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "provenance_only",
+   "row": 7,
+   "fields": {}
+  },
+  {
+   "id": "W-12-int",
+   "variant_of": null,
+   "template": "int",
+   "kind": "phi_int",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "provenance_only",
+   "row": 7,
+   "fields": {}
+  },
+  {
+   "id": "W-13",
+   "variant_of": null,
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C2",
+   "decisive": [
+    "signal_quality.ecg_sqi",
+    "cross_device.pulse_vs_ecg_hr_diff"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "below",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "above",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-13-C3",
+   "variant_of": "W-13",
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C3",
+   "decisive": [
+    "signal_quality.ecg_sqi",
+    "signal_quality.ppg_sqi",
+    "cross_device.pulse_vs_ecg_hr_diff"
+   ],
+   "reason": null,
+   "row": 3,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "above",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-13-U",
+   "variant_of": "W-13",
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "above",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-14",
+   "variant_of": null,
+   "template": "sys",
+   "kind": "phi_sys",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "provenance_only",
+   "row": 7,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-14-code",
+   "variant_of": "W-14",
+   "template": "sys",
+   "kind": "phi_sys",
+   "kappa": "C2",
+   "decisive": [
+    "signal_quality.cuff_error_code"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "E1",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-15",
+   "variant_of": null,
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C2",
+   "decisive": [
+    "system.node_lifecycle",
+    "system.ble_link_quality"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "link_down"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": {
+     "rel": "below",
+     "param": "ble_link_quality_floor"
+    },
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-15-alone",
+   "variant_of": "W-15",
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [
+    "system.ble_link_quality",
+    "crypto_temporal.seq_gap_or_replay"
+   ],
+   "reason": "conflict",
+   "row": 6,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": {
+     "rel": "between_floor_and_one",
+     "param": "ble_link_quality_floor"
+    },
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-15-repeat",
+   "variant_of": "W-15",
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C3",
+   "decisive": [
+    "system.ble_link_quality",
+    "crypto_temporal.seq_gap_or_replay"
+   ],
+   "reason": null,
+   "row": 2,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": 1.0,
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.authenticated": true,
+    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-15-jump",
+   "variant_of": "W-15",
+   "template": "range",
+   "kind": "phi_cp",
+   "kappa": "C2",
+   "decisive": [
+    "system.ble_link_quality"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active"
+    },
+    "system.diagnostics_ok": true,
+    "system.liveliness_ok": true,
+    "system.qos_deadline_missed": false,
+    "system.ble_link_quality": {
+     "rel": "below",
+     "param": "ble_link_quality_floor"
+    },
+    "signal_quality.ecg_sqi": {
+     "rel": "at_or_above",
+     "param": "ecg_sqi_floor"
+    },
+    "signal_quality.ppg_sqi": {
+     "rel": "at_or_above",
+     "param": "ppg_sqi_floor"
+    },
+    "signal_quality.cuff_error_code": "",
+    "cross_device.pulse_vs_ecg_hr_diff": {
+     "rel": "within",
+     "param": "hr_coherence_tolerance"
+    },
+    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.timestamp_implausible": false
+   }
+  },
+  {
+   "id": "W-11",
+   "variant_of": null,
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "C2",
+   "decisive": [
+    "system.liveliness_ok"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": false
+   }
+  },
+  {
+   "id": "W-11-resp",
+   "variant_of": "W-11",
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "C2",
+   "decisive": [
+    "system.liveliness_ok"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": false
+   }
+  },
+  {
+   "id": "W-11-hold",
+   "variant_of": "W-11",
+   "template": "hold",
+   "kind": "phi_cp",
+   "kappa": "C2",
+   "decisive": [
+    "system.liveliness_ok"
+   ],
+   "reason": null,
+   "row": 4,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": false
+   }
+  },
+  {
+   "id": "W-11-late-root",
+   "variant_of": "W-11",
+   "template": "hold",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [],
+   "reason": "insufficient",
+   "row": 8,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": true
+   }
+  },
+  {
+   "id": "W-11-deliberate",
+   "variant_of": "W-11",
+   "template": "sched",
+   "kind": "phi_cp",
+   "kappa": "UNDETERMINED",
+   "decisive": [
+    "system.node_lifecycle"
+   ],
+   "reason": "conflict",
+   "row": 6,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "inactive+commanded",
+     "robot": "active"
+    }
+   }
+  },
+  {
+   "id": "W-11-c3",
+   "variant_of": "W-11",
+   "template": "resp",
+   "kind": "phi_cp",
+   "kappa": "C3",
+   "decisive": [
+    "crypto_temporal.authenticated"
+   ],
+   "reason": null,
+   "row": 1,
+   "fields": {
+    "system.node_lifecycle": {
+     "cuff": "active",
+     "dispenser": "active",
+     "robot": "active"
+    },
+    "system.liveliness_ok": false,
+    "crypto_temporal.authenticated": false
+   }
+  }
+ ]
+}

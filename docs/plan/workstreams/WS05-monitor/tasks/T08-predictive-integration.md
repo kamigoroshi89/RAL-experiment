@@ -3,7 +3,7 @@ id: WS05-T08
 title: "Predictive integration and run_offline end to end"
 workstream: WS05-monitor
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS05-T05", "WS05-T06", "WS05-T07", "WS01-T08"]
 critical_path: true
 non_negotiable: false
@@ -117,3 +117,7 @@ Point (1) is settled: WS05-T11 handles the `NODE_STATE colocated` report inside 
 ### Hand-over (worker, 2026-10-10, from WS05-T06)
 
 Take every allocated level from `BonferroniAllocation.per_test_exact(alpha_total, n_tests)` (a `Fraction`) and pass it to `quantile` and `predict`; the float `per_test` can misrank (for example 0.05 / 3 on 59 scores gives `+inf` instead of 58). `AdaptiveConformal` keeps the exact rank of a `Fraction` level until its first update. An alert of the variant "possible" whose lower quantile is `-inf` (level below `1 / (n + 1)`) is emitted with `rho.value == 0.0` (`docs/formal/06-rho-proposition1.md` section 4.6); it carries no information and must be displayed as such. See ADR-058 and `#conformal-calibrator` 0.2.0.
+
+### Hand-over from WS05-T07 (worker, 2026-10-10, review fixes)
+
+`alert_from_record` needs `VerdictRecord.predicted_sigma_norm` for a PREDICTED_VIOLATION record: without it the record makes no alert (`AttributionInputError`, listed in `RuleAttributor.failures`, logged; the other alerts of the batch are returned). `Alert.rho` may be `None` (ADR-059). `RuleAttributor.update` must be called after the evidence cut-off of a record (an alert is frozen on its first VIOLATED record). The real registry lacks the seven names of OPF-6 (`docs/formal/08-consistency-review.md`): `HierarchicalRule` and `EvidenceExtractor` raise one `RegistryError` that lists them, so an end-to-end test (test 19) needs the fixture registry `tests/fixtures/attribution/registry_attribution.yaml` or the names in the registry.

@@ -103,3 +103,7 @@ From the repository root; steps needing ROS 2 run in the workspace sourced as in
 ### ADR-054 decided (gab, 2026-10-09)
 
 Point (1) is settled by WS05-T11: pass the robot `NODE_STATE` events to `push_event` as they arrive; the monitor derives the availability of both channels itself. Do not call `push_availability` for the same report a second time.
+
+### Hand-over from WS05-T07 (worker, 2026-10-10, review fixes)
+
+(1) Call `RuleAttributor.update` only after the evidence cut-off of the record (`decided_at_ms + reorder delay + evidence_grace_ms`): an alert is frozen on its first VIOLATED record, so a call made before the evidence has arrived freezes UNDETERMINED permanently. (2) Isolate per-record exceptions in the node: `update` and `attribute_all` isolate only a record that cannot make an alert (`AttributionInputError`: a predicted record without `predicted_sigma_norm`; listed in `RuleAttributor.failures` and logged); a `RegistryError` (for example `UnsetParameterError` for `priority_sys` or `priority_int`) propagates and would otherwise stop the batch. (3) The extractor keeps every input it is given: drop old days from it. (4) `Alert.rho` may be `None` (ADR-059, `#alert` 0.1.1): the converter to the ROS 2 message needs an optional `rho`. (5) H-INIT divergence between the extractor and the monitor is wider than the WS05-T11 note says: with the first robot report dropped the monitor reads the channels available and can say VIOLATED while the extractor reads every witness field `None` (44 of 1000 random draws); kappa is not affected.

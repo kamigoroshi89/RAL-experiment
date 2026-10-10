@@ -3,7 +3,7 @@ id: WS06-T01
 title: Detector protocol implementation and common harness
 workstream: WS06-baselines
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS05-T01", "WS04-T01", "WS05-T03", "WS05-T07"]
 critical_path: true
 non_negotiable: false

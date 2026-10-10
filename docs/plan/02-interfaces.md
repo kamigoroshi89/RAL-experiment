@@ -489,7 +489,7 @@ Rules of 0.2.0 (ADR-053, ADR-046). (1) `registry` defaults to `load_registry(ste
 
 ## Alert
 
-Version 0.1.0. Owner WS01. Consumers: WS02, WS05, WS06, WS08, WS09, WS11. Sources: analisi §4.2 (σ̃), §4.4 (ρ), §4.5 (κ), §4.8 (traceability wording), §4.9 item 3 (cascades).
+Version 0.1.1 (ADR-059: `Alert.rho` may be `None`). Owner WS01. Consumers: WS02, WS05, WS06, WS08, WS09, WS11. Sources: analisi §4.2 (σ̃), §4.4 (ρ), §4.5 (κ), §4.8 (traceability wording), §4.9 item 3 (cascades).
 
 The output tuple ⟨τ, κ, σ̃, ρ, ξ⟩ with explicit semantics per field.
 
@@ -522,7 +522,7 @@ class Alert(Detection):
     tau: TemplateId                   # violated template (constraint)
     kappa: AttributedCause            # attributed cause; UNDETERMINED is a valid output
     sigma_norm: float                 # normalised robustness in [-1, 0) for a violation
-    rho: Rho                          # confidence with declared kind and guarantee
+    rho: Rho | None                   # confidence with declared kind and guarantee; None when the record has no confidence (ADR-059)
     xi: Explanation
     verdict: VerdictState             # VIOLATED or PREDICTED_VIOLATION
     priority: int                     # clinician-assigned template priority
@@ -534,6 +534,7 @@ Semantics:
 
 - σ̃ answers "how badly is the prescribed care violated" in clinical scale units; ρ answers "how confidently can the violation be claimed", with its `kind` telling which guarantee applies. They are complementary, not orthogonal (analisi §4.8).
 - κ is produced by the attribution layer, never by the sub-formula alone (analisi §4.5). A value of `UNDETERMINED` is not an error.
+- `rho` is `None` exactly when the `VerdictRecord` has no confidence (the monitor has no error model for a MEASURED value). A violated verdict is always reported, so the alert is still issued; consumers of `Alert.rho` (calibration, ECE, ranking by confidence) filter `None` and never read it as 0 (ADR-059).
 - A cascade effect (for example a counter violation caused by a C2 missed measurement) carries `caused_by` and is not shown as a separate top-level alert (analisi §4.9 item 3).
 - Ordering of alerts uses `rank_alerts` from `#template`.
 
