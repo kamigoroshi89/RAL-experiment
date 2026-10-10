@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from ralmon.baselines._stubs import B2AnomalyDetection, B4ConformalOnly
+from ralmon.baselines._stubs import B2AnomalyDetection
 from ralmon.baselines.b1_static_thresholds import B1StaticThresholds
 from ralmon.baselines.b3_plain_stl import B3PlainSTL
+from ralmon.baselines.b4_conformal_only import B4ConformalOnly
 from ralmon.baselines.b5_conformal_stl import B5ConformalSTL
 from ralmon.baselines.base import Detector
 
