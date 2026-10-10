@@ -175,7 +175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _build(args)
         if args.command == "verify":
             return _verify(args)
-        print("validate: provided by WS04-T12", file=sys.stderr)
+        print("validate: provided by WS04-T12")
         return EXIT_CONFIG
     except (
         FixtureOnlyPriorError,

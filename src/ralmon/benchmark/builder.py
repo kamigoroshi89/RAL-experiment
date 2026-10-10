@@ -1348,7 +1348,12 @@ class BuildContext:
                 else:
                     spec = self._c3_spec(subtype, rng, day, section[subtype], stream_)
                 if spec is None:
-                    skipped[f"{cls_name}/{subtype}/no_position"] += 1
+                    reason = (
+                        "first_day"
+                        if subtype == "replay" and day == 0
+                        else "no_position"
+                    )
+                    skipped[f"{cls_name}/{subtype}/{reason}"] += 1
                     continue
                 if spec.duration_ms is not None:
                     group = (
@@ -1915,6 +1920,7 @@ class _Writer:
         self.patients: dict[str, dict[str, JsonValue]] = {}
         self.counts: Counter[str] = Counter()
         self.tail_counts: Counter[str] = Counter()
+        self.closing_counts: Counter[str] = Counter()
         self.disabled: set[str] = set()
         self.skipped: Counter[str] = Counter()
         self.n_patient_days = 0
@@ -1955,8 +1961,14 @@ class _Writer:
             ):
                 self._record(rel)
             counts = self.tail_counts if day.tail else self.counts
+            start = index * T_DAY_MS
             for event in truth.ground_truth:
                 counts[f"{event.cls.value}/{event.subtype}"] += 1
+                decided = event.end_ms if event.end_ms is not None else event.onset_ms
+                if (
+                    day.tail and event.cls is InjectedClass.C1 and decided == start
+                ):  # the closing step of the last scored day (ADR-066)
+                    self.closing_counts[f"{event.cls.value}/{event.subtype}"] += 1
         self.n_patient_days += built.n_scored_days
         self.disabled |= built.disabled_subtypes
         self.skipped.update(built.skipped)
@@ -2007,6 +2019,7 @@ class _Writer:
             "tail_day": True,
             "n_patient_days": self.n_patient_days,
             "tail_event_counts": dict(sorted(self.tail_counts.items())),
+            "closing_step_event_counts": dict(sorted(self.closing_counts.items())),
             "cohorts": [c.id for c in config.cohorts],
             "split_fractions": {k: float(v) for k, v in config.split_fractions.items()},
             "registry_version": context.registry.version(),
@@ -2154,8 +2167,9 @@ class BenchmarkReader:
     def closing_step_truth(self, patient_id: str) -> tuple[GroundTruthEvent, ...]:
         """The events of the tail day decided at its first step: the truth of the closing step of the last scored day.
 
-        An event is decided at ``end_ms`` (a windowed obligation) or at ``onset_ms`` (a point event); the first step of
-        the tail day is the instant ``tail_day * T_day``.
+        A C1 event is decided at ``end_ms`` (a windowed obligation) or at ``onset_ms`` (a point event); the first step
+        of the tail day is the instant ``tail_day * T_day``. The C2 and C3 events of the tail day are injected events of
+        that day, not decisions of the monitor at the shared step, so they are never part of it.
         """
         tail = self.tail_day(patient_id)
         if tail is None:
@@ -2164,7 +2178,8 @@ class BenchmarkReader:
         return tuple(
             e
             for e in self.truth(patient_id, tail).ground_truth
-            if (e.end_ms if e.end_ms is not None else e.onset_ms) == start
+            if e.cls is InjectedClass.C1
+            and (e.end_ms if e.end_ms is not None else e.onset_ms) == start
         )
 
     def baseline_sbp(self, patient_id: str, day_index: int) -> tuple[float, ...]:

@@ -930,6 +930,13 @@ def test_event_counts_in_manifest_match_truth_files(
         for event in reader.truth(patient, tail_day).ground_truth:
             tail[f"{event.cls.value}/{event.subtype}"] += 1
     assert dict(tail) == dict(manifest.settings["tail_event_counts"])
+    # the events the tail days decide at their first step: the closing-step truth of the last scored days
+    closing: Counter[str] = Counter()
+    for patient in reader.patients:
+        for event in reader.closing_step_truth(patient):
+            closing[f"{event.cls.value}/{event.subtype}"] += 1
+    assert dict(closing) == dict(manifest.settings["closing_step_event_counts"])
+    assert sum(closing.values()) <= sum(tail.values())
 
 
 def test_pair_patients_share_base_and_split(small: tuple[Path, Any, Path]) -> None:
