@@ -533,6 +533,28 @@ def test_b5_predicted_alerts_are_nested_in_alpha_but_detections_are_not() -> Non
     )  # only the measured verdict is left
 
 
+def test_b5_with_a_reorder_delay_decides_at_the_same_device_steps_shifted_by_the_delay() -> (
+    None
+):
+    """Same worked day with ``D = 2`` steps: the values and the decisions are those of ``D = 0``, the detections come
+    ``D`` later (the step is final at ``j * T + D``)."""
+    delay = 2 * STEP
+    b5 = fitted_worked(timing=TimingConfig(STEP, delay, 3 * STEP))
+    day = dispense_day(150.0, 100.0)
+    out = run(b5, day)
+    # rho_hat = -10, C = 6: the alert of step ACT, final at ACT + 2; score 4 as without delay
+    assert pairs(out) == [(ACT * STEP + delay, 4.0)]
+    (record,) = b5.predictions
+    assert (record.sigma_hat, record.quantile, record.sigma_true) == (-10.0, 6.0, 40.0)
+    measured = run(
+        fitted_worked(timing=TimingConfig(STEP, delay, 3 * STEP)),
+        dispense_day(100.0, 142.0),
+    )
+    assert pairs(measured) == [
+        ((ACT + LENGTH) * STEP + delay, 2.0)
+    ]  # the deadline step, final D later
+
+
 # ---- 6. only the public calibrator API -------------------------------------------------------------
 
 
@@ -776,9 +798,9 @@ def test_b5_prediction_then_satisfied_measurement_gives_one_detection() -> None:
 # ---- 11. causality -------------------------------------------------------------------------------------------
 
 
-@functools.lru_cache(maxsize=1)
-def fixed_b5() -> B5ConformalSTL:
-    return fitted_worked(timing=TimingConfig(STEP, 0, 60 * STEP))
+@functools.lru_cache(maxsize=3)
+def fixed_b5(delay_steps: int = 0) -> B5ConformalSTL:
+    return fitted_worked(timing=TimingConfig(STEP, delay_steps * STEP, 60 * STEP))
 
 
 @settings(max_examples=60, deadline=None)
@@ -790,9 +812,13 @@ def fixed_b5() -> B5ConformalSTL:
     ),
     dispenses=st.lists(st.integers(1, 20), min_size=1, max_size=2, unique=True),
     cut=st.integers(0, 40),
+    delay_steps=st.integers(0, 2),
 )
 def test_b5_is_causal_property(
-    sample_specs: list[tuple[int, int, int]], dispenses: list[int], cut: int
+    sample_specs: list[tuple[int, int, int]],
+    dispenses: list[int],
+    cut: int,
+    delay_steps: int,
 ) -> None:
     samples = [smp("bp", s, v, s + d) for s, v, d in sample_specs]
     events = [evt(EventKind.DISPENSE, s) for s in dispenses]
@@ -802,7 +828,7 @@ def test_b5_is_causal_property(
         [s for s in samples if s.t_rx_ms <= horizon],
         [e for e in events if e.t_rx_ms <= horizon],
     )
-    b5 = fixed_b5()
+    b5 = fixed_b5(delay_steps)
     a = [d for d in b5.run(full, make_care_plan(), None) if d.t_ms <= horizon]
     b = [d for d in b5.run(truncated, make_care_plan(), None) if d.t_ms <= horizon]
     assert a == b
@@ -922,8 +948,8 @@ def test_signal_grid_builds_held_values_impulses_and_derived_signals() -> None:
     )
     rows = {}
     for batch in iter_steps(day, TimingConfig(STEP, 0, 0), 5 * STEP):
-        step = grid.apply(batch)
-        rows[step.k] = step
+        for step in grid.apply(batch):
+            rows[step.k] = step
     assert (
         "bp" not in rows[0].values and "bp" not in rows[1].values
     )  # undefined before the first sample
@@ -955,10 +981,43 @@ def test_signal_grid_origin_shifts_the_axis_to_the_day() -> None:
         "plan-1",
     )
     # the harness grid of day 1 starts at 24 h; the evaluator axis starts at 0
-    steps = [grid.apply(b) for b in iter_steps(day, TIMING, T_DAY + 4 * STEP)]
+    steps = [
+        s for b in iter_steps(day, TIMING, T_DAY + 4 * STEP) for s in grid.apply(b)
+    ]
     assert [s.k for s in steps] == [0, 1, 2, 3, 4]
     assert steps[3].dispenses == (3 * STEP,)
     assert steps[0].values["bp"] == 125.0
+
+
+def test_signal_grid_with_a_reorder_delay_follows_the_device_time_grid() -> None:
+    """With ``D = 2`` steps the step ``j`` shows the inputs up to ``j * T`` and is final at ``j * T + D``, as in
+    ``run_offline``; an input that arrives after its step is final is late and is dropped."""
+    delay = 2 * STEP
+    grid = SignalGrid(STEP, delay_ms=delay)
+    day = observed(
+        [
+            smp("bp", 3, 125.0),
+            smp("bp", 4, 130.0, rx_step=9),
+        ],  # the second one arrives long after its step
+        [evt(EventKind.DISPENSE, 3)],
+    )
+    emitted: dict[int, int] = {}
+    steps = {}
+    for batch in iter_steps(day, TimingConfig(STEP, delay, 0), 10 * STEP):
+        for step in grid.apply(batch):
+            emitted[step.k] = batch.t_ms // STEP
+            steps[step.k] = step
+    assert (
+        emitted[0] == 2 and emitted[3] == 5 and emitted[7] == 9
+    )  # step j is final at j + 2
+    assert (
+        emitted[8] == 10 and 9 not in emitted
+    )  # the run ends at step 10: device steps 9 and 10 are not final
+    assert "bp" not in steps[2].values and steps[3].values["bp"] == 125.0
+    assert steps[3].dispenses == (3 * STEP,) and steps[3].values["dispense"] == 1.0
+    assert (
+        grid.late == 1 and steps[7].values["bp"] == 125.0
+    )  # the late 130 was not applied
 
 
 # ---- the real evaluator, hand derivation (integration) --------------------------------------------------------
@@ -1032,7 +1091,8 @@ def test_b5_resp_prediction_with_the_real_evaluator_uses_the_plan_ticks() -> Non
     assert pairs(out) == [(ACT * STEP, 3.0)]
 
 
-def test_b5_measured_decisions_agree_with_the_monitor() -> None:
+@pytest.mark.parametrize("delay_steps", [0, 2])
+def test_b5_measured_decisions_agree_with_the_monitor(delay_steps: int) -> None:
     """Without a prediction B5 is the measured verdict of the templates: the first violated record of each instance of
     ``run_offline`` and the detection of B5 are at the same step, for all seven templates (hand-built day, fixture
     registry). This checks the signal construction and the instance creation that B5 repeats from the monitor."""
@@ -1077,7 +1137,7 @@ def test_b5_measured_decisions_agree_with_the_monitor() -> None:
     records = run_offline(
         day,
         plan,
-        make_config(_REGISTRY),
+        make_config(_REGISTRY, d_ms=delay_steps * STEP),
         None,
         None,
         registry=_REGISTRY,
@@ -1087,9 +1147,10 @@ def test_b5_measured_decisions_agree_with_the_monitor() -> None:
     for r in records:
         if r.state.value == "violated" and r.instance_key not in first:
             first[r.instance_key] = r.t_eval_ms
-    expected = sorted(first.values())
+    # a step of the device-time grid is final D later: the detection time is the record time plus the delay
+    expected = sorted(t + delay_steps * STEP for t in first.values())
     assert len(expected) == 7  # range, sys, range, hold, count, resp, sched
-    long_tail = TimingConfig(STEP, 0, 25 * 60 * STEP)
+    long_tail = TimingConfig(STEP, delay_steps * STEP, 25 * 60 * STEP)
     for aggregation, times in (
         ("per_template", expected),
         ("conjunction", sorted(set(expected))),

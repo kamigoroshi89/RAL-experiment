@@ -79,6 +79,7 @@ from ralmon.baselines.access import (
 )
 from ralmon.baselines.base import BaselineBase, TimingConfig
 from ralmon.baselines.raw_robustness import (
+    GridStep,
     LoggingRegistry,
     RawRobustnessEvaluator,
     SignalGrid,
@@ -267,6 +268,22 @@ class _Outcome:
     points: list[_Point] = field(default_factory=list)
     final: dict[str, float | None] = field(default_factory=dict)
     skips: Counter[str] = field(default_factory=Counter)
+
+
+@dataclass(slots=True)
+class _DayState:
+    """What one day accumulates while it is processed."""
+
+    t0: int
+    records: dict[TemplateId, Mapping[str, float]]
+    statics: list[_Static]
+    ticks: frozenset[int]
+    calibrators: Mapping[str, Any] | None
+    rows: list[dict[str, float | None]] = field(default_factory=list)
+    live: list[_Tracker] = field(default_factory=list)
+    trackers: dict[str, _Tracker] = field(default_factory=dict)
+    history: list[Sample] = field(default_factory=list)
+    out: _Outcome = field(default_factory=_Outcome)
 
 
 @dataclass(frozen=True, slots=True)
@@ -555,84 +572,78 @@ class B5ConformalSTL(BaselineBase):
         """
         step = self._timing.step_ms
         t0 = day.day_index * _T_DAY_MS
-        k_day = _T_DAY_MS // step
         records, statics, ticks = self._read_plan(plan, t0, step)
         grid = SignalGrid(step, delay_ms=self._timing.reorder_delay_ms, origin_ms=t0)
-        rows: list[dict[str, float | None]] = []
-        live: list[_Tracker] = []
-        trackers: dict[str, _Tracker] = {}
-        history: list[Sample] = []
-        out = _Outcome()
+        state = _DayState(t0, records, statics, ticks, calibrators)
         for batch in self._steps(day, plan):
-            gs = grid.apply(batch)
-            k = gs.k
-            rows.append(gs.values)
-            for sample in batch.samples:
-                if sample.signal in self._history_signals:
-                    history.append(sample)
-            measured: list[Evaluation] = []
-            for tracker in live:
-                self._observe(
-                    tracker, tracker.evaluator.step(k * step, gs.values), measured
-                )
-            new: list[_Tracker] = []
-            if k == 0:
-                for static in statics:
-                    new.append(
-                        self._make_tracker(
-                            static.instance.instance_key,
-                            static.template,
-                            static.instance,
-                            static.kind,
-                            trackers,
-                        )
-                    )
-            for anchors, kinds in (
-                (gs.measurements, _MEASUREMENT_TEMPLATES),
-                (gs.dispenses, _DISPENSE_TEMPLATES),
-            ):
-                for anchor in anchors:
-                    if anchor < 0:
-                        continue  # stamped before the day: not part of it
-                    for tid in kinds:
-                        template = self._templates.get(tid)
-                        if template is None:
-                            continue
-                        key = _fresh_key(f"{tid.value}@{t0 + anchor}", trackers)
-                        instance = TemplateInstance(
-                            tid, key, records.get(tid, {}), anchor
-                        )
-                        new.append(
-                            self._make_tracker(
-                                key, template, instance, _ANCHOR_KIND[tid], trackers
-                            )
-                        )
-            for tracker in new:
-                value: float | None = None
-                for kk in range(k + 1):
-                    value = tracker.evaluator.step(kk * step, rows[kk])
-                self._observe(tracker, value, measured)
-            live.extend(new)
-            self._decide_measured(measured, trackers, batch.t_ms, out, calibrators)
-            self._predict(
-                [t for t in new if t.predictable and not t.has_value],
-                k,
-                batch.t_ms,
-                rows,
-                history,
-                ticks,
-                k_day,
-                trackers,
-                out,
-                calibrators,
-            )
-            live = [t for t in live if not t.done]
-        for key, tracker in trackers.items():
+            for gs in grid.apply(batch):
+                self._row(state, gs, batch.t_ms)
+        out = state.out
+        for key, tracker in state.trackers.items():
             out.final[key] = tracker.value
         out.records = [
             replace(r, sigma_true=_true_of(r.keys, out.final)) for r in out.records
         ]
         return out
+
+    def _row(self, state: _DayState, gs: GridStep, t_det: int) -> None:
+        """One step of the device-time grid, final at the harness time ``t_det`` (the time of its detections)."""
+        step = self._timing.step_ms
+        k = gs.k
+        state.rows.append(gs.values)
+        for sample in gs.samples:
+            if sample.signal in self._history_signals:
+                state.history.append(sample)
+        measured: list[Evaluation] = []
+        for tracker in state.live:
+            self._observe(
+                tracker, tracker.evaluator.step(k * step, gs.values), measured
+            )
+        new: list[_Tracker] = []
+        if k == 0:
+            for static in state.statics:
+                new.append(
+                    self._make_tracker(
+                        static.instance.instance_key,
+                        static.template,
+                        static.instance,
+                        static.kind,
+                        state.trackers,
+                    )
+                )
+        for anchors, kinds in (
+            (gs.measurements, _MEASUREMENT_TEMPLATES),
+            (gs.dispenses, _DISPENSE_TEMPLATES),
+        ):
+            for anchor in anchors:
+                if anchor < 0:
+                    continue  # stamped before the day: not part of it
+                for tid in kinds:
+                    template = self._templates.get(tid)
+                    if template is None:
+                        continue
+                    key = _fresh_key(f"{tid.value}@{state.t0 + anchor}", state.trackers)
+                    instance = TemplateInstance(
+                        tid, key, state.records.get(tid, {}), anchor
+                    )
+                    new.append(
+                        self._make_tracker(
+                            key, template, instance, _ANCHOR_KIND[tid], state.trackers
+                        )
+                    )
+        for tracker in new:
+            value: float | None = None
+            for kk in range(k + 1):
+                value = tracker.evaluator.step(kk * step, state.rows[kk])
+            self._observe(tracker, value, measured)
+        state.live.extend(new)
+        self._decide_measured(
+            measured, state.trackers, t_det, state.out, state.calibrators
+        )
+        self._predict(
+            [t for t in new if t.predictable and not t.has_value], k, t_det, state
+        )
+        state.live = [t for t in state.live if not t.done]
 
     def _make_tracker(
         self,
@@ -694,25 +705,15 @@ class B5ConformalSTL(BaselineBase):
             trackers[e.key].flag = e.value < 0
 
     def _predict(
-        self,
-        activated: list[_Tracker],
-        k: int,
-        t_ms: int,
-        rows: list[dict[str, float | None]],
-        history: list[Sample],
-        ticks: frozenset[int],
-        k_day: int,
-        trackers: dict[str, _Tracker],
-        out: _Outcome,
-        calibrators: Mapping[str, Any] | None,
+        self, activated: list[_Tracker], k: int, t_det: int, state: _DayState
     ) -> None:
+        """The predictive decisions of the instances activated at step ``k`` (final at the harness time ``t_det``)."""
         if not activated:
             return
+        out, calibrators = state.out, state.calibrators
         hats: list[Evaluation] = []
         for tracker in sorted(activated, key=lambda t: t.key):
-            sigma_hat = self._sigma_hat(
-                tracker, k, t_ms, rows, history, ticks, k_day, out
-            )
+            sigma_hat = self._sigma_hat(tracker, k, state)
             if sigma_hat is not None:
                 hats.append(
                     Evaluation(tracker.key, tracker.template.id, sigma_hat, "predicted")
@@ -728,7 +729,7 @@ class B5ConformalSTL(BaselineBase):
                 out.skips["no_calibration"] += 1
                 out.records.append(
                     B5Prediction(
-                        group.members, group.template, t_ms, group.value, None, False
+                        group.members, group.template, t_det, group.value, None, False
                     )
                 )
                 continue
@@ -737,28 +738,18 @@ class B5ConformalSTL(BaselineBase):
             quantile = float(calibrator.quantile(self._alpha))
             out.records.append(
                 B5Prediction(
-                    group.members, group.template, t_ms, group.value, quantile, emitted
+                    group.members, group.template, t_det, group.value, quantile, emitted
                 )
             )
             if emitted:
                 out.detections.append(
-                    Detection(t_ms, None, _score(-(group.value + quantile)))
+                    Detection(t_det, None, _score(-(group.value + quantile)))
                 )
                 for e in hats:
                     if e.key in group.members:
-                        trackers[e.key].flag = e.value + quantile < 0
+                        state.trackers[e.key].flag = e.value + quantile < 0
 
-    def _sigma_hat(
-        self,
-        tracker: _Tracker,
-        k: int,
-        t_ms: int,
-        rows: list[dict[str, float | None]],
-        history: list[Sample],
-        ticks: frozenset[int],
-        k_day: int,
-        out: _Outcome,
-    ) -> float | None:
+    def _sigma_hat(self, tracker: _Tracker, k: int, state: _DayState) -> float | None:
         """``rho_hat``: the raw robustness of the instance on the trace completed at its activation step.
 
         The prefix is the rows delivered so far; the unknown future is the forecast of the signal of the template
@@ -767,13 +758,18 @@ class B5ConformalSTL(BaselineBase):
         first step at which the completed trace gives a value (D8).
         """
         step = self._timing.step_ms
+        out, rows, ticks = state.out, state.rows, state.ticks
+        k_day = _T_DAY_MS // step
+        t_ms = (
+            state.t0 + k * step
+        )  # the forecast instant: the device-time grid, as for the history
         signal = _PREDICTIVE[tracker.template.id]
         horizon_steps = k_day - k
         if horizon_steps <= 0:
             out.skips["closes_after_day"] += 1
             return None
         try:
-            forecast = self._forecast(signal, t_ms, horizon_steps * step, history)
+            forecast = self._forecast(signal, t_ms, horizon_steps * step, state.history)
         except InsufficientHistoryError:
             out.skips["insufficient_history"] += 1
             return None

@@ -19,16 +19,18 @@ Public names (the contract that WS06-T04 describes, extended where the point eva
   monitor (ADR-047 (g)); a name that is not a parameter of the template is an error of the point evaluator.
 * ``LoggingRegistry``: ``AuditedRegistry`` that also forwards ``overrides()`` and ``step_ms``, which the point
   evaluator reads, so that the audit log and the approved-range rule of ADR-047 (g) work together.
-* ``SignalGrid`` and ``GridStep``: the ``values`` of each step, built incrementally from the harness batches with the
-  signal construction of ``ralmon.signals`` (held signals, one-step impulse counts, the derived signals fed in
-  device-time order with a clock sample at every step; the construction of the monitor tests, ``step_values``).
-  Inputs that arrive older than the state they would overwrite are not applied to that state. The level of
+* ``SignalGrid`` and ``GridStep``: the ``values`` of each step of the device-time grid, built incrementally from the
+  harness batches with the signal construction of ``ralmon.signals`` (held signals, one-step impulse counts, the
+  derived signals fed in device-time order with a clock sample at every step; the construction of the monitor
+  tests, ``step_values``). The step ``j`` is final at ``j * step_ms + delay_ms`` as in ``run_offline``, and an input
+  that arrives after its step is final is late and dropped, as in the monitor. The level of
   ``presence`` is the held level of the last sample: the construction of ADR-054 (a level per co-location episode,
   an unavailable channel) is not done, so an INT result on a generated day is not evidence until ADR-054 is decided.
 """
 
 from __future__ import annotations
 
+import heapq
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Final, Protocol, runtime_checkable
@@ -149,38 +151,72 @@ class LoggingRegistry(AuditedRegistry):
 
 @dataclass(frozen=True, slots=True)
 class GridStep:
-    """The values of one step on the axis of the day and the anchors that its events open.
+    """The values of one step of the device-time grid and the anchors that its events open.
 
     ``k`` is the step index on the axis of the day (0 at the origin); ``values`` is the argument of
     ``RawRobustnessEvaluator.step``; ``measurements`` and ``dispenses`` are the device times, on the axis of the
-    day, of the MEASUREMENT and DISPENSE events delivered at this step (they anchor RANGE and SYS, and HOLD, COUNT,
-    RESP and INT).
+    day, of the MEASUREMENT and DISPENSE events applied at this step (they anchor RANGE and SYS, and HOLD, COUNT,
+    RESP and INT); ``samples`` are the samples applied at this step, as they were received.
     """
 
     k: int
     values: dict[str, float | None]
     measurements: tuple[int, ...]
     dispenses: tuple[int, ...]
+    samples: tuple[Sample, ...] = ()
+
+
+# Same order as the reorder buffer of the monitor: events of one device time by kind (a measurement, a dispense, an
+# intake, a schedule tick); a sample comes before an event of the same device time.
+_EVENT_RANK: Final = {
+    EventKind.MEASUREMENT: 0,
+    EventKind.DISPENSE: 1,
+    EventKind.INTAKE: 2,
+    EventKind.SCHEDULE_TICK: 3,
+}
 
 
 class SignalGrid:
-    """Builds the ``values`` of each step from the harness batches (see the module docstring).
+    """Builds the ``values`` of each step of the device-time grid from the harness batches.
 
-    ``origin_ms`` is the time of step 0 on the continuing axis (the start of the day); every device time is shifted
-    by it. ``delay_ms`` is the reorder delay of the harness: the clock of the derived signals at a step is
-    ``t - delay_ms``, the device time up to which the step has delivered inputs.
+    The step ``j`` of the grid shows the inputs with device time up to ``j * step_ms`` (the ceiling rule of
+    docs/formal/01 section 3.3) and is final at the monitor time ``j * step_ms + delay_ms``, the cadence of
+    ``run_offline``. ``apply(batch)`` buffers the inputs of a harness batch and returns the steps that the batch
+    makes final: none while the reorder delay has not elapsed, one per batch when ``delay_ms`` is 0 (several if a
+    batch jumps). An input that arrives after its step is final is late, as in the monitor, and is counted in
+    ``late`` and not applied. ``origin_ms`` is the time of step 0 on the continuing axis (the start of the day);
+    every device time is shifted by it.
     """
 
     def __init__(self, step_ms: int, *, delay_ms: int = 0, origin_ms: int = 0) -> None:
         if step_ms <= 0:
             raise ValueError(f"step_ms must be positive, got {step_ms}")
+        if delay_ms < 0:
+            raise ValueError(f"delay_ms must not be negative, got {delay_ms}")
         self._step = step_ms
         self._delay = delay_ms
         self._origin = origin_ms
         self._held: dict[str, float] = {}
-        self._held_time: dict[str, int] = {}
         self._derived: list[DerivedSignal] = list(default_derived_signals())
         self._derived_last: dict[str, float] = {}
+        self._pending: list[tuple[tuple[int, ...], int, Sample | Event]] = []
+        self._arrivals = 0
+        self._next = 0
+        self.late = 0
+
+    @staticmethod
+    def _key(item: Sample | Event, device: int) -> tuple[int, ...]:
+        has_seq = item.seq is not None
+        secondary = item.seq if item.seq is not None else item.t_rx_ms
+        if isinstance(item, Sample):
+            return (device, 0, 0, 0 if has_seq else 1, secondary)
+        return (
+            device,
+            1,
+            _EVENT_RANK.get(item.kind, 0),
+            0 if has_seq else 1,
+            secondary,
+        )
 
     def _feed(self, sample: Sample) -> None:
         for derived in self._derived:
@@ -191,19 +227,38 @@ class SignalGrid:
             if out is not None:
                 self._derived_last[out.signal] = out.value
 
-    def apply(self, batch: StepBatch) -> GridStep:
+    def apply(self, batch: StepBatch) -> tuple[GridStep, ...]:
+        origin, step = self._origin, self._step
+        for item in batch.inputs():
+            device = item.t_device_ms - origin
+            if max(0, -(-device // step)) < self._next:
+                self.late += 1  # its step is final already
+                continue
+            heapq.heappush(
+                self._pending, (self._key(item, device), self._arrivals, item)
+            )
+            self._arrivals += 1
+        last = (batch.t_ms - origin - self._delay) // step
+        steps: list[GridStep] = []
+        while self._next <= last:
+            steps.append(self._finalise(self._next))
+            self._next += 1
+        return tuple(steps)
+
+    def _finalise(self, j: int) -> GridStep:
         origin = self._origin
-        t_local = batch.t_ms - origin
+        limit = j * self._step
         counts = dict.fromkeys(_IMPULSES, 0)
         measurements: list[int] = []
         dispenses: list[int] = []
-        for item in batch.inputs():
+        applied: list[Sample] = []
+        while self._pending and self._pending[0][0][0] <= limit:
+            item = heapq.heappop(self._pending)[2]
             device = item.t_device_ms - origin
             if isinstance(item, Sample):
+                applied.append(item)
                 if item.signal in _HELD:
-                    if device >= self._held_time.get(item.signal, device):
-                        self._held[item.signal] = item.value
-                        self._held_time[item.signal] = device
+                    self._held[item.signal] = item.value
                 elif item.signal == SignalId.AUTH.value:
                     counts[SignalId.AUTH.value] += 1
                 if item.signal != SignalId.AUTH.value:
@@ -212,14 +267,13 @@ class SignalGrid:
                     )
             else:
                 self._event(item, device, counts, measurements, dispenses)
-        clock = t_local - self._delay
-        self._feed(Sample(_CLOCK_SIGNAL, clock, clock, 0.0, None, None))
+        self._feed(Sample(_CLOCK_SIGNAL, limit, limit, 0.0, None, None))
         values: dict[str, float | None] = dict(self._held)
         for name in _IMPULSES:
             values[name] = float(counts[name])
         values.update(self._derived_last)
         return GridStep(
-            t_local // self._step, values, tuple(measurements), tuple(dispenses)
+            j, values, tuple(measurements), tuple(dispenses), tuple(applied)
         )
 
     def _event(
