@@ -480,6 +480,12 @@ def _audit_proposed(
     probe: ForecasterProbe | None,
     problems: list[str],
 ) -> DetectorTrace:
+    alpha = proposed.config.alpha
+    if alpha is None:
+        raise AuditError(
+            "the MonitorConfig of the proposed method has no alpha: the audit runs it in predictive mode and the level "
+            "is the experiment's, not a default of the audit"
+        )
     log = AccessLog()
     reads = ReadLog()
     train = [GuardedDay(d, Split.TRAIN, log).observed for d in days.train]
@@ -497,7 +503,6 @@ def _audit_proposed(
         templates=proposed.templates,
     )
     calibrator = proposed.calibrator_factory()
-    alpha = proposed.config.alpha if proposed.config.alpha is not None else 0.1
     calibrator.fit(episodes, alpha, model_version=forecaster.model_version)
     fit_reads = reads.all_names()
     reads.clear()
@@ -721,6 +726,24 @@ def render_markdown(report: AuditReport) -> str:
             lines.append(f"- {item}, {column}: {note}")
     extras = sorted(report.knowledge - report.knowledge_task)
     lines += [
+        "",
+        "What the matrix cannot show:",
+        "",
+        (
+            f"- The column `{OURS}` is a stand-in: `_audit_proposed` of `audit.py` reconstructs the proposed method (the "
+            "monitor in predictive mode with the calibrator built on the observed calibration days), it is not the "
+            "`OursDetector` of the experiment, and WS08 must regenerate the column with the real one."
+        ),
+        (
+            f"- The cells of `{OURS}` that name registry entries are computed from K (the template fields) together with "
+            "the names the monitor read on the audited day, not a log of reads per row: a name of K that the monitor did "
+            "not read shows as `read` (see the lines above for the `priority_*` names)."
+        ),
+        (
+            "- The `EvidenceVector` and plan-signature cells of a baseline are `not read` by construction of the harness "
+            "(`BaselineBase.run` drops the evidence before `_run`; no baseline has a verifier): they test the harness and "
+            "cannot discriminate a baseline. Only a baseline that overrode `run` could do otherwise."
+        ),
         "",
         "Names read by the proposed method that are not template fields (K of the task text is extended by them): "
         + (", ".join(f"`{n}`" for n in extras) if extras else "none")
