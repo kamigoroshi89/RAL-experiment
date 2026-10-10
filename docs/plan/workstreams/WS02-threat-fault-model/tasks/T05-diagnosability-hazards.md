@@ -3,7 +3,7 @@ id: WS02-T05
 title: Diagnosability matrix (machine-readable) and hazard and standards paragraph
 workstream: WS02-threat-fault-model
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS02-T04"]
 critical_path: false
 non_negotiable: false
@@ -133,3 +133,7 @@ Decisions and deviations from the task text (all recorded in the section Traceab
 - Not distinguishable rows (declared limits): `DX-04`, `DX-10`, `DX-11`, `DX-19`, `DX-24`, `DX-25`, `DX-26`, `DX-27`.
 - Left undefined because the sources do not give it: motion safety, infection-control and image-storage measures (open for WS10-T01 and WS00-T07), the clinical action offered per attributed cause (OP-AR-8), edition years and clause numbers of the three standards, any occurrence rate (WS08), and a field for a run of identical values or for clock health (none proposed).
 - Hand-over lines in the Notes of WS05-T07 (a row has no vector, build it from the worked case; skip `CH-DISP` outcomes and `NO_ALERT`) and WS08-T04 (the A4 column is the pair of outcomes; `DX-19` and `DX-27` lose C1 under A4; `dispenser_bounce` has two rows, key by subtype and template; no C3 outcome changes under A4). WS10-T01 and WS12-T04 assumptions hold.
+
+### Post-task review (2026-10-10)
+
+Produced: `configs/diagnosability.yaml` (27 rows: DX-01 to DX-10 from analisi §4.5, DX-11 to DX-27 inferred; each row has a default and an A4 outcome) and `docs/models/diagnosability-hazards.md` (the rendered matrix, eight declared limits, the standards paragraph in general terms, hazard register H-01 to H-16). Independent review: FAIL on one blocker (the A4 outcome of DX-19 listed C1, which the A4 transition table cannot produce for `sched` and `hold`), fixed in `d17f4dc` and re-checked by the orchestrator against the table; a script re-derived the A4 outcome of every row and found no other mismatch. Four minors fixed (a row DX-27 for the duplicate `hold`/`resp`/`int` instances of a dispenser bounce, one rule for the `conditional` label, CH-CRYPTO's two roles, register statuses). Deviations from the task text, justified by the worked cases: the default deployment is the unauthenticated one; DX-06 and DX-07 are `conditional` (W-06, W-07). Open: the standards are named without clause numbers, editions or citation keys; motion-safety, infection-control and image-storage measures stay "open" for WS10-T01 or WS00-T07; the action offered per cause is OP-AR-8. Dependents: WS05-T07 (a row has no EvidenceVector, build it from the worked case; outcomes naming CH-DISP and the cause NO_ALERT are not reproducible by the rule), WS08-T04 (no "loss" vocabulary: derive it by comparing default and A4; key a ground-truth event by subtype and template because `dispenser_bounce` has two rows).
