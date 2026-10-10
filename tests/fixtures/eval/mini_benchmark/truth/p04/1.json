@@ -1,0 +1,47 @@
+{
+  "behaviour_log": [],
+  "ground_truth": [
+    {
+      "cls": "C2",
+      "confounder_group": null,
+      "end_ms": 129600000,
+      "injected": true,
+      "onset_ms": 126000000,
+      "subtype": "stuck_at",
+      "template_id": null
+    }
+  ],
+  "injection_log": [],
+  "latent": {
+    "day_index": 1,
+    "events": [],
+    "patient_id": "p04",
+    "samples": [
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "bp",
+        "t_device_ms": 115200000,
+        "t_rx_ms": 115200000,
+        "value": 125.0
+      },
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "bp",
+        "t_device_ms": 122400000,
+        "t_rx_ms": 122400000,
+        "value": 115.0
+      },
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "bp",
+        "t_device_ms": 136800000,
+        "t_rx_ms": 136800000,
+        "value": 122.0
+      }
+    ],
+    "seed": 0
+  }
+}

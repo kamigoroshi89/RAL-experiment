@@ -1,0 +1,893 @@
+{
+  "care_plan_id": "plan-p05",
+  "day_index": 0,
+  "events": [
+    {
+      "kind": "measurement",
+      "payload": {},
+      "seq": null,
+      "source": "dev",
+      "t_device_ms": 28800000,
+      "t_rx_ms": 28800000
+    },
+    {
+      "kind": "node_state",
+      "payload": {
+        "colocated": true,
+        "state": "active"
+      },
+      "seq": null,
+      "source": "robot",
+      "t_device_ms": 28980000,
+      "t_rx_ms": 28980000
+    },
+    {
+      "kind": "dispense",
+      "payload": {},
+      "seq": null,
+      "source": "dev",
+      "t_device_ms": 29100000,
+      "t_rx_ms": 29100000
+    },
+    {
+      "kind": "intake",
+      "payload": {},
+      "seq": null,
+      "source": "dev",
+      "t_device_ms": 29160000,
+      "t_rx_ms": 29160000
+    },
+    {
+      "kind": "measurement",
+      "payload": {},
+      "seq": null,
+      "source": "dev",
+      "t_device_ms": 36000000,
+      "t_rx_ms": 36000000
+    },
+    {
+      "kind": "measurement",
+      "payload": {},
+      "seq": null,
+      "source": "dev",
+      "t_device_ms": 50400000,
+      "t_rx_ms": 50400000
+    }
+  ],
+  "patient_id": "p05",
+  "samples": [
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 0,
+      "t_rx_ms": 0,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 0,
+      "t_rx_ms": 0,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 1800000,
+      "t_rx_ms": 1800000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 1800000,
+      "t_rx_ms": 1800000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 3600000,
+      "t_rx_ms": 3600000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 3600000,
+      "t_rx_ms": 3600000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 5400000,
+      "t_rx_ms": 5400000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 5400000,
+      "t_rx_ms": 5400000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 7200000,
+      "t_rx_ms": 7200000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 7200000,
+      "t_rx_ms": 7200000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 9000000,
+      "t_rx_ms": 9000000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 9000000,
+      "t_rx_ms": 9000000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 10800000,
+      "t_rx_ms": 10800000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 10800000,
+      "t_rx_ms": 10800000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 12600000,
+      "t_rx_ms": 12600000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 12600000,
+      "t_rx_ms": 12600000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 14400000,
+      "t_rx_ms": 14400000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 14400000,
+      "t_rx_ms": 14400000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 16200000,
+      "t_rx_ms": 16200000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 16200000,
+      "t_rx_ms": 16200000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 18000000,
+      "t_rx_ms": 18000000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 18000000,
+      "t_rx_ms": 18000000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 19800000,
+      "t_rx_ms": 19800000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 19800000,
+      "t_rx_ms": 19800000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 21600000,
+      "t_rx_ms": 21600000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 21600000,
+      "t_rx_ms": 21600000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 23400000,
+      "t_rx_ms": 23400000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 23400000,
+      "t_rx_ms": 23400000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 25200000,
+      "t_rx_ms": 25200000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 25200000,
+      "t_rx_ms": 25200000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 27000000,
+      "t_rx_ms": 27000000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 27000000,
+      "t_rx_ms": 27000000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "bp",
+      "t_device_ms": 28800000,
+      "t_rx_ms": 28800000,
+      "value": 125.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "cuff_health",
+      "t_device_ms": 28800000,
+      "t_rx_ms": 28800000,
+      "value": 1.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 28800000,
+      "t_rx_ms": 28800000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "inflation_ms",
+      "t_device_ms": 28800000,
+      "t_rx_ms": 28800000,
+      "value": 40000.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 28800000,
+      "t_rx_ms": 28800000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "presence",
+      "t_device_ms": 28980000,
+      "t_rx_ms": 28980000,
+      "value": 1.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 30600000,
+      "t_rx_ms": 30600000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 30600000,
+      "t_rx_ms": 30600000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 32400000,
+      "t_rx_ms": 32400000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 32400000,
+      "t_rx_ms": 32400000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 34200000,
+      "t_rx_ms": 34200000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 34200000,
+      "t_rx_ms": 34200000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "bp",
+      "t_device_ms": 36000000,
+      "t_rx_ms": 36000000,
+      "value": 115.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 36000000,
+      "t_rx_ms": 36000000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 36000000,
+      "t_rx_ms": 36000000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 37800000,
+      "t_rx_ms": 37800000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 37800000,
+      "t_rx_ms": 37800000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 39600000,
+      "t_rx_ms": 39600000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 39600000,
+      "t_rx_ms": 39600000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 41400000,
+      "t_rx_ms": 41400000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 41400000,
+      "t_rx_ms": 41400000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 43200000,
+      "t_rx_ms": 43200000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 43200000,
+      "t_rx_ms": 43200000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 45000000,
+      "t_rx_ms": 45000000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 45000000,
+      "t_rx_ms": 45000000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 46800000,
+      "t_rx_ms": 46800000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 46800000,
+      "t_rx_ms": 46800000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 48600000,
+      "t_rx_ms": 48600000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 48600000,
+      "t_rx_ms": 48600000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "bp",
+      "t_device_ms": 50400000,
+      "t_rx_ms": 50400000,
+      "value": 165.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "cuff_health",
+      "t_device_ms": 50400000,
+      "t_rx_ms": 50400000,
+      "value": 1.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 50400000,
+      "t_rx_ms": 50400000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "inflation_ms",
+      "t_device_ms": 50400000,
+      "t_rx_ms": 50400000,
+      "value": 40000.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 50400000,
+      "t_rx_ms": 50400000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 52200000,
+      "t_rx_ms": 52200000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 52200000,
+      "t_rx_ms": 52200000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 54000000,
+      "t_rx_ms": 54000000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 54000000,
+      "t_rx_ms": 54000000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 55800000,
+      "t_rx_ms": 55800000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 55800000,
+      "t_rx_ms": 55800000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 57600000,
+      "t_rx_ms": 57600000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 57600000,
+      "t_rx_ms": 57600000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 59400000,
+      "t_rx_ms": 59400000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 59400000,
+      "t_rx_ms": 59400000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 61200000,
+      "t_rx_ms": 61200000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 61200000,
+      "t_rx_ms": 61200000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 63000000,
+      "t_rx_ms": 63000000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 63000000,
+      "t_rx_ms": 63000000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 64800000,
+      "t_rx_ms": 64800000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 64800000,
+      "t_rx_ms": 64800000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 66600000,
+      "t_rx_ms": 66600000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 66600000,
+      "t_rx_ms": 66600000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 68400000,
+      "t_rx_ms": 68400000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 68400000,
+      "t_rx_ms": 68400000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 70200000,
+      "t_rx_ms": 70200000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 70200000,
+      "t_rx_ms": 70200000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 72000000,
+      "t_rx_ms": 72000000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 72000000,
+      "t_rx_ms": 72000000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 73800000,
+      "t_rx_ms": 73800000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 73800000,
+      "t_rx_ms": 73800000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 75600000,
+      "t_rx_ms": 75600000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 75600000,
+      "t_rx_ms": 75600000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 77400000,
+      "t_rx_ms": 77400000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 77400000,
+      "t_rx_ms": 77400000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 79200000,
+      "t_rx_ms": 79200000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 79200000,
+      "t_rx_ms": 79200000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 81000000,
+      "t_rx_ms": 81000000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 81000000,
+      "t_rx_ms": 81000000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 82800000,
+      "t_rx_ms": 82800000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 82800000,
+      "t_rx_ms": 82800000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 84600000,
+      "t_rx_ms": 84600000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 84600000,
+      "t_rx_ms": 84600000,
+      "value": 98.0
+    }
+  ],
+  "seed": 0
+}

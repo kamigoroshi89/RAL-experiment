@@ -1,0 +1,149 @@
+{
+  "care_plan_id": "plan-p04",
+  "instances": [
+    {
+      "anchor_ms": null,
+      "instance_key": "record-range",
+      "param_values": {
+        "bp_band_high": 140.0,
+        "bp_band_low": 110.0
+      },
+      "template": "range"
+    },
+    {
+      "anchor_ms": null,
+      "instance_key": "record-hold",
+      "param_values": {
+        "bp_hold_threshold": 100.0,
+        "hold_lookback": 3600000.0
+      },
+      "template": "hold"
+    },
+    {
+      "anchor_ms": null,
+      "instance_key": "record-count",
+      "param_values": {
+        "dose_max_24h": 2.0,
+        "dose_min_day_end": 2.0
+      },
+      "template": "count"
+    },
+    {
+      "anchor_ms": null,
+      "instance_key": "record-resp",
+      "param_values": {
+        "delta1": 3600000.0,
+        "delta2": 10800000.0,
+        "delta_resp": 10.0
+      },
+      "template": "resp"
+    },
+    {
+      "anchor_ms": null,
+      "instance_key": "record-sys",
+      "param_values": {
+        "cuff_inflation_min": 30000.0
+      },
+      "template": "sys"
+    },
+    {
+      "anchor_ms": null,
+      "instance_key": "record-int",
+      "param_values": {
+        "int_window": 300000.0
+      },
+      "template": "int"
+    },
+    {
+      "anchor_ms": 28800000,
+      "instance_key": "sched@28800000",
+      "param_values": {
+        "sched_window": 1800000.0
+      },
+      "template": "sched"
+    },
+    {
+      "anchor_ms": 50400000,
+      "instance_key": "sched@50400000",
+      "param_values": {
+        "sched_window": 1800000.0
+      },
+      "template": "sched"
+    },
+    {
+      "anchor_ms": 86400000,
+      "instance_key": "count-day-end@86400000",
+      "param_values": {
+        "dose_max_24h": 2.0,
+        "dose_min_day_end": 2.0
+      },
+      "template": "count"
+    },
+    {
+      "anchor_ms": 115200000,
+      "instance_key": "sched@115200000",
+      "param_values": {
+        "sched_window": 1800000.0
+      },
+      "template": "sched"
+    },
+    {
+      "anchor_ms": 136800000,
+      "instance_key": "sched@136800000",
+      "param_values": {
+        "sched_window": 1800000.0
+      },
+      "template": "sched"
+    },
+    {
+      "anchor_ms": 172800000,
+      "instance_key": "count-day-end@172800000",
+      "param_values": {
+        "dose_max_24h": 2.0,
+        "dose_min_day_end": 2.0
+      },
+      "template": "count"
+    },
+    {
+      "anchor_ms": 201600000,
+      "instance_key": "sched@201600000",
+      "param_values": {
+        "sched_window": 1800000.0
+      },
+      "template": "sched"
+    },
+    {
+      "anchor_ms": 223200000,
+      "instance_key": "sched@223200000",
+      "param_values": {
+        "sched_window": 1800000.0
+      },
+      "template": "sched"
+    },
+    {
+      "anchor_ms": 259200000,
+      "instance_key": "count-day-end@259200000",
+      "param_values": {
+        "dose_max_24h": 2.0,
+        "dose_min_day_end": 2.0
+      },
+      "template": "count"
+    }
+  ],
+  "pathway_template_id": "pathway-fixture",
+  "patient_id": "p04",
+  "plan_version": 1,
+  "registry_version": "0.0.0",
+  "schedule": [
+    28800000,
+    29100000,
+    50400000,
+    115200000,
+    115500000,
+    136800000,
+    201600000,
+    201900000,
+    223200000
+  ],
+  "signature": null
+}

@@ -1,0 +1,47 @@
+{
+  "behaviour_log": [],
+  "ground_truth": [
+    {
+      "cls": "C1",
+      "confounder_group": null,
+      "end_ms": 30600000,
+      "injected": false,
+      "onset_ms": 28800000,
+      "subtype": "missed_measurement",
+      "template_id": "sched"
+    }
+  ],
+  "injection_log": [],
+  "latent": {
+    "day_index": 0,
+    "events": [],
+    "patient_id": "p03",
+    "samples": [
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "bp",
+        "t_device_ms": 28800000,
+        "t_rx_ms": 28800000,
+        "value": 125.0
+      },
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "bp",
+        "t_device_ms": 36000000,
+        "t_rx_ms": 36000000,
+        "value": 115.0
+      },
+      {
+        "quality": null,
+        "seq": null,
+        "signal": "bp",
+        "t_device_ms": 50400000,
+        "t_rx_ms": 50400000,
+        "value": 122.0
+      }
+    ],
+    "seed": 0
+  }
+}

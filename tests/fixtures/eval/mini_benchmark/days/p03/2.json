@@ -1,0 +1,893 @@
+{
+  "care_plan_id": "plan-p03",
+  "day_index": 2,
+  "events": [
+    {
+      "kind": "measurement",
+      "payload": {},
+      "seq": null,
+      "source": "dev",
+      "t_device_ms": 201600000,
+      "t_rx_ms": 201600000
+    },
+    {
+      "kind": "node_state",
+      "payload": {
+        "colocated": true,
+        "state": "active"
+      },
+      "seq": null,
+      "source": "robot",
+      "t_device_ms": 201780000,
+      "t_rx_ms": 201780000
+    },
+    {
+      "kind": "dispense",
+      "payload": {},
+      "seq": null,
+      "source": "dev",
+      "t_device_ms": 201900000,
+      "t_rx_ms": 201900000
+    },
+    {
+      "kind": "intake",
+      "payload": {},
+      "seq": null,
+      "source": "dev",
+      "t_device_ms": 201960000,
+      "t_rx_ms": 201960000
+    },
+    {
+      "kind": "measurement",
+      "payload": {},
+      "seq": null,
+      "source": "dev",
+      "t_device_ms": 208800000,
+      "t_rx_ms": 208800000
+    },
+    {
+      "kind": "measurement",
+      "payload": {},
+      "seq": null,
+      "source": "dev",
+      "t_device_ms": 223200000,
+      "t_rx_ms": 223200000
+    }
+  ],
+  "patient_id": "p03",
+  "samples": [
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 172800000,
+      "t_rx_ms": 172800000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 172800000,
+      "t_rx_ms": 172800000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 174600000,
+      "t_rx_ms": 174600000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 174600000,
+      "t_rx_ms": 174600000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 176400000,
+      "t_rx_ms": 176400000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 176400000,
+      "t_rx_ms": 176400000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 178200000,
+      "t_rx_ms": 178200000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 178200000,
+      "t_rx_ms": 178200000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 180000000,
+      "t_rx_ms": 180000000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 180000000,
+      "t_rx_ms": 180000000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 181800000,
+      "t_rx_ms": 181800000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 181800000,
+      "t_rx_ms": 181800000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 183600000,
+      "t_rx_ms": 183600000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 183600000,
+      "t_rx_ms": 183600000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 185400000,
+      "t_rx_ms": 185400000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 185400000,
+      "t_rx_ms": 185400000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 187200000,
+      "t_rx_ms": 187200000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 187200000,
+      "t_rx_ms": 187200000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 189000000,
+      "t_rx_ms": 189000000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 189000000,
+      "t_rx_ms": 189000000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 190800000,
+      "t_rx_ms": 190800000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 190800000,
+      "t_rx_ms": 190800000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 192600000,
+      "t_rx_ms": 192600000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 192600000,
+      "t_rx_ms": 192600000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 194400000,
+      "t_rx_ms": 194400000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 194400000,
+      "t_rx_ms": 194400000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 196200000,
+      "t_rx_ms": 196200000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 196200000,
+      "t_rx_ms": 196200000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 198000000,
+      "t_rx_ms": 198000000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 198000000,
+      "t_rx_ms": 198000000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 199800000,
+      "t_rx_ms": 199800000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 199800000,
+      "t_rx_ms": 199800000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "bp",
+      "t_device_ms": 201600000,
+      "t_rx_ms": 201600000,
+      "value": 125.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "cuff_health",
+      "t_device_ms": 201600000,
+      "t_rx_ms": 201600000,
+      "value": 1.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 201600000,
+      "t_rx_ms": 201600000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "inflation_ms",
+      "t_device_ms": 201600000,
+      "t_rx_ms": 201600000,
+      "value": 40000.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 201600000,
+      "t_rx_ms": 201600000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "presence",
+      "t_device_ms": 201780000,
+      "t_rx_ms": 201780000,
+      "value": 1.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 203400000,
+      "t_rx_ms": 203400000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 203400000,
+      "t_rx_ms": 203400000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 205200000,
+      "t_rx_ms": 205200000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 205200000,
+      "t_rx_ms": 205200000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 207000000,
+      "t_rx_ms": 207000000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 207000000,
+      "t_rx_ms": 207000000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "bp",
+      "t_device_ms": 208800000,
+      "t_rx_ms": 208800000,
+      "value": 115.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 208800000,
+      "t_rx_ms": 208800000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 208800000,
+      "t_rx_ms": 208800000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 210600000,
+      "t_rx_ms": 210600000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 210600000,
+      "t_rx_ms": 210600000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 212400000,
+      "t_rx_ms": 212400000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 212400000,
+      "t_rx_ms": 212400000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 214200000,
+      "t_rx_ms": 214200000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 214200000,
+      "t_rx_ms": 214200000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 216000000,
+      "t_rx_ms": 216000000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 216000000,
+      "t_rx_ms": 216000000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 217800000,
+      "t_rx_ms": 217800000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 217800000,
+      "t_rx_ms": 217800000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 219600000,
+      "t_rx_ms": 219600000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 219600000,
+      "t_rx_ms": 219600000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 221400000,
+      "t_rx_ms": 221400000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 221400000,
+      "t_rx_ms": 221400000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "bp",
+      "t_device_ms": 223200000,
+      "t_rx_ms": 223200000,
+      "value": 122.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "cuff_health",
+      "t_device_ms": 223200000,
+      "t_rx_ms": 223200000,
+      "value": 1.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 223200000,
+      "t_rx_ms": 223200000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "inflation_ms",
+      "t_device_ms": 223200000,
+      "t_rx_ms": 223200000,
+      "value": 40000.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 223200000,
+      "t_rx_ms": 223200000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 225000000,
+      "t_rx_ms": 225000000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 225000000,
+      "t_rx_ms": 225000000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 226800000,
+      "t_rx_ms": 226800000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 226800000,
+      "t_rx_ms": 226800000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 228600000,
+      "t_rx_ms": 228600000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 228600000,
+      "t_rx_ms": 228600000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 230400000,
+      "t_rx_ms": 230400000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 230400000,
+      "t_rx_ms": 230400000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 232200000,
+      "t_rx_ms": 232200000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 232200000,
+      "t_rx_ms": 232200000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 234000000,
+      "t_rx_ms": 234000000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 234000000,
+      "t_rx_ms": 234000000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 235800000,
+      "t_rx_ms": 235800000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 235800000,
+      "t_rx_ms": 235800000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 237600000,
+      "t_rx_ms": 237600000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 237600000,
+      "t_rx_ms": 237600000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 239400000,
+      "t_rx_ms": 239400000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 239400000,
+      "t_rx_ms": 239400000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 241200000,
+      "t_rx_ms": 241200000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 241200000,
+      "t_rx_ms": 241200000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 243000000,
+      "t_rx_ms": 243000000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 243000000,
+      "t_rx_ms": 243000000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 244800000,
+      "t_rx_ms": 244800000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 244800000,
+      "t_rx_ms": 244800000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 246600000,
+      "t_rx_ms": 246600000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 246600000,
+      "t_rx_ms": 246600000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 248400000,
+      "t_rx_ms": 248400000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 248400000,
+      "t_rx_ms": 248400000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 250200000,
+      "t_rx_ms": 250200000,
+      "value": 73.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 250200000,
+      "t_rx_ms": 250200000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 252000000,
+      "t_rx_ms": 252000000,
+      "value": 74.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 252000000,
+      "t_rx_ms": 252000000,
+      "value": 98.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 253800000,
+      "t_rx_ms": 253800000,
+      "value": 70.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 253800000,
+      "t_rx_ms": 253800000,
+      "value": 96.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 255600000,
+      "t_rx_ms": 255600000,
+      "value": 71.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 255600000,
+      "t_rx_ms": 255600000,
+      "value": 97.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "hr_ecg",
+      "t_device_ms": 257400000,
+      "t_rx_ms": 257400000,
+      "value": 72.0
+    },
+    {
+      "quality": null,
+      "seq": null,
+      "signal": "spo2",
+      "t_device_ms": 257400000,
+      "t_rx_ms": 257400000,
+      "value": 98.0
+    }
+  ],
+  "seed": 0
+}

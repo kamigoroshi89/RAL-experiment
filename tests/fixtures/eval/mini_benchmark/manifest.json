@@ -1,0 +1,183 @@
+{
+  "benchmark_version": "mini-0",
+  "event_counts": {
+    "C1/dose_omission": 1,
+    "C1/hypertensive_spike": 2,
+    "C1/missed_measurement": 1,
+    "C2/ble_dropout": 1,
+    "C2/stuck_at": 1,
+    "C3/injection_naive": 1,
+    "C3/replay": 1
+  },
+  "files": {
+    "days/p01/0.json": "e012d557d557c13e2e4c87d3bdbd2772b9c6739fcab3c7571e1d585f3a6b63f6",
+    "days/p01/1.json": "fd45321fb69eff9d70c2e7e553f9ce9e2f2f1df112e3ca8de141141ada006d80",
+    "days/p01/2.json": "6d9cd845b7550003352651c1e9f5cfa72ef42607d4277f087cb759020d2e7875",
+    "days/p02/0.json": "57bafd643601d9870c3654f1f4b7bde62da40a7a87cb09a8620441f9b9a7eb19",
+    "days/p02/1.json": "b0431e5a0f28e307f9314a6f91820d5dd6813e52f1d4ba1b49c85d00933942f1",
+    "days/p02/2.json": "c0616f63bb9d30701be317ea5e7b523e038ca3e1b138165119f6458de53a41d8",
+    "days/p03/0.json": "bbc33aaacda3c121585df865d33b40b41ab442faaff840974df0505b749da305",
+    "days/p03/1.json": "82fb0b73310026bd734f0747e8c367b49eeed385ce45be3dcf88a3a16f9f9f9b",
+    "days/p03/2.json": "7b3e2a54adf44f47c6738fdd0437e5664f1dc5975d76c62e0844cd10743af7ec",
+    "days/p04/0.json": "49a7fd6ed26dc47b557833ecd20732a83c487efe604e8d0e3fc6fef91f6e8aeb",
+    "days/p04/1.json": "10feba353d7a91a5fa8a26fe0226652b93a09f34484d6815486e6c2f447ea921",
+    "days/p04/2.json": "23542aba292787b94d6363758c6af8a93e284ea3c91dd522656faea0e1071496",
+    "days/p05/0.json": "a3a2a4efb9220fdda5d0df5520683567a265e280e1b092929a153c5b217e38dd",
+    "days/p05/1.json": "4878fea163dd36f3b08df1ef51c372c2b26d635e6f8bc859d1be9f222a3be925",
+    "days/p05/2.json": "3201313d04719fa83050594ca27de0700701267741406d34fb8c4e4ca6906ea5",
+    "days/p06/0.json": "901db80b3ea9351bae806f142fb805c3a13772801d26c8b537e68228dcd4fc3f",
+    "days/p06/1.json": "d70f526c65b3c61ac9fb53eb767f947a4aa241be894da1aae084e1477199b94d",
+    "days/p06/2.json": "87e78f32a994a9b9d96b1672dcecb74c77c91ee5c00b740bd24a4f1abe866f16",
+    "days/p07/0.json": "a35b5f6db6d9eaa740b38ae6f6a2ae649536c21c5c180438ee6914d661a78ca6",
+    "days/p07/1.json": "0fb6e1039dd56716738f4016200e5b16cf56769ab79a39f5b7eef47b3e7dfc67",
+    "days/p08/0.json": "dcd522a63a6880b784de0fb5afed65669c1ed75fb869a6b93c14a111e855f88a",
+    "days/p08/1.json": "d9df49bdf398f088dfb047ccc8a87d46ba6f8f6581bae00da6ea69aaaea7a92e",
+    "plans/plan-p01.json": "9b55c57be0ade55952114338cd612dc14eb65514a852a1e0906aff5ab9fbf931",
+    "plans/plan-p02.json": "db15ef9d8225a35a3c59b4069ad820a271496122752c178f332d3c82e8a072c9",
+    "plans/plan-p03.json": "f5f39c3f384d2172378a47270d11bad35ee4ef2612fd442943c7afc8ec89809a",
+    "plans/plan-p04.json": "c594f109d2730423cdb7e48d4cc8183068abf9a454cf51b8e3abf1564132cf52",
+    "plans/plan-p05.json": "705fbc539b32e78899d376adf0426bafb5c154c7f552c580a19280adeee8a0fb",
+    "plans/plan-p06.json": "90472887f5ea27b5f65bf862e1ef81d11fec96a69dfdd8d29a3f9c77a1d2055b",
+    "plans/plan-p07.json": "c19ad26dfe31ae1a0bfec638b13312047b195226fbf9b8733e7e5a9179e03548",
+    "plans/plan-p08.json": "cc1f42522ad610730404aaabcb3c2a169216b821b1e230dc1ebdfe9d48c62c45",
+    "truth/p01/0.json": "da292c41b6ecd0b4ac20050cb810de62d5aaef577ddb5d649e0314fa4365bc39",
+    "truth/p01/1.json": "df950c5339c3314f9b2810306921f684af9d7af5c5e11a48a03855da08585ab8",
+    "truth/p01/2.json": "f79c3d3fdb5c979f7dec6cde755b19d1a238cb0364035611ddf063af8cf73e2a",
+    "truth/p02/0.json": "0ae5a72e0454e3158b7495cafc8658b49cf784f7e0112d36f1b52444ae0ad4a9",
+    "truth/p02/1.json": "4b84e2ef851df1ca32607defa3a4d0ad343c362d3c44847c1fb495b55fcd2cd4",
+    "truth/p02/2.json": "c5f8c0980496d522237176f25a97a8b553c2768d98c1ce1bb267aa7b88edc85e",
+    "truth/p03/0.json": "cf8fe22258a44f76395fdf3cf08d85836fc9eb6a88f3365ce393648c208c7129",
+    "truth/p03/1.json": "70cff5819caf4b9fb7a87c9b9cc9f7b393f81e1ba52dbf205854157d286595ff",
+    "truth/p03/2.json": "f874ebd0e732ef11f8fae1c47e6b4fe0dc577bf3c18cfd0e641a4fee5a55636f",
+    "truth/p04/0.json": "3e2bc4b9b3d2a36d6d27dbd12dd80d7cb8bc83b27d096dacff8d5fc4e3a1f4bf",
+    "truth/p04/1.json": "2577b6b870329cae0f139e6b17949be46ded976a3f5560f31c0a69f3ce50162e",
+    "truth/p04/2.json": "795f929a1df224246103e5ce0cc6ba53ab4bd84131a6d6d6c1f86bf0bebe9439",
+    "truth/p05/0.json": "65f2eb278c338bbb1724ef04f452e0cdb6e508e7f9114aaf2d9f67182483ce83",
+    "truth/p05/1.json": "b90bc86c7cf5572b1b203f76a40ed6edabf1d458c8a152790c7d7308e148e97b",
+    "truth/p05/2.json": "39332b200be3bbdbcabdcdfd2cef1ad04e1330ee17156ee7884acc5cf54d1b6e",
+    "truth/p06/0.json": "47558aaa234bb03d34063c45f748356aae5ca0a27a6090dfbb9974184f2bf4ef",
+    "truth/p06/1.json": "9ac0c8f60de6b51e66d171cdb9ff5484c5bf65d0933c3103b1f5c800134b2a48",
+    "truth/p06/2.json": "8ee6836e7c28b70b725c4f9d30ae79160ec4c7ddff5f8181ace98aa5069f2cd9",
+    "truth/p07/0.json": "c9f5943eebceaa0d939466c2446e6b68407499cbdc409c4bc0e4fe2106a84394",
+    "truth/p07/1.json": "345bb22da0fb0bb6b3685e18fd1da06ca5822c3a71a9e8d9002eddf56c02a017",
+    "truth/p08/0.json": "d936503cd87c9a21c68ba53e8e526baf10af77c2176cd6ee26e418245923c5de",
+    "truth/p08/1.json": "8baf6c48391c8a834948e0ae234599d08b57b1ddec005066c154d5334049ebba"
+  },
+  "fixture_only": true,
+  "generation_seed": 0,
+  "generator_git_rev": "fixture-rev",
+  "n_unfilled": 0,
+  "n_unverified": 1,
+  "patients": {
+    "p01": {
+      "care_plan_id": "plan-p01",
+      "cohort": "fx",
+      "n_scored_days": 2,
+      "patient_index": 1,
+      "role": "patient",
+      "split": "train",
+      "tail_day_index": 2
+    },
+    "p02": {
+      "care_plan_id": "plan-p02",
+      "cohort": "fx",
+      "n_scored_days": 2,
+      "patient_index": 2,
+      "role": "patient",
+      "split": "train",
+      "tail_day_index": 2
+    },
+    "p03": {
+      "care_plan_id": "plan-p03",
+      "cohort": "fx",
+      "n_scored_days": 2,
+      "patient_index": 3,
+      "role": "patient",
+      "split": "calibration",
+      "tail_day_index": 2
+    },
+    "p04": {
+      "care_plan_id": "plan-p04",
+      "cohort": "fx",
+      "n_scored_days": 2,
+      "patient_index": 4,
+      "role": "patient",
+      "split": "calibration",
+      "tail_day_index": 2
+    },
+    "p05": {
+      "care_plan_id": "plan-p05",
+      "cohort": "fx",
+      "n_scored_days": 2,
+      "patient_index": 5,
+      "role": "patient",
+      "split": "test",
+      "tail_day_index": 2
+    },
+    "p06": {
+      "care_plan_id": "plan-p06",
+      "cohort": "fx",
+      "n_scored_days": 2,
+      "patient_index": 6,
+      "role": "patient",
+      "split": "test",
+      "tail_day_index": 2
+    },
+    "p07": {
+      "care_plan_id": "plan-p07",
+      "cohort": "fx",
+      "group": "double_take_vs_bounce",
+      "mechanism": "c1_double_take",
+      "member": "A",
+      "n_scored_days": 1,
+      "pair": "pair01",
+      "patient_index": 7,
+      "role": "confounder_pair",
+      "split": "test",
+      "tail_day_index": 1,
+      "variant_id": "v01"
+    },
+    "p08": {
+      "care_plan_id": "plan-p08",
+      "cohort": "fx",
+      "group": "double_take_vs_bounce",
+      "mechanism": "c2_bounce",
+      "member": "B",
+      "n_scored_days": 1,
+      "pair": "pair01",
+      "patient_index": 8,
+      "role": "confounder_pair",
+      "split": "test",
+      "tail_day_index": 1,
+      "variant_id": "v01"
+    }
+  },
+  "prior_provenance": [
+    {
+      "name": "fx_param",
+      "source_ref": "FIXTURE-ONLY: arithmetic value, no source",
+      "verified_by": null
+    }
+  ],
+  "prior_source_name": "fixture_prior",
+  "settings": {
+    "monitor": {
+      "reorder_delay_ms": 0,
+      "step_ms": 60000
+    },
+    "n_patient_days": 12,
+    "n_patients": 6,
+    "n_scored_days": 2,
+    "n_twin_patient_days": 2,
+    "n_twin_patients": 2,
+    "note": "ILLUSTRATIVE, UNVERIFIED: hand-written fixture of WS08-T01",
+    "registry_fixture_only": true,
+    "registry_version": "0.0.0",
+    "split_fractions": {
+      "calibration": 0.33,
+      "test": 0.33,
+      "train": 0.34
+    },
+    "tail_day": true
+  }
+}
