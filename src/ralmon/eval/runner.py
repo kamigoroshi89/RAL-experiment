@@ -184,7 +184,7 @@ BASELINE_NAMES: Final[tuple[str, ...]] = (
 _ALPHA_BASELINES: Final[frozenset[str]] = frozenset(
     {"B4", "B5", "B5-per-template", "B5-bonferroni"}
 )
-_OURS_NAME: Final = re.compile(r"ours(-[A-Za-z0-9]+)*")
+_OURS_NAME: Final = re.compile(r"ours(-[A-Za-z0-9_.]+)*")
 _EXPERIMENT_ID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 _EXTENSIONS: Final[tuple[str, ...]] = (
     "ralmon.eval.ablations",

@@ -406,7 +406,17 @@ def test_the_evidence_transform_sees_the_extracted_evidence_once_per_run(
 
 @pytest.mark.parametrize(
     "name",
-    ["B1", "B2", "B2-residual", "B2-iforest", "B3", "B4", "B5", "B5-per-template", "B5-bonferroni"],
+    [
+        "B1",
+        "B2",
+        "B2-residual",
+        "B2-iforest",
+        "B3",
+        "B4",
+        "B5",
+        "B5-per-template",
+        "B5-bonferroni",
+    ],
 )
 def test_build_detector_names_the_baselines_as_the_contract_does(name: str) -> None:
     config_, options = load_experiment(SMOKE)
@@ -422,7 +432,9 @@ def test_build_detector_names_the_baselines_as_the_contract_does(name: str) -> N
 
 def test_build_detector_refuses_a_baseline_without_its_operating_parameters() -> None:
     config_, options = load_experiment(SMOKE)
-    env = make_environment(config_, options, 0)  # no B2 parameters in the smoke configuration
+    env = make_environment(
+        config_, options, 0
+    )  # no B2 parameters in the smoke configuration
     with pytest.raises(ConfigError, match="z_threshold"):
         build_detector("B2", env)
     with pytest.raises(ConfigError, match="alpha"):

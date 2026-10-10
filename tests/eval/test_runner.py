@@ -998,3 +998,18 @@ def test_false_alarms_are_split_by_the_kind_of_detection(tmp_path: Path) -> None
         "unattributed_detection": 1,
     }
     assert m["false_alarms_per_patient_day"]["ours-s1"]["n_false_alarms"] == 3
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["ours", "ours-A1", "ours-A3-prio", "ours-A4-avail-0.5", "ours-A4-witness-only"],
+)
+def test_detector_names_of_the_ablation_variants_are_valid(name: str) -> None:
+    assert runner.is_valid_detector_name(name)
+
+
+@pytest.mark.parametrize(
+    "name", ["", "ours-", "ours--A1", "oursA1", "B6", "b1", "ours A1", "../ours"]
+)
+def test_other_detector_names_are_not(name: str) -> None:
+    assert not runner.is_valid_detector_name(name)
