@@ -40,6 +40,7 @@ from ralmon.eval.runner import (
     run_experiment,
     split_patients,
 )
+from ralmon.monitor import VerdictState
 from tests.eval.helpers import (
     C1,
     C2,
@@ -975,3 +976,25 @@ def test_device_profile_is_built_from_the_configuration() -> None:
     assert env.profile.caps("cuff").authenticates is True  # type: ignore[attr-defined]
     assert env.profile.caps("robot").authenticates is False  # type: ignore[attr-defined]
     assert runner.make_environment(config, opts, 0).profile is None
+
+
+def test_false_alarms_are_split_by_the_kind_of_detection(tmp_path: Path) -> None:
+    """A predictive false alarm is visible apart from a measured one (the early warnings enter the false alarms when they
+    lie outside the tolerance window of the event, E3)."""
+    from tests.eval.helpers import alert
+
+    script = {
+        ("p06", 0): [
+            alert(ms(5), UND, key="a", verdict=VerdictState.PREDICTED_VIOLATION),
+            alert(ms(6), C1, key="b"),
+            det(ms(7), None),
+        ]
+    }
+    m = read_metrics(run_doc(tmp_path, hand_document(), factory_for(script))[0])
+    kinds = m["analysis"]["run"]["false_alarms_by_kind"]["ours-s1"]
+    assert kinds == {
+        "predicted_violation": 1,
+        "violated": 1,
+        "unattributed_detection": 1,
+    }
+    assert m["false_alarms_per_patient_day"]["ours-s1"]["n_false_alarms"] == 3

@@ -73,7 +73,7 @@ from typing import Any, Final
 import numpy as np
 import yaml
 
-from ralmon.attribution import Detection, RuleAttributor, extract_evidence
+from ralmon.attribution import Alert, Detection, RuleAttributor, extract_evidence
 from ralmon.baselines import (
     B1StaticThresholds,
     B2AnomalyDetection,
@@ -91,8 +91,8 @@ from ralmon.benchmark import split_patients as _builder_split_patients
 from ralmon.conformal import BonferroniAllocation, SplitConformal
 from ralmon.eval.metrics import (
     CLASSES,
-    STREAM_BOOTSTRAP,
     LABEL_COLUMNS,
+    STREAM_BOOTSTRAP,
     MatchConfig,
     Matching,
     bootstrap_weights,
@@ -124,6 +124,7 @@ from ralmon.monitor import (
     MonitorConfig,
     PersistenceForecaster,
     StreamingMonitor,
+    VerdictState,
 )
 from ralmon.spec import CarePlan, load_registry, load_templates
 
@@ -1241,6 +1242,7 @@ class _Scored:
     matching: Matching
     table: np.ndarray
     n_dropped_tail: int
+    false_alarm_kinds: Counter[str]
 
 
 def _unit_of_detection(t_ms: int, last_day: int, tail_start: int) -> int:
@@ -1267,7 +1269,18 @@ def _score_patient(
         for i in (*matching.false_alarm_index, *matching.duplicate_index)
         if det_days[i] < 0
     )
-    return _Scored(matching, table, dropped)
+    kinds: Counter[str] = Counter()
+    for i in matching.false_alarm_index:
+        if det_days[i] < 0:
+            continue
+        item = matching.det[i]
+        if not isinstance(item, Alert):
+            kinds["unattributed_detection"] += 1
+        elif item.verdict is VerdictState.PREDICTED_VIOLATION:
+            kinds["predicted_violation"] += 1
+        else:
+            kinds["violated"] += 1
+    return _Scored(matching, table, dropped, kinds)
 
 
 # ---- the run ---------------------------------------------------------------------------------------------------------
@@ -1822,6 +1835,7 @@ def _run_seed(
     )
     metrics: dict[str, dict[str, Any]] = {name: {} for name in METRIC_NAMES}
     detections_info: dict[str, Any] = {}
+    fa_kinds: dict[str, Any] = {}
     subtype: dict[str, Any] = {}
     ours_info: dict[str, Any] = {}
     outputs: dict[str, Mapping[str, Sequence[Detection]]] = {}
@@ -1856,6 +1870,10 @@ def _run_seed(
         tables[name] = table
         dropped = sum(s.n_dropped_tail for s in scored.values())
         emitted = int(inst.stats["n_emitted"])
+        kinds: Counter[str] = Counter()
+        for scored_patient in scored.values():
+            kinds.update(scored_patient.false_alarm_kinds)
+        fa_kinds[name] = dict(sorted(kinds.items()))
         detections_info[name] = {
             "n_emitted": emitted,
             "n_clipped_after_close": inst.n_clipped,
@@ -1909,6 +1927,7 @@ def _run_seed(
         "run": {
             "split": {k: list(v) for k, v in context_split.items()},
             "detections": detections_info,
+            "false_alarms_by_kind": fa_kinds,
             "closing_step": {
                 "n_events": n_closing,
                 "classes": ["C1"],
