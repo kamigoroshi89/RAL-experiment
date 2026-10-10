@@ -743,10 +743,10 @@ def test_b3_excludes_a_late_input_exactly_as_the_monitor_does() -> None:
 
 
 def test_b3_creates_no_instance_for_an_anchor_stamped_before_the_day() -> None:
-    """On day 1 a MEASUREMENT stamped before the start of the day (but received in it) is not part of the day
+    """On day 1 a MEASUREMENT stamped before the start of the day (but received at its start) is not part of the day
     (empty carry-over, ADR-061): no instance is created for it. Removing the skip creates one with a negative anchor."""
     t0 = T_DAY
-    early = Event(EventKind.MEASUREMENT, t0 - 3 * STEP, t0 + STEP, "dev", {}, None)
+    early = Event(EventKind.MEASUREMENT, t0 - 3 * STEP, t0, "dev", {}, None)
     inside = Event(EventKind.MEASUREMENT, t0 + 3 * STEP, t0 + 3 * STEP, "dev", {}, None)
     factory = Factory({})
     b3 = make_b3(templ(TemplateId.RANGE), factory)
@@ -784,6 +784,25 @@ def test_b3_does_not_deduplicate_inputs_and_double_counts_doses() -> None:
     # dose_count is 2 at step 4 (limit 2: margin 0) and 4 at step 8: both copies of the second dispense see the
     # margin 2 - 4 = -2 and are detected at step 8 with the score 2
     assert pairs(out) == [(8 * STEP, 2.0), (8 * STEP, 2.0)]
+
+
+def test_b3_detects_an_open_response_window_after_midnight_where_the_monitor_ends_pending() -> (
+    None
+):
+    """OPEN DECISION (Notes of WS06-T04), pinned. A dose at 23:00 with no blood-pressure response: the RESP window
+    (``delta2`` = 180 minutes in the fixture registry) closes after midnight. The per-day monitor ends the day with the
+    instance PENDING; B3 runs on for the tail of its timing and detects at the step where the window closes (step
+    1560), a step of the next day. B3 is not clipped at the closing step."""
+    dose = 23 * 60
+    day = observed([smp("bp", dose - 1, 150.0)], [evt(EventKind.DISPENSE, dose)])
+    first, _ = _monitor_violations(day, make_care_plan(), 0, [TemplateId.RESP])
+    assert first == {}
+    b3 = make_b3(
+        templ(TemplateId.RESP), None, timing=TimingConfig(STEP, 0, 4 * 3600_000)
+    )
+    out = run(b3, day)
+    assert [d.t_ms for d in out] == [1560 * STEP]
+    assert all(d.t_ms > T_DAY for d in out)
 
 
 def test_b5_exposes_run_stats_and_the_gate_like_b3() -> None:

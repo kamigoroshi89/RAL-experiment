@@ -22,14 +22,24 @@ the evidence is dropped at the harness). Its scores are in different units for d
 comparable only within a template; detections of one step are kept in the order of their ``instance_key`` and are
 never ordered across units. It is fitted on nothing: ``fit`` reads no day.
 
-Handicaps, stated because B3 is a fair competitor. (a) The ones above, which are what the baseline is. (b) None
-else: all seven templates are evaluated, the threshold direction is that of the templates, the registry and the plan
+Handicaps, stated because B3 is a fair competitor. (a) The ones above, which are what the baseline is. (b) Apart from the
+differences listed next, nothing: all seven templates are evaluated, the threshold direction is that of the templates, the registry and the plan
 are read through the same logged wrappers as for every baseline, the lateness rule of the monitor is applied (an
 input that arrives after its step is final is dropped), and the availability of the robot channels is read from the
-``NODE_STATE colocated`` reports as the monitor reads it. Known differences from the monitor that favour or hurt B3
-and that the audit lists: the harness does not deduplicate inputs by ``(source, name, seq)``, and the detectors are
-run one day at a time with empty carry-over state (ADR-061, proposed), so a counter over 24 h can only under-count
-for B3 as for the proposed method.
+``NODE_STATE colocated`` reports as the monitor reads it.
+
+Known differences from the monitor, which the audit lists. (1) The harness does not deduplicate inputs by
+``(source, name, seq)``: an event delivered twice on time creates a second instance and counts twice (a dispense
+delivered twice is two doses in ``dose_count``), so B3 can report violations of the daily limit that the monitor does
+not (asymmetry (b) of ``base.py``; pinned by ``test_b3_does_not_deduplicate_inputs_and_double_counts_doses``). Inputs
+that arrive after their step is final are dropped as in the monitor. (2) The point evaluator gives a value only when
+the interval of an instance is a point, while the monitor decides VIOLATED from the sign of the upper bound: B3 is
+silent on INT and SYS violations whose history holds an undefined or unavailable step (ADR-063, proposed, open
+decision for gab). (3) The detectors are run one day at a time with empty carry-over state (ADR-061, proposed): a
+counter over 24 h can lack the doses of the day before, for B3 as for the proposed method. (4) B3 runs on after the
+end of the day for the tail of the timing, so an instance whose deadline passes after midnight (RESP of a late dose)
+can be detected at a step of the next day, where the per-day monitor ends PENDING (open decision for gab, Notes of
+WS06-T04).
 
 The INT gate. The held level of ``presence`` is a hazard when the trace carries no availability mark (ADR-054): the
 level of the last robot visit then witnesses every later dispense. ``run_stats`` of the last run reports
@@ -58,6 +68,7 @@ from ralmon.baselines.raw_robustness import (
     GridStep,
     LoggingRegistry,
     RawRobustnessEvaluator,
+    RunStats,
     SignalGrid,
     make_evaluator,
 )
@@ -93,20 +104,7 @@ _ANCHOR_KIND: Final[dict[TemplateId, str]] = {
 }
 
 
-@dataclass(frozen=True, slots=True)
-class B3RunStats:
-    """What the last ``run`` counted (no wall clock).
-
-    ``presence_samples_without_availability_marks`` is the gate of ADR-054 with the definition of ``MonitorStats``;
-    ``availability_reports`` the ``NODE_STATE colocated`` reports applied as marks of the robot channels;
-    ``late_inputs`` the inputs dropped because they arrived after their step was final; ``instances`` the instances
-    that were created.
-    """
-
-    presence_samples_without_availability_marks: int
-    availability_reports: int
-    late_inputs: int
-    instances: int
+B3RunStats = RunStats  # the counters of a run; the same type as for B5
 
 
 class _Tracker:
@@ -223,12 +221,7 @@ class B3PlainSTL(BaselineBase):
         for batch in self._steps(day, plan):
             for grid_step in grid.apply(batch):
                 self._row(state, grid_step, batch.t_ms)
-        self._run_stats = B3RunStats(
-            grid.presence_samples_without_availability_marks,
-            grid.availability_reports,
-            grid.late,
-            len(state.keys),
-        )
+        self._run_stats = RunStats.of(grid, len(state.keys))
         return state.detections
 
     def _read_plan(

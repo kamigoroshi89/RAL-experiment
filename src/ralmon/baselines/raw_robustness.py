@@ -71,6 +71,7 @@ __all__ = [
     "GridStep",
     "LoggingRegistry",
     "RawRobustnessEvaluator",
+    "RunStats",
     "SignalGrid",
     "TemplateRawEvaluator",
     "make_evaluator",
@@ -92,6 +93,31 @@ _IMPULSES: Final = (
 )
 # no derived signal reads this signal: a sample of it only advances the clock of the derived signals
 _CLOCK_SIGNAL: Final = SignalId.SPO2.value
+
+
+@dataclass(frozen=True, slots=True)
+class RunStats:
+    """What the last ``run`` of B3 or B5 counted (no wall clock).
+
+    ``presence_samples_without_availability_marks`` is the gate of ADR-054 with the definition of ``MonitorStats``;
+    ``availability_reports`` the ``NODE_STATE colocated`` reports applied as marks of the robot channels;
+    ``late_inputs`` the inputs dropped because they arrived after their step was final; ``instances`` the instances
+    that were created.
+    """
+
+    presence_samples_without_availability_marks: int
+    availability_reports: int
+    late_inputs: int
+    instances: int
+
+    @classmethod
+    def of(cls, grid: SignalGrid, instances: int) -> RunStats:
+        return cls(
+            grid.presence_samples_without_availability_marks,
+            grid.availability_reports,
+            grid.late,
+            instances,
+        )
 
 
 @runtime_checkable
