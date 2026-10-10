@@ -10,7 +10,6 @@ import math
 from fractions import Fraction
 
 import numpy as np
-import pytest
 
 import ralmon.conformal as c
 

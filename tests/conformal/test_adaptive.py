@@ -104,6 +104,7 @@ def test_adaptive_guarantee_string_is_empirical() -> None:
 
 def test_adaptive_docstring_states_the_reporting_rules() -> None:
     doc = c.AdaptiveConformal.__doc__ or ""
+    doc = " ".join(doc.split())  # docstring line breaks do not matter
     assert "calibration unit: patient episode" in doc
     assert "ref-needed: WS03" in doc
     assert "alpha allocation is required" in doc

@@ -91,6 +91,7 @@ def test_rho_declares_kind_guarantee_and_assumptions() -> None:
     assert "patient episode" in assumptions and "calibration unit" in assumptions
     assert "exchangeable" in assumptions
     doc = c.SplitConformal.__doc__ or ""
+    doc = " ".join(doc.split())  # docstring line breaks do not matter
     assert "calibration unit: patient episode" in doc
     assert "marginal over the population" in doc and "exchangeab" in doc
     assert "not conditional on the patient" in doc
