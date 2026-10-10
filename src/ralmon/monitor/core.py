@@ -133,6 +133,13 @@ _PLAIN_SAMPLES: Final = frozenset(
     }
 )
 _ROBOT_CHANNELS: Final = frozenset({SignalId.PRESENCE, SignalId.INTAKE})
+# One mask serves both robot channels (H-MASK of docs/models/evidence-channels.md): a NODE_STATE report of the
+# robot with a boolean ``colocated`` marks these two channels at once (ADR-054 (b)).
+_MASKED_BY_REPORT: Final = (SignalId.PRESENCE, SignalId.INTAKE)
+_ROBOT_SOURCE: Final = (
+    "robot"  # the source of the robot node's events (evidence-channels.md conventions)
+)
+_KEY_COLOCATED: Final = "colocated"
 _USED_EVENTS: Final = frozenset(
     {
         EventKind.MEASUREMENT,
@@ -206,13 +213,22 @@ class MonitorStats:
     one per instance evaluation, one per step summary and one per released input.
 
     ``presence_samples_without_availability_marks`` is the GATE for the presence hazard of ADR-054: it is
-    the number of presence samples used by the run when no availability mark for ``presence`` was ever
-    applied, and 0 as soon as one was (``push_availability`` of ``presence``, any value). A result that
+    the number of presence samples used by the run before the first availability mark for ``presence``, when
+    that mark is absent or is a ``NODE_STATE colocated`` report (a sample used before the first report
+    belongs to no episode that a report opened); when the first mark was given by ``push_availability`` it
+    is 0 as soon as that mark was applied, any value (the harness form, CG-6). A result that
     rests on the INT template is evidence only if it is 0, or if the trace carries the explicit zeros of
     option (a) of ADR-054. ``presence_level_older_than_window_steps`` is INFORMATION, not a gate: the
     number of finalised steps at which the level in force is 1.0, the channel is available and the sample
     that set it is older than ``int_window``; it is positive even with correct marks whenever a co-location
-    episode lasts longer than the window (the generator's dwell is 10 minutes, ``int_window`` 5)."""
+    episode lasts longer than the window (the generator's dwell is 10 minutes, ``int_window`` 5).
+
+    ``availability_reports`` is the number of ``NODE_STATE`` reports of the robot with a boolean
+    ``colocated`` that were applied as availability marks of both robot channels (ADR-054 (b)); it counts
+    reports that were used, not those refused as late, duplicate or after finalisation (those are in the
+    counters and lists of the refusals). ``colocated_reports_ignored`` is the number of ``NODE_STATE``
+    events that carry a ``colocated`` key and were not used because the source is not the robot or the
+    value is not a ``bool``; they are also in ``ignored_events``."""
 
     node_updates: int
     retained_samples: int
@@ -238,6 +254,8 @@ class MonitorStats:
     presence_level_older_than_window_steps: int = 0
     presence_samples_without_availability_marks: int = 0
     plan_instances_before_start: int = 0
+    availability_reports: int = 0
+    colocated_reports_ignored: int = 0
 
 
 def _seq_of(instance: Instance) -> int:
@@ -278,14 +296,28 @@ class StreamingMonitor:
     Anchors that arrive before any plan was loaded create nothing and are counted by
     ``stats().anchors_without_plan``.
 
-    The witness. ``presence`` is a held level that belongs to one co-location episode (ADR-054, proposed):
-    a step at which ``push_availability`` has marked the channel unavailable clears the level, and after
-    the channel returns the level is undefined until a new sample arrives (``value_undefined:presence``).
-    HAZARD, not a feature: a trace with no availability mark and no zero-valued presence sample (the
-    output of the benchmark generator, WS04-T06 test 11) keeps the level of the last robot visit for the
-    rest of the day, so INT is satisfied by an old sample (docs/formal/02 section 4.7, TG-9);
-    ``stats().presence_samples_without_availability_marks`` is non-zero exactly then (the gate),
-    ``stats().presence_level_older_than_window_steps`` is the information counter.
+    The witness. ``presence`` is a held level that belongs to one co-location episode (ADR-054, accepted
+    2026-10-09): a step at which the channel is marked unavailable clears the level, and after the channel
+    returns the level is undefined until a new sample arrives (``value_undefined:presence``). The mark comes
+    from a ``NODE_STATE`` event of the robot (source ``robot``) with a boolean ``payload.colocated``, which
+    ``push_event`` turns into an availability mark of BOTH robot channels at the device time and receive
+    time of the event (true at an arrival, false at a departure; ordered, late, duplicate and finalised by
+    the rule of any input); ``push_availability`` is the same mark given directly. A NODE_STATE without
+    ``colocated``, or from another source, or with a ``colocated`` that is not a ``bool``, is not a mark
+    (``ignored_events``; ``colocated_reports_ignored`` when it carried the key). Reading of H-INIT: the
+    channels are available until the first mark (a monitor cannot know at step 0 that the trace will carry
+    reports, and a trace without any must give the records it always gave), but when the first mark of
+    the run is a report the presence level held from before it is cleared (a sample used before the first
+    report does not witness a later dispense, and the gate counts it); a first report that is an arrival
+    also makes the level undefined until a sample of the new episode, a first report that is a departure
+    makes the channels unavailable. Before the first arrival, on a trace that has reports, the INT marker
+    can therefore be ``value_undefined:presence`` where strict H-INIT gives ``channel_unavailable:presence``.
+    HAZARD, not a feature: a trace with no availability mark (no ``colocated`` report) and no zero-valued
+    presence sample keeps the level of the last robot visit for the rest of the day, so INT is satisfied by
+    an old sample (docs/formal/02 section 4.7, TG-9); ``stats().presence_samples_without_availability_marks``
+    is non-zero exactly then (the gate), ``stats().presence_level_older_than_window_steps`` is the
+    information counter. The H-MASK condition "the robot node is active" is not applied here: only the
+    ``colocated`` key is read (the robot lifecycle state is evidence for the attribution layer).
     """
 
     @converting(MonitorConfigError)
@@ -413,8 +445,13 @@ class StreamingMonitor:
         self._unplanned = 0
         self._stale_presence = 0
         self._presence_step = -1
-        self._presence_samples = 0
+        self._presence_samples = (
+            0  # presence samples used before the first presence mark
+        )
         self._presence_marks = 0
+        self._first_mark_is_report = False
+        self._reports = 0
+        self._colocated_ignored = 0
         self._k_start = 0
         self._before_start = 0
 
@@ -563,6 +600,23 @@ class StreamingMonitor:
                 f"event payload must be a mapping, got {show(event.payload)}"
             )
         seq = self._seq_of_input(event.seq)
+        if kind is EventKind.NODE_STATE:
+            # ADR-054 (b): the robot's co-location report is the availability mask of both robot channels
+            payload = event.payload
+            if _KEY_COLOCATED in payload:
+                colocated = payload[_KEY_COLOCATED]
+                if source == _ROBOT_SOURCE and isinstance(colocated, bool):
+                    self._ingest(
+                        "avail",
+                        event,
+                        t_dev,
+                        t_rx,
+                        seq,
+                        ("event", source[:], kind.value, seq),
+                        (_MASKED_BY_REPORT, colocated),
+                    )
+                    return
+                self._colocated_ignored += 1
         if kind not in _USED_EVENTS:
             self._ignored += (
                 1  # evidence for the attribution layer, not a signal (01 section 2.1)
@@ -585,9 +639,10 @@ class StreamingMonitor:
         """Mark the robot channel ``signal`` (``presence`` or ``intake``) available or unavailable from
         the step that shows device time ``t_device_ms`` on (CG-6). A channel is available until marked.
 
-        Marking ``presence`` unavailable also ends the held level of the channel (ADR-054, proposed): after
-        it returns, the level is undefined until a new presence sample arrives. A sample that arrives
-        while the channel is down is not held after the return."""
+        Marking ``presence`` unavailable also ends the held level of the channel (ADR-054): after it
+        returns, the level is undefined until a new presence sample arrives. A sample that arrives while
+        the channel is down is not held after the return. A ``NODE_STATE`` report of the robot with a
+        boolean ``colocated`` given to ``push_event`` marks both channels in the same way."""
         self._check_open()
         channel = self._signal_of(signal)
         if channel not in _ROBOT_CHANNELS:
@@ -599,7 +654,7 @@ class StreamingMonitor:
         t_dev = as_int(t_device_ms, "t_device_ms", MonitorInputError)
         t_rx = as_int(t_rx_ms, "t_rx_ms", MonitorInputError)
         mark = ChannelAvailability(channel, available, t_dev, t_rx)
-        self._ingest("avail", mark, t_dev, t_rx, None, None, (channel, available))
+        self._ingest("avail", mark, t_dev, t_rx, None, None, ((channel,), available))
 
     @converting(MonitorInputError, MonitorInvariantError)
     def advance(self, t_ms: TimeMs) -> tuple[VerdictRecord, ...]:
@@ -689,11 +744,15 @@ class StreamingMonitor:
         return MonitorStats(
             dedup_evicted_count=self._dedup_evicted,
             plan_instances_before_start=self._before_start,
+            availability_reports=self._reports,
+            colocated_reports_ignored=self._colocated_ignored,
             ignored_samples=self._ignored_samples,
             anchors_without_plan=self._unplanned,
             presence_level_older_than_window_steps=self._stale_presence,
             presence_samples_without_availability_marks=(
-                self._presence_samples if self._presence_marks == 0 else 0
+                self._presence_samples
+                if self._presence_marks == 0 or self._first_mark_is_report
+                else 0
             ),
             node_updates=self._nodes,
             retained_samples=len(self._buffer) + len(self._dispense_steps),
@@ -1036,12 +1095,24 @@ class StreamingMonitor:
         kind = entry.kind
         data: Any = entry.data
         if kind == "avail":
-            channel, available = data
-            if channel is SignalId.PRESENCE:
-                self._presence_off = not available
-                self._presence_marks += 1
-            else:
-                self._intake_off = not available
+            channels, available = data
+            from_report = isinstance(entry.item, Event)
+            for channel in channels:
+                if channel is SignalId.PRESENCE:
+                    if from_report and self._presence_marks == 0:
+                        # the first mark of the run is a co-location report (H-INIT): a level held from
+                        # before it belongs to no episode that a report opened and does not count, and
+                        # the samples used before it stay counted by the gate
+                        self._first_mark_is_report = True
+                        self._presence = _NAN
+                    self._presence_off = not available
+                    self._presence_marks += 1
+                else:
+                    self._intake_off = not available
+            if from_report:
+                self._reports += (
+                    1  # a co-location report, applied as the mask of both channels
+                )
             return
         if kind == "sample":
             signal, value = data
@@ -1060,7 +1131,8 @@ class StreamingMonitor:
             elif signal is SignalId.PRESENCE:
                 self._presence = value
                 self._presence_step = k
-                self._presence_samples += 1
+                if self._presence_marks == 0:
+                    self._presence_samples += 1
             elif signal is SignalId.AUTH:
                 self._auth_n += 1
             return

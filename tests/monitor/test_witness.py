@@ -6,10 +6,11 @@ while the robot is co-located (``02-interfaces.md#signals``, rule; ``01-signals-
 unavailable clears the level: after the channel returns, the level is undefined until a new sample
 arrives (``value_undefined:presence``), never the level of an earlier visit.
 
-What this does NOT cover, and the tests below pin as the documented behaviour so that nobody mistakes it
-for a safe one: a trace that carries no availability mark and no zero-valued presence sample (the
-output of the benchmark generator, WS04-T06 test 11) keeps the level of the last robot visit for the
-rest of the day, so every later dispense with an old enough sample is witnessed. ``docs/formal/02-
+What this does NOT cover by itself: a trace that carries no availability mark and no zero-valued presence
+sample (the output of the benchmark generator before the reports of ADR-054 (b), WS04-T06 test 11) keeps the
+level of the last robot visit for the rest of the day, so every later dispense with an old enough sample is
+witnessed; WS05-T11 makes the ``NODE_STATE colocated`` reports the mask (tests/monitor/test_availability_
+reports.py) and keeps this behaviour, reported by the gate, for a trace that carries none. ``docs/formal/02-
 templates.md`` section 4.7 and TG-9 state that a witness that has left needs an explicit ``0`` sample
 or an availability mask. ``MonitorStats.presence_samples_without_availability_marks`` is the gate (non-zero
 exactly when presence samples were used and no mark for ``presence`` ever arrived);
@@ -138,30 +139,12 @@ def test_an_outage_of_the_intake_channel_does_not_touch_the_presence_level() -> 
 
 
 # ---------------------------------------------------------------------------------------------
-# reproducer 2: no marks and no zeros (the trace of the benchmark generator)
+# reproducer 2: no marks and no zeros (the trace of the benchmark generator). The pinned hazard test of
+# this place was replaced by WS05-T11 (ADR-054 (b)): see tests/monitor/test_availability_reports.py,
+# ``test_departure_report_ends_the_witness`` (the same dispense with the reports is not witnessed) and
+# ``test_gate_stays_positive_on_a_day_without_reports`` (a trace without reports keeps the hazard and the gate
+# reports it).
 # ---------------------------------------------------------------------------------------------
-
-
-def test_documented_hazard_a_trace_without_zeros_or_marks_witnesses_every_later_dispense() -> (
-    None
-):
-    """THIS IS NOT A SAFE BEHAVIOUR; it is the documented one (docs/formal/02 section 4.7, TG-9).
-
-    Presence is a held level. The robot sampled 1.0 at 07:00 and sent nothing afterwards; no zero and no
-    availability mark exists, so the dispense at 21:00 is INT-SATISFIED on a 14-hour-old observation.
-    The benchmark generator emits presence samples of 1.0 at arrivals only (WS04-T06 test 11), so
-    until ADR-054 is settled INT is blind after the first robot visit of a generated day.
-    """
-    mon = make_monitor()
-    mon.push_sample(smp("presence", hhmm(7, 0), 1.0))
-    mon.push_event(evt("dispense", hhmm(21, 0)))
-    records = mon.advance(hhmm(21, 0))
-    rec = int_record(records, hhmm(21, 0))
-    assert rec.state.value == "satisfied"
-    assert (rec.sigma_interval.lo, rec.sigma_interval.hi) == (INT_WINDOW, INT_WINDOW)
-    # the monitor reports it: the steps at which the level in force is older than int_window
-    stale = mon.stats().presence_level_older_than_window_steps
-    assert stale == hhmm(21, 0) // STEP - (hhmm(7, 0) // STEP + INT_WINDOW // STEP)
 
 
 def test_the_stale_level_counter_is_zero_when_the_robot_keeps_sampling() -> None:
