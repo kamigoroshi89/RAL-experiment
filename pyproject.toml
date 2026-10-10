@@ -10,6 +10,12 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "pyyaml",
+    # IsolationForest for baseline B2 (WS06-T03). Unpinned like numpy and pyyaml (no pin policy yet). No lower bound is written:
+    # the version developed and tested against is 1.9.1, which needs Python 3.11, while ralmon allows Python 3.10
+    # (ADR-042), so a bound would make the package unsolvable there. scipy 1.18.1 (pulled in) needs Python 3.12 and
+    # numpy 2, so on a Python 3.10 image with numpy < 2 pip resolves older scikit-learn and scipy: untested, record the
+    # resolved versions in the release notes.
+    "scikit-learn",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +38,11 @@ extend-select = ["I", "B"]
 [tool.mypy]
 strict = true
 files = ["src/ralmon"]
+
+[[tool.mypy.overrides]]
+# scikit-learn ships no py.typed marker and no stubs (installed 1.9.1); B2 uses IsolationForest only.
+module = ["sklearn", "sklearn.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # Placeholders are empty by design; the decorator of ralmon._stub supplies the failure.

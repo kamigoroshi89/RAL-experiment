@@ -146,3 +146,7 @@ Do not pass `history` to the proposed method (`run_offline(history=...)`) in a c
 ### Hand-over (worker, 2026-10-10, from WS06-T02 review round 1)
 
 B1 (`B1StaticThresholds`, keyword-only `timing`, optional `registry`) runs only the rules whose parameter record the care plan holds, and exposes `run_stats.rules_active`. The runner must HARD-FAIL a benchmark run of B1 unless `run_stats.rules_active == ("R1", "R2", "R3", "R4")` on every plan (the care plans of WS04-T11 must carry RANGE, HOLD and COUNT parameter records with `anchor_ms` None; the monitor's own plan helper emits only static SCHED and COUNT instances, which gives `("R3",)`). B1's score is constant 1.0 (one operating point, no AUROC or AP) and it has no RESP, SYS or INT rule, so metrics for B1 are per class. Open decisions for gab: Notes of WS06-T02.
+
+### Hand-over (worker, 2026-10-10, from the review of WS06-T03)
+
+Building B2 in `build_detector`: `B2AnomalyDetection(forecaster, *, mode, signals=None, z_threshold=None, score_quantile=None, seed, feature_step_ms=None, timing, plan_for_day=None, scorer_factory=None)`; `seed` is required; the forest modes need the same `plan_for_day` function as B5 (ADR-062); `forecaster` must be `None` for `mode="iforest"` and `plan_for_day`, `feature_step_ms`, `scorer_factory` must be absent for `mode="residual"` (a parameter the mode does not use is a `ValueError`). One instance per operating point and seed. scikit-learn is a core dependency for now (open decision 5b in the Notes of WS06-T03, with the Docker hand-over 5c: the ROS 2 image lacks it).

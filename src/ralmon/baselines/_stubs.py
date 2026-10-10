@@ -2,12 +2,8 @@
 
 Each placeholder imports, carries ``__ralmon_stub_owner__`` and fails loudly when used.
 The owner task moves its names to a real module and deletes them from this file.
+
+``ralmon.baselines`` has no placeholder left: WS06-T02 to WS06-T06 made every name real.
 """
 
 from __future__ import annotations
-
-from ralmon._stub import stub_class
-
-
-@stub_class("WS06-T03")
-class B2AnomalyDetection: ...
