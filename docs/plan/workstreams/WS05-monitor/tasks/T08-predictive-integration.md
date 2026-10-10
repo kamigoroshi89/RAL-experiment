@@ -3,7 +3,7 @@ id: WS05-T08
 title: "Predictive integration and run_offline end to end"
 workstream: WS05-monitor
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS05-T05", "WS05-T06", "WS05-T07", "WS01-T08"]
 critical_path: true
 non_negotiable: false
@@ -84,7 +84,7 @@ End to end (`tests/test_end_to_end.py`)
 
 From the repository root, inside `.venv`:
 
-- `pytest tests/monitor tests/test_end_to_end.py -q` exits 0 with no skipped test (`-rs` prints nothing).
+- `pytest tests/monitor tests/test_end_to_end.py -q` exits 0 with no skipped test other than test 30 of WS05-T04 (`tests/monitor/test_rtamt.py`, conditional on ADR-013 outcome A or B; the outcome is C), as read by the plan lead after the review of 2026-10-10 (`-rs` prints only that one).
 - `pytest tests -q` exits 0.
 - `ruff check src tests` and `ruff format --check src tests` exit 0; `mypy src/ralmon` exits 0.
 - `python -c "from ralmon.monitor import run_offline, StreamingMonitor, build_calibration_episodes, StaleCalibratorError"` exits 0 and none has `__ralmon_stub_owner__`.
@@ -148,3 +148,7 @@ Status stays `in_progress` (the worker does not set `done`; WS05-T09, WS06-T01, 
 **For WS08-T01: the pipeline is built from these public pieces.** `build_calibration_episodes(days, plans, config, forecaster, registry=, templates=)` then `SplitConformal().fit(episodes, alpha, model_version=forecaster.model_version)` (without `model_version` the monitor refuses the calibrator), `run_offline(day, plan, config_with_predictive_true, calibrator, forecaster, registry=, templates=, history=)`, `extract_evidence(day, records, registry, step_ms=, reorder_delay_ms=, profile=, plan=)`, `RuleAttributor(registry, templates, plan=).attribute_all(records, evidence)`, `rank_alerts`. `tests/fixtures/monitor/worked_day.py::pipeline` is that chain in 20 lines. `run_offline_detailed(...).stats` carries `n_tests`, `per_test_alpha` and the skip reasons. Alerts are `Detection`s (`t_ms`, `label`, `score`).
 
 **For WS05-T09.** A predicted instance has TWO records with the same `(instance_key, t_eval_ms)` at its activation step (PENDING then PREDICTED_VIOLATION): a converter or a consumer must not deduplicate on that pair alone (add the state). `StaleCalibratorError` escapes `advance`; `rsm_node` has to catch it and say so. The node refits nothing; it needs a calibrator calibrated for the model it loads.
+
+### Post-task review (2026-10-10)
+
+Produced: the predictive step (`predictive.py`), `build_calibration_episodes`, `StaleCalibratorError`, `#monitor` 0.3.0, ADR-060 (proposed, `[DA-CONFERMARE]`), the end-to-end pipeline test, 50 tests. Independent review: PASS, no blocker. Soundness (ADR-008) confirmed by a seeded comparison of predictive-on and predictive-off runs on 300 random days with forecasters returning NaN, inf, wrong length and nothing: 0 differences in the definitive records over 22,258 predicted records; `StaleCalibratorError` passes through unconverted. The Done-when line "no skipped test" is read as above (the one skip is T04 test 30, ADR-013 outcome C; deleting it is outside this task's files and would lose the automatic switch-on). Open for gab (details in ADR-060, Consequences): the golden day cannot be reproduced exactly (level 0.2 needs alpha_total 1.0, prediction at 12:00 against 12:10 in the formal document), recommended fix by ADR on H-W11, H-W14 and the golden file; a forecaster or calibrator exception leaves the step half applied (F1); one pooled calibrator instead of one per template (F2). Dependents: WS05-T09 becomes `ready` (dedup key must include the state; catch `StaleCalibratorError`; isolate foreign exceptions); WS08-T01 (`rho.alpha` is the per-test level; fit the calibrator with `model_version=forecaster.model_version`; same history in calibration and test; report `alpha_total` and `n_tests`); WS07-T06.

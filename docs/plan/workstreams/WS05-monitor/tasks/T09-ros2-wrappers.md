@@ -3,7 +3,7 @@ id: WS05-T09
 title: "ROS 2 wrapper packages: RSM, attribution, event manager, watchdog, heartbeat, ward-node placement"
 workstream: WS05-monitor
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS05-T08", "WS07-T01"]
 critical_path: true
 non_negotiable: false
