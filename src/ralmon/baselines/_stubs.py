@@ -11,7 +11,3 @@ from ralmon._stub import stub_class
 
 @stub_class("WS06-T03")
 class B2AnomalyDetection: ...
-
-
-@stub_class("WS06-T05")
-class B4ConformalOnly: ...
