@@ -846,6 +846,60 @@ def test_b4_stale_calibrator_is_refused() -> None:
         b4.run(hr([60, 70]), PLAN, None)
 
 
+def test_b4_calibrator_tied_to_no_model_is_refused() -> None:
+    # a calibrator whose ``calibrated_for`` is None (fitted without a model version) is not tied to the forecaster in use
+    class Untied(StubCalibrator):
+        def fit(
+            self,
+            episodes: Sequence[CalibrationEpisode],
+            alpha: Any,
+            *,
+            model_version: str | None = None,
+        ) -> None:
+            super().fit(episodes, alpha)
+
+    b4 = make_b4(factory=lambda: Untied(5.0))
+    b4.fit([], [bench([60, 61])])
+    with pytest.raises(StaleCalibratorError):
+        b4.run(hr([60, 70]), PLAN, None)
+
+
+def test_b4_fraction_alpha_goes_through_an_allocation_exactly() -> None:
+    # Fraction(1, 20) is the decimal literal 0.05: it reaches the allocation as that float and the level stays exact,
+    # 1/20 over 3 signals = 1/60 (never a rounded float)
+    signals = ("hr_ecg", "hr_pulse", "spo2")
+    factory = Factory([1.0] * 3)
+    b4 = make_b4(
+        factory=factory,
+        signals=signals,
+        alpha=Fraction(1, 20),
+        allocation=BonferroniAllocation(),
+    )
+    assert b4.level == Fraction(1, 60) and isinstance(b4.level, Fraction)
+    # the same rank as the float literal 0.05 (59 days: rank 59, not +inf)
+    exact = real_b4(
+        [[60, 60 + m] for m in range(1, 60)],
+        Fraction(1, 20),  # type: ignore[arg-type]
+        signals=signals,
+        allocation=BonferroniAllocation(),
+    )
+    spike = [s for sig in signals for s in series(sig, [60, 119.5])]
+    assert len(exact.run(observed(spike), PLAN, None)) == 3
+    # a stub allocation that has only ``per_test`` gets the float literal
+    stub = StubAllocation()
+    make_b4(signals=signals, alpha=Fraction(1, 5), allocation=stub)
+    assert stub.calls == [(0.2, 3)]
+
+
+def test_b4_fraction_alpha_that_is_not_a_float_literal_is_refused_with_an_allocation() -> (
+    None
+):
+    # 1/3 has no decimal literal: converting it would round it silently (the WS05-T06 trap); without an allocation it is fine
+    with pytest.raises(ValueError, match="allocation"):
+        make_b4(alpha=Fraction(1, 3), allocation=BonferroniAllocation())
+    assert make_b4(alpha=Fraction(1, 3)).level == Fraction(1, 3)
+
+
 # ---- constructor, state and harness ----------------------------------------------------------------------------------
 
 
