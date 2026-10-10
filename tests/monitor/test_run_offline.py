@@ -285,20 +285,6 @@ def test_run_offline_with_the_real_defaults_loads_and_runs() -> None:
     )  # no instance in a day without input and without static instances
 
 
-def test_predictive_run_is_refused_until_ws05_t08() -> None:
-    config = make_config(REG, predictive=True, alpha=0.1)
-    with pytest.raises(m.MonitorConfigError, match="added by WS05-T08"):
-        m.run_offline(
-            day_of(Inputs()),
-            make_plan(REG),
-            config,
-            None,
-            None,
-            registry=REG,
-            templates=LIB,
-        )
-
-
 # ---------------------------------------------------------------------------------------------
 # test 29 and the isolation of the monitor: no ground truth, no look-ahead into other packages
 # ---------------------------------------------------------------------------------------------
