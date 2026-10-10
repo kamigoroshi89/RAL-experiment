@@ -1,7 +1,18 @@
 """Access guards and read logs of the baseline harness (WS06-T01; analisi section 10 objection 1).
 
-Two things must be true by construction and auditable by logs: a baseline never sees the latent trace or the
+Two things are meant to hold and to be auditable by logs: a baseline never sees the latent trace or the
 ground truth when it runs, and it knows no more of the clinical specification than the proposed method.
+
+Threat model (what this module does not do). The guards defend against ACCIDENTS and leave an AUDIT LOG; they
+are not a sandbox, and a deliberate cheat is feasible. Known routes, none hardened here: the wrapped day is
+reachable as ``guarded._day`` (and ``getattr``), ``_policy`` and ``_split`` can be reassigned, ``copy``,
+``deepcopy`` and ``pickle`` keep the day; a subclass that overrides ``fit`` can read ``calib_days[i].latent``
+from the ``BenchmarkDay`` it is handed without any log entry; ``detector.access_log.clear()`` erases the log;
+``LoggedMapping._inner`` exposes the plan values; ``import ralmon.benchmark`` is open to any code; the split
+label is trusted (a day object in both lists is refused, but two distinct objects of one patient are not
+detected). The read logs are only as complete as the code paths that use the wrappers: a baseline that reads
+``plan.schedule``, or a registry it holds unwrapped, is not logged. An audit (WS06-T07) shows what a
+well-behaved baseline read; it does not prove that no baseline could read more.
 
 Fitting. ``BaselineBase.fit`` wraps every ``BenchmarkDay`` it receives in a ``GuardedDay`` and hands only
 those to ``_fit``. The wrapper offers three properties and enforces the contract of ``#detector``

@@ -1,7 +1,8 @@
 """The ``Detector`` protocol, the ``BaselineBase`` template and the causal step iterator (WS06-T01).
 
-Every baseline B1 to B5 is a subclass of ``BaselineBase`` and is driven by the same code, so none of them
-can see more than the proposed method sees (analisi section 10 objection 1). The module fixes the
+Every baseline B1 to B5 is a subclass of ``BaselineBase`` and is driven by the same code, so that none of them
+is given more than the proposed method by accident (analisi section 10 objection 1); this is a guard against
+accidents plus an audit log, not a sandbox. The module fixes the
 conventions that WS06-T02 to T07 and WS08-T01 rely on; each is stated here once.
 
 Harness boundary (``BaselineBase``)
@@ -10,6 +11,10 @@ Harness boundary (``BaselineBase``)
   ``GuardedDay`` views (``ralmon.baselines.access``) with the split label and the ``AccessPolicy``; ``_fit``
   gets only those. A second ``fit`` replaces the state of the first (recalibration semantics, #conformal-calibrator
   rule 4); a ``_fit`` that raises leaves the detector not fitted.
+* The guards are a defence against accidents and an audit log, not a sandbox (see ``access.py`` for what a
+  deliberate cheat can still do). ``fit`` refuses a day that is not a ``BenchmarkDay`` and a day object listed
+  in both ``train_days`` and ``calib_days`` (``LeakageError``); that two different objects describe the same
+  patient is not checked.
 * ``run(day, plan, evidence)`` is a template method. It raises ``LeakageError`` unless ``day`` is an
   ``ObservedDay`` (a benchmark day or a latent day is refused before anything else), then ``NotFittedError``
   before ``fit``. It drops ``evidence`` (baselines do not attribute, analisi section 5.4: this asymmetry is
@@ -26,14 +31,22 @@ Timing conventions (``iter_steps``, ``TimingConfig``)
 * The grid is ``t = start, start + step_ms, ...`` on the continuing axis of the patient
   (#time-and-units rule 5); ``start`` is ``day_index * 24 h`` unless given. The grid covers ``end_ms``: its
   last point is the first one at or after it.
-* Causality is that of ``Monitor.advance``. At step ``t`` an input is delivered iff it has been received
-  (``t_rx_ms <= t``) and ``t_device_ms <= t - reorder_delay_ms``. Each input is delivered exactly once, at
-  the first step where both hold. A batch is ordered by device time; ties by the rules of the monitor's
-  reorder buffer: events by kind (measurement, dispense, intake, schedule tick), then inputs that carry a
-  sequence number before those that do not, then ``seq`` (or the receive time when there is none), then the
-  order of arrival. ``StepBatch.inputs()`` merges samples and events, a sample first at an equal device time
-  (a pressure with the device time of a dispense is the pre-dose value). An input stamped before the first
-  step is delivered in the first batch, not dropped.
+* Causality follows ``Monitor.advance`` in its main rule, not in every detail. At step ``t`` an input is
+  delivered iff it has been received (``t_rx_ms <= t``) and ``t_device_ms <= t - reorder_delay_ms``. Each
+  input is delivered exactly once, at the first step where both hold. A batch is ordered by device time;
+  ties by the rules of the monitor's reorder buffer: events by kind (measurement, dispense, intake, schedule
+  tick), then inputs that carry a sequence number before those that do not, then ``seq`` (or the receive time
+  when there is none), then the order of arrival. ``StepBatch.inputs()`` merges samples and events, a sample
+  first at an equal device time (a pressure with the device time of a dispense is the pre-dose value). An
+  input stamped before the first step is delivered in the first batch, not dropped.
+* Known differences from the monitor (documented asymmetries; WS06-T07 lists them). (a) The monitor
+  excludes a late input (``is_late``: ``t_rx_ms`` after the watermark ``ceil(t_dev / T_s) * T_s + D``);
+  ``iter_steps`` delivers it at the first step after it is received (task test 9 requires this), so a
+  baseline can use an input that the monitor discards. (b) The monitor deduplicates inputs by (source, name,
+  seq); the harness does not, so a duplicated input is delivered twice (B1 would raise an extra alarm).
+  (c) The monitor rejects an input stamped in the future; the harness does not. The net direction of
+  (a) to (c) on the comparison is unclear, and whether ``iter_steps`` should mirror these rules is an open
+  question for the project owner.
 * The grid time ``t`` is a monitor time: the step ``t`` sees device times up to ``t - reorder_delay_ms``.
   ``run_offline`` calls ``advance(k * T_s + D)``, so its step ``k`` sees device times up to ``k * T_s``. The two
   agree when the grid is shifted by ``D``; the harness keeps the grid at multiples of ``step_ms`` (as the
@@ -378,6 +391,12 @@ class BaselineBase(ABC):
         train_days: Sequence[BenchmarkDay],
         calib_days: Sequence[BenchmarkDay],
     ) -> None:
+        shared = {id(d) for d in train_days} & {id(d) for d in calib_days}
+        if shared:
+            raise LeakageError(
+                "a day object is listed in both train_days and calib_days: the split is by patient "
+                "and the ground truth of a training day must not reach calibration"
+            )
         train = self._guard(train_days, Split.TRAIN, "train_days")
         calib = self._guard(calib_days, Split.CALIB, "calib_days")
         self._fitted = False
@@ -421,8 +440,9 @@ class BaselineBase(ABC):
         guarded: list[GuardedDay] = []
         for index, item in enumerate(days):
             if not isinstance(item, BenchmarkDay):
-                raise TypeError(
-                    f"{what}[{index}] must be a BenchmarkDay, got {type(item).__name__}"
+                raise LeakageError(
+                    f"{what}[{index}] must be a BenchmarkDay, got {type(item).__name__}: "
+                    "only a benchmark day can be wrapped in a guarded view"
                 )
             guarded.append(GuardedDay(item, split, self.access_log, self._policy))
         return guarded
