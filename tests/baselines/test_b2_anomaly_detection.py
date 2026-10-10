@@ -966,7 +966,10 @@ def test_b2_iforest_blind_spot_it_has_no_band_a_level_shift_changes_nothing() ->
     # the test day by the same amount (here from around 120, inside any ordinary range, to around 200, far outside it)
     # and the scores do not change (the splits of an isolation tree are uniform between the minimum and the maximum of
     # a feature, so a common shift moves every split with it). Same seed, same forest. A method that knew the band would
-    # score the two worlds differently.
+    # score the two worlds differently. The invariance is inherent to ANY band-free detector (uniform splits between
+    # the minimum and the maximum are translation-equivariant); it says nothing about how strongly the forest reacts to ONE
+    # out-of-range value, which depends on the feature design (in the joint 13-feature forest the reviewer measured a
+    # mean score of 0.518 with one blood pressure of 200 against 0.470 on normal rows, threshold 0.566).
     def world(shift: float) -> tuple[list[float], list[Any]]:
         rng = np.random.default_rng(0)
         days = []

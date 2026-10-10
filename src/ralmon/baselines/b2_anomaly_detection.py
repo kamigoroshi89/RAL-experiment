@@ -61,8 +61,16 @@ residual 0, and a drift in steps smaller than the scale reaches any level withou
 measurement, a silent sensor, a day without readings) or an event (dispenses, counts, schedules, robot tasks); it cannot tell
 a wanted change (the drop after a dose) from a harmful one. The Isolation Forest sees what is unusual in the training
 population and not what is unsafe: a value that is frequent in the training days is ordinary however far outside the band it
-is, and a value inside the band that is rare scores as an anomaly (pinned by a test); it has no direction, no clinical meaning
-and no cause. It can react to an absence or a count only if that feature is unusual among the training rows. Neither makes an
+is, and a value inside the band that is rare can score as an anomaly. Moving every value of the training days, the calibration
+days and the test day by one common amount leaves the scores unchanged (pinned by a test): this invariance is inherent to any
+band-free detector (the splits of an isolation tree are uniform between the minimum and the maximum of a feature, which is
+translation-equivariant), so it is a property of B2's definition and not a defect of the implementation. How weakly the forest
+responds to ONE out-of-range value is a different matter and depends on the feature design: in the JOINT 13-feature forest a
+single blood-pressure value of 200 among 13 features moved the mean score only from 0.470 to 0.518 (threshold 0.566; 1% of the
+rows in alarm on normal days, 5% with the value of 200), whereas a forest on ``last_bp`` and ``age_bp`` alone gave 0.487 and
+0.677 (threshold 0.670; 0% and 76%). Both figures are the independent reviewer's measurement on benchmark-like days (30 training
+and 15 calibration days, five blood-pressure readings a day, heart rate and saturation every five minutes, quantile 0.99, eight
+test days, rows from 14 h to 18 h), not part of the test suite. It has no direction, no clinical meaning and no cause. It can react to an absence or a count only if that feature is unusual among the training rows. Neither makes an
 attribution or has a notion of severity. By template of the proposed method: RANGE is seen only as an unusual value or a large
 change, never as a level relative to the band; HOLD, COUNT, SCHED, RESP, SYS and INT only as unusual feature values, if at all
 (the forest has the dispense count, the time since the last dispense and the age of the last reading, but no window, no
@@ -77,7 +85,9 @@ Time. Delivery is the shared causal step iterator; the detection time of a resid
 delivered (``t_eval + D``), not clipped at midnight (a sample delivered after the closing step of its day is detected there, as
 for B1, B3 and B4); the detection time of a forest row is its grid time. B2 applies the lateness rule of the monitor and of B1,
 B3, B4 and B5 to the samples and dispense events it uses: an input received after its step is final is dropped and counted
-(``late_inputs``, ``late_events``). It does not deduplicate (asymmetry (b) of ``base.py``): a duplicate sample has no
+(``late_inputs``, ``late_events``). The rule agrees with the monitor when the reorder delay ``D`` is a multiple of ``step_ms``
+and diverges from it otherwise, as for B1, B3, B4 and B5 (open decision since WS06-T05: require ``D`` to be a multiple of the
+step in ``TimingConfig``, or fix the grid rule); run every comparison with ``D`` a multiple of the step. It does not deduplicate (asymmetry (b) of ``base.py``): a duplicate sample has no
 residual, whereas a dispense delivered twice counts twice in the feature. B2 runs one day at a time with empty carry-over
 state (ADR-061): the first reading of every day has no residual and the 24 h counter can only under-count. The residual run
 ends at the last step that delivers a monitored sample and the forest rows cover ``[t0, t0 + 24 h)``, so the output does not
@@ -281,12 +291,13 @@ class B2AnomalyDetection(BaselineBase):
     """Baseline B2; see the module docstring for the method, what it sees and what it cannot see.
 
     Parameters: ``forecaster`` (fitted by ``fit`` on the observed training days; required for ``"residual"`` and
-    ``"both"``, ignored by ``"iforest"``), ``mode`` (``"residual"``, ``"iforest"`` or ``"both"``), ``signals`` (default:
+    ``"both"``, refused by ``"iforest"``: pass ``None``), ``mode`` (``"residual"``, ``"iforest"`` or ``"both"``), ``signals`` (default:
     ``bp``, ``hr_ecg``, ``hr_pulse`` and ``spo2``; for the residual modes the ones the forecaster supports),
     ``z_threshold`` (residual modes), ``score_quantile`` (forest modes), ``seed`` (integer, required: the forest is random),
-    ``feature_step_ms`` (default: the step of ``timing``; a positive multiple of it), ``timing``, ``plan_for_day`` (forest
+    ``feature_step_ms`` (forest modes; default: the step of ``timing``; a positive multiple of it), ``timing``, ``plan_for_day`` (forest
     modes: the function from an observed training or calibration day to its care plan, of which only ``schedule`` is read;
-    ADR-062) and ``scorer_factory`` (default ``IsolationForestScorer``; called with the seed at each ``fit``). B2 makes no
+    ADR-062) and ``scorer_factory`` (forest modes; default ``IsolationForestScorer``; called with the seed at each ``fit``). A parameter
+    that the chosen mode does not use is refused (``ValueError``), not ignored. B2 makes no
     attribution (every ``label`` is ``None``) and ignores the evidence.
 
     Hyperparameter selection. ``z_threshold`` and ``score_quantile`` are operating parameters with no default; WS08 sweeps
@@ -334,6 +345,19 @@ class B2AnomalyDetection(BaselineBase):
         self._score_quantile = self._check_quantile(score_quantile)
         if self._residual and forecaster is None:
             raise ValueError(f"mode {mode!r} needs a forecaster")
+        # a parameter the chosen mode does not use is refused, as z_threshold and score_quantile are
+        if not self._residual and forecaster is not None:
+            raise ValueError(f"forecaster is not used by mode {mode!r}; pass None")
+        if not self._forest:
+            for given, label in (
+                (feature_step_ms, "feature_step_ms"),
+                (scorer_factory, "scorer_factory"),
+                (plan_for_day, "plan_for_day"),
+            ):
+                if given is not None:
+                    raise ValueError(
+                        f"{label} is not used by mode {mode!r}; leave it None"
+                    )
         if self._forest and plan_for_day is None:
             raise ValueError(
                 f"mode {mode!r} needs plan_for_day: the schedule features of the training and calibration days "

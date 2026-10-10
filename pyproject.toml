@@ -10,8 +10,11 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "pyyaml",
-    # IsolationForest for baseline B2 (WS06-T03). Unpinned like the others (ADR-016 defers pins); developed against
-    # 1.9.1, which needs Python 3.11, while ralmon allows 3.10 (ADR-042), so no lower bound is written here.
+    # IsolationForest for baseline B2 (WS06-T03). Unpinned like the others (ADR-016 defers pins). No lower bound is written:
+    # the version developed and tested against is 1.9.1, which needs Python 3.11, while ralmon allows Python 3.10
+    # (ADR-042), so a bound would make the package unsolvable there. scipy 1.18.1 (pulled in) needs Python 3.12 and
+    # numpy 2, so on a Python 3.10 image with numpy < 2 pip resolves older scikit-learn and scipy: untested, record the
+    # resolved versions in the release notes.
     "scikit-learn",
 ]
 
