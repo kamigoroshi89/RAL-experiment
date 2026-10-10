@@ -18,6 +18,7 @@ import functools
 import inspect
 import math
 import re
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -640,9 +641,23 @@ def test_b5_raw_robustness_never_normalised(monkeypatch: pytest.MonkeyPatch) -> 
     def boom(*args: object, **kwargs: object) -> None:
         raise AssertionError("normalisation or ranking was used by B5")
 
-    for module in (ralmon.spec, ralmon.monitor.predictive):
-        monkeypatch.setattr(module, "normalise", boom, raising=False)
-    monkeypatch.setattr(ralmon.spec, "rank_alerts", boom, raising=False)
+    # every module that holds a reference to the function of the spec package gets the failing one
+    original_normalise = ralmon.spec.normalise
+    original_rank = ralmon.spec.rank_alerts
+    patched = 0
+    for module in list(sys.modules.values()):
+        name = getattr(module, "__name__", "")
+        if not name.startswith("ralmon."):
+            continue
+        if getattr(module, "normalise", None) is original_normalise:
+            monkeypatch.setattr(module, "normalise", boom)
+            patched += 1
+        if getattr(module, "rank_alerts", None) is original_rank:
+            monkeypatch.setattr(module, "rank_alerts", boom)
+            patched += 1
+    assert (
+        patched >= 3
+    )  # the spec package, the instances and the predictive step of the monitor, at least
 
     # the real evaluator on every template: the read log holds no scale or priority name
     registry = _REGISTRY
