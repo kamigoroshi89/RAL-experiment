@@ -317,9 +317,8 @@ def test_b1_dose_window_is_left_open_24h() -> None:
         detections(0, hours(1), hours(24)) == []
     )  # at 24 h: the dose at 0 is outside, 1 h and 24 h count
     assert detections(0, hours(1), hours(2)) == [hours(2)]  # at 2 h: 0, 1 h and 2 h
-    assert detections(0, hours(1), hours(24) - 1) == [
-        hours(24) - 1
-    ]  # at 24 h - 1 ms the dose at 0 still counts
+    # at 24 h - 1 ms the dose at 0 still counts (3 doses); the alarm is raised at the delivery step, 24 h
+    assert detections(0, hours(1), hours(24) - 1) == [hours(24)]
 
 
 # ---- 9, 10 what the plan holds ------------------------------------------------------------------------------------------
@@ -532,6 +531,8 @@ def test_b1_plan_errors() -> None:
         )
     with pytest.raises(PlanFeasibilityError, match="window"):
         run(b1, day, plan_of(sched(hours(6), {"sched_window": -1.0})))
+    with pytest.raises(PlanFeasibilityError, match="multiple"):
+        run(b1, day, plan_of(sched(hours(6), {"sched_window": 90_000.0})))  # 1.5 steps
     with pytest.raises(PlanFeasibilityError, match="dose_max_24h"):
         run(b1, day, plan_of(rec(TemplateId.COUNT, {"dose_max_24h": float("nan")})))
 
@@ -652,6 +653,12 @@ def test_b1_drops_a_late_input_like_the_monitor() -> None:
     on_time = day_of([bp(hours(2), 152.0, rx=hours(2))])
     assert times(run(b1, on_time, plan)) == [hours(2)]
     assert b1.run_stats.late_inputs == 0
+    # one step after its step was final is late, exactly at the watermark is on time (``ceil(t / T_s) * T_s + D``)
+    one_step = day_of([bp(hours(2), 152.0, rx=hours(2) + STEP)])
+    assert run(b1, one_step, plan) == []
+    assert b1.run_stats.late_inputs == 1
+    at_watermark = day_of([bp(hours(2) + 1, 152.0, rx=hours(2) + STEP)])
+    assert times(run(b1, at_watermark, plan)) == [hours(2) + STEP]
     # received exactly at the watermark of its step with D = 2 steps: on time
     delayed = make_b1(delay_ms=2 * STEP)
     edge = day_of([bp(hours(2), 152.0, rx=hours(2) + 2 * STEP)])
@@ -883,8 +890,10 @@ def test_b1_signature_name_and_protocol() -> None:
 
 
 def test_b1_docstring_states_what_b1_sees_and_does_not_see() -> None:
+    """The class names its hyperparameter rule; the module states the rules, the five roles and the blind spots."""
     doc = inspect.getdoc(B1StaticThresholds) or ""
-    assert "Hyperparameter selection" in doc
+    assert "Hyperparameter selection" in doc and "no operating parameter" in doc
+    module_doc = inspect.getdoc(b1_module()) or ""
     for phrase in (
         "R1",
         "R2",
@@ -896,9 +905,9 @@ def test_b1_docstring_states_what_b1_sees_and_does_not_see() -> None:
         "day-end",
         "look-back",
         "attribution",
+        "Hyperparameter selection",
     ):
-        assert phrase in doc, phrase
-    module_doc = inspect.getdoc(b1_module()) or ""
+        assert phrase in module_doc, phrase
     for name in b1_module().ROLE_PARAMETERS.values():
         assert name in module_doc, name
 
