@@ -43,8 +43,9 @@ well, because hypothesis (A0) of `docs/formal/05-three-valued-semantics.md` sect
 per bin) would not hold.
 
 The runner is an argument (`run_fn`, default `run_offline` with no calibrator and no forecaster), called as
-`run_fn(day, plan, config, None, None, registry=registry, templates=phi_cp_templates)`. A stub is accepted so
-that the mapping can be unit-tested. The labeller refuses a plan whose `registry_version` differs from
+`run_fn(day, plan, config, None, None, registry=registry, templates=phi_cp_templates)`, and, only when the day is
+labelled with a history (section "Onset and end conventions", "Several days"), with the extra keyword
+`history=<ideal observations of the earlier days>`. A stub is accepted so that the mapping can be unit-tested. The labeller refuses a plan whose `registry_version` differs from
 `MonitorConfig.registry_version` (`RegistryMismatchError`), takes `step_ms` from the configuration and asserts
 that the registry agrees, and reads the window length `delta2` from the registry only when a RESP violation
 needs it; a name that the registry declares but does not set raises a `LabellingError` that names it (no
@@ -85,14 +86,76 @@ what WS08 uses as the deadline when it measures a detection delay "relative to t
 
 **Instances open at the end of the day.** An instance whose decision step lies after the closing step (a RESP
 window that crosses midnight, a SCHED deadline after 24:00) is decided early where the early-decision rule
-applies and is otherwise PENDING at trace end: **it is not a violation** (`docs/formal/05` section 7.5 item 2; the
-monitor and the labeller apply one rule). A day is labelled with empty history, as the monitor runs it
-without `history` (ADR-046 is accepted; multi-day labelling with the history is WS04-T15, ADR-055 (b)): a
-counter that depends on the previous day under-counts, and a RESP window that ends after the closing step is not
-labelled on either day. A dispense at exactly the start of the day (00:00) is
+applies and is otherwise PENDING at trace end: **it is not a violation of this run** (`docs/formal/05` section 7.5
+item 2; the monitor and the labeller apply one rule). A day labelled with no history, as the monitor runs it
+without `history`, has empty state: a counter that depends on the previous day under-counts, and a RESP window that
+ends after the closing step is not labelled on this day. With the history of the earlier days (next subsection) such
+an instance is decided in the day that decides it. A dispense at exactly the start of the day (00:00) is
 seen by the first step of the run, so it creates its HOLD and RESP instances on this day and counts in the trailing
 24 h counter; by the day boundary (the day covers `(d * T_day, (d + 1) * T_day]`) it is not one of the dispenses of
 the day that the day-end count adds up (case GT-10).
+
+### Several days: history and ownership (WS04-T15, ADR-046, ADR-055 (b), ADR-064)
+
+`label_latent_day`, `label_latent_day_detailed` and `assemble_benchmark_day` take a keyword-only
+`history: Sequence[HistoryDay] = ()`. A `HistoryDay` holds the **latent day** of an earlier day of the same patient,
+its injection `records` and its `behaviour_log`; the items are in increasing order of day index, below the day to
+label, at most `MAX_HISTORY_DAYS` (14, the bound of `run_offline`; one day is enough with the registry of today).
+The labeller builds the **ideal observation of each history day** (the same view as for the day, same mode, same
+signals) and hands them to the monitor, which replays them first (`run_offline(..., history=...)`, WS05-T10). The
+state that crosses midnight is then the monitor's: the trailing 24 h dose counter after an evening double take,
+the held pressure, the look-back of HOLD, the pre-dose value, and the response windows and SCHED deadlines of an
+instance anchored in an earlier day. The records of the history days explain events of the day (a surplus dispense
+of the evening explains the COUNT event of the morning, a `drug_nonresponse` of the evening explains the RESP event
+of 01:00) and the behaviour logs give the natural subtypes; they never produce an event: the C2 and C3 events of a
+record belong to its own day. The monitor is called without the keyword when the history is empty, so that a day
+without history is labelled exactly as before.
+
+**Ownership of an event.** The words of ADR-064 (decided by gab, 2026-10-10):
+
+* (a) The truth of an event is the verdict of a run that has all the data stamped up to and including the instant
+  of decision.
+* (b) A record decided at the shared step belongs to the run whose first step it is, that is to the day d that
+  starts there (days are half-open intervals `[d * T_day, (d + 1) * T_day)`): the labelling of day d-1 discards its
+  records at its closing step, and the labelling of day d with history keeps those decided at its first step,
+  whatever the anchor day.
+* (c) Exception: the day-end COUNT obligation (`dose_count >= dose_min_day_end`) that closes day d-1 belongs to day
+  d-1; it speaks of the day just closed and is decided by the run of its own day.
+* (d) There is no tolerance parameter: the windows are closed at both ends on the grid and a tie is satisfied
+  (`docs/formal/02` section 1, `05` tie rule), so a measurement stamped exactly at the deadline is inside the window.
+
+**The plan.** The care plan is the same object for all the days of a run. A plan of the whole record of the patient
+(a SCHED instance for every tick of every day and the day-end COUNT of every day, anchors on the continuing axis) lets
+an obligation of an earlier day be decided in a later one (case HC-07); a plan that lists the instances of one day
+only labels that day and the earlier days' obligations do not exist for the monitor. The day-end COUNT of any day
+other than the one being labelled is skipped by the labeller (review fix B1 of WS04-T10), also with a history.
+
+The closing step of day d-1 is also the first step of day d. Example (tests `test_the_shared_midnight_step_belongs_to_the_day_that_starts_there`
+and cases HC-04, HC-05): a dose at 21:00 whose RESP window closes at 24:00. The run of day d-1 stops before the inputs
+stamped 24:00, so it would decide VIOLATED at the closing step; the run of day d sees a response stamped 24:00 and
+decides SATISFIED. The truth is the second: the labelling of day d-1 returns no event for the instance, and so does
+that of day d. With the response stamped 24:00:01 the instance is violated at the shared step, and it is an event
+of day d (onset 21:00 of day d-1, end 24:00). An event belongs to the day in which the monitor decides it; its onset
+may lie in an earlier day, so the day bounds apply to the decision and not to the onset (the onset must lie
+no earlier than the first history day). A record of an instance that was decided in an earlier day and is reported
+again at a later step (the refinement of SCHED) is that earlier day's event and is skipped. Nothing else changes in
+the conventions of the previous subsection (first VIOLATED record, `onset_ms`, `end_ms`, the day-end COUNT guard:
+the day-end obligation of another day is still skipped, with or without history).
+
+**What the history does to the size of the truth.** With a history the truth gains the events that depend on the
+previous day. On the seeded patients of `tests/benchmark/test_ground_truth.py` (fixture prior, natural adherence, no
+injection, days 1 and 2 of three-day patients, 40 patients per schedule) the per-day truth lacked 4.5% of the events
+for doses at 08:00 and 20:00 (22 of 485: 20 COUNT, 2 RESP) and 9.6% for doses at 08:00 and 22:00 (50 of 523: 20
+COUNT, 30 RESP). The per-day truth is a subset of the history truth on these patients (test
+`test_the_per_day_truth_is_a_subset_of_the_history_truth`), but not in general: a dose within the HOLD look-back
+of midnight is violated by the empty state of a day with no history (no reading in the look-back) and satisfied
+with the history (case HC-06).
+
+**Consequence for the comparison (to state, not to hide).** A baseline that is run one day at a time (the detectors
+of WS06 until ADR-061 is decided) can emit a VIOLATED at the closing step of day d-1 that the truth, by (b), does not
+contain for day d-1 and may not contain for day d either. WS08 must therefore score a detection at the shared step
+with the same ownership: a detection decided at the closing step of day d-1 is matched against the truth of day d.
+This is the asymmetry F12 of `docs/plan/workstreams/WS06-baselines/notes/fairness-audit.md`.
 
 **Order of the truth.** The events of a day are sorted by `(onset_ms, cls, subtype, end_ms)` with `end_ms = None`
 first; ties are broken by template, injected flag, group and record position, so the order is a function of the
@@ -154,7 +217,16 @@ documented cause only where the table names it.
 | anything else | | `spontaneous_<template id>` (`spontaneous_range`, `spontaneous_sched`, ...) |
 
 A forced `OMITTED` slot (a scenario control of the confounder pairs) has no record: the log makes it
-`dose_omission`, not injected, with no group. Entries of another day are not this day's slots.
+`dose_omission`, not injected, with no group. Entries of another day are not this day's slots; with a history the
+`double_take` entries of the history days count for the COUNT limit (the surplus of the evening is inside the 24 h
+window of the next morning), the `dose_omission` of the day-end obligation reads the entries of the day only.
+
+**Records of the history days.** A C1 record of a history day explains an event by the same link table and instant
+rule (its instants are on the continuing axis). The event is `injected = True` with the subtype and group of the
+record; the position of the record cannot be an index into this day's `records`, so `LabelledDay.record_index` is
+`None` and `LabelledDay.history_record_index` is `(position of the history day, position of the record in its
+records)`. The sidecar of `assemble_benchmark_day` lists the records of the day only: an event explained by a record
+of a history day is in no `truth_indices` of this day (its record is in the sidecar of its own day).
 
 **C2 and C3.** One event per realised record, from `record_to_ground_truth` (class and subtype of the spec, the
 window or the instant, `injected = True`, no template, the group of the record). Unrealised records are absent from
@@ -203,6 +275,9 @@ all in `tests/benchmark/test_ground_truth.py` (the reference evaluator is `tests
 | `test_c1_truth_follows_latent_not_injection_intent` | A spike that keeps the reading in the band has a record and no event; one that crosses the edge has one `hypertensive_spike` event |
 | `test_ground_truth_unchanged_by_observation_corruption` | Cuff noise, a C2 fault and a C3 attack on one latent day give the identical set of C1 events while the monitor's violated set changes |
 | `test_undetectable_injection_still_in_ground_truth` | A silent cuff bias is a C2 truth event with an empty evidence signature while the monitor emits no SYS or INT violation |
+| `test_a_day_with_history_equals_the_full_run` | Over 40 seeded three-day patients, the truth of day 1 (history: day 0) and of day 2 (history: days 0 and 1) equals the violations decided in that day of one run of the independent reference over all the days, with the ownership of ADR-064 |
+| `test_the_truth_does_not_depend_on_where_the_days_are_cut` | The union of the labellings of the three days equals the events of one run over the three days, each event once, and one day of history gives the same truth as all of them |
+| `test_hand_computed_history_cases_label_as_computed_by_hand` | Seven hand-computed patients of two days (an evening double take, a response window and a SCHED deadline across midnight, a reading at and after the shared step, a HOLD guard that needs the previous day), checked against the reference |
 | `test_independent_reference_evaluator_agrees` | Over 20 seeded random latent days (fixture prior, natural adherence, no injection; and the same days shifted across the band) the labeller and the independent evaluator give the same violated instances, anchors and deadlines |
 | `test_labeller_takes_no_observed_day` | The labeller has no parameter, annotation or name that refers to an observed day |
 | `test_import_boundaries` | Only `labelling.py`, `builder.py` and `validation.py` import `ralmon.monitor` or `ralmon.spec`; every other module of `src/ralmon/benchmark/` imports `ralmon.signals`, numpy, YAML and the standard library (and its own package) |
@@ -233,11 +308,15 @@ What the evaluation does and does not show, stated so that it cannot be read as 
 * The **latent day is a model** (baseline, circadian component, autoregressive noise, one-compartment PK/PD,
   a Markov adherence model, all declared assumptions with priors that carry provenance); the truth inherits its
   limits.
-* **Per-day labelling.** The truth of a day uses empty history, as the monitor does. Violations that need the
-  previous day (a counter over 24 h across midnight) and RESP windows that end after the closing step are not
-  labelled. Nothing in this task removes the corresponding monitor results from scoring: a monitor run with
-  `history` (ADR-046) can report such a violation, which the per-day truth lacks. Until WS04-T15 labels with
-  the history, the scoring of WS08-T01 must leave these instances out or count them apart.
+* **Labelling with a history.** The truth of a day is labelled with the earlier days as history (ADR-046,
+  WS04-T15), by the same monitor and the same specification: the circularity argument above is unchanged, and the
+  independent reference evaluator is run over several days with the same ownership. A day labelled with no history
+  (the first day of a patient, or a call without `history`) has empty state: it under-counts a counter that depends
+  on the previous day and leaves a window that crosses midnight to the next day; a caller that labels a day that
+  follows another without passing it gets that per-day truth and must say so. The ownership at the shared step is a
+  convention decided by gab (ADR-064), not a clinical statement; it makes the truth independent of where the days
+  are cut, and it means that a comparison run one day at a time has a residual asymmetry at the shared step (section
+  "Several days").
 * **Cross-template consequences** of an injection (a hypotension window that also leaves the band) are labelled
   `spontaneous_<template id>`, not injected.
 * The label `injected` says that a record explains the event by the link table, not that the event would not have

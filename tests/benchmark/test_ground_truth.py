@@ -5492,3 +5492,31 @@ def test_assemble_benchmark_day_takes_the_history_and_keeps_its_own_sidecars() -
         registry=F0, templates=LIBRARY,
     )  # fmt: skip
     assert plain.day.ground_truth == ()
+
+
+def test_the_document_states_the_ownership_and_the_residual_consequence() -> None:
+    sections = doc_sections()
+    conventions = sections["Onset and end conventions"]
+    for needle in (
+        "ADR-064",
+        "HistoryDay",
+        "history",
+        "half-open",
+        "shared step",
+        "day-end COUNT",
+        "no tolerance",
+        "decided",
+    ):
+        assert needle in conventions, needle
+    # the consequence for the comparison: a baseline run one day at a time, scored with the same ownership
+    assert "one day at a time" in conventions and "WS08" in conventions
+    assert "ADR-061" in conventions
+    for name in (
+        "test_a_day_with_history_equals_the_full_run",
+        "test_the_truth_does_not_depend_on_where_the_days_are_cut",
+        "test_hand_computed_history_cases_label_as_computed_by_hand",
+    ):
+        assert (
+            name in defined_test_names() and name in sections["Non-circularity tests"]
+        )
+    assert "Labelling with a history" in sections["Residual circularity"]
