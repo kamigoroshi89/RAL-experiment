@@ -137,19 +137,19 @@ The tail-day policy P1 is decided. The builder generates `n_days + 1` days per p
 
 **Result.** `src/ralmon/benchmark/builder.py` (`generate_benchmark`, `BuildContext`, `split_patients`, `BenchmarkReader`, `open_benchmark`, `load_benchmark`, care-plan writer and loader, `load_config`, `verify_benchmark`), `__main__.py` (`build`, `verify`, `validate` placeholder), `configs/benchmark/default.yaml`, four rows in `injections.yaml` (`injection_rate_c1/c2/c3`, `confounder_pairs_per_variant`), `vocab.KEY_COLOCATED`, `docs/benchmark/builder.md`, proposed ADR-067, 33 tests in `tests/benchmark/test_builder.py` (the 22 of the task, the ADR-066 tail-day tests, the colocated gate, the B1 records, the sidecars). Commits: `523f3f8` (red tests) to `1a4c39f`. Verification, exit codes: `pytest tests/benchmark/test_builder.py -q` 0 (33 passed); `pytest tests/benchmark -q` 0 (2578); full `pytest -q` 0 (6033 passed, 1 skipped); `ruff check src tests` 0; `ruff format --check src tests` 0; `mypy src/ralmon` 0; `pytest tests/benchmark/test_builder.py::test_build_small_benchmark_end_to_end -q` 0; `python -c "from ralmon.benchmark import generate_benchmark, open_benchmark"` 0; `pytest tests/test_public_api.py -q` 0; `python3 tools/check_plan.py` 0; `python -m ralmon.benchmark.priors --check-table` 0 (table regenerated); the forbidden-token grep prints nothing. Not run: Python 3.10 (not installed here; the three new modules parse with `feature_version=(3, 10)`).
 
-**CLI output** (fixture-only configuration under a temporary directory, 3 virtual patients x 2 days and 3 pair variants; the same build with `PYTHONHASHSEED` 1 and 777 gave identical bytes in all 73 files):
+**CLI output after the review fixes** (fixture-only configuration under a temporary directory, 3 virtual patients x 2 days and 3 pair variants, 6 twin patients; the same build with `PYTHONHASHSEED` 1 and 777 gave identical bytes in all 73 files):
 
 ```
 $ python -m ralmon.benchmark build --config <tmp>/config.yaml --out <tmp>/a --allow-fixture-only --git-rev fixture
 built <tmp>/a
   benchmark version fixture-0, generation seed 11, revision fixture
-  patients 9 (3 virtual, 6 confounder twins)
-  scored patient-days 12, tail days 9 (unscored, ADR-066)
-  files 72, ground-truth events on scored days 84
+  virtual patients 3, scored patient-days 6, tail days 3 (unscored, ADR-066)
+  twin patients 6, scored twin days 6, tail days 6 (unscored); the twins are not in the headline counts
+  files 72; ground-truth events on scored days of the virtual patients 61; events of the twins 23
   prior fixture-FIXTURE-ONLY: fixture_only true, n_unfilled 0, n_unverified 94
 exit code 0
 $ python -m ralmon.benchmark verify <tmp>/a
-verified 72 files of <tmp>/a: hashes match the manifest, no observed file names truth
+verified 72 files of <tmp>/a: hashes match the manifest, no unlisted file, every observed day parses strictly and names no truth
 exit code 0
 $ python -m ralmon.benchmark build --config configs/benchmark/default.yaml --out <tmp>/c --allow-fixture-only --git-rev fixture
 provenance error: parameter(s) ble_dropout_rate_per_h, mean_delay_ms of the prior are awaiting_human_value: a human supplies the value and its source_ref

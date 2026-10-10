@@ -175,7 +175,7 @@ def _verify(args: argparse.Namespace) -> int:
         print(f"verify failed: {exc}", file=sys.stderr)
         return EXIT_VERIFY
     print(
-        f"verified {count} files of {args.directory}: hashes match the manifest, no observed file names truth"
+        f"verified {count} files of {args.directory}: hashes match the manifest, no unlisted file, every observed day parses strictly and names no truth"
     )
     return EXIT_OK
 
