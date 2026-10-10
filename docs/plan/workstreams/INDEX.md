@@ -79,7 +79,7 @@ Total estimate: 8.0 person-days.
 | WS04-T11 | benchmark-builder | Benchmark builder CLI: splits by patient, manifest, seeds, scale | agent | WS04-T10, WS04-T15 | yes | no | 2 | analisi §5.1 | #trace-schema #experiment-config-and-outputs | R3-W1 |
 | WS04-T12 | benchmark-validation | Benchmark validation report and alert-load sanity check | agent | WS04-T11 | no | no | 1.5 | analisi §5.1, §10 (1) | #trace-schema | R3-W1 |
 | WS04-T13 | mimic-priorsource | MimicPriorSource and eICU variant (blocked until credentialing) | agent | WS04-T02, WS00-T04 | no | no | 2 | analisi §5.1 | #priorsource | - |
-| WS04-T14 | second-pathology-optional | OPTIONAL: second pathology (diabetes, simglucose) | agent | WS04-T11 | no | no | 4 | analisi §5.8, §9 | #priorsource | - |
+| WS04-T14 | second-pathology-optional | OPTIONAL: second pathology (diabetes, simglucose) | agent | WS04-T11, WS08-T02 | no | no | 4 | analisi §5.8, §9 | #priorsource | - |
 | WS04-T15 | multi-day-labelling | Multi-day ground-truth labelling with history (ADR-046, ADR-055 (b)) | agent | WS04-T10, WS05-T10 | yes | no | 1.5 | ADR-046, ADR-055 (b), analisi §5.1 | #trace-schema #monitor | - |
 
 Total estimate: 34.0 person-days.

@@ -3,8 +3,8 @@ id: WS04-T14
 title: "OPTIONAL: second pathology (diabetes, simglucose)"
 workstream: WS04-benchmark
 owner: agent
-status: ready
-depends_on: ["WS04-T11"]
+status: blocked
+depends_on: ["WS04-T11", "WS08-T02"]
 critical_path: false
 non_negotiable: false
 estimate_pd: 4
@@ -66,3 +66,8 @@ The simulator is replaced by a stub in unit tests; tests that need the real pack
 - `ruff check src tests` exits 0 and `mypy src/ralmon` exits 0.
 - `grep -cE '^## (Question|Local availability|Licence|Patient roster and API|Representation decisions|Blocked items|Decision)$' docs/benchmark/second-pathology.md` prints `7`.
 - `grep -c '^## ADR-' docs/plan/03-decisions.md` has increased by one and the new entry names `GlucosePatientParams`.
+
+### Gate kept by the coordinator (2026-10-10)
+
+WS04-T11 is done, so the dependency list is satisfied, but ADR-019 makes this task `ready` only after M3 (the main experiment results exist). Status set back to `blocked` and `WS08-T02` (the main experiment, which is M3) added to `depends_on` (here and in INDEX.md) so that `check_plan` accepts the gate and the dependency list encodes ADR-019; tesista proposal C (untracked) also touches this scope and is not a reason to start it.
+
