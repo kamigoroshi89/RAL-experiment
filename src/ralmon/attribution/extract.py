@@ -651,10 +651,14 @@ class EvidenceExtractor:
         window_values = [m.seq for m in finalised if m.seq is not None]
         base = max(before) if before else min(window_values) - 1
         top = max(window_values)
-        span = set(range(base + 1, top + 1))
-        present = {m.seq for m in with_seq if m.seq is not None} & span
-        ratio = len(present) / len(span) if span else 1.0
-        gap = len(present) < len(span)
+        # the span (base, top] is counted, never materialised: a forged number that jumps far ahead
+        # (EX-1 (m)) must not cost memory proportional to its size
+        size = max(0, top - base)
+        present = sum(
+            1 for v in {m.seq for m in with_seq if m.seq is not None} if base < v <= top
+        )
+        ratio = present / size if size else 1.0
+        gap = present < size
         return ratio, repeat or gap
 
     def _sequence(self, w: _Window) -> tuple[float | None, bool | None]:

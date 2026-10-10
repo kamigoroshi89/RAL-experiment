@@ -1515,7 +1515,7 @@ def test_forged_sequence_number_is_counted_not_materialised(
             1.0,
             False,
         ),  # the base is the smallest value of the window minus one
-        ((7, 9), 0.5, True),
+        ((7, 9), 2 / 3, True),
     ],
 )
 def test_small_range_sequence_results_are_unchanged(
