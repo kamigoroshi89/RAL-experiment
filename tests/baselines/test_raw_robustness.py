@@ -107,6 +107,31 @@ def test_adapter_step_before_reset_is_an_error() -> None:
         evaluator.step(0, {})
 
 
+def test_adapter_done_marks_a_final_value_except_for_sched() -> None:
+    """``done`` is true once an instance other than SCHED has a value (the point evaluator freezes it); SCHED keeps
+    grading the lateness of the first measurement, so it is never done; ``reset`` clears it."""
+    range_eval = make_evaluator(
+        LIBRARY[TemplateId.RANGE], REGISTRY, STEP, "measurement"
+    )
+    range_eval.reset(TemplateInstance(TemplateId.RANGE, "r", {}, STEP))
+    assert range_eval.done is False
+    assert range_eval.step(0, {"bp": 125.0}) is None and range_eval.done is False
+    assert range_eval.step(STEP, {"bp": 125.0, "meas": 1.0}) == 15.0
+    assert range_eval.done is True
+    range_eval.reset(TemplateInstance(TemplateId.RANGE, "r", {}, STEP))
+    assert range_eval.done is False
+    sched = make_evaluator(LIBRARY[TemplateId.SCHED], REGISTRY, STEP, "sched_tick")
+    sched.reset(TemplateInstance(TemplateId.SCHED, "s", {}, 0))
+    value = None
+    for k in range(400):
+        value = sched.step(
+            k * STEP,
+            {"meas": 1.0 if k == 1 else 0.0, "sched_tick": 1.0 if k == 0 else 0.0},
+        )
+        assert sched.done is False
+    assert value is not None
+
+
 def test_adapter_reset_gives_independent_state() -> None:
     """Test 2: two instances of one template stepped with different values do not influence each other; ``reset``
     forgets the history.

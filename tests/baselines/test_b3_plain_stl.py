@@ -253,6 +253,7 @@ def test_b3_evaluates_every_instance_of_the_plan() -> None:
         (TemplateId.RANGE, "measurement", 1),
         (TemplateId.SYS, "measurement", 1),
         (TemplateId.INT, "dispense", 1),
+        (TemplateId.COUNT, "dispense", 1),
         (TemplateId.SCHED, "sched_tick", 1),
         (TemplateId.COUNT, "day_end", 1),
     }
@@ -312,6 +313,7 @@ def test_b3_uses_measured_values_only() -> None:
         "dose_count",
         "bp_pre",
         "bp_drop",
+        "meas_count",
     }
     assert set().union(*(v.keys() for v in by_step.values())) <= allowed
 
@@ -640,25 +642,27 @@ def _report(step: int, colocated: bool) -> Event:
     )
 
 
-def _visit_day(with_reports: bool) -> ObservedDay:
-    """One robot visit 07:00 to 07:10 with a presence sample at 07:00, a dispense at 08:00 with the robot away."""
+def _dense_day(with_reports: bool) -> ObservedDay:
+    """The robot sees no patient at every step of the morning (presence 0.0 at steps 0 to 479); a dispense at 08:00.
+    With reports the robot is co-located from step 0 and leaves at step 470, so the dispense finds the channels down."""
     events = [evt(EventKind.DISPENSE, 8 * 60)]
     if with_reports:
-        events += [_report(7 * 60, True), _report(7 * 60 + 10, False)]
-    return observed([smp("presence", 7 * 60, 1.0)], events)
+        events += [_report(0, True), _report(470, False)]
+    return observed([smp("presence", m, 0.0) for m in range(8 * 60)], events)
 
 
 @pytest.mark.parametrize("delay_steps", [0, 2])
 def test_b3_presence_follows_the_colocation_reports_like_the_monitor(
     delay_steps: int,
 ) -> None:
-    """ADR-054 (b). The dispense at 08:00 finds the robot away. With the reports (arrival 07:00, departure 07:10) the
-    channel is down at 08:00: INT is not decided (not violated) and the gate is 0. Without any report the level of the
-    07:00 sample is held, 60 minutes old against a window of 5: the witness is too old, INT is violated by graded
-    lateness, and the gate counts the sample. B3 and the monitor give the same answer in both cases."""
+    """ADR-054 (b). Presence is defined (0.0, no witness) at every step before the dispense, so the exact raw
+    robustness exists. Without any report the level 0.0 is held to the dispense: no witness, raw robustness minus
+    infinity (a failed guard), a detection with the largest finite score, and the gate counts the 480 samples. With the
+    reports (co-located from step 0, leaves at step 470) the channels are down at the dispense: the witness may
+    have been missed, INT is not decided, no detection, and the gate is 0. B3 and the monitor agree in both cases."""
     plan = make_care_plan()
     for with_reports in (True, False):
-        day = _visit_day(with_reports)
+        day = _dense_day(with_reports)
         first, result = _monitor_violations(day, plan, delay_steps, [TemplateId.INT])
         b3 = B3PlainSTL(
             templ(TemplateId.INT),
@@ -674,20 +678,41 @@ def test_b3_presence_follows_the_colocation_reports_like_the_monitor(
         assert stats is not None
         gate = result.stats.presence_samples_without_availability_marks
         assert stats.presence_samples_without_availability_marks == gate
-        assert gate == (0 if with_reports else 1)
+        assert gate == (0 if with_reports else 480)
         assert b3.int_gate_passed is with_reports
         assert bool(out) is (not with_reports)
         assert stats.availability_reports == (2 if with_reports else 0)
+        if not with_reports:
+            assert out[0].score == sys.float_info.max
+
+
+def test_b3_known_difference_a_violation_without_a_point_value_is_not_detected() -> (
+    None
+):
+    """KNOWN DIFFERENCE from the monitor, pinned (Notes of WS06-T04). The robot is co-located from step 470 and sees no
+    patient; a dispense at step 480 has no witness. The monitor decides VIOLATED because the upper bound of the
+    interval is negative ([-inf, -360000] ms: the best case is a witness at the unavailable step 469, older than the
+    window) while the exact value is unknown. The point evaluator has a value only when the interval is a point, so B3
+    is silent. Every INT violation whose history holds an undefined or unavailable step is of this kind; B3 and B5
+    detect only the others. This is a property of the entry point of ADR-013 (outcome C), not of the templates."""
+    day = observed(
+        [smp("presence", m, 0.0) for m in range(470, 480)],
+        [evt(EventKind.DISPENSE, 480), _report(470, True)],
+    )
+    first, _ = _monitor_violations(day, make_care_plan(), 0, [TemplateId.INT])
+    assert first == {"int@28800000": 28_800_000}
+    b3 = make_b3(templ(TemplateId.INT), None, timing=TimingConfig(STEP, 0, 120 * STEP))
+    assert run(b3, day) == []
 
 
 def test_b3_run_stats_before_any_run_and_after_a_second_day() -> None:
     b3 = B3PlainSTL(templ(TemplateId.INT), REGISTRY, timing=TIMING)
     assert b3.run_stats is None
     b3.fit([], [])
-    run(b3, _visit_day(False))
+    run(b3, _dense_day(False))
     assert b3.run_stats is not None
-    assert b3.run_stats.presence_samples_without_availability_marks == 1
-    run(b3, _visit_day(True))  # the counters belong to the last run only
+    assert b3.run_stats.presence_samples_without_availability_marks == 480
+    run(b3, _dense_day(True))  # the counters belong to the last run only
     assert b3.run_stats.presence_samples_without_availability_marks == 0
 
 

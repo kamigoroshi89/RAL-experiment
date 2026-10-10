@@ -4,7 +4,10 @@ Entry point of the spec package that this module wraps: ``ralmon.monitor.make_po
 ADR-053 (c); the spike of WS05-T02 found that RTAMT cannot host the templates, ADR-013 outcome C). The wrapper builds
 nothing of the STL semantics: it passes the instance, the registry and the values of a step to the point evaluator
 and returns its answer, a raw robustness in ``Template.unit`` (never scaled, never clipped, possibly minus or plus
-infinity for a failed Boolean guard) or ``None`` while the instance is open or an atom is undefined.
+infinity for a failed Boolean guard) or ``None`` while the instance is open or an atom is undefined. The answer is a value only when the interval of the
+instance is a point: an instance that the monitor decides VIOLATED from the sign of the upper bound of a wider interval
+(INT with an undefined or unavailable step in its history and no witness since) stays ``None``, so the baselines built
+on this module do not detect it (Notes of WS06-T04).
 
 Public names (the contract that WS06-T04 describes, extended where the point evaluator needs more):
 
@@ -15,8 +18,11 @@ Public names (the contract that WS06-T04 describes, extended where the point eva
   (ADR-061, proposed), and this is what ``SignalGrid(origin_ms=...)`` does for the values.
 * ``TemplateRawEvaluator`` and ``make_evaluator(template, registry, step_ms, anchor_kind=None)``: the real adapter.
   ``step_ms`` and ``anchor_kind`` are needed by the point evaluator and are not in the two-argument text of the
-  WS06-T04 task; the later task reconciles. Parameters that an instance omits come from the registry, as in the
-  monitor (ADR-047 (g)); a name that is not a parameter of the template is an error of the point evaluator.
+  WS06-T04 task (reconciled there: B3 passes them as B5 does). Parameters that an instance omits come from the
+  registry, as in the monitor (ADR-047 (g)); a name that is not a parameter of the template, and a value that
+  differs from the registry outside an approved range, are errors of the point evaluator (``PlanFeasibilityError``),
+  never ignored. The adapter has the optional member ``done``: true once the value of an instance other than SCHED is
+  final, so that a baseline need not step it again.
 * ``LoggingRegistry``: ``AuditedRegistry`` that also forwards ``overrides()`` and ``step_ms``, which the point
   evaluator reads, so that the audit log and the approved-range rule of ADR-047 (g) work together.
 * ``SignalGrid`` and ``GridStep``: the ``values`` of each step of the device-time grid, built incrementally from the
@@ -59,7 +65,7 @@ from ralmon.signals import (
     default_derived_signals,
     event_to_sample,
 )
-from ralmon.spec import RobustnessUnit, Template, TemplateInstance
+from ralmon.spec import RobustnessUnit, Template, TemplateId, TemplateInstance
 
 __all__ = [
     "GridStep",
@@ -118,10 +124,21 @@ class TemplateRawEvaluator:
         self._step_ms = step_ms
         self._anchor_kind = anchor_kind
         self._inner: PointEvaluator | None = None
+        self._value: float | None = None
 
     @property
     def unit(self) -> RobustnessUnit:
         return self._template.unit
+
+    @property
+    def done(self) -> bool:
+        """Whether the value is final and the evaluator need not be stepped again.
+
+        True once an instance of a template other than SCHED has a value: the point evaluator freezes such an
+        instance when it decides (SCHED keeps grading the lateness of the first measurement after its deadline).
+        This is an optional member of the protocol, a caller that does not know it steps the evaluator to the end.
+        """
+        return self._value is not None and self._template.id is not TemplateId.SCHED
 
     def reset(self, instance: TemplateInstance) -> None:
         self._inner = make_point_evaluator(
@@ -131,11 +148,13 @@ class TemplateRawEvaluator:
             self._step_ms,
             anchor_kind=self._anchor_kind,
         )
+        self._value = None
 
     def step(self, t_ms: TimeMs, values: Mapping[str, float | None]) -> float | None:
         if self._inner is None:
             raise RuntimeError("reset(instance) must be called before step")
-        return self._inner.step(t_ms, values)
+        self._value = self._inner.step(t_ms, values)
+        return self._value
 
 
 def make_evaluator(
