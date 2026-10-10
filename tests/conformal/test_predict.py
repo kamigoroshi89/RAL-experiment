@@ -109,9 +109,10 @@ def test_rho_alpha_is_the_level_used_not_alpha_star() -> None:
     )  # alpha_star 0.2 is 1 - value, not stored
 
 
-def test_variant_possible_follows_ws01_t06() -> None:
+@pytest.mark.parametrize("case_id", ["C-3"])
+def test_variant_possible_follows_ws01_t06(case_id: str) -> None:
     """Lower-quantile form of Proposition 1b (golden C-3), not the symmetric form."""
-    case = GOLDEN["C-3"]
+    case = GOLDEN[case_id]
     cal = split_on(case["inputs"]["scores_sorted"])
     alpha = case["inputs"]["alpha"]
     assert cal.quantile_lower(alpha) == case["inputs"]["q_lower"]

@@ -158,3 +158,20 @@ def test_no_hidden_randomness() -> None:
         c.SplitConformal(rng=object())  # type: ignore[call-arg]
     with pytest.raises(TypeError):
         c.SplitConformal(seed=0)  # type: ignore[call-arg]
+
+
+def test_levels_of_the_wrong_type_are_refused() -> None:
+    cal = split_on(FIXTURE_SCORES)
+    for bad in ("0.1", b"0.1", True, False, 1, None, [0.1]):
+        with pytest.raises(ValueError):
+            cal.quantile(bad)  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            cal.quantile_lower(bad)  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            cal.predict(0.0, bad)  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            c.SplitConformal().fit(episodes_from_scores(FIXTURE_SCORES), bad)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        c.BonferroniAllocation().per_test("0.1", 3)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        c.BonferroniAllocation().per_test(True, 3)  # type: ignore[arg-type]

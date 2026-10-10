@@ -7,6 +7,7 @@ inference, unverified until the human check of WS03-T06. Values are fixture-only
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 
 import numpy as np
 import pytest
@@ -161,3 +162,46 @@ def test_adaptive_unfitted_refuses() -> None:
         cal.quantile(0.2)
     with pytest.raises(RuntimeError):
         cal.update(0.0, 0.0)
+
+
+def _split_and_adaptive(
+    scores: list[float], level: Fraction | float
+) -> tuple[c.SplitConformal, c.AdaptiveConformal]:
+    split = c.SplitConformal()
+    split.fit(episodes_from_scores(scores), level)
+    adaptive = c.AdaptiveConformal(gamma=0.1)
+    adaptive.fit(episodes_from_scores(scores), level)
+    return split, adaptive
+
+
+def test_adaptive_keeps_the_exact_rank_of_a_fraction_level() -> None:
+    """Before any update the working level is the fitted level, exactly (rule 5, ADR-058 d)."""
+    split, adaptive = _split_and_adaptive([1.0, 2.0], Fraction(1, 3))
+    assert split.quantile(Fraction(1, 3)) == 2.0
+    assert adaptive.quantile(Fraction(1, 3)) == 2.0
+    assert (
+        adaptive.quantile_lower(Fraction(1, 3))
+        == split.quantile_lower(Fraction(1, 3))
+        == 1.0
+    )
+
+
+def test_adaptive_keeps_the_exact_rank_of_an_allocated_level() -> None:
+    level = c.BonferroniAllocation().per_test_exact(0.05, 3)  # 1/60
+    assert level == Fraction(1, 60)
+    scores = [float(i) for i in range(59)]
+    split, adaptive = _split_and_adaptive(scores, level)
+    assert split.quantile(level) == 58.0
+    assert adaptive.quantile(level) == 58.0
+    assert adaptive.quantile_lower(level) == split.quantile_lower(level)
+    assert adaptive.predict(-100.0, level).emitted is True
+    assert adaptive.fork().quantile(level) == 58.0
+
+
+def test_adaptive_level_moves_after_an_update_with_a_fraction_target() -> None:
+    cal = c.AdaptiveConformal(gamma=0.1)
+    cal.fit(episodes_from_scores(FIXTURE_SCORES), Fraction(1, 5))
+    assert cal.alpha_t == 0.2 and cal.quantile(Fraction(1, 5)) == 0.4
+    cal.update(0.0, 0.9)
+    assert cal.alpha_t == pytest.approx(0.12)
+    assert cal.quantile(Fraction(1, 5)) == 0.9  # rank at the moved level 0.12
