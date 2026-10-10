@@ -410,7 +410,7 @@ Targets in scope (analisi §4.3): continuous signals (heart rate, SpO₂) and ro
 
 ## Conformal calibrator
 
-Version 0.1.0. Owner WS05. Consumers: WS06, WS08. Sources: analisi §4.4 (ρ definitions, Proposition 1, caveats), §3.2, §5.6 (A1, A6), §2 R2 weaknesses 3, 4, 6.
+Version 0.2.0 (ADR-058: `calibrated_for`, `model_version`, `quantile_lower`, the `variant` argument of `predict`, levels as exact fractions, the accessors of the adaptive mode; 0.1.0 was the first text). Owner WS05. Consumers: WS06, WS08. Sources: analisi §4.4 (ρ definitions, Proposition 1, caveats), §3.2, §5.6 (A1, A6), §2 R2 weaknesses 3, 4, 6; `docs/formal/06-rho-proposition1.md`.
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -421,20 +421,24 @@ class CalibrationEpisode:
     sigma_hat: float          # predicted normalised robustness
     sigma_true: float         # normalised robustness of the completed trace (latent or measured)
 
+Level = float | Fraction     # a float is read as its decimal literal (Fraction(repr(alpha))); a Fraction is exact
+
 class AlphaAllocation(Protocol):
     def per_test(self, alpha_total: float, n_tests: int) -> float: ...   # controls alarms per patient-day (analisi §4.4)
 
 class ConformalCalibrator(Protocol):
-    mode: Literal["split", "adaptive"]
-    def fit(self, episodes: Sequence[CalibrationEpisode], alpha: float) -> None: ...
-    def quantile(self, alpha: float) -> float: ...                    # one-sided q_{1-alpha} of R = sigma_true - sigma_hat
-    def predict(self, sigma_hat: float, alpha: float) -> "PredictedViolation": ...
+    mode: Literal["split", "adaptive"]                                # read-only
+    calibrated_for: str | None                                        # model version of the last fit; None: no particular model
+    def fit(self, episodes: Sequence[CalibrationEpisode], alpha: Level, *, model_version: str | None = None) -> None: ...
+    def quantile(self, alpha: Level) -> float: ...                    # one-sided q_{1-alpha} of R = sigma_true - sigma_hat
+    def quantile_lower(self, alpha: Level) -> float: ...              # q^lo_alpha, for the variant "possible" (ADR-030)
+    def predict(self, sigma_hat: float, alpha: Level, *, variant: Literal["likely", "possible"] = "likely") -> "PredictedViolation": ...
     def update(self, sigma_hat: float, sigma_true: float) -> None: ... # adaptive mode only; no-op in split mode
 
 @dataclass(frozen=True, slots=True)
 class PredictedViolation:
     emitted: bool
-    rho: Rho | None           # RhoKind.PREDICTED with alpha_star = inf{alpha : sigma_hat + q_{1-alpha} < 0}
+    rho: Rho | None           # RhoKind.PREDICTED with alpha_star = inf{alpha : sigma_hat + q_{1-alpha} < 0}; None when not emitted
     variant: Literal["likely", "possible"]
 ```
 
@@ -443,7 +447,14 @@ Rules (analisi §4.4):
 1. Calibration unit is the **patient episode**, never the time step. Split by patient.
 2. Coverage is marginal over the population, not conditional on the patient; this is stated wherever coverage is reported.
 3. Nonconformity score is one-sided, `R = sigma_true - sigma_hat`; Proposition 1 (WS01) states `P(alert emitted and sigma >= 0) <= alpha` under exchangeability across episodes.
-4. Every model update pushed from the back-end triggers recalibration on held-out episodes (`fit` is called again); the monitor refuses to use a calibrator older than the model version (analisi §2 R2 weakness 6).
+4. Every model update pushed from the back-end triggers recalibration on held-out episodes (`fit` is called again); the monitor refuses to use a calibrator older than the model version (analisi §2 R2 weakness 6). The version token is `calibrated_for`: `fit(..., model_version=v)` sets it to `v`, a `fit` without `model_version` sets it to `None` (calibrated for no particular model), and the monitor compares it with `Forecaster.model_version` and refuses `None` in predictive mode.
+
+Additions of 0.2.0 (ADR-058):
+
+5. **Ranks** are computed in integer arithmetic from the level as an exact fraction: `k = ceil((n + 1)(1 - alpha))` for `quantile` (`+inf` if `k > n`) and `j = floor((n + 1) alpha)` for `quantile_lower` (`-inf` if `j < 1`). A float level is read through its shortest round-trip decimal; an allocated level (`alpha_total / n_tests`) is passed as a `Fraction`, which `BonferroniAllocation.per_test_exact(alpha_total, n_tests)` returns (`per_test` is its float image). `alpha` outside `(0, 1)` raises `ValueError`; the split calibrator is level-agnostic (the `alpha` of `fit` is only validated).
+6. **Variants.** `variant="likely"` emits iff `sigma_hat + quantile(alpha) < 0` (Proposition 1, false alarms). `variant="possible"` emits iff `sigma_hat + quantile_lower(alpha) < 0` (Proposition 1b, missed violations), not the symmetric form `sigma_hat - q < 0`, which carries the miss bound only for scores symmetric about zero (ADR-030). In both variants `Rho.value = m / (n + 1)` with `m` the number of calibration scores `R_i` with `sigma_hat + R_i < 0`, so `1 - Rho.value = alpha_star = (m' + 1) / (n + 1)` with `m' = n - m`; `Rho.alpha` is the level used and `Rho.guarantee` is `"marginal over patient episodes under exchangeability"` for the split mode.
+7. **Not emitted.** `PredictedViolation.rho` is `None` when `emitted` is false (including a quantile of `+inf`: a level below `1 / (n + 1)` never emits, which is reported, not hidden). `quantile`, `quantile_lower` and `predict` raise `RuntimeError` before the first `fit`; `fit` raises `ValueError` for no episodes and for a non-finite `sigma`.
+8. **Adaptive mode** (`AdaptiveConformal(gamma, window=None)`, `gamma` required): `fit(episodes, alpha)` sets the target level and `alpha_t = alpha`; `update` moves `alpha_t` by `alpha_t + gamma (alpha - err_t)` (`err_t = 1` when the new score exceeds the quantile at `alpha_t`) and adds the score; accessors `alpha_t` (unclipped) and `n_scores`; `fork()` returns a copy at the state right after `fit` (per-patient adaptation without leakage); `quantile`, `quantile_lower` and `predict` raise `ValueError` for a level other than the one of `fit`. `alpha_t <= 0` gives `quantile = +inf`, `alpha_t >= 1` gives `-inf`. `Rho.guarantee` is empirical (ablation A6), with no finite-sample claim. The recursion is that of the adaptive conformal inference literature, `[ref-needed: WS03]`, unverified until the human reference check (ADR-018).
 
 ## Monitor
 
