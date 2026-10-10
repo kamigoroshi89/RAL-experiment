@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Final, Protocol
 
@@ -99,6 +99,9 @@ class Decision:
     reason: AbstentionReason | None
     evidence_used: tuple[str, ...]
     missing: tuple[str, ...]
+    #: The value of each decisive field (a mapping as sorted pairs), so that the text can state the reading
+    #: itself and not only the name of the field: "no intake observed" is not "intake observed".
+    readings: tuple[tuple[str, object], ...] = ()
 
 
 def predicted_decision() -> Decision:
@@ -182,6 +185,13 @@ _CUFF_CODE = (
 
 def _ordered(paths: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted(set(paths), key=_ORDER.__getitem__))
+
+
+def _plain(value: object) -> object:
+    """A reading as a hashable value: a node mapping becomes sorted ``(node, state)`` pairs."""
+    if isinstance(value, dict):
+        return tuple(sorted((str(k), str(v)) for k, v in value.items()))
+    return value
 
 
 def _is_real(value: object) -> bool:
@@ -291,6 +301,14 @@ class HierarchicalRule:
 
     def decide(self, violated: VerdictRecord, evidence: EvidenceVector) -> Decision:
         """Apply the decision table to the vector (``violated`` is not read: invariant I1)."""
+        decision = self._table(evidence)
+        readings = tuple(
+            (path, _plain(get_evidence(evidence, path)))
+            for path in decision.evidence_used
+        )
+        return replace(decision, readings=readings)
+
+    def _table(self, evidence: EvidenceVector) -> Decision:
         template = evidence.provenance.violated_template
         kind = evidence.provenance.template_kind
         if (

@@ -490,7 +490,3 @@ def test_conflict_text_does_not_assert_an_intake_that_was_not_observed(
 def test_a_failed_authentication_is_stated_as_failed(attributor, registry) -> None:  # type: ignore[no-untyped-def]
     text = alert_of(attributor, registry, "W-08").xi.text
     assert "message authentication failed (crypto_temporal.authenticated)" in text
-    assert (
-        "robot did not perceive" in alert_of(attributor, registry, "W-09-resp").xi.text
-        or True
-    )

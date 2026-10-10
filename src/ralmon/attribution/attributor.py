@@ -344,14 +344,7 @@ class RuleAttributor:
             decision = core.decision
             caused_by = links.get(key)
             if caused_by is not None:
-                root_decision = cores[caused_by].decision
-                decision = Decision(
-                    root_decision.kappa,
-                    root_decision.row,
-                    root_decision.reason,
-                    root_decision.evidence_used,
-                    root_decision.missing,
-                )
+                decision = cores[caused_by].decision
             alerts.append(
                 alert_from_record(
                     record,

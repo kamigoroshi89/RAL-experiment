@@ -149,8 +149,114 @@ def _unreviewed(registry: ParameterRegistry, name: str) -> str:
     return " (unreviewed)" if registry.get(name).reviewed_by is None else ""
 
 
-def _evidence_list(paths: Sequence[str]) -> str:
-    return ", ".join(f"{FIELD_WORDS.get(p, p)} ({p})" for p in paths)
+def _state_word(token: str) -> str:
+    if token.endswith("+commanded"):
+        return f"{token[: -len('+commanded')]} (commanded)"
+    return token
+
+
+def _reading_words(path: str, value: object) -> str | None:
+    """The actual reading of a field in words (evidence-channels.md, section Field semantics), or ``None``.
+
+    The words state the value, not only the name of the field: a failed check, an intake that was not seen and a
+    lapse are written as such, so that "no intake observed" is never read as "intake observed" (ADR-004).
+    """
+    if path == "system.node_lifecycle" and isinstance(value, tuple):
+        entries = ", ".join(f"{node} {_state_word(state)}" for node, state in value)
+        return f"node status reported: {entries}"
+    if isinstance(value, bool):
+        pair = _BOOLEAN_WORDS.get(path)
+        return None if pair is None else pair[0 if value else 1]
+    if isinstance(value, str) and path == "signal_quality.cuff_error_code":
+        return (
+            f"the cuff reported error code {value}"
+            if value
+            else "the cuff reported no error code"
+        )
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        if path == "system.ble_link_quality":
+            return f"delivery ratio of the device link {value:.2f}"
+        if path == "signal_quality.ecg_sqi":
+            return f"ECG signal quality {value:.2f}"
+        if path == "signal_quality.ppg_sqi":
+            return f"pulse-oximeter signal quality {value:.2f}"
+        if path == "cross_device.pulse_vs_ecg_hr_diff":
+            return (
+                "the cuff pulse rate and the ECG heart rate differ by "
+                f"{_number(float(value))} beats per minute"
+            )
+    return None
+
+
+#: (words when the field is True, words when it is False) for the Boolean fields.
+_BOOLEAN_WORDS: Final[dict[str, tuple[str, str]]] = {
+    "system.diagnostics_ok": (
+        "diagnostics reported ok",
+        "diagnostics reported an error or a stale report",
+    ),
+    "system.liveliness_ok": (
+        "no liveliness lapse of a monitored node",
+        "the liveliness of a monitored node lapsed",
+    ),
+    "system.qos_deadline_missed": (
+        "a message deadline was missed",
+        "no message deadline was missed",
+    ),
+    "system.battery_low": (
+        "the robot battery was reported low",
+        "the robot battery was not reported low",
+    ),
+    "system.nav_task_failed": (
+        "a robot navigation task failed, timed out or was late",
+        "the robot navigation tasks succeeded",
+    ),
+    "system.manip_task_failed": (
+        "a robot manipulation task failed, timed out or was late",
+        "the robot manipulation tasks succeeded",
+    ),
+    "witness.robot_present": (
+        "the robot perceived the patient present",
+        "the robot did not perceive the patient present",
+    ),
+    "witness.identity_confirmed": (
+        "the robot confirmed the patient identity",
+        "the robot identity check failed",
+    ),
+    "witness.intake_observed": (
+        "intake observed by the robot",
+        "no intake observed by the robot",
+    ),
+    "crypto_temporal.authenticated": (
+        "message authentication succeeded",
+        "message authentication failed",
+    ),
+    "crypto_temporal.seq_gap_or_replay": (
+        "a repeated or missing sequence value was found",
+        "no repeated or missing sequence value was found",
+    ),
+    "crypto_temporal.timestamp_implausible": (
+        "a late or future-stamped message was received",
+        "no late or future-stamped message was received",
+    ),
+}
+
+
+def _evidence_list(
+    paths: Sequence[str], readings: Sequence[tuple[str, object]] = ()
+) -> str:
+    """The fields with their reading in words and the canonical path in parentheses."""
+    values = dict(readings)
+    out: list[str] = []
+    for path in paths:
+        words = _reading_words(path, values[path]) if path in values else None
+        out.append(
+            f"{words if words is not None else FIELD_WORDS.get(path, path)} ({path})"
+        )
+    return ", ".join(out)
+
+
+def _unavailable_list(paths: Sequence[str]) -> str:
+    return ", ".join(f"{FIELD_WORDS.get(p, p)} unavailable ({p})" for p in paths)
 
 
 def render_text(
@@ -335,14 +441,14 @@ def _cause(alert: Alert, decision: Decision, predicted: bool) -> str:
             head
             + ", because no system or integrity evidence was found and every channel required for the "
             "exclusion was available and showed no problem. Channels checked: "
-            + _evidence_list(decision.evidence_used)
+            + _evidence_list(decision.evidence_used, decision.readings)
             + "."
         )
     if kappa in (AttributedCause.C2_SYSTEM, AttributedCause.C3_INTEGRITY):
         return (
             head
             + ", because of the evidence: "
-            + _evidence_list(decision.evidence_used)
+            + _evidence_list(decision.evidence_used, decision.readings)
             + "."
         )
     reason = decision.reason
@@ -350,9 +456,10 @@ def _cause(alert: Alert, decision: Decision, predicted: bool) -> str:
         why = sorted({_CONFLICT_WHY.get(p, "") for p in decision.evidence_used} - {""})
         return (
             head
-            + ". Reason: conflicting evidence. The asserted evidence "
-            + _evidence_list(decision.evidence_used)
-            + " is not accepted by the integrity rule or the system rule ("
+            + ". Reason: conflicting evidence. Readings that neither the integrity rule nor the system rule "
+            "accepts: "
+            + _evidence_list(decision.evidence_used, decision.readings)
+            + " ("
             + "; ".join(why)
             + ")."
         )
@@ -367,7 +474,7 @@ def _cause(alert: Alert, decision: Decision, predicted: bool) -> str:
         + ". Reason: insufficient evidence, the channels needed to exclude the other causes were not available"
     )
     if decision.missing:
-        text += ": " + _evidence_list(decision.missing)
+        text += ": " + _unavailable_list(decision.missing)
     if alert.tau is TemplateId.COUNT:
         text += "; the dispenser content evidence has no field in this contract version"
     return text + "."
