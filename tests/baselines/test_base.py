@@ -81,17 +81,34 @@ def test_run_before_fit_raises_not_fitted() -> None:
 
 
 def test_failed_fit_leaves_the_detector_not_fitted() -> None:
+    class FailsOnSecondFit(RecordingBaseline):
+        def _fit(self, train, calib):  # type: ignore[no-untyped-def]
+            if self.fit_calls:
+                raise RuntimeError("boom")
+            super()._fit(train, calib)
+            self.fit_calls.append((tuple(train), tuple(calib)))
+
+    detector = FailsOnSecondFit()
+    detector.fit([], [])
+    assert detector.is_fitted
+    detector.run(make_observed_day(), make_care_plan(), None)  # fitted: accepted
+    with pytest.raises(RuntimeError):
+        detector.fit([], [])
+    assert not detector.is_fitted
+    with pytest.raises(NotFittedError):
+        detector.run(make_observed_day(), make_care_plan(), None)
+
+
+def test_a_detector_whose_first_fit_fails_is_not_fitted() -> None:
     class Failing(RecordingBaseline):
         def _fit(self, train, calib):  # type: ignore[no-untyped-def]
             raise RuntimeError("boom")
 
-    detector = fitted()
     failing = Failing()
     with pytest.raises(RuntimeError):
         failing.fit([], [])
     with pytest.raises(NotFittedError):
         failing.run(make_observed_day(), make_care_plan(), None)
-    assert detector.run(make_observed_day(), make_care_plan(), None) == ()
 
 
 def test_refit_replaces_state() -> None:
@@ -105,10 +122,26 @@ def test_refit_replaces_state() -> None:
     assert detector.state == (2, 1)
 
 
-def test_fit_rejects_days_that_are_not_benchmark_days() -> None:
+def test_fit_rejects_days_that_are_not_benchmark_days_with_a_named_error() -> None:
     detector = RecordingBaseline()
-    with pytest.raises(TypeError):
-        detector.fit([make_observed_day()], [])  # type: ignore[list-item]
+    for bad in (make_observed_day(), make_benchmark_day().latent, "day"):
+        with pytest.raises(LeakageError):
+            detector.fit([bad], [])  # type: ignore[list-item]
+        with pytest.raises(LeakageError):
+            detector.fit([], [bad])  # type: ignore[list-item]
+    assert not detector.is_fitted
+
+
+def test_fit_rejects_a_day_object_listed_in_both_splits() -> None:
+    detector = RecordingBaseline()
+    shared = make_benchmark_day()
+    with pytest.raises(LeakageError):
+        detector.fit([shared], [shared])
+    assert not detector.is_fitted
+    detector.fit(
+        [shared], [make_benchmark_day()]
+    )  # equal but distinct objects are fine
+    assert detector.is_fitted
 
 
 def test_run_rejects_latent_and_benchmark_days() -> None:
@@ -311,6 +344,29 @@ def test_iter_steps_first_batch_holds_inputs_stamped_before_the_grid() -> None:
         make_observed_day([early]), TimingConfig(60_000, 0, 0), 120_000, start_ms=60_000
     )
     assert out[0].samples == (early,)
+
+
+def test_iter_steps_receive_time_bound_is_exact() -> None:
+    # step 60_000, no delay: an input received exactly at the step is delivered there, 1 ms later it is not
+    timing = TimingConfig(60_000, 0, 0)
+    for rx, at in ((59_999, 60_000), (60_000, 60_000), (60_001, 120_000)):
+        sample = make_sample(t_device_ms=0, t_rx_ms=rx)
+        event = make_event(EventKind.INTAKE, 0, rx)
+        out = batches(make_observed_day([sample], [event]), timing, 180_000)
+        delivered = {b.t_ms for b in out if b.samples}
+        assert delivered == {at}, rx
+        assert {b.t_ms for b in out if b.events} == {at}, rx
+
+
+def test_iter_steps_device_time_horizon_is_exact() -> None:
+    # step 60_000, delay 30_000: at t = 60_000 the horizon is 30_000, inclusive
+    timing = TimingConfig(60_000, 30_000, 0)
+    for dev, at in ((29_999, 60_000), (30_000, 60_000), (30_001, 120_000)):
+        sample = make_sample(t_device_ms=dev)
+        event = make_event(EventKind.INTAKE, dev, dev)
+        out = batches(make_observed_day([sample], [event]), timing, 180_000)
+        assert {b.t_ms for b in out if b.samples} == {at}, dev
+        assert {b.t_ms for b in out if b.events} == {at}, dev
 
 
 def test_iter_steps_input_is_delivered_exactly_once() -> None:
