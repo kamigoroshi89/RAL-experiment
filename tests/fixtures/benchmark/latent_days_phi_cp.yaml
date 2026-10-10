@@ -259,14 +259,18 @@ cases:
       (deadline 24:01, also without a reading: open). Doses 21:00 (window [22:00, 24:00], no reading: RESP violated, onset
       21:00, end 24:00) and 21:01 (window [22:01, 24:01]: open). The reading 130 at 20:30 is in band, in the look-back of
       both doses (130 - 100 = +30) and answers the tick 20:30. Two doses meet the limit (2 - 2 = 0, a tie) and the
-      day-end minimum.
+      day-end minimum. The two violations are decided at the shared step of midnight; since WS04-T15 (ADR-064) a record
+      decided there belongs to the day that starts there (days are half-open), so this day owns neither of them and
+      nothing is expected; they are events of the next day (the reference evaluator still finds both, with decided_at 24:00,
+      and `owned_by_day` gives them to day + 1; `expected_next_day` lists them, as clock times of the next day's start).
     bp_default: 130.0
     bp_segments: []
     measurements: ["20:30"]
     dispenses: ["21:00", "21:01"]
     sched_ticks: ["20:30", "23:30", "23:31"]
     count_end: true
-    expected:
+    expected: []
+    expected_next_day:
       - {template: resp, onset: "21:00", end: "24:00"}
       - {template: sched, onset: "23:30", end: "24:00"}
 
