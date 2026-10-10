@@ -327,7 +327,11 @@ def test_b2_residual_scale_from_calibration_days_only() -> None:
     assert (
         dict(b2.residual_scales) == first
     )  # a different training set does not move the scale
-    assert len(forecaster.fit_calls) == 2  # the forecaster did see the training days
+    assert (
+        len(forecaster.fit_calls) == 2
+    )  # the forecaster did see the training days, and only those
+    assert forecaster.fit_calls[0] == tuple(d.observed for d in train_1)
+    assert forecaster.fit_calls[1] == tuple(d.observed for d in train_2)
     assert forecaster.fit_calls[0] != forecaster.fit_calls[1]
     b2.fit(train_2, [bench([60, 66, 60, 66, 60], patient="cb")])
     assert dict(b2.residual_scales) != first  # a different calibration set does
@@ -351,6 +355,10 @@ def test_b2_quantile_threshold_hand_computed() -> None:
     b2.fit([bench([])], [bench([])])
     assert b2.iforest_threshold == 3.25
     assert b2.iforest_threshold == float(np.quantile([1, 2, 3, 4], 0.75))
+
+
+def b2_features() -> Any:
+    return importlib.import_module("ralmon.baselines.b2_features")
 
 
 def _real_scorer(seed: int = 0) -> Any:
@@ -767,6 +775,40 @@ def test_b2_pre_day_samples_are_values_but_not_detections() -> None:
         day=1,
     )
     assert b2.run(only_pre, PLAN, None) == ()
+
+
+def test_b2_input_within_one_step_before_the_day_is_step_zero() -> None:
+    # Day 1 starts at t0. A sample stamped 30 s before it (inside (t0 - step, t0]) is step 0 of the day and yields a
+    # residual; one stamped exactly one step before is not part of the day and yields none.
+    b2 = residual_b2(3.0)
+    t0 = at(0, 1)
+    previous = Sample("hr_ecg", t0 - 10 * STEP, t0, 60.0, None, None)
+    inside = Sample("hr_ecg", t0 - 30_000, t0, 99.0, None, None)
+    outside = Sample("hr_ecg", t0 - STEP, t0, 99.0, None, None)
+    out = b2.run(observed([previous, inside], day=1), PLAN, None)
+    assert times(out) == [t0]
+    assert b2.run_stats.residuals == 1
+    assert b2.run(observed([previous, outside], day=1), PLAN, None) == ()
+    assert b2.run_stats.residuals == 0
+
+
+def test_b2_late_dispense_is_dropped_from_the_counter_and_counted() -> None:
+    # A dispense received one step after its device time is late (D = 0) and not counted; one received on time is.
+    for rx_step, count, late in ((10, 1.0, 0), (11, 0.0, 1)):
+        scorer = StubScorer([[0.5] * 4, [0.1] * 4])
+        b2 = make_b2(
+            mode="iforest",
+            z_threshold=None,
+            score_quantile=0.5,
+            feature_step_ms=FEATURE_STEP_4,
+            scorer_factory=lambda seed, s=scorer: s,
+        )
+        b2.fit([bench([])], [bench([])])
+        event = make_event(EventKind.DISPENSE, 10 * STEP, rx_step * STEP)
+        b2.run(observed([], events=[event]), PLAN_SCHEDULE, None)
+        col = b2_features().feature_names(("hr_ecg",)).index("dose_count_24h")
+        assert scorer.score_rows[-1][1, col] == count  # the row at 6 h
+        assert b2.run_stats.late_events == late
 
 
 def test_b2_zero_scale_makes_any_deviation_an_alarm_with_a_finite_score() -> None:

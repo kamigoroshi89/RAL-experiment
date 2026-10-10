@@ -127,6 +127,13 @@ def test_features_dose_count_window_is_open_on_the_left() -> None:
     assert rows[T_DAY]["since_last_dispense_ms"] == 0
 
 
+def test_features_dose_count_window_boundary_to_the_millisecond() -> None:
+    # A dose 1 ms after the left edge is inside (t - 24 h, t]; a dose exactly on it is outside.
+    events = [make_event(EventKind.DISPENSE, 1), make_event(EventKind.DISPENSE, T_DAY)]
+    rows = dict(rows_at([], events, [], T_DAY))
+    assert rows[T_DAY]["dose_count_24h"] == 2
+
+
 def test_features_only_dispense_events_count_as_doses() -> None:
     events = [
         make_event(EventKind.MEASUREMENT, H),
