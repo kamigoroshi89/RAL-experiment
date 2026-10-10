@@ -506,6 +506,31 @@ def test_b5_prediction_records_expose_sigma_hat_and_quantile() -> None:
     assert record.sigma_hat == -10.0
     assert record.quantile == 6.0
     assert record.emitted is True
+    assert record.sigma_true == 40.0  # measured at the deadline: 140 - 100
+
+
+def test_b5_predicted_alerts_are_nested_in_alpha_but_detections_are_not() -> None:
+    """A smaller ``alpha`` gives a larger constant and fewer predicted alerts (nested), but the measured verdict at the
+    deadline then supplies the detection that the prediction no longer does, so the detection sets are not nested.
+
+    Hand derivation, scores as in the worked example (``n = 10``): ``alpha = 0.2``: ``k = 9``, ``C = 6``; ``alpha = 0.1``:
+    ``k = 10``, ``C = 8``; ``alpha = 0.05``: ``k = 11 > 10``, ``C = inf``. Day: pressure 150 throughout, ``rho = -10``.
+    """
+    deadline = (ACT + LENGTH) * STEP
+    seen = {}
+    for alpha, constant in ((0.2, 6.0), (0.1, 8.0), (0.05, math.inf)):
+        b5 = make_b5(alpha=alpha)
+        b5.fit(train_days(), calibration_days(WORKED_RESIDUALS))
+        out = run(b5, dispense_day(150.0, 150.0))
+        (record,) = b5.predictions
+        assert record.quantile == constant
+        seen[alpha] = (record.emitted, pairs(out))
+    assert seen[0.2] == (True, [(ACT * STEP, 4.0)])  # -10 + 6
+    assert seen[0.1] == (True, [(ACT * STEP, 2.0)])  # -10 + 8
+    assert seen[0.05] == (
+        False,
+        [(deadline, 10.0)],
+    )  # only the measured verdict is left
 
 
 # ---- 6. only the public calibrator API -------------------------------------------------------------

@@ -4,7 +4,7 @@ Source. L. Lindemann, X. Qin, J. V. Deshmukh and G. J. Pappas, "Conformal Predic
 ICCPS 2023, author preprint arXiv:2211.01539v2 [ref-needed: the bibliography entry is not verified]. Every statement
 about the method below carries a locator into that preprint (printed page numbers); the full record of what was
 read, how it maps to the templates and every departure is ``docs/plan/workstreams/WS06-baselines/notes/
-B5-deviations.md`` (deviations D1 to D20), and where B5 fails on this problem is
+B5-deviations.md`` (deviations D1 to D21), and where B5 fails on this problem is
 ``notes/B5-failure-analysis.md``.
 
 What B5 is. The direct method (Section 3.2, Theorem 1, equation (4), p. 8): a trajectory predictor completes the
@@ -65,7 +65,7 @@ import math
 import sys
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from typing import Any, Final, Literal
 
@@ -198,7 +198,10 @@ class B5Prediction:
     """One predictive decision of the last ``run``: the value tested, the constant and the outcome.
 
     ``quantile`` is ``None`` when no calibrator was fitted for the group (no calibration episode); it is
-    ``math.inf`` when the level is below ``1 / (n + 1)`` (nothing can be emitted).
+    ``math.inf`` when the level is below ``1 / (n + 1)`` (nothing can be emitted). ``sigma_true`` is the measured
+    raw robustness of the same group on the observed day, known once the instances are decided (``None`` while
+    the run ended before the deadline, or when it is not finite); it is read after the run, for the coverage of
+    WS08, and takes no part in any decision.
     """
 
     keys: tuple[str, ...]
@@ -207,6 +210,7 @@ class B5Prediction:
     sigma_hat: float
     quantile: float | None
     emitted: bool
+    sigma_true: float | None = None
 
 
 class _Tracker:
@@ -625,6 +629,9 @@ class B5ConformalSTL(BaselineBase):
             live = [t for t in live if not t.done]
         for key, tracker in trackers.items():
             out.final[key] = tracker.value
+        out.records = [
+            replace(r, sigma_true=_true_of(r.keys, out.final)) for r in out.records
+        ]
         return out
 
     def _make_tracker(
@@ -810,6 +817,13 @@ class B5ConformalSTL(BaselineBase):
         supported = frozenset(self._forecaster.supported_signals)
         clean = [s for s in history if s.signal == signal or s.signal not in supported]
         return self._forecaster.predict(clean, t_ms, horizon_ms)
+
+
+def _true_of(keys: tuple[str, ...], final: Mapping[str, float | None]) -> float | None:
+    """The measured raw robustness of a group (the minimum over its members), if all are decided and finite."""
+    values = [final.get(k) for k in keys]
+    known = [v for v in values if v is not None and math.isfinite(v)]
+    return min(known) if known and len(known) == len(values) else None
 
 
 def _fresh_key(base: str, taken: Mapping[str, object]) -> str:

@@ -16,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import re
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -361,15 +362,32 @@ def test_failure_no_attribution_same_range_detection_for_c1_and_c2_days() -> Non
         out_clean == out_faulty
     )  # the same detection for a true excursion and for a faulty cuff
 
-    # with the system template as well, the faulty cuff is flagged but cannot be told apart by anything B5 outputs
-    both = make_b5(
-        templates=templ(TemplateId.RANGE, TemplateId.SYS),
-        evaluator_factory=make_evaluator,
-        alpha=0.2,
-    )
-    both.fit(train_days(), [bench(clean)])
-    for day in (clean, faulty):
-        assert all(d.label is None for d in both.run(day, plan, None))
+    # with the system template as well the faulty cuff changes the score or adds a detection, but nothing says why
+    largest = (
+        sys.float_info.max
+    )  # a failed Boolean guard has robustness -inf: the score saturates (D20)
+    for aggregation, expected_clean, expected_faulty in (
+        ("conjunction", [(5 * STEP, 12.0)], [(5 * STEP, largest)]),
+        (
+            "per_template",
+            [(5 * STEP, 12.0)],
+            [(5 * STEP, 12.0), (5 * STEP, largest)],
+        ),
+    ):
+        both = make_b5(
+            aggregation=aggregation,
+            templates=templ(TemplateId.RANGE, TemplateId.SYS),
+            evaluator_factory=make_evaluator,
+            alpha=0.2,
+        )
+        both.fit(train_days(), [bench(clean)])
+        got_clean, got_faulty = (
+            both.run(clean, plan, None),
+            both.run(faulty, plan, None),
+        )
+        assert pairs(got_clean) == expected_clean
+        assert pairs(got_faulty) == expected_faulty
+        assert all(d.label is None for d in (*got_clean, *got_faulty))
 
 
 # ---- 19. the analysis note ---------------------------------------------------------------------------------------
