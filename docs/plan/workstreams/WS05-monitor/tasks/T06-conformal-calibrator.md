@@ -3,7 +3,7 @@ id: WS05-T06
 title: "Split and adaptive conformal calibrator, rho, alpha allocation, recalibration rule"
 workstream: WS05-monitor
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS05-T04", "WS01-T06"]
 critical_path: true
 non_negotiable: false
