@@ -82,6 +82,7 @@ from ralmon.baselines.raw_robustness import (
     GridStep,
     LoggingRegistry,
     RawRobustnessEvaluator,
+    RunStats,
     SignalGrid,
     make_evaluator,
 )
@@ -268,6 +269,7 @@ class _Outcome:
     points: list[_Point] = field(default_factory=list)
     final: dict[str, float | None] = field(default_factory=dict)
     skips: Counter[str] = field(default_factory=Counter)
+    stats: RunStats | None = None
 
 
 @dataclass(slots=True)
@@ -384,8 +386,22 @@ class B5ConformalSTL(BaselineBase):
         self._censored = 0
         self.predictions: tuple[B5Prediction, ...] = ()
         self.skips: Mapping[str, int] = {}
+        self._run_stats: RunStats | None = None
 
     # -- what the last fit and run produced ---------------------------------------------------------------
+
+    @property
+    def run_stats(self) -> RunStats | None:
+        """The counters of the last ``run`` (the ADR-054 gate among them); ``None`` before the first one."""
+        return self._run_stats
+
+    @property
+    def int_gate_passed(self) -> bool:
+        """Whether the last run passed the INT gate of ADR-054 (no presence sample used without a mark)."""
+        stats = self._run_stats
+        return (
+            stats is not None and stats.presence_samples_without_availability_marks == 0
+        )
 
     @property
     def n_calibration_episodes(self) -> int:
@@ -436,6 +452,7 @@ class B5ConformalSTL(BaselineBase):
         self._censored = censored
         self.predictions = ()
         self.skips = {}
+        self._run_stats = None
 
     def _episodes_of(
         self, day: ObservedDay, outcome: _Outcome
@@ -491,6 +508,7 @@ class B5ConformalSTL(BaselineBase):
         outcome = self._process(day, plan, calibrators=self._calibrators)
         self.predictions = tuple(outcome.records)
         self.skips = dict(outcome.skips)
+        self._run_stats = outcome.stats
         return outcome.detections
 
     # -- one day, shared by fit and run ---------------------------------------------------------------------
@@ -579,6 +597,7 @@ class B5ConformalSTL(BaselineBase):
             for gs in grid.apply(batch):
                 self._row(state, gs, batch.t_ms)
         out = state.out
+        out.stats = RunStats.of(grid, len(state.trackers))
         for key, tracker in state.trackers.items():
             out.final[key] = tracker.value
         out.records = [
