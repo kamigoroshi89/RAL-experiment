@@ -3,7 +3,7 @@ id: WS04-T11
 title: "Benchmark builder CLI: splits by patient, manifest, seeds, scale"
 workstream: WS04-benchmark
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS04-T10", "WS04-T15"]
 critical_path: true
 non_negotiable: false
