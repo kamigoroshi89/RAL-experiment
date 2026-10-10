@@ -64,8 +64,9 @@ def test_fit_passes_guarded_days_with_split_labels() -> None:
 def test_observed_always_allowed_and_logged() -> None:
     for split in (Split.TRAIN, Split.CALIB):
         day, log, guarded = guard(split)
-        assert isinstance(guarded.observed, ObservedDay)
-        assert guarded.observed is day.observed
+        observed = guarded.observed
+        assert isinstance(observed, ObservedDay)
+        assert observed is day.observed
         assert [(r.split, r.field) for r in log.records] == [(split, "observed")]
         assert log.records[0].patient_id == "p1"
         assert log.records[0].day_index == 0
@@ -73,12 +74,12 @@ def test_observed_always_allowed_and_logged() -> None:
 
 
 def test_ground_truth_train_only() -> None:
-    day, log, train = guard(Split.TRAIN)
+    _, log, train = guard(Split.TRAIN)
     assert train.ground_truth == make_ground_truth()
     assert [(r.split, r.field) for r in log.records] == [(Split.TRAIN, "ground_truth")]
     _, calib_log, calib = guard(Split.CALIB)
     with pytest.raises(LeakageError):
-        calib.ground_truth
+        _ = calib.ground_truth
     assert calib_log.records == ()
     assert [(d.split, d.field) for d in calib_log.denied] == [
         (Split.CALIB, "ground_truth")
@@ -88,14 +89,14 @@ def test_ground_truth_train_only() -> None:
 def test_ground_truth_is_denied_on_calibration_even_with_the_latent_exception() -> None:
     _, _, calib = guard(Split.CALIB, policy=AccessPolicy(calib_latent=True))
     with pytest.raises(LeakageError):
-        calib.ground_truth
+        _ = calib.ground_truth
 
 
 def test_latent_denied_on_calibration_by_default() -> None:
     day, log, calib = guard(Split.CALIB)
     assert AccessPolicy().calib_latent is False
     with pytest.raises(LeakageError):
-        calib.latent
+        _ = calib.latent
     assert log.records == ()
     day, log, calib = guard(Split.CALIB, policy=AccessPolicy(calib_latent=True))
     assert calib.latent is day.latent
@@ -116,9 +117,7 @@ def test_access_log_queries_and_clear() -> None:
     log = AccessLog()
     _, _, train = guard(Split.TRAIN, log=log)
     _, _, calib = guard(Split.CALIB, log=log)
-    train.observed
-    train.ground_truth
-    calib.observed
+    _ = (train.observed, train.ground_truth, calib.observed)
     assert log.fields(Split.TRAIN) == frozenset({"observed", "ground_truth"})
     assert log.fields(Split.CALIB) == frozenset({"observed"})
     assert log.fields() == frozenset({"observed", "ground_truth"})
@@ -161,7 +160,7 @@ def test_harness_applies_the_policy_and_shares_the_log() -> None:
     default = RecordingBaseline()
     default.fit([], [make_benchmark_day()])
     with pytest.raises(LeakageError):
-        default.fit_calls[0][1][0].latent
+        _ = default.fit_calls[0][1][0].latent
 
 
 # ---- ReadLog, AuditedRegistry, LoggedMapping, logged_plan --------------------------------------
