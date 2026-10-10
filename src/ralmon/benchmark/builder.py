@@ -96,6 +96,7 @@ from ralmon.benchmark.injection import (
     InjectionRecord,
     InjectionSpec,
     LevelRow,
+    QuantityDesign,
     SubtypeDesign,
     apply_observation_injections,
     finalize_observed,
@@ -255,6 +256,51 @@ _C2_DRIVEN: Final = (  # the C2 subtypes that the class rate draws (the other tw
     "nav_delay",
     "stuck_at",
 )
+
+
+def _magnitude_references(errors: DeviceErrorModel) -> dict[str, float]:
+    """The prior quantities a relative magnitude level may be a multiple of, for one cohort."""
+    return {
+        "cuff_error_sd_mmhg": errors.cuff_error_sd_mmhg,
+        "cuff_bias_mmhg": errors.cuff_bias_mmhg,
+    }
+
+
+def drawable_magnitude_levels(
+    block: QuantityDesign, errors: DeviceErrorModel
+) -> tuple[tuple[LevelRow, ...], tuple[str, ...]]:
+    """``(drawable levels, excluded level names)`` of a magnitude block for the device errors of one cohort.
+
+    A level whose resolved magnitude is exactly zero is not drawn: an injection with no effect is never
+    realised (the level ``device_bias`` of ``cuff_silent_bias`` is the multiplier 1.0 of ``cuff_bias_mmhg``,
+    which is 0.0 mmHg for an accurate device), and keeping it in the uniform draw wastes that share of the
+    injections. The level keeps its definition: with a non-zero prior bias it is drawn again. The resolution
+    is the one the planner applies (``resolve_magnitude``); a level still awaiting a value is kept, and the
+    planner refuses it where it draws it.
+    """
+    references = _magnitude_references(errors)
+    drawable: list[LevelRow] = []
+    excluded: list[str] = []
+    for level in block.levels:
+        if level.value is None:
+            magnitude: float | None = None
+        elif level.reference is None:
+            magnitude = float(level.value)
+        else:
+            magnitude = resolve_magnitude(
+                level, references[level.reference], level.reference
+            )
+        if magnitude == 0.0:
+            excluded.append(level.level)
+        else:
+            drawable.append(level)
+    if not drawable:
+        raise BenchmarkConfigError(
+            f"every level of the magnitude block {block.key!r} resolves to zero: nothing can be injected"
+        )
+    return tuple(drawable), tuple(excluded)
+
+
 _C3_ORDER: Final = (
     "dispense_forgery",
     "injection_informed",
@@ -1000,6 +1046,7 @@ class BuildContext:
         )
         self.response_model = OneCompartmentEmax()
         self.design = self._load_design()
+        self.excluded_zero_levels()  # refuses a magnitude block with no drawable level, before any draw
         self.sched_window_ms = windows["sched_window_ms"]
         bounds = self.registry.bounds("bp")
         self.bp_bounds = (float(bounds.lower), float(bounds.upper))
@@ -1060,6 +1107,21 @@ class BuildContext:
             except (RegistryError, KeyError):
                 continue
         return max(1, -(-longest // T_DAY_MS))
+
+    def excluded_zero_levels(self) -> dict[str, dict[str, list[str]]]:
+        """Per cohort and C2 subtype, the magnitude levels the plan does not draw because they resolve to zero."""
+        out: dict[str, dict[str, list[str]]] = {}
+        for cohort_id, cohort in self.cohorts.items():
+            per_subtype: dict[str, list[str]] = {}
+            for subtype in _C2_DRIVEN:
+                entry = self.design.c2[subtype]
+                if entry.duration is None or entry.magnitude is None:
+                    continue
+                _, excluded = drawable_magnitude_levels(entry.magnitude, cohort.errors)
+                if excluded:
+                    per_subtype[subtype] = list(excluded)
+            out[cohort_id] = per_subtype
+        return out
 
     def _load_design(self) -> _Design:
         config = self.config
@@ -1438,16 +1500,16 @@ class BuildContext:
             unit: str | None = None
             label = level.level
             if entry.magnitude is not None:
-                mag_level = self._pick(rng, entry.magnitude.levels)
+                drawable, _ = drawable_magnitude_levels(entry.magnitude, cohort.errors)
+                mag_level = self._pick(rng, drawable)
                 assert mag_level.value is not None
                 unit = entry.magnitude.unit
                 if mag_level.reference is None:
                     magnitude = float(mag_level.value)
                 else:
-                    reference = {
-                        "cuff_error_sd_mmhg": cohort.errors.cuff_error_sd_mmhg,
-                        "cuff_bias_mmhg": cohort.errors.cuff_bias_mmhg,
-                    }[mag_level.reference]
+                    reference = _magnitude_references(cohort.errors)[
+                        mag_level.reference
+                    ]
                     magnitude = resolve_magnitude(
                         mag_level, reference, mag_level.reference
                     )
@@ -2130,6 +2192,10 @@ class _Writer:
                 "c3": context.design.rate_c3,
             },
             "confounder_pairs_per_variant": context.design.pairs_per_variant,
+            "excluded_zero_levels": {
+                cohort_id: {k: list(v) for k, v in per_subtype.items()}
+                for cohort_id, per_subtype in context.excluded_zero_levels().items()
+            },
             "plan_skipped": dict(sorted(self.skipped.items())),
             "n_unverified_prior": context.n_unverified_prior,
             "n_unverified_design": context.n_unverified_design,
