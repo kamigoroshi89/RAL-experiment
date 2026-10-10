@@ -198,6 +198,9 @@ Two policies, both **proposals for gab; the choice is open**:
 WS04-T11 must not pick one silently: the builder and the scoring depend on the choice, and until gab decides the last
 day of each patient has this hole. Whichever policy is taken, the paper must state it.
 
+**Decided (gab, 2026-10-10, ADR-066): P1.** The builder generates the tail day; how it is marked in the manifest, which events
+are the closing-step truth of the last scored day and what is not counted are in `docs/benchmark/builder.md`.
+
 **Order of the truth.** The events of a day are sorted by `(onset_ms, cls, subtype, end_ms)` with `end_ms = None`
 first; ties are broken by template, injected flag, group and record position, so the order is a function of the
 content and not of the order of the arguments.
