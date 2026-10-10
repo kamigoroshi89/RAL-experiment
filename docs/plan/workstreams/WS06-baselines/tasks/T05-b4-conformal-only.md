@@ -3,7 +3,7 @@ id: WS06-T05
 title: B4 conformal without STL
 workstream: WS06-baselines
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS06-T01", "WS05-T06", "WS05-T05"]
 critical_path: true
 non_negotiable: false
@@ -118,3 +118,7 @@ Commits: `WS06-T05: failing test for a Fraction alpha with an allocation; pin th
 4. Caching of the alpha-independent residuals. Residuals do not depend on `alpha`, but every B4 instance recomputes them: about 0.82 s for a dense 3-signal day and about 2.4 s for a fit on 1 training and 3 calibration days; an alpha sweep multiplies this, and at full benchmark density WS08 could take hours. A cache keyed on (day, forecaster `model_version`) would remove it; not added here (outside File toccati of this task, and a decision on where the cache lives belongs to WS08-T01).
 
 Verification after the round (exit codes): `pytest tests/baselines/test_b4_conformal_only.py -q` 0 (47 passed); `pytest tests/baselines -q` 0 (274 passed); `pytest -q` 0 (5716 passed, 1 skipped); `ruff check src tests` 0; `ruff format --check src tests` 0; `mypy src/ralmon` 0; `python -c "from ralmon.baselines import B4ConformalOnly"` 0; `pytest tests/test_public_api.py -q` 0 (143 passed); the Done-when `grep` prints nothing; `python3 tools/check_plan.py` 0.
+
+### Post-task review (2026-10-10)
+
+Produced: `B4ConformalOnly` (forecast residual per monitored signal, split conformal quantile per signal at the allocated level from `per_test_exact`, alarm when the residual exceeds the quantile; no STL, no normalisation, no attribution), 47 tests. Independent review: PASS, no blocker. Re-derived with an independent `Fraction` reference on 300 seeded cases (3 signals, 3 to 60 calibration days, 3062 alarms, 111 `+inf` quantiles): exact agreement; the WS05-T06 trap (0.05 over 3 signals with 59 days) gives rank 59 with the Fraction and `+inf` with the float; the residual index `(t - t_prev)//step_ms - 1` is the right one (the `floor` form in the WS06-T03 text would index past the path); the test day never reaches a calibrator; 37 of 38 mutants were killed and the survivor is now killed. Review fixes (test-first): a calibrator tied to no model is refused and pinned; a `Fraction` alpha with an allocation is accepted only when it is an exact float literal, else a named error. OPEN DECISIONS FOR GAB (details in the Notes): (1) a reorder delay D that is not a multiple of `step_ms` makes B1, B3, B4 and B5 diverge from the monitor's lateness rule (280 of 400 trials at D = 30000 ms, 362 of 400 at D = 120001 ms; exact at D = 0 and 2 steps): require D to be a multiple of the step in `TimingConfig`, or fix the grid rule; (2) the reported `unit` (`day_max` or `sample`) and the final monitored signals (sets the Bonferroni n, 4 with bp and both heart-rate channels); (3) detections after midnight clipped or kept; (4) caching the alpha-independent residuals (about 0.82 s per dense 3-signal day). B4's scores are `|r|/q(alpha)`, exist only for alarms and are not comparable across alpha: report B4 as an operating-point sweep, not an AUROC/AP ranking. Dependents: WS06-T03 (B2 must mirror the residual rule), WS06-T07, WS08-T02, WS08-T05.
