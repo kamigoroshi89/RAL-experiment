@@ -3,7 +3,7 @@ id: WS13-T01
 title: "Repository hygiene: README, install docs, license decision"
 workstream: WS13-release
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS05-T08", "WS04-T11"]
 critical_path: false
 non_negotiable: false
