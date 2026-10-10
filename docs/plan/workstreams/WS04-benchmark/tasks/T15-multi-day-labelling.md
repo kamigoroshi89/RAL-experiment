@@ -3,7 +3,7 @@ id: WS04-T15
 title: "Multi-day ground-truth labelling with history (ADR-046, ADR-055 (b))"
 workstream: WS04-benchmark
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS04-T10", "WS05-T10"]
 critical_path: true
 non_negotiable: false
