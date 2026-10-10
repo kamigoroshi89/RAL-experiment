@@ -61,13 +61,29 @@ def test_signal_id_values_match_contract() -> None:
         ("HR_ECG", "hr_ecg"),
         ("HR_PULSE", "hr_pulse"),
         ("SPO2", "spo2"),
+        ("NAV_ETA", "nav_eta_ms"),
+        ("TASK_QUEUE", "task_queue_ms"),
     ]
-    assert len(expected) == 17
+    assert len(expected) == 19
     assert [(m.name, m.value) for m in SignalId] == expected
     assert _contract_members("SignalId") == expected
     assert issubclass(SignalId, str)
     assert SignalId("bp") is SignalId.BP
     assert SignalId.BP == "bp"
+
+
+def test_signal_id_includes_robot_state_signals() -> None:
+    original = [
+        "bp", "meas", "dispense", "intake", "sched_tick", "dose_count", "meas_count",
+        "bp_pre", "bp_drop", "cuff_health", "inflation_ms", "presence", "auth",
+        "day_end", "hr_ecg", "hr_pulse", "spo2",
+    ]  # fmt: skip
+    values = [m.value for m in SignalId]
+    assert values[:17] == original  # the 17 original ones, in their order
+    assert values[17:] == ["nav_eta_ms", "task_queue_ms"]
+    assert SignalId.NAV_ETA == "nav_eta_ms"
+    assert SignalId.TASK_QUEUE == "task_queue_ms"
+    assert len(SignalId) == 19
 
 
 def test_event_kind_values_match_contract() -> None:
