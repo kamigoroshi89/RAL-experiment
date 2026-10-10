@@ -65,6 +65,7 @@ INTERNAL_MODULES = {  # numeric kernels and plumbing, called with validated valu
     "ralmon.monitor.forecasters",  # WS05-T05: its classes are exercised by test_forecasters.py
     "ralmon.monitor.instances",
     "ralmon.monitor.measured_rho",
+    "ralmon.monitor.predictive",  # WS05-T08: the predictive step, driven by the monitor and by the episode builder
     "ralmon.monitor.reorder",
     "ralmon.monitor.verdict",
 }
@@ -226,6 +227,8 @@ FUZZED_CLASSES = {  # fuzzed here, in test_inputs.py or in test_field_fuzz.py
     "ralmon.monitor.formula.Node",
     "ralmon.monitor.formula.PathTable",
     "ralmon.monitor.offline.OfflineResult",
+    "ralmon.monitor.predictive.PredictionPoint",
+    "ralmon.monitor.predictive.Predictor",
     "ralmon.monitor.reorder.BufferedInput",
     "ralmon.monitor.reorder.ReorderBuffer",
     "ralmon.monitor.config.MonitorConfig",
@@ -448,14 +451,14 @@ def test_the_annotations_of_the_offline_run_follow_the_contract() -> None:
         name: str(p.annotation).replace("'", "")
         for name, p in inspect.signature(m.run_offline).parameters.items()
     }
-    # the layering rule (signals and spec only) keeps ConformalCalibrator out of this package: disclosed
-    assert hints["calibrator"] == "object | None"
+    # WS05-T08: the layering allows ralmon.conformal, so the calibrator has its contract type again
+    assert hints["calibrator"] == "ConformalCalibrator | None"
     assert "Forecaster" in hints["forecaster"]
     assert "ObservedTrace" in hints["day"]
 
 
 def test_a_calibrator_and_a_forecaster_are_accepted_and_never_called() -> None:
-    """WS05-T08 gives them a role; until then the measured half ignores whatever is passed."""
+    """With ``predictive=False`` (ablation A2) whatever is passed is ignored: only the predictive step calls them."""
 
     class Spy:
         calls = 0

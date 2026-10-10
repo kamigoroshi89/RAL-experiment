@@ -301,8 +301,10 @@ def test_monitor_sources_do_not_reference_ground_truth() -> None:
             assert name not in text, f"{path.name} mentions {name}"
 
 
-def test_monitor_imports_only_signals_and_spec_of_the_package() -> None:
-    allowed = {"signals", "spec"}
+def test_monitor_imports_only_signals_spec_and_conformal_of_the_package() -> None:
+    # WS05-T08: the predictive step uses the allocation and the calibrator type of ``ralmon.conformal``; the
+    # attribution, baselines, evaluation and benchmark packages stay out (the layering test has the full graph)
+    allowed = {"signals", "spec", "conformal"}
     seen: set[str] = set()
     for path in sorted(SRC_MONITOR.rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

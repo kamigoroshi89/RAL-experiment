@@ -15,15 +15,13 @@ The three forecasters (``PersistenceForecaster``, ``AutoRegressiveForecaster``, 
 their errors (``ForecasterNotFittedError``, ``InsufficientHistoryError``, ``UnsupportedSignalError``) joined
 the table with WS05-T05 (ADR-057); they live in ``monitor/forecasters.py``.
 
-``build_calibration_episodes`` and ``StaleCalibratorError`` stay placeholders owned by WS05-T08.
+``build_calibration_episodes`` (in ``monitor/offline.py``) and ``StaleCalibratorError`` (in
+``monitor/predictive.py``) joined with WS05-T08 (ADR-060): the predictive mode of ``StreamingMonitor``, one
+prediction per pending instance at its activation, and the calibration episodes on the same code path.
 """
 
 from __future__ import annotations
 
-from ralmon.monitor._stubs import (
-    StaleCalibratorError,
-    build_calibration_episodes,
-)
 from ralmon.monitor.config import (
     MonitorConfig,
     MonitorConfigError,
@@ -71,11 +69,13 @@ from ralmon.monitor.offline import (
     OfflineResult as OfflineResult,
 )
 from ralmon.monitor.offline import (
+    build_calibration_episodes,
     run_offline,
 )
 from ralmon.monitor.offline import (
     run_offline_detailed as run_offline_detailed,
 )
+from ralmon.monitor.predictive import StaleCalibratorError
 from ralmon.monitor.verdict import (
     Rho,
     RhoKind,

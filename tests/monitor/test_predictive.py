@@ -770,3 +770,108 @@ def test_predictive_mode_does_not_mention_ground_truth() -> None:
     text = (Path(m.__file__).parent / "predictive.py").read_text(encoding="utf-8")
     for name in ("LatentDay", "GroundTruthEvent", "BenchmarkDay"):
         assert name not in text
+
+
+# ---------------------------------------------------------------------------------------------
+# robustness of the step (added after the implementation: the cases the hypothesis test does not pin)
+# ---------------------------------------------------------------------------------------------
+
+
+def test_a_path_that_is_not_the_one_asked_for_is_skipped_and_counted() -> None:
+    for raw in (
+        lambda signal, t, h, n: [0.0] * (n + 3),  # wrong length
+        lambda signal, t, h, n: [math.nan] * n,  # not finite
+        lambda signal, t, h, n: [math.inf] + [0.0] * (n - 1),
+    ):
+        mon = monitor(
+            sched=[TICK], forecaster=StubForecaster(raw=raw), cal=calibrator()
+        )
+        records = run(mon, Inputs(), hhmm(9, 5))
+        assert not [r for r in records if r.state is PREDICTED]
+        assert dict(mon.stats().prediction_skips) == {"invalid_forecast": 1}
+
+
+def test_a_forecaster_that_answers_another_signal_is_skipped() -> None:
+    from ralmon.monitor import Forecast
+
+    class Wrong(StubForecaster):
+        def predict(
+            self, history: Any, t_ms: int, horizon_ms: int, *, signal: Any = None
+        ) -> Any:
+            return Forecast("bp", t_ms, horizon_ms, [0.0] * (horizon_ms // STEP))
+
+    mon = monitor(sched=[TICK], forecaster=Wrong(), cal=calibrator())
+    run(mon, Inputs(), hhmm(9, 5))
+    assert dict(mon.stats().prediction_skips) == {"invalid_forecast": 1}
+
+
+def test_a_forecaster_without_the_signal_keyword_is_called_with_the_contract_arguments() -> (
+    None
+):
+    class Plain:
+        name = "plain"
+        model_version = "v1"
+        supported_signals = frozenset({"meas"})
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int]] = []
+
+        def fit(self, train_days: Any) -> None: ...
+
+        def predict(self, history: Any, t_ms: int, horizon_ms: int) -> Any:
+            self.calls.append((t_ms, horizon_ms))
+            mean = [0.0] * (horizon_ms // STEP)
+            mean[51] = 1.0  # 09:52
+            return m.Forecast("meas", t_ms, horizon_ms, mean)
+
+    forecaster = Plain()
+    mon = monitor(sched=[TICK], forecaster=forecaster, cal=calibrator())
+    records = run(mon, Inputs(), hhmm(9, 5))
+    assert forecaster.calls == [(TICK, 3_600_000)]
+    assert [r for r in records if r.state is PREDICTED]
+
+
+def test_an_open_pre_dose_pressure_gives_no_completed_value() -> None:
+    forecaster = StubForecaster(bp=145.0, signals=frozenset({"bp"}))
+    mon = monitor(
+        sched=[hhmm(8, 30)],
+        schedule=[hhmm(8, 30), hhmm(7)],
+        forecaster=forecaster,
+        cal=calibrator(),
+    )
+    inputs = Inputs()  # no pressure before the dose: bp_pre is undefined (stale-open)
+    inputs.events.append(evt("dispense", hhmm(7), source="dispenser", seq=5))
+    inputs.samples.append(smp("auth", hhmm(7), 1.0, seq=5))
+    records = run(mon, inputs, hhmm(7, 5))
+    assert not [r for r in records if r.state is PREDICTED]
+    assert dict(mon.stats().prediction_skips) == {"undefined_completion": 1}
+
+
+def test_a_new_version_of_the_plan_recomputes_the_tests_and_keeps_the_slots_used() -> (
+    None
+):
+    forecaster = StubForecaster(arrival=lambda t: t + 3_120_000)
+    mon = monitor(sched=[TICK], forecaster=forecaster, cal=calibrator(), alpha=0.4)
+    assert mon.stats().n_tests == 1
+    import dataclasses
+
+    bigger = dataclasses.replace(plan(REG, sched=[TICK, hhmm(12)]), plan_version=2)
+    mon.load(bigger)
+    assert mon.stats().n_tests == 2
+    assert mon.stats().per_test_alpha == pytest.approx(0.2)
+
+
+def test_the_recording_mode_needs_a_forecaster_and_no_calibrator() -> None:
+    mon = m.StreamingMonitor(make_config(REG), REG, LIB)
+    with pytest.raises(MonitorConfigError):
+        mon._enable_recording(lambda point: None)
+    mon2 = m.StreamingMonitor(
+        make_config(REG), REG, LIB, forecaster=late_arrival_forecaster()
+    )
+    seen: list[Any] = []
+    mon2._enable_recording(seen.append)
+    mon2.load(plan(REG, sched=[TICK]))
+    run(mon2, Inputs(), hhmm(9, 5))
+    assert len(seen) == 1 and seen[0].sigma_hat == pytest.approx(-1_320_000 / 1_800_000)
+    with pytest.raises(MonitorConfigError):
+        mon2._enable_recording(seen.append)  # after the plan

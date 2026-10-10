@@ -80,8 +80,9 @@ class MonitorConfig:
 def check_config(config: object) -> MonitorConfig:
     """Validate a ``MonitorConfig`` (CG-12) and return it; raise ``MonitorConfigError`` otherwise.
 
-    ``predictive`` is refused: the predictive mode is added by WS05-T08 and this monitor produces
-    measured verdicts only (ADR-008).
+    ``predictive=True`` needs ``alpha``: it is the total level of a patient-day, split over the tests of
+    the plan (ADR-060). The calibrator and the forecaster that it also needs are checked when the
+    ``StreamingMonitor`` is built.
     """
     if not isinstance(config, MonitorConfig):
         raise MonitorConfigError(f"config must be a MonitorConfig, got {show(config)}")
@@ -120,9 +121,8 @@ def check_config(config: object) -> MonitorConfig:
         raise MonitorConfigError(
             f"registry_version must be a str, got {show(config.registry_version)}"
         )
-    if config.predictive:
+    if config.predictive and alpha is None:
         raise MonitorConfigError(
-            "predictive monitoring (PREDICTED_VIOLATION) is added by WS05-T08; this monitor "
-            "emits measured verdicts only (ADR-008): pass predictive=False"
+            "predictive monitoring (PREDICTED_VIOLATION) needs alpha, the total level of a patient-day"
         )
     return config

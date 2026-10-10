@@ -13,8 +13,8 @@ instance retires; a running extremum is exact, and the cost per node is O(1) per
 monotone queue (05 section 6.4). The queue is the right tool for the whole-formula form, which this
 monitor does not implement (review rule R1 of 08 section 5.3).
 
-Verdict rule (05 sections 3.4 and 6.2), applied only to an instance that is PENDING, so a definitive
-state is never re-evaluated:
+Verdict rule (05 sections 3.4 and 6.2), applied to an instance that is PENDING or PREDICTED_VIOLATION
+(ADR-048 (b)), so a definitive state is never re-evaluated and a forecast never decides:
 
     VIOLATED   iff hi < 0
     SATISFIED  iff lo > 0, or (k >= k_d and lo == hi == 0)       (tie rule, CP3)
@@ -63,6 +63,8 @@ __all__ = [
 
 INF: Final = math.inf
 _NAN: Final = math.nan
+# the states from which the measured prefix can still decide (ADR-048 (b)); a definitive state is absorbing
+_UNDECIDED: Final = (VerdictState.PENDING, VerdictState.PREDICTED_VIOLATION)
 
 # the entries of the marker of an undecidable instance, in the order of docs/formal/05 section 3.5
 _MARKER_ORDER: Final[tuple[str, ...]] = (
@@ -207,6 +209,7 @@ class Instance(ABC):
         "_closed_done",
         "act",
         "anchor_ms",
+        "awaits_prediction",
         "closed_guard",
         "ctx",
         "decided_at_ms",
@@ -219,6 +222,8 @@ class Instance(ABC):
         "params",
         "path",
         "pending_until_ms",
+        "pred_rho",
+        "pred_sigma",
         "refines",
         "rho",
         "scale",
@@ -261,6 +266,12 @@ class Instance(ABC):
         self.closed_guard: str | None = None
         self._closed_done = False
         self.refines = False  # only SCHED keeps emitting records after its decision
+        # the predictive step (ADR-060): set by the monitor at creation when the instance has a predictive
+        # path, cleared by the one prediction at the activation step; the rho and the bound of a
+        # PREDICTED_VIOLATION state live apart from ``rho``, which is the rho of a definitive verdict
+        self.awaits_prediction = False
+        self.pred_rho: Rho | None = None
+        self.pred_sigma: float | None = None
 
     # -- provided by the template ------------------------------------------------------------
 
@@ -300,15 +311,17 @@ class Instance(ABC):
 
     def step(self, k: int, v: StepView) -> VerdictRecord:
         lo, hi = self.evaluate(k, v)
-        if self.state is VerdictState.PENDING:
+        undecided = self.state in _UNDECIDED
+        if undecided:
             if hi < 0.0:
                 self._decide(VerdictState.VIOLATED, k)
             elif lo > 0.0 or (k >= self.k_d and lo == 0.0 and hi == 0.0):
                 self._decide(VerdictState.SATISFIED, k)
         marker = None
-        if self.state is VerdictState.PENDING and k >= self.k_d:
+        if self.state in _UNDECIDED and k >= self.k_d:
             marker = format_marker(self.markers(k, v))
         scale = self.scale
+        predicted = self.state is VerdictState.PREDICTED_VIOLATION
         return VerdictRecord(
             instance_key=self.key,
             template=self.template.id,
@@ -316,16 +329,32 @@ class Instance(ABC):
             state=self.state,
             sigma_interval=RobustnessInterval(lo, hi),
             sigma_norm_interval=(normalise(lo, scale), normalise(hi, scale)),
-            rho=self.rho,
+            rho=self.pred_rho if predicted else self.rho,
             decided_at_ms=self.decided_at_ms,
             pending_until_ms=self.pending_until_ms,
             undecidable=marker,
             guard_failed=self.guard_failed,
             subformula_path=self.path,
-            predicted_sigma_norm=None,
+            predicted_sigma_norm=self.pred_sigma if predicted else None,
         )
 
+    def mark_predicted(self, rho: Rho, sigma_norm: float) -> None:
+        """PENDING to PREDICTED_VIOLATION (T2 of docs/formal/05 section 4): sticky until a definitive verdict.
+
+        Only the state, the rho and the bound change; the interval, ``decided_at_ms`` and every other field
+        of the instance stay those of the measured prefix (P3, Lemma 9).
+        """
+        if self.state is not VerdictState.PENDING:
+            raise MonitorInvariantError(
+                f"{self.key}: only a PENDING instance can be predicted, not {self.state.value}"
+            )
+        self.state = VerdictState.PREDICTED_VIOLATION
+        self.pred_rho = rho
+        self.pred_sigma = sigma_norm
+
     def _decide(self, state: VerdictState, k: int) -> None:
+        self.pred_rho = None  # T6 and T7: the predicted rho is dropped
+        self.pred_sigma = None
         self.state = state
         self.decided_step = k
         self.decided_at_ms = k * self.ctx.step_ms
@@ -340,7 +369,7 @@ class Instance(ABC):
 
     def finished(self, k: int) -> bool:
         """Whether the record of step ``k`` is the last one (05 section 6.5)."""
-        if self.state is VerdictState.PENDING:
+        if self.state in _UNDECIDED:
             return k >= self.horizon
         if self.refines:
             return k >= max(self.decided_step or 0, self.horizon)
