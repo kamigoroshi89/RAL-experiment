@@ -71,3 +71,7 @@ Write these first. `all_baselines` builds B1 to B5 from one timing configuration
 - `ruff check src tests` and `mypy src/ralmon` exit 0.
 - `test -f docs/plan/workstreams/WS06-baselines/notes/fairness-audit.md` exits 0 and `grep -c -E '^## (Scope and method|Knowledge matrix|Checks|Documented asymmetries|Findings|Conclusion for WS08-T02)$' docs/plan/workstreams/WS06-baselines/notes/fairness-audit.md` prints `6`.
 - `grep -nE '^- F[0-9]+ \[open\]' docs/plan/workstreams/WS06-baselines/notes/fairness-audit.md` prints nothing.
+
+### Hand-over from WS06-T01 (agent, 2026-10-10)
+
+Test 12 assumes the B3 detection time equals the `t_eval_ms` of the first `VIOLATED` record. With the harness grid (a monitor time: step `t` sees device times up to `t - reorder_delay_ms`) this holds for `reorder_delay_ms = 0` only; for `D > 0` the detection time is `t_eval_ms + D` rounded up to the grid (see the module docstring of `ralmon.baselines.base`), so use the documented-difference clause. `BaselineBase.run` already passes the plan through `logged_plan(plan, detector.read_log)`: read `detector.read_log` and `detector.access_log` and build `AuditedRegistry(registry, detector.read_log)` so that registry and plan reads land in one log.
