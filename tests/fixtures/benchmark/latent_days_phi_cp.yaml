@@ -306,3 +306,171 @@ cases:
     sched_ticks: []
     count_end: true
     expected: []
+
+# Hand-written patients of several days with hand-computed phi_CP ground truth of the LAST day (WS04-T15, ADR-046,
+# ADR-055 (b), ADR-064). Same arithmetic and same registry as above (FIXTURE-ONLY). `days` lists the days of the patient in
+# order on the continuing axis (day 0, day 1, ...), each with the keys of a case above (clock times of that day, with
+# optional seconds "HH:MM:SS"); the labeller gets the earlier days as history and labels the last one. `expected` lists the
+# events of the last day (those DECIDED in it: a day is the half-open interval [d * 24 h, (d + 1) * 24 h), and the day-end
+# obligation that closes a day stays with that day), as "<day> <clock>" so that an onset can lie in an earlier day.
+# `per_day` is what the same day gives when it is labelled with no history (the truth that WS04-T10 produced): it shows
+# what the history adds, or, for HC-06, removes.
+
+history_cases:
+  - id: HC-01-evening-double-take-gives-the-morning-count-event
+    why: >
+      Day 0: doses 21:00 and 21:02 (a double take), readings 130 at 20:30 and 118 at 22:30. Each dose has its reading in
+      the HOLD look-back (130 - 100 = +30) and one in its RESP window (130 - 118 - 10 = +2); the trailing count is 1 then
+      2 (the limit, a tie). Day 1: dose 07:00 after the reading 130 at 06:30, answered by 118 at 09:00 (+2). The trailing
+      24 h count at 07:00 of day 1 is the doses of (07:00 day 0, 07:00 day 1], that is 21:00, 21:02 and 07:00: 2 - 3 = -1,
+      COUNT violated at 07:00 of day 1. With no history the counter is 1 and nothing is violated.
+    days:
+      - bp_default: 130.0
+        bp_segments: [["22:00", "24:00", 118.0]]
+        measurements: ["20:30", "22:30"]
+        dispenses: ["21:00", "21:02"]
+        sched_ticks: []
+        count_end: false
+      - bp_default: 130.0
+        bp_segments: [["08:00", "12:00", 118.0]]
+        measurements: ["06:30", "09:00"]
+        dispenses: ["07:00"]
+        sched_ticks: []
+        count_end: false
+    expected:
+      - {template: count, onset: "1 07:00", end: null}
+    per_day: []
+
+  - id: HC-02-response-window-across-midnight-unanswered
+    why: >
+      Day 0: dose 22:00 after the reading 130 at 21:30 (HOLD +30). Its RESP window is [23:00, 01:00 of day 1]; there is no
+      reading in it. Day 1: one reading 130 at 12:00 (in band). RESP is violated at 01:00 of day 1, the deadline: onset 22:00
+      of day 0, end 01:00 of day 1, an event of day 1. The day alone, or with no history, is open at its closing step and
+      labels nothing.
+    days:
+      - bp_default: 130.0
+        bp_segments: []
+        measurements: ["21:30"]
+        dispenses: ["22:00"]
+        sched_ticks: []
+        count_end: false
+      - bp_default: 130.0
+        bp_segments: []
+        measurements: ["12:00"]
+        dispenses: []
+        sched_ticks: []
+        count_end: false
+    expected:
+      - {template: resp, onset: "0 22:00", end: "1 01:00"}
+    per_day: []
+
+  - id: HC-03-response-window-across-midnight-answered
+    why: >
+      As HC-02, with the reading 118 at 00:30 of day 1, inside the window [23:00, 01:00]: 130 - 118 - 10 = +2, satisfied.
+      Nothing is violated, with or without the history.
+    days:
+      - bp_default: 130.0
+        bp_segments: []
+        measurements: ["21:30"]
+        dispenses: ["22:00"]
+        sched_ticks: []
+        count_end: false
+      - bp_default: 130.0
+        bp_segments: [["00:00", "02:00", 118.0]]
+        measurements: ["00:30"]
+        dispenses: []
+        sched_ticks: []
+        count_end: false
+    expected: []
+    per_day: []
+
+  - id: HC-04-a-reading-stamped-at-the-shared-step-answers
+    why: >
+      Day 0: dose 21:00 after the reading 130 at 20:30; RESP window [22:00, 24:00], deadline exactly at the shared step of
+      midnight, closed at both ends. No reading in day 0 after 20:30, so the run of day 0 alone would decide VIOLATED at
+      24:00. Day 1: pressure 118 and a reading stamped 00:00:00 of day 1, that is 24:00 of day 0: it lies in the window,
+      130 - 118 - 10 = +2, satisfied. The run that has the data stamped up to and including the instant of
+      decision decides SATISFIED: no event on either day.
+    days:
+      - bp_default: 130.0
+        bp_segments: []
+        measurements: ["20:30"]
+        dispenses: ["21:00"]
+        sched_ticks: []
+        count_end: false
+      - bp_default: 118.0
+        bp_segments: []
+        measurements: ["00:00"]
+        dispenses: []
+        sched_ticks: []
+        count_end: false
+    expected: []
+    per_day: []
+
+  - id: HC-05-a-reading-one-second-after-the-shared-step-is-late
+    why: >
+      As HC-04 with the reading stamped 00:00:01 of day 1: it is visible at the step 00:01, after the deadline 24:00, so no
+      reading lies in the window and RESP is violated at the shared step (decided at 24:00 of day 0 = 00:00 of day 1). By the
+      half-open day it is an event of day 1 (onset 21:00 of day 0, end 00:00 of day 1) and not of day 0.
+    days:
+      - bp_default: 130.0
+        bp_segments: []
+        measurements: ["20:30"]
+        dispenses: ["21:00"]
+        sched_ticks: []
+        count_end: false
+      - bp_default: 118.0
+        bp_segments: []
+        measurements: ["00:00:01"]
+        dispenses: []
+        sched_ticks: []
+        count_end: false
+    expected:
+      - {template: resp, onset: "0 21:00", end: "1 00:00"}
+    per_day: []
+
+  - id: HC-06-the-hold-guard-needs-the-previous-day
+    why: >
+      Day 0: reading 130 at 23:50. Day 1: dose 00:20 and a reading 118 at 02:00. HOLD: the reading of 23:50 lies in the
+      look-back [23:20, 00:20] and 130 - 100 = +30, satisfied. RESP: the pre-dose value is 130 (the reading of day 0), the
+      window [01:20, 03:20] holds 118: +2, satisfied. Nothing is violated with the history. With no history the guard
+      sees no reading in the look-back and HOLD is violated at 00:20: the per-day truth is not always a subset of the
+      history truth (it is when no dose lies within the look-back of midnight).
+    days:
+      - bp_default: 130.0
+        bp_segments: []
+        measurements: ["23:50"]
+        dispenses: []
+        sched_ticks: []
+        count_end: false
+      - bp_default: 130.0
+        bp_segments: [["01:30", "03:30", 118.0]]
+        measurements: ["02:00"]
+        dispenses: ["00:20"]
+        sched_ticks: []
+        count_end: false
+    expected: []
+    per_day:
+      - {template: hold, onset: "1 00:20", end: null}
+
+  - id: HC-07-sched-deadline-across-midnight
+    why: >
+      Day 0: ticks 12:00 (reading 12:00) and 23:45 (no reading in [23:45, 00:15 of day 1]). Day 1: the first reading is at
+      00:20, after the deadline: SCHED violated at 00:15 of day 1, onset 23:45 of day 0, end 00:15 of day 1. With no history
+      the instance of day 0 is not part of the run and nothing is labelled.
+    days:
+      - bp_default: 130.0
+        bp_segments: []
+        measurements: ["12:00"]
+        dispenses: []
+        sched_ticks: ["12:00", "23:45"]
+        count_end: false
+      - bp_default: 130.0
+        bp_segments: []
+        measurements: ["00:20"]
+        dispenses: []
+        sched_ticks: []
+        count_end: false
+    expected:
+      - {template: sched, onset: "0 23:45", end: "1 00:15"}
+    per_day: []
