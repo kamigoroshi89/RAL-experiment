@@ -263,3 +263,40 @@ def test_default_build_error_does_not_name_the_ble_rate(
     assert code == EXIT_PROVENANCE
     assert "mean_delay_ms" in err
     assert "ble_dropout_rate_per_h" not in err
+
+
+STALE_NOTE_PHRASES = (
+    "no value has been chosen by an agent",
+    "no value chosen by an agent",
+    "the human supplies the value",
+    "agent-proposed grid point for confirmation",
+)
+NOTE_ACCEPTED = "proposal accepted by gab on 2026-10-10 and not reviewed"
+NOTE_SOURCES = "sources opened by the research agent, not by gab"
+
+
+@pytest.mark.parametrize(
+    ("name", "row", "unit", "value", "source_type"),
+    all_seven(),
+    ids=lambda x: str(x)[:40],
+)
+def test_note_of_a_filled_row_is_true(
+    name: str, row: object, unit: str, value: float, source_type: str
+) -> None:
+    note = flat(row.note)
+    lowered = note.lower()
+    for phrase in STALE_NOTE_PHRASES:
+        assert phrase not in lowered, (name, phrase)
+    assert NOTE_ACCEPTED in note, name
+    if source_type == "published_literature":
+        assert NOTE_SOURCES in note, name
+    # the meaning part of the note survives
+    assert len(note) > 120, name
+
+
+def test_stale_sentence_stays_only_on_awaiting_rows_of_the_design_file() -> None:
+    """The awaiting rows are unchanged: their note still says that no value has been chosen."""
+    for name, row in design_rows().items():
+        if name in AWAITING_DESIGN:
+            assert row.status == "awaiting_human_value", name
+            assert "chosen by an agent" in flat(row.note), name
