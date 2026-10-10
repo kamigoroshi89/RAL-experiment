@@ -34,6 +34,9 @@ from typing import Any
 import numpy as np
 import pytest
 import yaml
+
+from ralmon.benchmark import vocab
+from ralmon.benchmark.adherence import AdherenceState
 from ralmon.benchmark.builder import (
     BenchmarkConfigError,
     BenchmarkReader,
@@ -46,9 +49,6 @@ from ralmon.benchmark.builder import (
     split_patients,
     verify_benchmark,
 )
-
-from ralmon.benchmark import vocab
-from ralmon.benchmark.adherence import AdherenceState
 from ralmon.benchmark.inject_c1 import c1_spec
 from ralmon.benchmark.latent import T_DAY_MS
 from ralmon.benchmark.latent_day import ForcedSlot
@@ -636,7 +636,7 @@ def test_unfilled_prior_refuses_build(tmp_path: Path) -> None:
     committed["paths"] = {**doc["paths"], "injections": str(INJECTIONS_FILE)}
     config = load_config(write_config(tmp_path, committed))
     good = LiteraturePriorSource(
-        Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True
+        make_prior(tmp_path, name="good.yaml"), strict=False, allow_fixture_only=True
     )
     with pytest.raises(UnfilledParameterError, match="duration"):
         generate_benchmark(
@@ -1174,7 +1174,9 @@ def test_manifest_marks_exactly_one_tail_day_per_patient(
     split_counts = Counter(e["split"] for e in manifest.patients.values())
     assert sum(split_counts.values()) == len(manifest.patients)
     total_days = sum(e["n_scored_days"] for e in manifest.patients.values())
-    assert total_days == 4 * 2 + 2 * 1
+    assert (
+        total_days == 4 * 2 + 4 * 1
+    )  # four patients of two days, four pair members of one
     assert manifest.settings["n_patient_days"] == total_days
     assert sum(len(reader.days(p)) for p in reader.patients) == total_days
 
@@ -1240,11 +1242,20 @@ def test_the_closing_step_of_the_last_scored_day_is_owned_by_the_tail_day(
     deadline = (last + 1) * DAY
     scored, tail = built.days[last], built.days[last + 1]
     assert built.n_scored_days == 2 and built.days[-1].tail and not scored.tail
-    resp_last = [e for e in scored.truth.ground_truth if e.template_id == "resp"]
+    dose_onset = last * DAY + dose_21
+    resp_last = [
+        e
+        for e in scored.truth.ground_truth
+        if e.template_id == "resp" and e.onset_ms == dose_onset
+    ]
     assert resp_last == [], (
         "by ADR-064 (b) the closing step of the last scored day is not its own"
     )
-    resp_tail = [e for e in tail.truth.ground_truth if e.template_id == "resp"]
+    resp_tail = [
+        e
+        for e in tail.truth.ground_truth
+        if e.template_id == "resp" and e.onset_ms == dose_onset
+    ]
     owned = [e for e in resp_tail if e.end_ms == deadline]
     assert len(owned) == 1, resp_tail
     event = owned[0]
