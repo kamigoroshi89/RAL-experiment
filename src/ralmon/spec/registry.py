@@ -8,6 +8,8 @@ the checks of that schema in code:
   unverified (ADR-020);
 * durations (unit ``ms``) are integral and non-negative, scales are positive, priorities are integral
   ranks >= 1 with unit ``1``; window parameters are multiples of ``step_ms`` when it is given;
+* ``hold_lookback`` must be longer than ``sched_window`` when both are set (ADR-068): otherwise no
+  care-plan schedule can be derived;
 * a name can be an entry, a derived name (a sum of entries and ``step_ms``, evaluated by this
   module's own parser, never by ``eval``) or an unset name; asking for an unset name raises
   ``UnsetParameterError``, never a default;
@@ -64,6 +66,8 @@ REVIEW_STATUSES: Final = ("unreviewed", "partially_reviewed", "reviewed")
 TEMPLATE_IDS: Final = ("range", "sched", "hold", "count", "resp", "sys", "int")
 WINDOW_START: Final = "delta1"
 WINDOW_END: Final = "delta2"
+HOLD_LOOKBACK: Final = "hold_lookback"
+SCHED_WINDOW: Final = "sched_window"
 DEFAULT_REGISTRY_RELPATH: Final = ("configs", "registry", "hypertension.yaml")
 
 _NAME_RE: Final = re.compile(r"[a-z][a-z0-9_]*")
@@ -753,6 +757,23 @@ def _check_derived_terms(
                 )
 
 
+def _check_hold_longer_than_sched(entries: Mapping[str, RegistryEntry]) -> None:
+    """``hold_lookback`` must be longer than ``sched_window`` (ADR-068).
+
+    A pre-dose measurement for a dose at ``a`` must be fresh for HOLD (``t >= a - hold_lookback``) and
+    leave the schedule window of slack (``t + sched_window < a``); with ``hold_lookback <=
+    sched_window`` no such ``t`` exists, so no care-plan schedule can be derived.
+    """
+    hold, sched = entries.get(HOLD_LOOKBACK), entries.get(SCHED_WINDOW)
+    if hold is not None and sched is not None and not hold.value > sched.value:
+        raise RegistryError(
+            f"{HOLD_LOOKBACK} ({show(hold.value)} ms) must be longer than {SCHED_WINDOW} "
+            f"({show(sched.value)} ms): no pre-dose measurement can be both fresh for HOLD and "
+            f"leave {SCHED_WINDOW} of slack before the dose, so no care-plan schedule can be derived "
+            "(ADR-068)"
+        )
+
+
 def _check_windows(
     windows: Sequence[str],
     entries: Mapping[str, RegistryEntry],
@@ -777,6 +798,7 @@ def _check_windows(
             raise RegistryError(
                 f"window_parameters: {show(name)} has unit {show(unit)}; a window is a duration in ms"
             )
+    _check_hold_longer_than_sched(entries)
     if step_ms is None:
         return
     for name in windows:

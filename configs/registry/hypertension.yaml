@@ -4,7 +4,9 @@
 # Status: NOTHING IN THIS FILE HAS BEEN REVIEWED BY A CLINICIAN (ADR-020, ADR-043). Version 0.2.0
 # (2026-10-08) replaces or adds values with literature-anchored proposals and design choices of
 # WS01-T09, accepted by gab: each rationale says which, and the passages, citations and derivations are
-# in docs/formal/parameter-literature-proposal.md. Entries without a WS01-T09 value keep the analisi
+# in docs/formal/parameter-literature-proposal.md. Version 0.2.1 (2026-10-10, ADR-068) changes one
+# value, sched_window (3600000 to 1800000 ms), now a declared design choice without literature source,
+# because with hold_lookback = sched_window no care-plan schedule can be derived. Entries without a WS01-T09 value keep the analisi
 # value (analisi §4.1, §4.2, §4.6, §4.7), labelled "illustrative, unverified". Validation in this
 # project is technical and pre-clinical. Names still under `unset:` await a value. Values chosen only
 # for hand arithmetic (fixture registry F0, FIXTURE-ONLY, ADR-027) are deliberately absent from this file.
@@ -13,7 +15,7 @@
 # and has, at four-space indent and in this order, value, unit, rationale, source_ref, reviewed_by.
 # Elements of `derived:` and `unset:` are written as one-line flow mappings so that the line counts
 # of the entry keys stay equal to the number of entries.
-registry_version: "0.2.0"
+registry_version: "0.2.1"
 pathology: hypertension
 review_status: unreviewed
 
@@ -130,10 +132,10 @@ entries:
     source_ref: "WS01-T09 part C; IEC 60601-1-8 Table 1 (procedure only) (detail: docs/formal/parameter-literature-proposal.md)"
     reviewed_by: null
   - name: sched_window
-    value: 3600000.0
+    value: 1800000.0
     unit: ms
-    rationale: "literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), ISMP allows a twice-daily dose within 1 h before or after the scheduled time; applied to measurements by analogy; not clinically reviewed: illustrative, unverified"
-    source_ref: "ISMP Acute Care Guidelines for Timely Administration of Scheduled Medications, 2011 (detail: docs/formal/parameter-literature-proposal.md)"
+    rationale: "design choice (decision of gab 2026-10-10, ADR-068), not literature, no source supports this value: 30 min is half of hold_lookback, chosen so that hold_lookback is longer than sched_window and a care-plan schedule with a pre-dose tick can be derived (a pre-dose tick must lie in [a - hold_lookback, a - sched_window)); history of the old value: 0.2.0 had 3600000 ms (1 h) as a literature-anchored proposal (WS01-T09, accepted by gab 2026-10-08), ISMP allows a twice-daily dose within 1 h before or after the scheduled time, applied to measurements by analogy, and it made the schedule infeasible; not clinically reviewed: illustrative, unverified"
+    source_ref: "ADR-068 (docs/plan/03-decisions.md), design choice of gab 2026-10-10 with no literature source; history of the 0.2.0 value: ISMP Acute Care Guidelines for Timely Administration of Scheduled Medications, 2011 (detail: docs/formal/parameter-literature-proposal.md)"
     reviewed_by: null
   - name: delta_resp
     value: 7.5

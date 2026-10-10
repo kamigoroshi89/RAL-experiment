@@ -1,6 +1,6 @@
 # Literature-anchored parameter proposal (WS01-T09)
 
-Status: **decided by gab on 2026-10-08** (drug carvedilol twice daily; every proposed row accepted; design candidates accepted where the agents gave one; `ec50` normalised to a unit dose of 12.5 mg). Values entered in registry 0.2.0 and in the literature prior file. Produced on 2026-10-08 by three research agents in gab's interactive session (ADR-043) and assembled by the agent. This is not a clinical review and nothing in it is clinically validated: every value is a proposal anchored in a published source (or marked `no-literature-value`), to be accepted, changed or rejected by gab before it enters `configs/`. Accepted values keep `reviewed_by: null` and the rationale "literature-anchored proposal (WS01-T09), not clinically reviewed" (ADR-020, ADR-043). Every source was opened on 2026-10-08; quotes that came through a page extractor instead of the original PDF are flagged in their rows and should be spot-checked. Standards that were not opened directly (ISO 81060-2, IEC 80601-2-30, IEC 60601-1-8 Amendment 2, Bluetooth Core 5.2) need their edition and clause confirmed.
+Status: **decided by gab on 2026-10-08** (drug carvedilol twice daily; every proposed row accepted; design candidates accepted where the agents gave one; `ec50` normalised to a unit dose of 12.5 mg). Values entered in registry 0.2.0 and in the literature prior file (amended 2026-10-10 by ADR-068: `sched_window` is 1800000 ms, a design choice without literature source, since registry 0.2.1). Produced on 2026-10-08 by three research agents in gab's interactive session (ADR-043) and assembled by the agent. This is not a clinical review and nothing in it is clinically validated: every value is a proposal anchored in a published source (or marked `no-literature-value`), to be accepted, changed or rejected by gab before it enters `configs/`. Accepted values keep `reviewed_by: null` and the rationale "literature-anchored proposal (WS01-T09), not clinically reviewed" (ADR-020, ADR-043). Every source was opened on 2026-10-08; quotes that came through a page extractor instead of the original PDF are flagged in their rows and should be spot-checked. Standards that were not opened directly (ISO 81060-2, IEC 80601-2-30, IEC 60601-1-8 Amendment 2, Bluetooth Core 5.2) need their edition and clause confirmed.
 
 ## How to decide
 
@@ -197,6 +197,7 @@ Summary (sources opened on 2026-10-08; nothing here is a clinical review):
 - decision_gab:
 
 #### sched_window
+- amended by ADR-068 (2026-10-10): the value below, 3600000 ms, was accepted for registry 0.2.0 and is withdrawn in registry 0.2.1, which sets `sched_window` to 1800000 ms as a declared design choice of gab with no literature source (with `hold_lookback` equal to it, no care-plan schedule can be derived). This section is kept as the history of the 0.2.0 value; the ISMP passage does not support 1800000 ms.
 - file: registry unset
 - unit: ms
 - current: unset

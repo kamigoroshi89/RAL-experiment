@@ -62,3 +62,8 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 
 - gab ha scelto la politica P1: il costruttore del benchmark genera un giorno in più per paziente (giorno di coda), etichettato con la storia e non valutato, così il passo di chiusura dell'ultimo giorno valutato ha un proprietario. Contano solo i record che il giorno di coda possiede al suo primo passo; monitor e baseline non girano sul giorno di coda. WS04-T11 è pronto con questa regola e un test nuovo nelle sue note.
 
+
+## Registro 0.2.1: finestra di schedulazione a 30 minuti (ADR-068, 2026-10-10)
+
+- Con il registro 0.2.0 `hold_lookback` e `sched_window` valevano entrambi 1 h e nessun piano di cura era derivabile (`SLACK_HOLD`): i test non lo vedevano perché usano un registro di fixture. gab ha scelto l'opzione B: `sched_window` = 30 min (1800000 ms), scelta di progetto dichiarata e senza fonte in letteratura, `reviewed_by: null`; `hold_lookback` resta 1 h. Il caricatore ora rifiuta un registro con `hold_lookback` non maggiore di `sched_window`. Registro versione 0.2.1; i piani emessi con 0.2.0 vanno riemessi.
+- Proposta ADR-069 `[DA-CONFERMARE]` (misura pre-dose tipizzata con finestra propria): prima serve un test che la finestra abbia una sola fonte, l'istanza del piano; oggi costruttore, iniettore C2, confondenti ed estrattore delle evidenze leggono il valore globale del registro. Le proposte di ricerca del gruppo 1 che usavano 1 h come ancora vanno rilette contro 30 min.

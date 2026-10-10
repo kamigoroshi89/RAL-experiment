@@ -344,7 +344,7 @@ What the evaluation does and does not show, stated so that it cannot be read as 
   holds by construction, since one specification defines both; what the test adds is that the ideal observation
   equals an independently built one and that the hand-computed cases agree.
 * The **clinical validity of phi_CP rests on the registry review** (WS00-T07): the band, the hold threshold, the
-  response window and the other values are literature proposals that no clinician has reviewed (registry 0.2.0,
+  response window and the other values are literature proposals that no clinician has reviewed (registry 0.2.1,
   `review_status: unreviewed`, ADR-043). A result computed on them is a technical, pre-clinical result.
 * The **independent reference evaluator** guards against a defect of the monitor defining its own truth. It
   cannot guard against a mistake that the specification and the reference share, because it is written from the
