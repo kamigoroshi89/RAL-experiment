@@ -71,3 +71,7 @@ Write these first. Stub forecaster: persistence (forecast = last value of the re
 ## Notes
 
 **Hand-over from WS05-T05 (forecaster, ADR-057).** The index of a `Forecast` path is `(t - t_from_ms) // step_ms - 1` (`mean[k]` predicts `t_from_ms + (k + 1) * step_ms`), not `floor((t - t_from_ms) / step_ms)` as the test text above writes it. The Protocol call `predict(history, t_ms, horizon_ms)` has no target signal: a baseline that needs a given signal must call the concrete class with the keyword `signal=` (or pass a history that holds one signal only). `supported_signals` and `model_version` exist on every forecaster; import the classes and `InsufficientHistoryError` from `ralmon.monitor`, which now lists them in the public API table.
+
+### Hand-over (worker, 2026-10-10, from WS05-T06)
+
+If this baseline works with an allocated level, take it from `BonferroniAllocation.per_test_exact(alpha_total, n_tests)` (a `Fraction`) and pass it to `fit`, `quantile` and `predict`: the float `per_test` can misrank (for example 0.05 / 3 on 59 scores gives `+inf` instead of 58). Levels given as floats are read as their decimal literal; a string or a bool is refused with `ValueError`. See ADR-058.

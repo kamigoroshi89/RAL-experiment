@@ -43,6 +43,10 @@ class BonferroniAllocation:
             raise ValueError(
                 f"n_tests must be an integer of at least 1, got {n_tests!r}"
             )
+        if isinstance(alpha_total, bool) or not isinstance(alpha_total, float):
+            raise ValueError(  # noqa: TRY004 - one named error for every bad level
+                f"alpha_total must be a float in (0, 1), got {alpha_total!r}"
+            )
         if not math.isfinite(alpha_total):
             raise ValueError(f"alpha_total must be finite, got {alpha_total!r}")
         total = Fraction(repr(float(alpha_total)))

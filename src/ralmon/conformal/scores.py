@@ -72,12 +72,16 @@ def scores_of(episodes: Sequence[CalibrationEpisode]) -> list[float]:
 def exact_level(alpha: Level) -> Fraction:
     """The level as an exact fraction, validated to lie in the open interval (0, 1).
 
-    A float is read as the shortest decimal that round-trips (``Fraction(repr(alpha))``): the level
+    A float (not a bool, a string or an int) is read as the shortest decimal that round-trips (``Fraction(repr(alpha))``): the level
     is the literal that the user wrote. A ``Fraction`` is used as it is.
     """
     if isinstance(alpha, Fraction):
         level = alpha
     else:
+        if isinstance(alpha, bool) or not isinstance(alpha, float):
+            raise ValueError(  # noqa: TRY004 - one named error for every bad level
+                f"alpha must be a float or a Fraction in (0, 1), got {type(alpha).__name__}"
+            )
         value = float(alpha)
         if not math.isfinite(value):
             raise ValueError(f"alpha must be finite, got {alpha!r}")

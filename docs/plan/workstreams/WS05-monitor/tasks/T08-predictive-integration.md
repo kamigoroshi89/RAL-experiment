@@ -113,3 +113,7 @@ Test 7 quotes the symmetric reading of the "possible" variant ("under the litera
 ### ADR-054 decided (gab, 2026-10-09)
 
 Point (1) is settled: WS05-T11 handles the `NODE_STATE colocated` report inside `StreamingMonitor.push_event`, so `run_offline` needs no availability input and the offline path and `rsm_node` share the code. Keep it when the predictive path is added.
+
+### Hand-over (worker, 2026-10-10, from WS05-T06)
+
+Take every allocated level from `BonferroniAllocation.per_test_exact(alpha_total, n_tests)` (a `Fraction`) and pass it to `quantile` and `predict`; the float `per_test` can misrank (for example 0.05 / 3 on 59 scores gives `+inf` instead of 58). `AdaptiveConformal` keeps the exact rank of a `Fraction` level until its first update. An alert of the variant "possible" whose lower quantile is `-inf` (level below `1 / (n + 1)`) is emitted with `rho.value == 0.0` (`docs/formal/06-rho-proposition1.md` section 4.6); it carries no information and must be displayed as such. See ADR-058 and `#conformal-calibrator` 0.2.0.

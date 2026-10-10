@@ -87,6 +87,9 @@ class AdaptiveConformal:
         self._target: Fraction | None = None
         self._target_float = math.nan
         self._alpha_t = math.nan
+        self._moved = (
+            False  # True once an update has moved alpha_t away from the target
+        )
         self._population: tuple[float, ...] = ()
         self._arrival: deque[float] = deque()
         self._sorted: list[float] = []
@@ -124,6 +127,7 @@ class AdaptiveConformal:
         self._target = target
         self._target_float = float(alpha)
         self._alpha_t = self._target_float
+        self._moved = False
         self._population = tuple(self._arrival)
         self.calibrated_for = model_version
 
@@ -135,6 +139,7 @@ class AdaptiveConformal:
         other._target = target
         other._target_float = self._target_float
         other._alpha_t = self._target_float
+        other._moved = False
         other._population = self._population
         other.calibrated_for = self.calibrated_for
         return other
@@ -147,7 +152,13 @@ class AdaptiveConformal:
             )
 
     def _working_level(self) -> Fraction | None:
-        """Exact working level, or None when ``alpha_t`` is outside ``(0, 1)``."""
+        """Exact working level, or None when ``alpha_t`` is outside ``(0, 1)``.
+
+        Until an update moves it, the working level is the fitted target itself, so a ``Fraction``
+        level keeps its exact rank; the moving level comes from the float recursion.
+        """
+        if not self._moved:
+            return self._target
         if 0 < self._alpha_t < 1:
             return Fraction(repr(self._alpha_t))
         return None
@@ -194,6 +205,7 @@ class AdaptiveConformal:
         r = residual(sigma_hat, sigma_true)
         err = 1.0 if r > self._upper() else 0.0
         self._alpha_t = self._alpha_t + self.gamma * (self._target_float - err)
+        self._moved = True
         self._arrival.append(r)
         insort(self._sorted, r)
         if self.window is not None and len(self._arrival) > self.window:
