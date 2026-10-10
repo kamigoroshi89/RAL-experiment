@@ -3,7 +3,7 @@ id: WS06-T07
 title: Baseline fairness audit
 workstream: WS06-baselines
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS06-T02", "WS06-T03", "WS06-T04", "WS06-T05", "WS06-T06"]
 critical_path: true
 non_negotiable: false

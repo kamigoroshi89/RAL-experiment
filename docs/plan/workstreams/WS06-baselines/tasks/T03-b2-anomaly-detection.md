@@ -3,7 +3,7 @@ id: WS06-T03
 title: B2 anomaly detection (forecast residual and isolation forest)
 workstream: WS06-baselines
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS06-T01", "WS05-T05"]
 critical_path: true
 non_negotiable: false
@@ -138,3 +138,7 @@ Commits: `WS06-T03: failing test for parameters the mode does not use; tests for
 - (The earlier decision stays open: `plan_for_day` for B2 as an extension of ADR-062.)
 
 Verification after the round (exit codes, final tree): `pytest` on the two B2 files 0 (92 passed); `pytest tests/baselines -q` 0 (366 passed); full `pytest -q` 0 (5808 passed, 1 skipped); `ruff check src tests` 0; `ruff format --check src tests` 0; `mypy src/ralmon` 0; `pytest tests/test_public_api.py -q` 0; `python3 tools/check_plan.py` 0; the import line 0; the Done-when `grep -lE 'LatentDay|GroundTruthEvent|normalise|rank_alerts'` prints nothing (grep exit 1).
+
+### Post-task review (2026-10-10)
+
+Produced: `B2AnomalyDetection` (forecast-residual z-score, Isolation Forest on 13 schedule-and-signal features, or both; no clinical parameter read; `seed` required, `plan_for_day` for the forest modes), the feature extractor, 92 tests; scikit-learn 1.9.1 installed in `.venv` and declared in `pyproject.toml` (unpinned). Independent review: PASS, no blocker. Verified: residuals equal B4's on 200 seeded streams (1836 residuals, zero mismatches, delays up to 120001 ms); deterministic across `PYTHONHASHSEED`, thread counts and `n_jobs`; no leakage (forecaster on train days, z-scale and forest threshold from calibration only; 23 of 26 reviewer mutants killed and the 3 survivors, plus unused-parameter strictness, now covered). The worker's observation that the forest barely reacts to one out-of-range blood pressure is a property of the JOINT 13-feature forest (reviewer's measurement: rows in alarm 1% normal and 5% with one BP of 200 for the joint forest; 0% and 76% for a forest on `last_bp` and `age_bp` alone), while invariance under a common level shift is inherent to any band-free detector. OPEN DECISIONS FOR GAB: (a) add a per-signal forest variant in WS08 (about 0.5 pd; a reviewer could call the joint forest a weak competitor; the reviewer leans towards adding it); (b) scikit-learn as a core dependency or an optional extra `baselines` (with `importorskip`; without it 10 B2 tests fail with ImportError); (c) `docker/Dockerfile.ros2` (line ~49) and `docker/README.md` lack scikit-learn, so B2 tests would fail in the ROS image (outside this task's files); on the Python 3.10 image with `numpy<2` pip would resolve older scikit-learn/scipy than the tested 1.9.1 (record resolved versions in the release notes); (d) the lateness divergence for a reorder delay that is not a multiple of the step (open since WS06-T05, B2 inherits it); ADR-062 (`plan_for_day`) now also covers B2. Dependents: WS06-T07 (`all_baselines` must pass `seed`, and `plan_for_day` for the forest modes), WS08-T01, WS08-T02.
