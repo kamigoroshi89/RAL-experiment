@@ -45,6 +45,10 @@ the proposed method, ADR-061, F12) and ``TWINS_IN_HEADLINE``. A decision that ga
 (F19), ``SCORES_NOT_RANKED`` (F13: no AUROC or AP is computed for B1 or B4) and ``B2_IFOREST_NOT_STRONGEST`` (F14). All of
 them are in ``meta.guards``.
 
+Before the run the registry is checked against what the proposed method needs (the evidence thresholds of the attribution
+layer and a priority, a scale and a latency bound for every template): a registry that lacks them is refused with a
+``ConfigError`` naming the rows, because a run that reaches such an alert would stop hours later.
+
 Extension points. Modules ``ralmon.eval.ablations``, ``embodied``, ``shift`` and ``realdata`` may expose
 ``variant_components(name) -> PipelineComponents | None``; ``analysis``, ``ablations``, ``embodied``, ``shift`` and
 ``realdata`` may expose ``hooks_for(experiment_id)``, a list of functions ``RunContext -> HookResult`` whose ``analysis`` is
@@ -1811,8 +1815,8 @@ def _run_seed(
     for p in (*by_split["train"], *by_split["calibration"], *test_patients, *twin_ids):
         for d in reader_obs.days(p):
             lookup(reader_obs.observed(p, d))
-    _validate_plans(env, plans)
     _preflight_registry(env, config.detectors)
+    _validate_plans(env, plans)
     instances = _fit_all(config, options, env, factory, train_days, calib_days)
     test_days = {
         p: [reader_obs.observed(p, d) for d in reader_obs.days(p)]

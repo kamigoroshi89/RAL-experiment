@@ -900,7 +900,7 @@ def test_the_registry_that_cannot_feed_the_attribution_is_refused_before_the_run
         Path("configs/registry/hypertension.yaml").read_text(encoding="utf-8")
     )["registry_version"]
     doc["monitor"]["registry_version"] = str(real_version)
-    with pytest.raises(ConfigError, match="registry"):
+    with pytest.raises(ConfigError, match="attribution layer"):
         run_doc(tmp_path, doc, None)
 
 
@@ -1013,3 +1013,26 @@ def test_detector_names_of_the_ablation_variants_are_valid(name: str) -> None:
 )
 def test_other_detector_names_are_not(name: str) -> None:
     assert not runner.is_valid_detector_name(name)
+
+
+def test_a_registry_with_an_unset_priority_is_refused_before_the_run(
+    tmp_path: Path,
+) -> None:
+    """The fixture registry with ``priority_sys`` turned into an unset row: a SYS alert would stop the run later."""
+    text = REGISTRY_TEXT()
+    start = text.index("  - name: priority_sys")
+    end = text.index("  - name:", start + 1)
+    unset_row = '  - {parameter: priority_sys, unit: "1", required_by: [sys], note: "unset for this test"}\n'
+    changed = text[:start] + text[end:]
+    changed = changed.replace("unset: []", "unset:\n" + unset_row)
+    registry = tmp_path / "registry.yaml"
+    registry.write_text(changed, encoding="utf-8")
+    doc = real_document(registry=str(registry))
+    with pytest.raises(ConfigError, match="priority_sys"):
+        run_doc(tmp_path, doc, None)
+
+
+def REGISTRY_TEXT() -> str:
+    from tests.eval.helpers import REGISTRY
+
+    return REGISTRY.read_text(encoding="utf-8")
