@@ -47,8 +47,9 @@ task prescribes, and the monitor reports both (pinned by ``test_b1_blind_spots_a
 template needs a measurement in its look-back window before the dispense, and B1 has no look-back window, so a dispense
 long after the last in-range pressure is silent; the COUNT template has a day-end obligation (a minimum number of doses),
 and B1 knows only the upper limit, so a missed dose is silent. Whether B1 should have them is a decision for the project
-owner (Notes of WS06-T02). A violation that the monitor reports on an INT or SYS instance cannot be seen by B1 (the
-comparison on the integrity class C3 is therefore not a comparison of equals), and a pressure outside the physiological
+owner (Notes of WS06-T02). A violation that the monitor reports on a RESP, SYS or INT instance cannot be seen by B1 (pinned by
+``test_b1_cannot_see_response_cuff_and_integrity_violations``): the comparison with the proposed method on the system
+class (C2) and on the integrity class (C3) is therefore not a comparison of equals. A pressure outside the physiological
 bounds of the registry is an ordinary out-of-band value to B1 (it does not read the bounds).
 
 Known differences from the monitor, which the audit lists. (1) The lateness rule of the grid of B3 and B5 is applied: an

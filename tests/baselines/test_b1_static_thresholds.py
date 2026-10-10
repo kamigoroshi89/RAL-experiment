@@ -283,6 +283,15 @@ def test_b1_schedule_rule_ignores_an_anchor_outside_the_day() -> None:
     ]
 
 
+def test_b1_schedule_rule_detects_after_midnight_where_the_monitor_ends_pending() -> (
+    None
+):
+    """OPEN DECISION (WS06-T04, midnight), pinned for B1. A tick at 23:30 with a 1 h window closes at 00:30 of the next
+    day: B1 detects at that step (``T_DAY + 1 800 000``), it is not clipped at the closing step of the day."""
+    plan = plan_of(sched(hours(23.5), {"sched_window": 3_600_000.0}))
+    assert times(run(make_b1(tail_ms=0), day_of([]), plan)) == [T_DAY + 1_800_000]
+
+
 def test_b1_schedule_rule_late_measurement_gets_no_credit() -> None:
     """A measurement stamped inside the window but received after its step was final is late and is dropped, as in
     the monitor: it does not satisfy the rule."""
@@ -839,6 +848,50 @@ def test_b1_blind_spots_against_the_monitor_are_pinned() -> None:
     first, _ = _monitor_violations(one_dose, plan_monitor, 0, (TemplateId.COUNT,))
     assert "c-end" in first
     assert run(make_b1(registry=REGISTRY), one_dose, plan_b1) == []
+
+
+def test_b1_cannot_see_response_cuff_and_integrity_violations() -> None:
+    """KNOWN BLIND SPOT, by construction (analisi section 5.4), pinned like the INT and SYS hole of B3. Three violations
+    that the monitor reports VIOLATED and that B1 cannot see, because it has no response, cuff-health or presence logic:
+    SYS (the cuff reports itself unhealthy at a measurement), RESP (no response within the window after a dose) and INT (a
+    dispense with the robot present and seeing no patient: explicit presence zeros). B1 is silent on all three even with
+    every threshold rule active and an in-band pressure; the comparison with the proposed method on the integrity class
+    (C3) and on the system class (C2) is not a comparison of equals, and WS08 must say so."""
+
+    def m(h: int, mm: int = 0) -> int:
+        return (60 * h + mm) * 60_000
+
+    monitor_plan = make_care_plan()
+    b1_plan = plan_of(
+        rec(TemplateId.RANGE, {}),
+        rec(TemplateId.HOLD, {}),
+        rec(TemplateId.COUNT, {}),
+        sched(m(8)),
+        schedule=[m(8)],
+    )
+    cases = {
+        TemplateId.SYS: day_of(
+            [bp(m(8), 125.0), make_sample("cuff_health", m(8), None, 0.0)],
+            [measurement(m(8))],
+        ),
+        TemplateId.RESP: day_of(
+            [bp(m(7, 59), 130.0), bp(m(8), 125.0)], [dispense(m(8))]
+        ),
+        TemplateId.INT: day_of(
+            [bp(m(7, 59), 125.0), bp(m(8), 125.0)]
+            + [
+                make_sample("presence", m(7, 50) + k * STEP, None, 0.0)
+                for k in range(15)
+            ],
+            [measurement(m(8)), dispense(m(8))],
+        ),
+    }
+    for template, day in cases.items():
+        first, _ = _monitor_violations(day, monitor_plan, 0, [template])
+        assert len(first) == 1, (template, first)
+        assert run(make_b1(tail_ms=hours(4), registry=REGISTRY), day, b1_plan) == [], (
+            template
+        )
 
 
 # ---- stats, determinism, the class and its source ---------------------------------------------------------------------------
