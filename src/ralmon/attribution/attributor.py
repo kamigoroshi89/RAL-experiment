@@ -30,16 +30,22 @@ instance when a plan is given and from the registry otherwise (H-10, OP-AR-3).
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from ralmon.attribution.alert import Alert, AttributedCause, alert_from_record
+from ralmon.attribution.alert import (
+    Alert,
+    AttributedCause,
+    AttributionInputError,
+    alert_from_record,
+)
 from ralmon.attribution.evidence import (
     EvidenceVector,
     empty_evidence,
-    instance_anchor_ms,
+    known_anchor_ms,
 )
 from ralmon.attribution.rule import (
     AttributionRule,
@@ -60,6 +66,8 @@ from ralmon.spec import (
 )
 
 __all__ = ["Attributor", "RuleAttributor"]
+
+log = logging.getLogger(__name__)
 
 
 class Attributor(Protocol):
@@ -128,6 +136,7 @@ class RuleAttributor:
         self._history: list[Alert] = []
         self._closed: list[str] = []
         self._links: dict[str, str | None] = {}
+        self._failures: list[tuple[str, str]] = []
 
     # ---- public API -------------------------------------------------------------------------------------
 
@@ -137,7 +146,9 @@ class RuleAttributor:
         """The current set of alerts for the records, root causes propagated, in ``rank_alerts`` order."""
         cores: dict[str, _Core] = {}
         self._admit(cores, violated, evidence, closed=[])
-        return self._assemble(cores, {})
+        alerts, failed = self._assemble(cores, {})
+        self._record_failures(failed)
+        return alerts
 
     def update(
         self, violated: Sequence[VerdictRecord], evidence: Mapping[str, EvidenceVector]
@@ -149,7 +160,10 @@ class RuleAttributor:
             if key not in self._closed:
                 self._closed.append(key)
             self._issued.pop(key, None)
-        current = self._assemble(self._cores, self._links)
+        current, failed = self._assemble(self._cores, self._links)
+        self._record_failures(failed)
+        for key in failed:
+            self._cores.pop(key, None)  # reported once, not retried at every call
         new: list[Alert] = []
         changed: list[Alert] = []
         for alert in current:
@@ -167,6 +181,22 @@ class RuleAttributor:
             if alert.verdict is VerdictState.VIOLATED and key not in self._links:
                 self._links[key] = alert.caused_by
         return out
+
+    @property
+    def failures(self) -> tuple[tuple[str, str], ...]:
+        """``(instance_key, reason)`` of the records that could not make an alert, in the order they were met.
+
+        A record that is malformed for the alert path (a PREDICTED record without its severity bound) is logged at
+        WARNING and listed here; the other alerts of the call are returned. A registry error (an unset priority) is
+        not isolated: it is a configuration error and propagates.
+        """
+        return tuple(self._failures)
+
+    def _record_failures(self, failed: Mapping[str, str]) -> None:
+        for key, reason in failed.items():
+            if (key, reason) not in self._failures:
+                self._failures.append((key, reason))
+                log.warning("attribution: no alert for %s: %s", key, reason)
 
     @property
     def history(self) -> tuple[Alert, ...]:
@@ -232,17 +262,16 @@ class RuleAttributor:
             return int(override[name])
         return as_duration_ms(self._registry.get(name))
 
-    def _anchor(self, record: VerdictRecord) -> TimeMs:
+    def _anchor(self, record: VerdictRecord) -> TimeMs | None:
+        """The anchor for the text: only when a source states it (plan, dynamic key, deadline minus window)."""
         window: int | None = None
         if record.template is TemplateId.SCHED:
             window = self._window("sched_window", record.instance_key)
         elif record.template is TemplateId.RESP:
             window = self._window("delta2", record.instance_key)
-        return instance_anchor_ms(
+        return known_anchor_ms(
             record.instance_key,
             record.template,
-            decided_at_ms=record.decided_at_ms,
-            t_eval_ms=record.t_eval_ms,
             pending_until_ms=record.pending_until_ms,
             window_ms=window,
             plan_anchor_ms=self._plan_anchor.get(record.instance_key),
@@ -328,7 +357,7 @@ class RuleAttributor:
 
     def _assemble(
         self, cores: Mapping[str, _Core], frozen: Mapping[str, str | None]
-    ) -> list[Alert]:
+    ) -> tuple[list[Alert], dict[str, str]]:
         computed = self._links_of(cores)
         links: dict[str, str] = {}
         for key in cores:
@@ -339,23 +368,27 @@ class RuleAttributor:
         for effect, root in links.items():
             effects.setdefault(root, []).append(effect)
         alerts: list[Alert] = []
+        failed: dict[str, str] = {}
         for key, core in cores.items():
             record = core.record
             decision = core.decision
             caused_by = links.get(key)
             if caused_by is not None:
                 decision = cores[caused_by].decision
-            alerts.append(
-                alert_from_record(
-                    record,
-                    decision,
-                    self._template(record.template),
-                    self._registry,
-                    param_values=self._plan_params.get(key),
-                    anchor_ms=self._anchor(record),
-                    variant=self._variant,
-                    caused_by=caused_by,
-                    root_cause_of=tuple(sorted(effects.get(key, ()))),
+            try:
+                alerts.append(
+                    alert_from_record(
+                        record,
+                        decision,
+                        self._template(record.template),
+                        self._registry,
+                        param_values=self._plan_params.get(key),
+                        anchor_ms=self._anchor(record),
+                        variant=self._variant,
+                        caused_by=caused_by,
+                        root_cause_of=tuple(sorted(effects.get(key, ()))),
+                    )
                 )
-            )
-        return rank_alerts(alerts)
+            except AttributionInputError as error:
+                failed[key] = str(error)
+        return rank_alerts(alerts), failed

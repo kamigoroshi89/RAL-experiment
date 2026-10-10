@@ -30,6 +30,7 @@ trace wins, an adverse reading of either side stands, the snapshot fills what th
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
@@ -44,6 +45,7 @@ from ralmon.attribution.evidence import (
     SignalQualityEvidence,
     SystemHealthEvidence,
     instance_anchor_ms,
+    require_registry_names,
     template_kind_of,
 )
 from ralmon.monitor import VerdictRecord, VerdictState
@@ -61,12 +63,20 @@ from ralmon.signals import (
 from ralmon.spec import CarePlan, ParameterRegistry, TemplateId, as_duration_ms
 
 __all__ = [
+    "EXTRACTOR_PARAMETERS",
     "DeviceCapabilities",
     "DeviceProfile",
     "EvidenceExtractor",
     "extract_evidence",
 ]
 
+#: The registry names that the extractor reads (evidence-channels.md, Parameters requested from the registry).
+EXTRACTOR_PARAMETERS: Final = (
+    "evidence_margin_ms",
+    "evidence_grace_ms",
+    "hr_coherence_max_age_ms",
+    "clock_skew_max_ms",
+)
 _MS_PER_DAY: Final = 24 * MS_PER_HOUR
 CUFF: Final = "cuff"
 DISPENSER: Final = "dispenser"
@@ -187,6 +197,7 @@ class EvidenceExtractor:
                 f"reorder_delay_ms must be a non-negative int, got {reorder_delay_ms!r}"
             )
         # no default value: a missing name is a RegistryError (docs/models/evidence-channels.md, parameters)
+        require_registry_names(registry, EXTRACTOR_PARAMETERS, "EvidenceExtractor")
         self._margin = as_duration_ms(registry.get("evidence_margin_ms"))
         self._grace = as_duration_ms(registry.get("evidence_grace_ms"))
         self._max_age = as_duration_ms(registry.get("hr_coherence_max_age_ms"))
@@ -568,8 +579,10 @@ class EvidenceExtractor:
         qualities = [
             s.quality
             for s in self._event_axis_samples(w, signal)
-            if s.quality is not None
+            if s.quality is not None and math.isfinite(s.quality)
         ]
+        # a non-finite quality is a defect of the source and is skipped, so that the minimum does not
+        # depend on the order of arrival
         return min(qualities) if qualities else None
 
     def _error_code(self, w: _Window) -> str | None:
@@ -599,9 +612,14 @@ class EvidenceExtractor:
             if s.signal == SignalId.HR_ECG.value
             and status == "ok"
             and s.t_rx_ms <= w.cutoff
+            and math.isfinite(
+                s.value
+            )  # a non-finite heart rate is skipped, in any order of arrival
         )
         best: float | None = None
         for pulse in self._event_axis_samples(w, SignalId.HR_PULSE):
+            if not math.isfinite(pulse.value):
+                continue
             step = self._vis(pulse.t_device_ms)
             held = [e for e in ecg if e[0] <= step]
             if not held:
@@ -739,6 +757,9 @@ class EvidenceExtractor:
         return runs
 
     def _witness(self, w: _Window) -> EmbodiedWitnessEvidence:
+        if w.wit_lo_step > w.hi_step:
+            # an empty window (the anchor is after the decision time) holds no observation: no reading, not a denial
+            return EmbodiedWitnessEvidence(None, None, None)
         runs = self._episodes(w)
         steps = range(w.wit_lo_step, w.hi_step + 1)
         episode_of: dict[int, int] = {}

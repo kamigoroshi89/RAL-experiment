@@ -276,9 +276,10 @@ def render_text(
 
     # 1. the template in plain words and the verdict state (requirements 1, 5 and 9)
     if predicted:
-        kind = f"{variant}-violation early warning" if variant else "early warning"
+        kind = f"a {variant}-violation early warning" if variant else "an early warning"
         parts.append(
-            f'Predicted violation of the constraint "{words}": this is a {kind}, not a definitive verdict.'
+            f'Predicted violation of the constraint "{words}": this is {kind}, '
+            "not a definitive verdict."
         )
     else:
         parts.append(f'Violation of the constraint "{words}".')

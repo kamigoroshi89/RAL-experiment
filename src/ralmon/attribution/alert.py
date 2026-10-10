@@ -42,10 +42,15 @@ if TYPE_CHECKING:
 __all__ = [
     "Alert",
     "AttributedCause",
+    "AttributionInputError",
     "Detection",
     "Explanation",
     "alert_from_record",
 ]
+
+
+class AttributionInputError(ValueError):
+    """A record that cannot make an alert (a predicted record without its severity bound, a record that claims no violation)."""
 
 
 class AttributedCause(str, Enum):
@@ -113,7 +118,7 @@ def alert_time_and_severity(record: VerdictRecord) -> tuple[TimeMs, float]:
     if record.state is VerdictState.PREDICTED_VIOLATION:
         bound = getattr(record, "predicted_sigma_norm", None)
         if bound is None:
-            raise ValueError(
+            raise AttributionInputError(
                 f"{record.instance_key}: a PREDICTED_VIOLATION record needs predicted_sigma_norm"
             )
         return record.t_eval_ms, float(bound)

@@ -42,12 +42,14 @@ from ralmon.attribution.evidence import (
     NON_PROVENANCE_PATHS,
     EvidenceVector,
     get_evidence,
+    require_registry_names,
     template_kind_of,
 )
 from ralmon.monitor import VerdictRecord
 from ralmon.spec import ParameterRegistry, RegistryError, TemplateId, TemplateKind
 
 __all__ = [
+    "RULE_THRESHOLDS",
     "AbstentionReason",
     "AttributionRule",
     "Decision",
@@ -56,6 +58,14 @@ __all__ = [
 ]
 
 log = logging.getLogger(__name__)
+
+#: The registry names that the rule reads (attribution-rule.md, hypothesis H-1); no default value.
+RULE_THRESHOLDS: Final = (
+    "hr_coherence_tolerance",
+    "ecg_sqi_floor",
+    "ppg_sqi_floor",
+    "ble_link_quality_floor",
+)
 
 #: The rows of the decision table in precedence order (section Decision table); a row is identified by its number.
 ROWS: Final = (
@@ -202,6 +212,8 @@ class HierarchicalRule:
     """The default rule of ``#attribution`` (analisi 4.5): integrity, system, coherent channels, abstention."""
 
     def __init__(self, registry: ParameterRegistry) -> None:
+        require_registry_names(registry, RULE_THRESHOLDS, "HierarchicalRule")
+
         def threshold(name: str) -> float:
             value = float(registry.get(name).value)
             if not math.isfinite(value):

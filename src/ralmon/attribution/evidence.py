@@ -12,12 +12,12 @@ record, every other field ``None``, decision D-1), ``template_kind_of`` and ``in
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
 from ralmon.signals import TimeMs
-from ralmon.spec import TemplateId, TemplateKind
+from ralmon.spec import ParameterRegistry, RegistryError, TemplateId, TemplateKind
 
 __all__ = [
     "EVIDENCE_PATHS",
@@ -32,6 +32,9 @@ __all__ = [
     "empty_evidence",
     "get_evidence",
     "instance_anchor_ms",
+    "known_anchor_ms",
+    "parse_anchor_from_key",
+    "require_registry_names",
     "template_kind_of",
 ]
 
@@ -151,6 +154,49 @@ def empty_evidence(template: TemplateId) -> EvidenceVector:
     )
 
 
+def require_registry_names(
+    registry: ParameterRegistry, names: Sequence[str], who: str
+) -> None:
+    """Raise one ``RegistryError`` that lists every name of ``names`` without a value in the registry.
+
+    These parameters are requested by docs/models/evidence-channels.md and docs/models/attribution-rule.md and have no
+    registry row (open point OPF-6 of docs/formal/08-consistency-review.md); no default is invented.
+    """
+    missing: list[str] = []
+    for name in names:
+        try:
+            registry.get(name)
+        except RegistryError:
+            missing.append(name)
+    if missing:
+        where = getattr(registry, "path", None)
+        file = (
+            f" (registry file {where}, version {registry.version()})" if where else ""
+        )
+        raise RegistryError(
+            f"{who}: the registry{file} has no value for {', '.join(missing)}; these names are requested "
+            "by docs/models/evidence-channels.md and docs/models/attribution-rule.md and have no registry row "
+            "(open point OPF-6 of docs/formal/08-consistency-review.md); add them to the registry file "
+            "(configs/registry/hypertension.yaml) or use a registry that carries them, no default is assumed"
+        )
+
+
+def parse_anchor_from_key(key: str, template: TemplateId) -> TimeMs | None:
+    """The anchor in a dynamic instance key ``<template id>@<t_device_ms>`` (``#n`` suffix ignored), else ``None``.
+
+    The convention is the monitor's for the instances created by an anchoring event (a measurement, a dispense).
+    A ``sched`` instance is anchored by a schedule tick of the plan and its key is free text, and a key whose prefix
+    is not the template id is not of the convention: neither names an anchor.
+    """
+    if template is TemplateId.SCHED:
+        return None
+    prefix, sep, tail = key.partition("@")
+    digits = tail.split("#", 1)[0]
+    if sep and prefix == template.value and digits.isdigit():
+        return int(digits)
+    return None
+
+
 def instance_anchor_ms(
     instance_key: str,
     template: TemplateId,
@@ -161,28 +207,49 @@ def instance_anchor_ms(
     window_ms: int | None,
     plan_anchor_ms: TimeMs | None = None,
 ) -> TimeMs:
-    """The anchor of an instance: the schedule tick or the event that created it.
+    """The anchor of an instance, always a number (the evidence window needs one).
 
-    In order: the anchor of the plan instance (``plan_anchor_ms``); the number after ``@`` in a dynamic key
-    ``<template id>@<t_device_ms of the anchoring event>`` (an optional ``#n`` suffix is ignored); the
-    decision deadline minus the window for ``sched`` (``sched_window``) and ``resp`` (``delta2``); the decision
-    time of an instance decided at its anchor step (``range``, ``sys``, ``hold``, ``int``, the limit of
-    ``count``), else the evaluation time. A plan key is free text, so this chain is a convention of the
-    attribution layer (docs/models/evidence-channels.md, D-1).
+    In order: the anchor of the plan instance (``plan_anchor_ms``); the anchor of a dynamic key
+    (``parse_anchor_from_key``); for ``sched`` and ``resp`` the decision deadline (``pending_until_ms``, else the
+    decision time) minus the window (``sched_window``, ``delta2``); else the decision time of an instance decided at
+    its anchor step, else the evaluation time. Where the anchor is only an estimate the text does not print it
+    (``known_anchor_ms``).
     """
+    known = known_anchor_ms(
+        instance_key,
+        template,
+        pending_until_ms=pending_until_ms,
+        window_ms=window_ms,
+        plan_anchor_ms=plan_anchor_ms,
+    )
+    if known is not None:
+        return known
+    if template in (TemplateId.SCHED, TemplateId.RESP) and window_ms is not None:
+        deadline = decided_at_ms if decided_at_ms is not None else t_eval_ms
+        return deadline - window_ms
+    if decided_at_ms is not None:
+        return decided_at_ms
+    return t_eval_ms
+
+
+def known_anchor_ms(
+    instance_key: str,
+    template: TemplateId,
+    *,
+    pending_until_ms: TimeMs | None,
+    window_ms: int | None,
+    plan_anchor_ms: TimeMs | None = None,
+) -> TimeMs | None:
+    """The anchor when a source states it (plan, dynamic key, deadline minus window), else ``None``."""
     if plan_anchor_ms is not None:
         return plan_anchor_ms
-    _, sep, tail = instance_key.partition("@")
-    if sep:
-        digits = tail.split("#", 1)[0]
-        if digits.isdigit():
-            return int(digits)
+    parsed = parse_anchor_from_key(instance_key, template)
+    if parsed is not None:
+        return parsed
     if (
         template in (TemplateId.SCHED, TemplateId.RESP)
         and pending_until_ms is not None
         and window_ms is not None
     ):
         return pending_until_ms - window_ms
-    if decided_at_ms is not None:
-        return decided_at_ms
-    return t_eval_ms
+    return None
