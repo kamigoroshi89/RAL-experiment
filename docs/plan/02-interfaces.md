@@ -298,7 +298,7 @@ Rules: the conjunction of templates is never a `min` over raw values in differen
 
 ## Signals
 
-Version 0.1.0. Owner WS05. Consumers: WS01, WS04, WS06, WS07. Sources: analisi §4.1 (signals list and derived signals), §4.5 (evidence channels).
+Version 0.2.0 (ADR-057: the two robot-state signals). Owner WS05. Consumers: WS01, WS04, WS06, WS07. Sources: analisi §4.1 (signals list and derived signals), §4.5 (evidence channels), §4.3 (forecast from task queue and navigation state).
 
 ```python
 class SignalId(str, Enum):
@@ -319,6 +319,8 @@ class SignalId(str, Enum):
     HR_ECG = "hr_ecg"
     HR_PULSE = "hr_pulse"         # pulse rate reported by the cuff
     SPO2 = "spo2"
+    NAV_ETA = "nav_eta_ms"        # remaining navigation time to the patient room, published by the robot task layer (integer ms)
+    TASK_QUEUE = "task_queue_ms"  # summed estimated duration of the tasks queued ahead of the care-delivery task (integer ms)
 
 class DerivedSignal(Protocol):
     output: SignalId
@@ -329,7 +331,7 @@ def hold_last(samples: Sequence[Sample], t_grid_ms: Sequence[TimeMs]) -> Sequenc
     """Piecewise-constant interpolation on the monitor grid (analisi §4.1 item 2)."""
 ```
 
-Rule: derived signals are causal and streaming. The `PRESENCE` and `INTAKE` signals exist only while the robot is co-located; their absence is reported through the `EvidenceVector`, not as a value of zero.
+Rule: derived signals are causal and streaming. `NAV_ETA` and `TASK_QUEUE` are inputs of the deadline forecaster (`#forecaster`) and of no template; the robot task layer (WS07-T04) publishes them as `Sample`s. The `PRESENCE` and `INTAKE` signals exist only while the robot is co-located; their absence is reported through the `EvidenceVector`, not as a value of zero.
 
 ## Verdict
 
@@ -384,7 +386,7 @@ Allowed transitions: PENDING → PREDICTED_VIOLATION → VIOLATED; PENDING → V
 
 ## Forecaster
 
-Version 0.1.0. Owner WS05. Consumers: WS05, WS07, WS08. Sources: analisi §4.3 (candidates for prediction), §2 R2 weakness 5, §10 objection 3.
+Version 0.2.0 (ADR-057: `model_version`, `supported_signals`, the index convention, the concrete classes). Owner WS05. Consumers: WS05, WS07, WS08. Sources: analisi §4.3 (candidates for prediction), §2 R2 weakness 5, §10 objection 3.
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -396,11 +398,15 @@ class Forecast:
 
 class Forecaster(Protocol):
     name: str
+    model_version: str                     # read-only; changes whenever the fitted parameters change
+    supported_signals: frozenset[str]      # read-only; the Forecast.signal values it can produce
     def fit(self, train_days: Sequence[ObservedDay]) -> None: ...
     def predict(self, history: Sequence[Sample], t_ms: TimeMs, horizon_ms: DurationMs) -> Forecast: ...
 ```
 
-Targets in scope (analisi §4.3): continuous signals (heart rate, SpO₂) and robot care-delivery deadlines (the forecast that the robot will arrive late to a scheduled window, from task queue and navigation state). Blood pressure with about five measurements per day is expected to give intervals too wide to be useful; WS08 reports this honestly as a finding. Model class is chosen by WS05-T05 and recorded as an ADR.
+Index convention of `Forecast.mean`: `t_from_ms == t_ms`, `len(mean) == horizon_ms // step_ms`, and `mean[k]` predicts the value at `t_from_ms + (k + 1) * step_ms`. For the impulse signal `meas` an entry is 1.0 at the first grid step at or after the predicted instant and 0.0 elsewhere. The concrete classes (`PersistenceForecaster(step_ms)`, `AutoRegressiveForecaster(step_ms, order)`, `DeadlineForecaster(step_ms)`) add a keyword-only `signal: str | None = None` to `predict`; with `None` the target is the single supported signal present in `history`. They raise `ForecasterNotFittedError`, `InsufficientHistoryError` or `UnsupportedSignalError` and never return a silent default.
+
+Targets in scope (analisi §4.3): continuous signals (heart rate, SpO₂) and robot care-delivery deadlines (the forecast that the robot will arrive late to a scheduled window, from task queue and navigation state). Blood pressure with about five measurements per day is expected to give intervals too wide to be useful; WS08 reports this honestly as a finding. Model class is chosen by WS05-T05 and recorded as an ADR (ADR-057).
 
 ## Conformal calibrator
 
@@ -679,7 +685,7 @@ QoS: liveliness and deadline QoS on `/ralmon/heartbeat` and `/ralmon/samples`; t
 
 ## Package public API
 
-Version 0.2.1. Owner WS05. Consumers: all. Sources: analisi §9 item 5, `01-conventions.md` section 1. History: 0.1.1 (ADR-021, editorial additions of missing public names); 0.2.0 (ADR-024, API reconciliation: names that the contracts of WS05-T02 to WS05-T08 use; no signature changes); 0.2.1 (ADR-053 (d), the named errors, report types and extra entry points of `ralmon.monitor`).
+Version 0.2.2. Owner WS05. Consumers: all. Sources: analisi §9 item 5, `01-conventions.md` section 1. History: 0.1.1 (ADR-021, editorial additions of missing public names); 0.2.0 (ADR-024, API reconciliation: names that the contracts of WS05-T02 to WS05-T08 use; no signature changes); 0.2.1 (ADR-053 (d), the named errors, report types and extra entry points of `ralmon.monitor`); 0.2.2 (ADR-057, the three forecasters and their three errors in `ralmon.monitor`).
 
 Consumers import only these names, from the package root.
 
@@ -687,7 +693,7 @@ Consumers import only these names, from the package root.
 |---|---|
 | `ralmon.signals` | `SignalId`, `Sample`, `Event`, `EventKind`, `DerivedSignal`, `hold_last`, `minutes`, `hours`, `TimeMs`, `DurationMs`, `MS_PER_SECOND`, `MS_PER_MINUTE`, `MS_PER_HOUR`, `ObservedTrace`, `default_derived_signals`, `event_to_sample`, `impulses_on_grid` |
 | `ralmon.spec` | `Template`, `TemplateId`, `TemplateKind`, `TemplateInstance`, `CarePlan`, `RobustnessUnit`, `ParameterRegistry`, `RegistryEntry`, `PhysioBounds`, `normalise`, `rank_alerts`, `load_registry`, `load_templates`, `Rho`, `RhoKind`, `PlanVerifier`, `HmacSha256PlanVerifier`, `PlanIntegrityError`, `verify_plan` |
-| `ralmon.monitor` | `Monitor`, `MonitorConfig`, `VerdictRecord`, `VerdictState`, `RobustnessInterval`, `Rho`, `RhoKind`, `run_offline`, `Forecaster`, `Forecast`, `StreamingMonitor`, `PointEvaluator`, `make_point_evaluator`, `MonitorConfigError`, `PlanVersionError`, `PlanFeasibilityError`, `MonitorInputError`, `MonitorInvariantError`, `MonitorStats`, `RejectedInput`, `ChannelAvailability`, `OfflineResult`, `run_offline_detailed`, `resolve_subformula_path`, `resolve_subformula_paths`, `build_calibration_episodes`, `StaleCalibratorError` |
+| `ralmon.monitor` | `Monitor`, `MonitorConfig`, `VerdictRecord`, `VerdictState`, `RobustnessInterval`, `Rho`, `RhoKind`, `run_offline`, `Forecaster`, `Forecast`, `StreamingMonitor`, `PointEvaluator`, `make_point_evaluator`, `MonitorConfigError`, `PlanVersionError`, `PlanFeasibilityError`, `MonitorInputError`, `MonitorInvariantError`, `MonitorStats`, `RejectedInput`, `ChannelAvailability`, `OfflineResult`, `run_offline_detailed`, `resolve_subformula_path`, `resolve_subformula_paths`, `PersistenceForecaster`, `AutoRegressiveForecaster`, `DeadlineForecaster`, `ForecasterNotFittedError`, `InsufficientHistoryError`, `UnsupportedSignalError`, `build_calibration_episodes`, `StaleCalibratorError` |
 | `ralmon.conformal` | `ConformalCalibrator`, `CalibrationEpisode`, `PredictedViolation`, `AlphaAllocation`, `SplitConformal`, `AdaptiveConformal`, `BonferroniAllocation` |
 | `ralmon.attribution` | `EvidenceVector` (and its parts), `AttributionRule`, `Attributor`, `AttributedCause`, `Alert`, `Explanation`, `Detection`, `HierarchicalRule`, `RuleAttributor`, `EvidenceExtractor`, `extract_evidence` |
 | `ralmon.benchmark` | `PriorSource`, `LiteraturePriorSource`, `PatientParams`, `AdherenceParams`, `DeviceErrorModel`, `ParamProvenance`, `BenchmarkDay`, `ObservedDay`, `LatentDay`, `GroundTruthEvent`, `InjectedClass`, `generate_benchmark`, `load_benchmark` |

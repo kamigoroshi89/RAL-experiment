@@ -12,9 +12,14 @@ import pytest
 import ralmon.monitor as m
 from ralmon.signals import Event, EventKind
 
-from .helpers import LocalDay, hhmm, smp
+from .helpers import LocalDay, smp
+from .helpers import hhmm as _hhmm
 
 STEP = 60_000  # FIXTURE-ONLY
+
+
+def hhmm(hh: int, mm: int = 0) -> int:
+    return _hhmm(hh, mm)
 
 
 def tick(t: int) -> Event:

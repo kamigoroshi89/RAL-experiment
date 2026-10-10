@@ -11,6 +11,10 @@ run) and ``resolve_subformula_path`` / ``resolve_subformula_paths`` (the text of
 the same patient that precede ``day``, on the continuing axis, replayed first so that the 24 h dose counter, the
 held pressure and the instances whose window ends after midnight carry into the day (``monitor/offline.py``).
 
+The three forecasters (``PersistenceForecaster``, ``AutoRegressiveForecaster``, ``DeadlineForecaster``) and
+their errors (``ForecasterNotFittedError``, ``InsufficientHistoryError``, ``UnsupportedSignalError``) joined
+the table with WS05-T05 (ADR-057); they live in ``monitor/forecasters.py``.
+
 ``build_calibration_episodes`` and ``StaleCalibratorError`` stay placeholders owned by WS05-T08.
 """
 
@@ -49,6 +53,14 @@ from ralmon.monitor.core import (
 )
 from ralmon.monitor.evaluator import PointEvaluator, make_point_evaluator
 from ralmon.monitor.forecast import Forecast, Forecaster
+from ralmon.monitor.forecasters import (
+    AutoRegressiveForecaster,
+    DeadlineForecaster,
+    ForecasterNotFittedError,
+    InsufficientHistoryError,
+    PersistenceForecaster,
+    UnsupportedSignalError,
+)
 from ralmon.monitor.formula import (
     resolve_subformula_path as resolve_subformula_path,
 )
@@ -73,9 +85,13 @@ from ralmon.monitor.verdict import (
 )
 
 __all__ = [
+    "AutoRegressiveForecaster",
     "ChannelAvailability",
+    "DeadlineForecaster",
     "Forecast",
     "Forecaster",
+    "ForecasterNotFittedError",
+    "InsufficientHistoryError",
     "Monitor",
     "MonitorConfig",
     "MonitorConfigError",
@@ -83,6 +99,7 @@ __all__ = [
     "MonitorInvariantError",
     "MonitorStats",
     "OfflineResult",
+    "PersistenceForecaster",
     "PlanFeasibilityError",
     "PlanVersionError",
     "PointEvaluator",
@@ -92,6 +109,7 @@ __all__ = [
     "RobustnessInterval",
     "StaleCalibratorError",
     "StreamingMonitor",
+    "UnsupportedSignalError",
     "VerdictRecord",
     "VerdictState",
     "build_calibration_episodes",

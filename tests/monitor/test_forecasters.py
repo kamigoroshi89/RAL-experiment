@@ -329,7 +329,7 @@ def test_training_series_applies_the_ceiling_rule_to_off_grid_samples() -> None:
     )
     # first grid point at or after 90_000 is 120_000, the sample is visible there;
     # 150_000 becomes visible at 180_000
-    assert list(_training_series(day, "hr_ecg", STEP)) == [5.0, 5.0, 7.0]
+    assert list(_training_series(day, "hr_ecg", STEP)) == [5.0, 7.0]
 
 
 def test_bp_path_exists_and_expectation_is_documented() -> None:
