@@ -261,3 +261,22 @@ def owned_by_day(
         elif day_start_ms <= v.decided_at_ms < day_end_ms:
             owned.append(v)
     return sorted(owned)
+
+
+def owned_in_run(
+    violations: Sequence[Violation], *, first_day_start_ms: int, n_days: int
+) -> list[Violation]:
+    """The violations of a run of ``n_days`` days that some day of the run owns (ADR-064).
+
+    It is the union of ``owned_by_day`` over the days of the run, so a violation decided at the FINAL closing step
+    (the end of the last day) is not in it, whatever its template, except the day-end obligation of the last day:
+    the day after the run does not exist, so nothing labels it.
+    """
+    owned: list[Violation] = []
+    for day in range(n_days):
+        owned += owned_by_day(
+            violations,
+            day_start_ms=first_day_start_ms + day * DAY_MS,
+            day_end_ms=first_day_start_ms + (day + 1) * DAY_MS,
+        )
+    return sorted(owned)

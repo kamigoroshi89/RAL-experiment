@@ -157,6 +157,47 @@ contain for day d-1 and may not contain for day d either. WS08 must therefore sc
 with the same ownership: a detection decided at the closing step of day d-1 is matched against the truth of day d.
 This is the asymmetry F12 of `docs/plan/workstreams/WS06-baselines/notes/fairness-audit.md`.
 
+### The last day of a patient
+
+The last day of a patient has no next day, and by ownership (b) a record decided at the closing step belongs to the day
+that starts there. So **every record that the monitor decides at the final closing step of a patient is in no truth**:
+the labelling of the last day discards it, and no later day exists to keep it. The one exception is the day-end COUNT of
+the last day (exception (c)), which stays with it. This was not stated in the first version of this section, and the
+hand-overs said it was; it is a hole, not a convention that is already covered.
+
+What falls into it, with a day of 24 h and a step of one minute (test `test_the_last_day_of_a_patient_has_no_owner_for_its_closing_step`):
+
+* a SCHED tick whose deadline is exactly the closing step (a tick at 23:30 with the 30 minute window of the fixture
+  registry);
+* a RESP window that ends exactly at 24:00: a plain dose at 21:00 with `delta2` of 180 minutes, not only a late one;
+* a HOLD or COUNT-limit violation of a dose in the last minute, which is decided at the step that sees the dose, that is
+  the closing step.
+
+An instance whose decision step lies after the closing step is a different case: nothing is decided after the closing
+step, it is PENDING at trace end (section above) and neither the monitor nor the labeller reports it.
+
+The monitor and the baselines run on the last day **do emit** these VIOLATED records at the final closing step, and
+the truth has no event to match them, so WS08 would score each as a false positive. On the review of WS04-T15 (200
+seeded patients, with SCHED ticks at 23:30 and 23:59; the mechanism of the 23:59 case was not re-derived here) 76 of 200 patients had at least one VIOLATED decided at the final
+closing step. The effect is on the last day of every patient and affects the monitor and every baseline alike; it is
+not a property of one method, and it cannot be removed by the choice of the doses alone: moving the last dose before
+21:00 does not help a SCHED tick near midnight.
+
+Two policies, both **proposals for gab; the choice is open**:
+
+* **P1 (recommended by the reviewer and by the coordinator): a tail day.** The builder generates one extra, unscored
+  tail day per patient, labelled with the history of the scored days, so that the closing step of the last scored day is
+  the first step of the tail day and its records are owned. Only the events the tail day decides at its first step are
+  used (to match detections of the last scored day); nothing of the tail day is scored as a detection, a miss or a
+  false positive, and the events it decides later are not scored. The runs of the monitor and the baselines on the
+  scored days are unchanged. Cost: one more latent day per patient.
+* **P2: drop the detections.** WS08 drops, for each patient, the detections decided at the final closing step, for the
+  monitor and the baselines identically. The scored set changes but is the same for all methods; the real events
+  decided there are lost from the evaluation.
+
+WS04-T11 must not pick one silently: the builder and the scoring depend on the choice, and until gab decides the last
+day of each patient has this hole. Whichever policy is taken, the paper must state it.
+
 **Order of the truth.** The events of a day are sorted by `(onset_ms, cls, subtype, end_ms)` with `end_ms = None`
 first; ties are broken by template, injected flag, group and record position, so the order is a function of the
 content and not of the order of the arguments.

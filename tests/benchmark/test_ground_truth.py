@@ -36,6 +36,7 @@ import json
 import math
 import re
 import sys
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -4964,19 +4965,23 @@ def test_the_schedule_with_the_evening_double_take_is_not_vacuous_either(
     multi_day_patients_20: dict[tuple[int, float], dict[str, Any]],
 ) -> None:
     # doses at 08:00 and 20:00: no RESP window crosses midnight, the COUNT events of a previous-day double
-    # take do (20 in 40 patients on days 1 and 2); the count of cross-midnight events relies on COUNT here
-    crossing_counts = 0
+    # take do: the COUNT events that the truth with history has and the per-day truth lacks (20 in 40 patients)
+    gained = 0
     for run in multi_day_patients_20.values():
         for day in (1, 2):
-            truth = labelled_with_history(run, day)
-            crossing_counts += sum(
-                1
-                for e in truth
-                if e.template_id == "count"
-                and e.end_ms is None
-                and e.subtype == "double_take"
+            result = run["results"][day]
+            per_day = Counter(
+                tup(e)
+                for e in truth_of(
+                    result.latent, run["plan"], result.c1_records, result.behaviour_log
+                )
             )
-    assert crossing_counts >= 5
+            for e in labelled_with_history(run, day):
+                if per_day[tup(e)] > 0:
+                    per_day[tup(e)] -= 1
+                elif e.template_id == "count" and e.end_ms is None:
+                    gained += 1
+    assert gained >= 5
 
 
 # --- 2 and 3: the examples of the task ------------------------------------------------------------------
