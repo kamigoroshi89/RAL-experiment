@@ -3,7 +3,7 @@ id: WS02-T05
 title: Diagnosability matrix (machine-readable) and hazard and standards paragraph
 workstream: WS02-threat-fault-model
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS02-T04"]
 critical_path: false
 non_negotiable: false
