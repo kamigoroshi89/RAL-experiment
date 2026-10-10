@@ -116,3 +116,18 @@ Step 3 (DX-03) lists "cuff detached, C2, `cuff_detached`, `sys`" and "the inflat
 ### Flag from the WS02-T02 review (orchestrator, 2026-10-02)
 
 Two mismatches of `docs/models/threat-model.md` are NOT disclosed there: DX-08 is planned as "conditional (yes with authentication)" but the threat model finds the authenticated column for a verbatim naive replay "partial" (a verbatim copy has a valid tag, and one Boolean mixes a replayed and a lost `seq`: TM-GAP-SEQ), while analisi §4.5 row 8 reads "yes with authentication; partial without"; DX-09 `violated_templates` "resp and int" differs from the four templates of the threat model (`count`, `int`, `hold`, `resp` for `dispense_forgery`). Starting content of this task is "to be checked", so decide here. Kept `blocked`.
+
+### Completion note (worker, 2026-10-10)
+
+Produced `configs/diagnosability.yaml` (26 rows: `DX-01` to `DX-10` from analisi §4.5, `DX-11` to `DX-26` inferred; every row has a default and an A4 outcome) and `docs/models/diagnosability-hazards.md` (matrix, declared limits, reading, the hazards and standards paragraph of 193 words, a register `H-01` to `H-16`, traceability). Status left `in_progress` for the orchestrator.
+
+Decisions and deviations from the task text (all recorded in the section Traceability of the document):
+
+- The default deployment (`when: {}`) is the unauthenticated one, the deployment of the base worked cases W-02, W-09, W-10; the authenticated one is `CH-CRYPTO: available`. The task suggested "authentication unavailable" as the extra combination; `CH-CRYPTO: unavailable` would also lose the sequence and time fields, so the direction is reversed.
+- `DX-06` and `DX-07` are `conditional` (the task said `distinguishable` for `DX-07`): W-06 and W-07 give UNDETERMINED because the dispenser evidence has no field (G-1); the analisi verdict is kept as an outcome that names the proposed channel `CH-DISP`, not reproducible by the rule.
+- Flags resolved: `DX-03` (injected `cuff_detached` opens no `sys` instance: templates `sched`, `resp`, `hold`, `sys` for the G-SYS-3 variant), `DX-08` (conditional; authenticated outcome restricted to rewritten metadata), `DX-09` (templates of the threat model: `count`, `hold`, `resp`, `int`; by the decision table a forged dispense that violates `hold` reads as C1).
+- `DX-04` lists `hold`; `DX-12` has an empty `violated_templates` (no template reads the ECG); `DX-24` also (a spoof alone raises no violation).
+- Added beyond the vocabularies: `DX-22` for `dose_omission` and `spontaneous_count`, and the `spontaneous_*` subtypes in the rows of their templates (WS04 README issue I8).
+- Not distinguishable rows (declared limits): `DX-04`, `DX-10`, `DX-11`, `DX-19`, `DX-24`, `DX-25`, `DX-26`. Row verdict rule: not distinguishable when an outcome that removes no channel is not distinguishable.
+- Left undefined because the sources do not give it: motion safety measures, infection-control and image-storage measures (open for WS10-T01 and WS00-T07), the clinical action offered per attributed cause (OP-AR-8), edition years and clause numbers of the three standards, any occurrence rate (WS08), and a field for a run of identical values or for clock health (no field proposed).
+- Hand-over lines added to the Notes of WS05-T07 (a row has no vector, build it from the worked case; skip `CH-DISP` outcomes and `NO_ALERT`) and WS08-T04 (the A4 column is the pair of outcomes; no C3 outcome changes under A4). WS10-T01 and WS12-T04 assumptions hold.
