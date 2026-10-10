@@ -62,6 +62,7 @@ INTERNAL_MODULES = {  # numeric kernels and plumbing, called with validated valu
     "ralmon.monitor._text",
     "ralmon.monitor.core",  # StreamingMonitor: fuzzed by test_inputs.py
     "ralmon.monitor.forecast",
+    "ralmon.monitor.forecasters",  # WS05-T05: its classes are exercised by test_forecasters.py
     "ralmon.monitor.instances",
     "ralmon.monitor.measured_rho",
     "ralmon.monitor.reorder",
@@ -230,6 +231,9 @@ FUZZED_CLASSES = {  # fuzzed here, in test_inputs.py or in test_field_fuzz.py
     "ralmon.monitor.config.MonitorConfig",
     "ralmon.monitor.forecast.Forecast",
     "ralmon.monitor.forecast.Forecaster",
+    "ralmon.monitor.forecasters.AutoRegressiveForecaster",
+    "ralmon.monitor.forecasters.DeadlineForecaster",
+    "ralmon.monitor.forecasters.PersistenceForecaster",
     "ralmon.monitor.verdict.RobustnessInterval",
     "ralmon.monitor.verdict.VerdictRecord",
     "ralmon.monitor.verdict.VerdictState",
