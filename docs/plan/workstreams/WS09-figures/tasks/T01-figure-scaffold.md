@@ -3,7 +3,7 @@ id: WS09-T01
 title: Figure and table generation scaffold from outputs/
 workstream: WS09-figures
 owner: agent
-status: blocked
+status: ready
 depends_on: [WS08-T01]
 critical_path: false
 non_negotiable: false

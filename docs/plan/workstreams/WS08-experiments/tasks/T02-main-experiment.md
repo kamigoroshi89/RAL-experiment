@@ -3,7 +3,7 @@ id: WS08-T02
 title: "Main experiment: B1-B5 versus proposed method"
 workstream: WS08-experiments
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS08-T01", "WS06-T07"]
 critical_path: true
 non_negotiable: false
