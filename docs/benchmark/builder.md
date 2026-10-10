@@ -17,7 +17,10 @@ variant) are design choices without a source, awaiting the confirmation H3; ADR-
 ```
 
 All files are canonical JSON (sorted keys, two-space indent, final newline). The manifest lists every file with its
-sha256, so `python -m ralmon.benchmark verify <dir>` is a complete integrity check. A detector run reads `days/` and
+sha256, so `python -m ralmon.benchmark verify <dir>` is a complete integrity check: it checks the hashes, refuses a file on
+disk that the manifest does not list, parses every observed file as an `ObservedDay` (an unknown key or an undeclared payload
+key is an error, so it reads the whole `days/` tree) and refuses an observed file that names latent data, ground truth or the
+injection vocabulary (record fields, subtype names, template ids, the prefix `spontaneous_`). A detector run reads `days/` and
 `plans/` only. `generator/` holds `baseline_sbp_mmhg`, the latent pressure before the drug effect and the injected
 pulses, on the latent grid of the day (`latent_step_ms`): the validation report (V3, prior fidelity) re-estimates the
 patient parameters from it, because the latent `bp` of the truth file carries the drug and the pulses.
@@ -31,8 +34,8 @@ decided at the shared step belongs to the day that starts there.
 
 * `manifest.patients[<id>].n_scored_days` and `tail_day_index` (equal to `n_scored_days`) mark it; `settings.tail_day` is
   `true` and `settings.n_scored_days` is the number of scored days of a virtual patient.
-* The tail day is in no split count, in no day total (`settings.n_patient_days` counts the scored days of all patients, the
-  twins included) and not in `event_counts`; `BenchmarkReader.days(patient)` lists the scored days only.
+* The tail day is in no split count, in no day total (`settings.n_patient_days` counts the scored days of the virtual
+  patients; the twins' are `n_twin_patient_days`) and not in `event_counts`; `BenchmarkReader.days(patient)` lists the scored days only.
 * The truth of the closing step of the last scored day is `BenchmarkReader.closing_step_truth(patient)`: the C1 events of the
   tail day that are decided at its first step (the C2 and C3 events of that day are injected events of the tail day and are not part of it), that is whose `end_ms` is the start of the tail day (a windowed
   obligation whose deadline is the closing step, for example the response window of a dose at 21:00 that closes at 24:00),
@@ -59,7 +62,29 @@ design files), `files`, `event_counts` (scored days, key `<class>/<subtype>`), a
   `authenticating_devices`), `design_sha256` (the care-plan, generator-design and injection files), `history_days`,
   `injection_rates`, `confounder_pairs_per_variant`, `plan_skipped` (injections that the plan drew and could not place:
   overlap, no position, a replay on the first day), `schedule`, `cohorts`, `split_fractions`, `n_unverified_prior`,
-  `n_unverified_design`. There is no clock, host or user field.
+  `n_unverified_design`, `prior_sha256` (per cohort) and, in `design_sha256`, the hash of the configuration file besides the
+  care-plan, generator-design and injection files. There is no clock, host or user field. `python_version` and
+  `numpy_version` are host properties: the manifest bytes depend on the machine that built it while the day, truth,
+  plan and generator files do not (compare the files, not the manifest, across machines). A configuration file that
+  lives in another directory has other paths and so another hash.
+
+## Virtual patients and twins are counted apart
+
+The headline figures are the virtual patients' (`role: patient`): `event_counts`, `settings.n_patients`,
+`n_patient_days`, `tail_event_counts`, `closing_step_event_counts`, and the first lines of the command-line output. The
+twins (`role: confounder_pair`, one scored day each) have their own fields: `n_twin_patients`, `n_twin_patient_days`,
+`twin_event_counts`, `twin_tail_event_counts`, `twin_closing_step_event_counts`; `total_event_counts` is the explicit
+sum. `BenchmarkReader.n_patient_days(role="patient")` defaults to the virtual patients (`role=None`: all). The twin
+patients are not counted in the 200 x 7 patient-days of analisi §5.1.
+
+## Opaque ids
+
+A patient id has the shape `p0042` for a virtual patient and for a twin alike (with the cohort id in front when there are
+several cohorts). The id numbers of all patients are one permutation drawn from the generation seed, so an id, a care-plan
+id (`plan-<id>`), a directory or a file name says nothing about the role, and member A of a pair is the lower id in about
+half of the pairs. `pair`, `member`, `group`, `variant_id` and `mechanism` are in the manifest and the truth side only;
+the manifest is not a detector input. Test `test_twin_ids_carry_no_role_and_have_the_shape_of_a_virtual_id` scans the
+observed side of a build for them.
 
 ## Truth sidecars
 
@@ -91,6 +116,12 @@ runs its four rules (`rules_active == ("R1", "R2", "R3", "R4")`). `registry_vers
 
 ## Reader
 
+`open_benchmark(path, view="observed")` is the view that the monitor, the baselines and any code that fits or runs a
+detector must be given: it offers only the observed days, the care plans, the day lists and the split (`patients` maps an id
+to `split` and `cohort`), and raises `ObservedViewError` on `truth`, `benchmark_day`, `closing_step_truth`,
+`baseline_sbp`, `manifest`, `root` and the role filters. `view="full"` (the default) is for evaluation code. The generator
+sidecar is refused in the full view too once the `truth/` directory is gone.
+
 ```python
 from ralmon.benchmark import open_benchmark
 reader = open_benchmark("<dir>", verify=False)
@@ -112,7 +143,9 @@ seed and independent of the order of `ids`. WS08 re-draws the split per experime
 `python -m ralmon.benchmark build --config PATH --out DIR [--seed N] [--prior PATH] [--allow-fixture-only] [--git-rev REV]
 [--n-patients N] [--n-days N]`, `verify DIR`, `validate DIR` (placeholder until WS04-T12; it exits 2). Exit codes: 0 done,
 1 `verify` found a problem, 2 configuration error, 3 provenance error (a fixture-only input without the flag, an unfilled
-row). The committed configuration cannot be built until a human has filled the rows that `injections.yaml` and
+row). A build that fails removes the directory it created (never a pre-existing one; a pre-existing empty directory is emptied).
+The revision is dirty (`-dirty`) when a tracked file has changes or an untracked file lies under `src/` or `configs/`; untracked
+files elsewhere do not count. The committed configuration cannot be built until a human has filled the rows that `injections.yaml` and
 `generator_design.yaml` still await (`n_unfilled` must be 0): the command stops with exit code 3 and names them.
 
 ## What the build does not claim
@@ -122,3 +155,20 @@ logged with `realised` false and is not a ground-truth event; the realisation ra
 Injections that the plan cannot place are counted in `settings.plan_skipped`. The uniform choice of the subtype and of the
 level inside a class, and the Poisson count, are design choices of the plan (`plan:` section of `injections.yaml`), not
 properties of any real population.
+
+## Open decisions for gab (ADR-067)
+
+* **Realised injections.** Windows are placed uniformly over the day, while cuff readings are 5 a day and intakes 2 a day, so
+  few windows hit anything. Reviewer's figures on a 40-patient, 7-day fixture build at rates 1/1/1, realised over planned:
+  cuff_detached 5/45, cuff_silent_bias 3/48, stuck_at 4/52, injection_naive 6/56, injection_informed 5/61, replay 4/31,
+  ecg_noise 0/55 (the fixture library has no noise segment), drug_nonresponse 0/50 (windows with no intake in them). At the
+  default rates 0.3/0.3/0.2 about 5 to 10 realised positives per cuff subtype and 0 to 4 for drug_nonresponse are expected.
+  Placement was not changed; an option is to place C1 and cuff windows on a known tick or intake. WS04-T12 reports the
+  realised fraction per subtype.
+* **Closing-step truth is C1 only.** A C2 or C3 event that starts exactly at the first instant of the tail day (about 0.1
+  expected at the default scale) is not part of `closing_step_truth`, so a detection of it at the closing step of the last
+  scored day would be scored as a false positive unless WS08 scores closing-step detections against C1 only or states the limit.
+* **Twins in headline counts, split design of the pair units** (stratify them over the splits, or keep them out of train and
+  calibration; the fractions are targets for the units that are split), **the 65 awaiting rows** (2 in the prior, 8 in
+  `generator_design.yaml`, 55 in `injections.yaml`) and **the confirmation of the design values** (0.5/0.25/0.25, seed 0,
+  60000 ms, reorder delay 0, rates 0.3/0.3/0.2, 2 pairs per variant).
