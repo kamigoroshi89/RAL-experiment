@@ -56,7 +56,7 @@ from ralmon.monitor import (
     build_calibration_episodes,
     run_offline_detailed,
 )
-from ralmon.signals import Sample
+from ralmon.signals import MS_PER_HOUR, Sample
 from ralmon.spec import CarePlan, Template, TemplateId
 
 __all__ = [
@@ -82,7 +82,7 @@ __all__ = [
 ]
 
 OURS: Final = "ours (K)"
-_T_DAY_MS: Final = 24 * 3_600_000
+_T_DAY_MS: Final = 24 * MS_PER_HOUR
 _BOUNDED_SIGNALS: Final = (
     "bp",
 )  # the signals whose physiological bounds the monitor reads
