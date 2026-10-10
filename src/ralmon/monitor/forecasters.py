@@ -367,6 +367,11 @@ class AutoRegressiveForecaster:
             nxt = intercept + sum(
                 a * window[-1 - i] for i, a in enumerate(coefficients)
             )
+            if not math.isfinite(nxt):
+                raise ValueError(
+                    f"the iterated {target} path is not finite after {len(mean)} steps "
+                    "(overflow of the fitted model); no path is returned"
+                )
             window.append(nxt)
             mean.append(nxt)
         return _path(target, t_ms, horizon_ms, mean)
@@ -486,6 +491,12 @@ class DeadlineForecaster:
                 "no nav_eta_ms or task_queue_ms sample at or before t_ms"
             )
         delay_ms = state[0] + state[1] + bias
+        if not math.isfinite(
+            delay_ms
+        ):  # two finite states can still sum past the float range
+            raise ValueError(
+                "the predicted delay is not finite (nav_eta_ms + task_queue_ms + bias overflows)"
+            )
         steps = max(1, math.ceil(delay_ms / self._step_ms))
         n = horizon_ms // self._step_ms
         mean = [0.0] * n

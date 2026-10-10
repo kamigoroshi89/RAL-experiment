@@ -79,3 +79,7 @@ Residual definition (the same wording is used in WS06-T05 and checked by WS06-T0
 - `ruff check src tests` and `mypy src/ralmon` exit 0.
 - `python -c "from ralmon.baselines import B2AnomalyDetection"` exits 0.
 - `grep -lE 'LatentDay|GroundTruthEvent|normalise|rank_alerts' src/ralmon/baselines/b2_anomaly_detection.py src/ralmon/baselines/b2_features.py` prints nothing.
+
+## Notes
+
+**Hand-over from WS05-T05 (forecaster, ADR-057).** The index of a `Forecast` path is `(t - t_from_ms) // step_ms - 1` (`mean[k]` predicts `t_from_ms + (k + 1) * step_ms`), not `floor((t - t_from_ms) / step_ms)` as the test text above writes it. The Protocol call `predict(history, t_ms, horizon_ms)` has no target signal: a baseline that needs a given signal must call the concrete class with the keyword `signal=` (or pass a history that holds one signal only). `supported_signals` and `model_version` exist on every forecaster; import the classes and `InsufficientHistoryError` from `ralmon.monitor`, which now lists them in the public API table.

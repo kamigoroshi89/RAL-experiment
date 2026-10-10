@@ -88,3 +88,5 @@ Test `test_witness_obligation_from_int_instance` assumes a dynamic INT obligatio
 ### Flag from the WS02-T03 review (orchestrator, 2026-10-04)
 
 See `docs/models/evidence-channels.md` EC-OP-1 and EC-OP-14: the stub publishes `manip_task_failed` false with no manipulation outcome and per-tick `intake_observed` False and identity values as fields instead of `ROBOT_TASK` witness events; the test "exactly one outcome per task" conflicts with an overrun report (`late`, stamped with the deadline) followed by a completion event (hypothesis H-OVERRUN). Kept `blocked`.
+
+**Hand-over from WS05-T05 (ADR-057).** `nav_eta_ms` and `task_queue_ms` (`SignalId.NAV_ETA`, `SignalId.TASK_QUEUE`, integer milliseconds, refreshed at least once per monitor step) must be emitted for the deadline forecaster (`DeadlineForecaster`) to be fitted and used: without them every `sched_tick` of a training day is counted as having no robot state and `fit` raises `ValueError`.
