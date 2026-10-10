@@ -100,3 +100,7 @@ Correction of the gate in the hand-over above: it said to require `presence_leve
 ### ADR-054 decided (gab, 2026-10-09)
 
 Option (b) is chosen; WS08-T01 depends on WS05-T11, so the runner exists only once the reports drive the witness. The A4 mask (the robot channel removed) is the same `NODE_STATE colocated` mask. Gate on `presence_samples_without_availability_marks == 0` and report it per day.
+
+### Hand-over from WS02-T05 (worker, 2026-10-10)
+
+The A4 column of `configs/diagnosability.yaml` is the pair of outcomes of a row, `when: {}` (default) and the outcome whose `when` is exactly `{CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}`; the test vocabulary "loss" and "no_change" of test 19 is derived by comparing their `result` and `expected_kappa`, there is no column of that name. Rows with a loss, rows where only a confident C1 becomes UNDETERMINED, and rows with no change are listed in the matrix section of `docs/models/diagnosability-hazards.md`. No C3 outcome changes under A4 in the file, so test 6 (C3 for `ours`, a different cause for `ours-A4` on a forged DISPENSE with robot present and no authentication evidence) does not hold under the rule (already recorded in `attribution-rule.md`, resolution (a)). For test 20: the subtypes `dose_omission` and `spontaneous_range`, `spontaneous_resp`, `spontaneous_hold`, `spontaneous_sched`, `spontaneous_count` have rows (DX-22, DX-01, DX-02, DX-20, DX-21, DX-22), so no `MatrixCoverageError` is expected for the WS04 vocabulary.
