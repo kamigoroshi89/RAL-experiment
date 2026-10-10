@@ -86,7 +86,9 @@ def _check_signals(signals: Sequence[str]) -> tuple[str, ...]:
         raise ValueError("signals must name at least one signal")
     for index, name in enumerate(names):
         if not isinstance(name, str):
-            raise ValueError(f"signal {name!r} is not a string")
+            raise ValueError(  # noqa: TRY004 - one named error for every bad argument
+                f"signal {name!r} is not a string"
+            )
         if name in names[:index]:
             raise ValueError(f"signal {name!r} is given twice")
     return names
@@ -157,6 +159,8 @@ class FeatureExtractor:
         row["to_next_tick_ms"] = (
             float(self._schedule[ticks] - t) if ticks < len(self._schedule) else None
         )
-        row["since_last_tick_ms"] = float(t - self._schedule[ticks - 1]) if ticks else None
+        row["since_last_tick_ms"] = (
+            float(t - self._schedule[ticks - 1]) if ticks else None
+        )
         row["time_of_day_ms"] = float(t % _T_DAY_MS)
         return row

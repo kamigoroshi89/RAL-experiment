@@ -329,7 +329,7 @@ def test_b2_residual_scale_from_calibration_days_only() -> None:
     )  # a different training set does not move the scale
     assert len(forecaster.fit_calls) == 2  # the forecaster did see the training days
     assert forecaster.fit_calls[0] != forecaster.fit_calls[1]
-    b2.fit(train_2, [bench([60, 66, 60, 66], patient="cb")])
+    b2.fit(train_2, [bench([60, 66, 60, 66, 60], patient="cb")])
     assert dict(b2.residual_scales) != first  # a different calibration set does
     assert b2.residual_scales["hr_ecg"].std == pytest.approx(6.0)
     # only the observed trace is read, on both splits, and nothing is refused
@@ -907,31 +907,40 @@ def test_b2_residual_mode_is_independent_of_the_plan_and_of_the_tail() -> None:
     assert other.read_log.all_names() == frozenset()
 
 
-def test_b2_iforest_blind_spot_it_learns_what_is_frequent_not_what_is_allowed() -> None:
-    # The forest is unsupervised and has no band. A population whose values sit at 200 (out of any clinical range)
-    # makes 200 ordinary, and a value of 120 that a clinician would accept scores as MORE anomalous. This is the
-    # reason B2 is not "equal clinical knowledge": it measures unusualness, not safety.
-    rng = np.random.default_rng(0)
-    days = []
-    for i in range(12):
-        values = [float(v) for v in rng.integers(190, 211, size=8)]
-        days.append(bench(values, signal="bp", patient=f"h{i}", first=30, every=60))
-    b2 = make_b2(
-        mode="iforest",
-        z_threshold=None,
-        score_quantile=0.99,
-        signals=("bp",),
-        feature_step_ms=15 * STEP,
-        seed=3,
-    )
-    b2.fit(days[:6], days[6:])
-    usual = observed(series("bp", [200.0] * 8, first=30, every=60))
-    unusual = observed(series("bp", [120.0] * 8, first=30, every=60))
-    b2.run(usual, PLAN_SCHEDULE, None)
-    usual_scores = [r.score for r in b2.iforest_rows if r.t_ms >= at(480)]
-    b2.run(unusual, PLAN_SCHEDULE, None)
-    unusual_scores = [r.score for r in b2.iforest_rows if r.t_ms >= at(480)]
-    assert np.mean(unusual_scores) > np.mean(usual_scores)
+def test_b2_iforest_blind_spot_it_has_no_band_a_level_shift_changes_nothing() -> None:
+    # The forest is unsupervised and has no band: it measures unusualness in the population it was fitted on, not
+    # safety. Pinned by construction: move EVERY blood-pressure value of the training days, the calibration days and
+    # the test day by the same amount (here from around 120, inside any ordinary range, to around 200, far outside it)
+    # and the scores do not change (the splits of an isolation tree are uniform between the minimum and the maximum of
+    # a feature, so a common shift moves every split with it). Same seed, same forest. A method that knew the band would
+    # score the two worlds differently.
+    def world(shift: float) -> tuple[list[float], list[Any]]:
+        rng = np.random.default_rng(0)
+        days = []
+        for i in range(12):
+            values = [float(v) + shift for v in rng.integers(100, 121, size=8)]
+            days.append(bench(values, signal="bp", patient=f"h{i}", first=30, every=60))
+        test = observed(
+            series(
+                "bp", [105.0 + shift, 118.0 + shift, 90.0 + shift], first=30, every=60
+            )
+        )
+        b2 = make_b2(
+            mode="iforest",
+            z_threshold=None,
+            score_quantile=0.9,
+            signals=("bp",),
+            feature_step_ms=15 * STEP,
+            seed=3,
+        )
+        b2.fit(days[:6], days[6:])
+        detections = b2.run(test, PLAN_SCHEDULE, None)
+        return [r.score for r in b2.iforest_rows], times(detections)
+
+    low_scores, low_times = world(0.0)
+    high_scores, high_times = world(80.0)
+    assert low_times == high_times
+    assert low_scores == pytest.approx(high_scores, rel=1e-9)
 
 
 def test_b2_iforest_cannot_name_a_cause() -> None:
@@ -959,7 +968,9 @@ def test_b2_imputes_undefined_features_with_the_train_day_means() -> None:
     calib = bench([10, 20], signal="bp", first=300, every=360, patient="cc")
     b2.fit([train], [calib])
     (fit_rows,) = scorer.fit_rows
-    names = b2_module().feature_names(("bp",))
+    names = importlib.import_module("ralmon.baselines.b2_features").feature_names(
+        ("bp",)
+    )
     col = names.index("last_bp")
     assert fit_rows.shape == (4, len(names))
     assert fit_rows[:, col] == pytest.approx([500 / 3, 100.0, 200.0, 200.0])
