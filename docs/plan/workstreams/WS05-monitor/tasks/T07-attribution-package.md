@@ -3,7 +3,7 @@ id: WS05-T07
 title: "Attribution package: hierarchical rule, cascades, Attributor, natural-language rendering"
 workstream: WS05-monitor
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS05-T04", "WS02-T04", "WS02-T05"]
 critical_path: true
 non_negotiable: false
