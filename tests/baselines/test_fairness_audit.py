@@ -29,14 +29,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from ralmon.baselines.audit import (
-    AuditError,
-    assert_b1_not_vacuous,
-    knowledge_set,
-    render_markdown,
-    render_probe_table,
-    run_audit,
-)
 
 import ralmon.baselines as baselines_package
 from ralmon.baselines import (
@@ -48,6 +40,14 @@ from ralmon.baselines import (
     Detector,
 )
 from ralmon.baselines.access import LeakageError, Split
+from ralmon.baselines.audit import (
+    AuditError,
+    assert_b1_not_vacuous,
+    knowledge_set,
+    render_markdown,
+    render_probe_table,
+    run_audit,
+)
 from ralmon.baselines.b1_static_thresholds import ROLE_PARAMETERS
 from ralmon.baselines.base import BaselineBase, TimingConfig
 from ralmon.benchmark import BenchmarkDay, ObservedDay
@@ -585,15 +585,21 @@ def test_conformal_baselines_monotone_in_alpha() -> None:
         alpha: [p.quantile for p in sets[alpha]["B5"].predictions] for alpha in sets
     }
     assert quantiles == {0.05: [10.0], AUDIT_ALPHA: [7.0]}
-    # the documented shift: the measured verdict of the response template at its deadline replaces the alert
+    # the documented shift: without the predicted alert the response template is decided at its deadline
     activation = (ACT_STEP + 2) * STEP  # dose step plus the reorder delay of two steps
+    deadline = (
+        ACT_STEP + 180 + 2
+    ) * STEP  # the response window of the fixture registry is 180 steps
+    at_activation = {
+        alpha: sorted(d.score for d in sets[alpha]["B5-out"] if d.t_ms == activation)
+        for alpha in sets
+    }
+    assert len(at_activation[AUDIT_ALPHA]) == len(at_activation[0.05]) + 1
+    assert 3.0 in at_activation[AUDIT_ALPHA]  # the predicted alert: -(-10 + 7)
     times_high = {d.t_ms for d in high["B5-out"]}
     times_low = {d.t_ms for d in low["B5-out"]}
-    assert activation in times_high
-    assert activation not in times_low or times_low == times_high
-    assert times_low - times_high, (
-        "the deadline detection of the small level has no counterpart"
-    )
+    assert times_low - times_high == {deadline}
+    assert not times_high - times_low
 
 
 # ---- 16 sources --------------------------------------------------------------------------------------------------
@@ -688,7 +694,7 @@ def test_probes_measure_the_documented_asymmetries(audit: Audit) -> None:
         midnight.extra_after_close["B3"] >= 1 and midnight.extra_after_close["B5"] >= 1
     )
     assert midnight.extra_after_close["B4"] == 0
-    state = by_label["state across midnight"]
+    state = by_label["state across midnight (two doses the evening before)"]
     assert state.extra["ours"] >= 1  # with the day before as history
     assert state.extra["B1"] == state.extra["B3"] == state.extra["B5"] == 0
     assert (

@@ -367,6 +367,9 @@ class PoisonedBenchmarkDay(BenchmarkDay):
     def __init__(self, observed_day: ObservedDay) -> None:
         object.__setattr__(self, "observed", observed_day)
 
+    def __repr__(self) -> str:  # the dataclass repr would read the latent trace
+        return f"PoisonedBenchmarkDay({self.observed.patient_id!r}, day {self.observed.day_index})"
+
     @property  # type: ignore[override]
     def latent(self) -> Any:
         raise AssertionError("the latent trace was read")
@@ -415,8 +418,6 @@ class AuditSetup:
 def build_audit_setup(*, alpha: float = AUDIT_ALPHA) -> AuditSetup:
     """B1 to B5 as the experiment configures them: one timing, one persistence forecaster class per baseline that has
     one (wrapped in a probe), the calibrator of the proposed method, the operating parameters of the fixture."""
-    from ralmon.baselines.audit import ForecasterProbe
-
     from ralmon.baselines import (
         B1StaticThresholds,
         B2AnomalyDetection,
@@ -424,6 +425,7 @@ def build_audit_setup(*, alpha: float = AUDIT_ALPHA) -> AuditSetup:
         B4ConformalOnly,
         B5ConformalSTL,
     )
+    from ralmon.baselines.audit import ForecasterProbe
     from ralmon.conformal import SplitConformal
     from ralmon.monitor import PersistenceForecaster
 
@@ -515,6 +517,34 @@ def _day(
     )
 
 
+class SkewRegistry:
+    """The fixture registry plus ``clock_skew_max_ms`` (a test value), so that the monitor's future-stamp check is on.
+
+    The fixture registry F0 has no such row: with it the monitor does not check future stamps (``MonitorStats``
+    reports ``future_stamp_check`` False). FIXTURE-ONLY, never a clinical or device value.
+    """
+
+    SKEW_MS = 60_000.0
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def get(self, name: str) -> Any:
+        if name == "clock_skew_max_ms":
+            return RegistryEntry(
+                name,
+                self.SKEW_MS,
+                "ms",
+                "FIXTURE-ONLY: tests/baselines/conftest.py",
+                "FIXTURE-ONLY: tests/baselines/conftest.py",
+                None,
+            )
+        return self._inner.get(name)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
 def audit_probes(registry: Any) -> list[Any]:
     """The perturbation probes: each is a control day and a perturbed day that differ in one thing only, so that the
     detections added by the perturbation are the size of an asymmetry between the baselines and the monitor."""
@@ -522,9 +552,15 @@ def audit_probes(registry: Any) -> list[Any]:
 
     plan = make_full_plan(registry, sched_steps=(), day_end=False, ticks=())
     in_band = [_sample("bp", 0, 125.0)]
+    witness = [
+        _sample("presence", m, 1.0) for m in range(5, 21)
+    ]  # the robot sees the patient at both doses
 
     # 1. duplicate deliveries: two doses (the limit is 2), each delivered twice with the same sequence number
     once = [
+        _event(
+            EventKind.MEASUREMENT, 5, seq=0
+        ),  # the measurement that the hold template looks back for
         _event(EventKind.DISPENSE, 10, seq=1),
         _event(EventKind.DISPENSE, 20, seq=2),
     ]
@@ -564,8 +600,8 @@ def audit_probes(registry: Any) -> list[Any]:
     return [
         Probe(
             "duplicate deliveries",
-            _day(in_band, once),
-            _day(in_band, twice),
+            _day([*in_band, *witness], once),
+            _day([*in_band, *witness], twice),
             plan,
             "asymmetry (b): the monitor deduplicates by (source, name, seq), the harness does not",
         ),
@@ -584,7 +620,9 @@ def audit_probes(registry: Any) -> list[Any]:
             _day(in_band, []),
             _day([*in_band, *future_bp], future_meas),
             plan,
-            "asymmetry (c): the monitor rejects an input stamped in the future; the harness delivers it at its time",
+            "asymmetry (c): the monitor rejects an input stamped in the future (with a clock-skew bound, which the "
+            "fixture registry lacks: the probe supplies a test value); the harness delivers it at its time",
+            registry=SkewRegistry(registry),
         ),
         Probe(
             "deadline after midnight",
@@ -601,7 +639,7 @@ def audit_probes(registry: Any) -> list[Any]:
             "ADR-063: the point evaluator has no value for an interval whose upper bound is negative",
         ),
         Probe(
-            "state across midnight",
+            "state across midnight (two doses the evening before)",
             next_day,
             next_day,
             plan,
@@ -632,7 +670,6 @@ def build_audit() -> Audit:
         run_audit,
         run_probe,
     )
-
     from ralmon.conformal import SplitConformal
     from ralmon.monitor import MonitorConfig, PersistenceForecaster
 
