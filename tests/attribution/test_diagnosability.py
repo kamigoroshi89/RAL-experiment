@@ -128,8 +128,36 @@ def transform(
     return out
 
 
+#: The adverse reading of each field (the value that asserts it) for the vectors derived from the decision table.
+ADVERSE: dict[str, Any] = {
+    "system.node_lifecycle": {
+        "cuff": "inactive",
+        "dispenser": "active",
+        "robot": "active",
+    },
+    "system.diagnostics_ok": False,
+    "system.liveliness_ok": False,
+    "system.qos_deadline_missed": True,
+    "system.ble_link_quality": 0.45,
+    "system.battery_low": True,
+    "system.nav_task_failed": True,
+    "system.manip_task_failed": True,
+    "signal_quality.ecg_sqi": 0.25,
+    "signal_quality.ppg_sqi": 0.25,
+    "signal_quality.cuff_error_code": "E1",
+    "cross_device.pulse_vs_ecg_hr_diff": 20.0,
+    "witness.robot_present": False,
+    "witness.identity_confirmed": False,
+    "witness.intake_observed": False,
+    "crypto_temporal.authenticated": False,
+    "crypto_temporal.seq_gap_or_replay": True,
+    "crypto_temporal.timestamp_implausible": True,
+}
+
+
 def candidates(row: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
-    """(case id, template, fields) of the named cases, then a clean vector per template of the row."""
+    """(case id, template, fields): the named cases, a clean vector per template of the row and, for the causes that
+    the row note derives from the decision table, that clean vector with one discriminating field asserted."""
     out: list[tuple[str, str, dict[str, Any]]] = []
     for cid in named_cases(row):
         assert cid in KNOWN, (
@@ -139,14 +167,30 @@ def candidates(row: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
         out.append((cid, case["template"], dict(case["fields"])))
     for template in row["violated_templates"]:
         out.append((f"clean-{template}", template, dict(CLEAN)))
+        for path in row["discriminating_evidence"]:
+            if path in ADVERSE:
+                out.append(
+                    (
+                        f"clean-{template}+{path}",
+                        template,
+                        {**CLEAN, path: ADVERSE[path]},
+                    )
+                )
     return out
 
 
 def computed_causes(
-    row: dict[str, Any], outcome: dict[str, Any], rule: Any, registry: Any
+    row: dict[str, Any],
+    outcome: dict[str, Any],
+    rule: Any,
+    registry: Any,
+    *,
+    named_only: bool = False,
 ) -> set[str]:
     causes: set[str] = set()
     for cid, template, fields in candidates(row):
+        if named_only and cid.startswith("clean-"):
+            continue
         fields = transform(cid, fields, outcome["when"])
         decision = rule.decide(
             make_record(template), vector(template, fields, registry)
@@ -210,6 +254,10 @@ def test_diagnosability_rows_reproduced(row: dict[str, Any], registry, rule) -> 
             continue
         causes = computed_causes(row, outcome, rule, registry)
         assert expected - {"NO_ALERT"} <= causes, (row["id"], outcome["when"], causes)
+        if result == "distinguishable" and named_cases(row):
+            # a distinguishable outcome is reproduced by the worked cases that the row names, not by a constructed vector
+            only = computed_causes(row, outcome, rule, registry, named_only=True)
+            assert expected - {"NO_ALERT"} <= only, (row["id"], outcome["when"], only)
 
 
 def test_skipped_outcomes_have_a_recorded_reason() -> None:

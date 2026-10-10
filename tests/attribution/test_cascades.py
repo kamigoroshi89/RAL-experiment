@@ -454,3 +454,21 @@ def test_attribute_all_returns_the_violated_alert_of_a_key_only(
         "sched", key="sched@11:00", state=VerdictState.PENDING, hi=60_000.0, lo=-5.0
     )
     assert list(attributor.attribute_all([pending], {})) == []
+
+
+def test_refinement_records_do_not_change_an_issued_alert(attributor, registry) -> None:  # type: ignore[no-untyped-def]
+    """OP-T05-19 and OP-T07-11: a later record of a VIOLATED instance (the graded lateness of SCHED) is not a new alert."""
+    root = root_record()
+    ev = {"sched@09:00": evidence_for(registry, "W-11")}
+    (first,) = attributor.update([root], ev)
+    refinement = dataclasses.replace(
+        root,
+        t_eval_ms=hms(9, 40),
+        sigma_interval=dataclasses.replace(root.sigma_interval, hi=-600_000.0),
+        sigma_norm_interval=(-1.0, -0.3333),
+    )
+    assert list(attributor.update([refinement], ev)) == []
+    assert first.sigma_norm == pytest.approx(-0.0333) and first.t_ms == hms(9, 30)
+    # the stateless view reads the first VIOLATED record, whatever the order of the input
+    (stateless,) = attributor.attribute_all([refinement, root], ev)
+    assert stateless == first

@@ -998,14 +998,14 @@ def test_extractor_sequence_gap_explained_by_link_fault(registry) -> None:  # ty
     ]
     link = I(*base, node_state(at(20, 11, 0), "cuff", "link_down"))
     vec = feed(extractor(registry, cuff, reorder_delay_ms=120_000), link).evidence_for(
-        range_record()
+        hold_record()
     )
     assert (
         vec.crypto_temporal.seq_gap_or_replay is True
     )  # the field is set by the gap ...
     assert vec.system.ble_link_quality is not None and vec.system.ble_link_quality < 1.0
     assert vec.system.node_lifecycle == {"cuff": "link_down"}
-    decision = rule.decide(range_record(), vec)
+    decision = rule.decide(hold_record(), vec)
     assert (
         decision.kappa.value != "C3"
     )  # ... and it is not integrity evidence (W-15, W-15-alone)
@@ -1019,8 +1019,8 @@ def test_extractor_sequence_gap_explained_by_link_fault(registry) -> None:  # ty
     )
     vec = feed(
         extractor(registry, cuff, reorder_delay_ms=120_000), repeat
-    ).evidence_for(range_record())
-    assert rule.decide(range_record(), vec).kappa.value == "C3"
+    ).evidence_for(hold_record())
+    assert rule.decide(hold_record(), vec).kappa.value == "C3"
 
 
 # ---- test 32 -----------------------------------------------------------------------------------

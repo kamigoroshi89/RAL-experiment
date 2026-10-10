@@ -333,3 +333,27 @@ def test_explanation_fields(attributor, registry) -> None:  # type: ignore[no-un
     assert bare.xi.subformula_path == ""
     # a predicted alert has no decisive evidence
     assert list(predicted_alert(attributor, registry, None).xi.evidence_used) == []
+
+
+def test_violated_sub_formula_is_named_when_the_path_resolves(
+    attributor, registry
+) -> None:  # type: ignore[no-untyped-def]
+    """Hand-over (3) of WS05-T04: the text of the violated sub-formula comes from the path of the record."""
+    sched = make_record(
+        "sched",
+        key="sched@32400000",
+        decided_at_ms=hms(9, 30),
+        hi=float("-inf"),
+        lo=float("-inf"),
+        sigma_norm=(-1.0, -1.0),
+        guard_failed="no_measurement_after_tick",
+        subformula_path="sched/0/1",
+    )
+    text = alert_of(attributor, registry, "W-11", sched).xi.text
+    assert "Violated sub-formula: once[0, sched_window] (meas and age >= 0)." in text
+    assert "(failed guard: no_measurement_after_tick)" in text
+    # a path that does not resolve loses the sentence and not the alert
+    broken = dataclasses.replace(sched, subformula_path="sched/9/9/9")
+    other = alert_of(attributor, registry, "W-11", broken)
+    assert "Violated sub-formula" not in other.xi.text
+    assert other.xi.subformula_path == "sched/9/9/9"
