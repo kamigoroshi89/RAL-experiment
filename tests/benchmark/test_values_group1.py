@@ -48,7 +48,29 @@ MARK_PROPOSAL = "proposal accepted by gab 2026-10-10, not reviewed"
 MARK_SOURCE = "source opened by the research agent, not by gab"
 MARK_DECISION = "gab, 2026-10-10, accepted as a proposal, not reviewed"
 
-# The 58 rows that still wait for a human value, by file.
+# Block 3 (ADR-070 (c)): bias magnitudes, multiples of cuff_error_sd_mmhg (8 mmHg in the prior file).
+BIAS_LEVELS = {
+    "cuff_silent_bias_magnitude_low": (
+        1.0,
+        8,
+        "1.00 / 1.41 / 1.73",
+        "0.26 / 0.45 / 0.60",
+    ),
+    "cuff_silent_bias_magnitude_medium": (
+        1.5,
+        12,
+        "1.50 / 2.12 / 2.60",
+        "0.40 / 0.66 / 0.79",
+    ),
+    "cuff_silent_bias_magnitude_high": (
+        2.5,
+        20,
+        "2.50 / 3.54 / 4.33",
+        "0.69 / 0.89 / 0.97",
+    ),
+}
+
+# The 55 rows that still wait for a human value, by file.
 AWAITING_PRIOR = ["mean_delay_ms"]
 AWAITING_DESIGN = [
     "circadian_peak_clock_ms",
@@ -57,8 +79,8 @@ AWAITING_DESIGN = [
     "robot_dwell_ms",
     "vitals_period_ms",
 ]
-FILLED_NOW = 36
-AWAITING_NOW = 58
+FILLED_NOW = 39
+AWAITING_NOW = 55
 
 
 def flat(text: str | None) -> str:
@@ -195,27 +217,26 @@ def test_ble_durations_are_ordered_and_tied_to_the_window() -> None:
         assert "ADR-068" in text, level
 
 
-def test_cuff_fault_rows_and_bias_magnitudes_stay_untouched() -> None:
-    """Blocks 3 and 4 wait for the observability analysis: their rows are still unfilled."""
+def test_cuff_duration_rows_and_device_bias_stay_untouched() -> None:
+    """The duration rows wait for WS04-T16 (unit change); the device_bias level is a definition."""
     rows = injection_rows()
     for family in ("stuck_at", "cuff_silent_bias", "cuff_detached"):
         for level in ("short", "medium", "long"):
             assert rows[f"{family}_duration_{level}"].status == "awaiting_human_value"
-    for level in ("low", "medium", "high"):
-        assert (
-            rows[f"cuff_silent_bias_magnitude_{level}"].status == "awaiting_human_value"
-        )
     assert rows["cuff_silent_bias_magnitude_device_bias"].value == 1.0
+    assert rows["cuff_silent_bias_magnitude_device_bias"].unit == "x cuff_bias_mmhg"
+    assert rows["cuff_silent_bias_magnitude_device_bias"].status == "filled"
 
 
-def test_awaiting_rows_are_exactly_the_other_58() -> None:
+def test_awaiting_rows_are_exactly_the_other_55() -> None:
     expected_injections = {
         name
         for name, row in injection_rows().items()
         if row.status == "awaiting_human_value"
     }
-    assert len(expected_injections) == 52
+    assert len(expected_injections) == 49
     assert not (expected_injections & set(BLOCK2_DURATIONS))
+    assert not (expected_injections & set(BIAS_LEVELS))
     files = {f.path.name: f for f in collect_parameter_files(ROOT)}
     awaiting = {
         name: [r.parameter for r in f.rows if r.status == "awaiting_human_value"]
@@ -300,3 +321,64 @@ def test_stale_sentence_stays_only_on_awaiting_rows_of_the_design_file() -> None
         if name in AWAITING_DESIGN:
             assert row.status == "awaiting_human_value", name
             assert "chosen by an agent" in flat(row.note), name
+
+
+def test_bias_magnitudes_load_as_filled_with_the_stated_values() -> None:
+    rows = injection_rows()
+    for name, (value, _mmhg, _z, _p) in BIAS_LEVELS.items():
+        row = rows[name]
+        assert row.status == "filled", name
+        assert row.filled, name
+        assert row.unit == "x cuff_error_sd_mmhg", name
+        assert row.value == value, name
+        assert row.distribution is None, name
+        assert row.source_type == "design_choice", name
+
+
+def test_bias_magnitudes_are_increasing_and_non_negative() -> None:
+    rows = injection_rows()
+    values = [
+        rows[f"cuff_silent_bias_magnitude_{level}"].value
+        for level in ("low", "medium", "high")
+    ]
+    assert values == [1.0, 1.5, 2.5]
+    assert all(v >= 0 for v in values)
+    assert values[0] < values[1] < values[2]
+
+
+def test_bias_magnitudes_are_proposals_not_reviewed_with_their_arithmetic() -> None:
+    rows = injection_rows()
+    for name, (_value, mmhg, z_text, p_text) in BIAS_LEVELS.items():
+        row = rows[name]
+        assert row.verified_by is None, name
+        rationale = flat(row.rationale)
+        source_ref = flat(row.source_ref)
+        assert MARK_PROPOSAL in rationale, name
+        assert MARK_DECISION in source_ref, name
+        assert "ADR-070 (c)" in source_ref, name
+        for doi in (
+            "10.1161/HYPERTENSIONAHA.117.10237",
+            "10.3389/fcvm.2024.1388313",
+            "10.5152/FNJN.2020.19119",
+        ):
+            assert doi in source_ref, (name, doi)
+        assert f"{mmhg} mmHg" in rationale, name
+        assert z_text in rationale, name
+        assert p_text in rationale, name
+        assert "cancels in the RESP drop" in rationale, name
+        assert "not a requirement" in rationale, name
+        note = flat(row.note)
+        assert NOTE_ACCEPTED in note, name
+        assert "chosen by an agent" not in note, name
+        assert "agent chose" not in note.lower(), name
+
+
+def test_bias_magnitudes_sub_threshold_by_construction() -> None:
+    rows = injection_rows()
+    low = flat(rows["cuff_silent_bias_magnitude_low"].rationale)
+    medium = flat(rows["cuff_silent_bias_magnitude_medium"].rationale)
+    high = flat(rows["cuff_silent_bias_magnitude_high"].rationale)
+    assert "sub-threshold by construction for n = 1, 2, 3" in low
+    assert "sub-threshold by construction for n = 1 only" in medium
+    assert "sub-threshold by construction" not in high
+    assert "none of its cells is sub-threshold" in high
