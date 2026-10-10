@@ -3,7 +3,7 @@ id: WS06-T01
 title: Detector protocol implementation and common harness
 workstream: WS06-baselines
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS05-T01", "WS04-T01", "WS05-T03", "WS05-T07"]
 critical_path: true
 non_negotiable: false
@@ -120,3 +120,7 @@ Review fixes (agent, 2026-10-10), commits `WS06-T01: failing test for named fit 
 - MINOR-4: the fairness consequence is in the Consequences of ADR-061; hand-over to WS08-T01 (no `history` for the proposed method in a comparison until ADR-061 is accepted, or report both).
 - MINOR-5: exact-boundary tests (-1, 0, +1 ms) for the receive time and for the device-time horizon, samples and events. Mutated in a /tmp copy: `t + 1` and `t - 1` on the receive bound, `horizon + 1` and `horizon - 1` on both heaps are each killed by one failing test.
 - MINOR-6: `test_failed_fit_leaves_the_detector_not_fitted` fits successfully first and then refits with a failing `_fit`; the mutation that drops `self._fitted = False` before `_fit` is killed (the first-fit-fails case is kept as a second test).
+
+### Post-task review (2026-10-10)
+
+Produced: `ralmon.baselines.Detector` (runtime-checkable protocol), `BaselineBase` with a causal step iterator, and the access guards of `access.py`, 49 tests; ADR-061 (the `history` input of `Detector.run`, proposed, `[DA-CONFERMARE]`; `#detector` stays 0.1.0 until accepted). Independent review: PASS, no blocker; causality checked on 3000 random days with reorder delays up to 90 s (no sample seen before its time); the guards were attacked with adversarial detectors and the results are stated in the docstrings: they are a defence against accidents plus an audit log, not a sandbox. Six minors fixed (docs, a named error, a day listed in both train and calibration is refused, exact +-1 ms boundary tests, a refit-failure test); 12 of 16 mutations were killed by the original tests and the surviving ones are now killed. Open for gab: ADR-061; whether `iter_steps` should mirror the monitor's treatment of late inputs, duplicates and future stamps (baselines currently see late inputs the monitor excludes, do not deduplicate and do not reject future stamps; net direction unclear); whether latency comparisons are shifted by the reorder delay D (a baseline's detection time is the monitor's `t_eval_ms` plus D). Dependents: WS06-T02 to T06 run one day at a time until ADR-061 is accepted; WS06-T07 asserts `access_log.denied` is empty and documents the asymmetries; WS08-T01 does not pass `history` to the proposed method in a comparison until ADR-061 is accepted, or reports both variants.

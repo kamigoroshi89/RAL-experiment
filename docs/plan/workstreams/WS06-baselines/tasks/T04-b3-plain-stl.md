@@ -3,7 +3,7 @@ id: WS06-T04
 title: B3 STL without uncertainty (raw robustness on measured values)
 workstream: WS06-baselines
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS06-T01", "WS05-T03", "WS05-T04"]
 critical_path: true
 non_negotiable: false

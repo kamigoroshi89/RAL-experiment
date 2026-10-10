@@ -3,7 +3,7 @@ id: WS06-T05
 title: B4 conformal without STL
 workstream: WS06-baselines
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS06-T01", "WS05-T06", "WS05-T05"]
 critical_path: true
 non_negotiable: false
