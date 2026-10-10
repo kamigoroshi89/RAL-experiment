@@ -60,7 +60,8 @@ design files), `files`, `event_counts` (scored days, key `<class>/<subtype>`), a
   injector could not run, for example `ecg_noise` without a noise segment), `numpy_version`, `python_version`,
   `registry_version`, `registry_sha256`, `registry_fixture_only`, `device_profile` (ADR-036: `dispenser_content_sensing`,
   `authenticating_devices`), `design_sha256` (the care-plan, generator-design and injection files), `history_days`,
-  `injection_rates`, `confounder_pairs_per_variant`, `plan_skipped` (injections that the plan drew and could not place:
+  `injection_rates`, `confounder_pairs_per_variant`, `excluded_zero_levels` (per cohort and subtype, the magnitude levels
+  the plan does not draw because they resolve to zero, see below), `plan_skipped` (injections that the plan drew and could not place:
   overlap, no position, a replay on the first day), `schedule`, `cohorts`, `split_fractions`, `n_unverified_prior`,
   `n_unverified_design`, `prior_sha256` (per cohort) and, in `design_sha256`, the hash of the configuration file besides the
   care-plan, generator-design and injection files. There is no clock, host or user field. `python_version` and
@@ -155,6 +156,15 @@ logged with `realised` false and is not a ground-truth event; the realisation ra
 Injections that the plan cannot place are counted in `settings.plan_skipped`. The uniform choice of the subtype and of the
 level inside a class, and the Poisson count, are design choices of the plan (`plan:` section of `injections.yaml`), not
 properties of any real population.
+
+A level whose resolved magnitude is exactly zero is not drawn (fixed after the observability analysis, 2026-10-10). The
+magnitude block of `cuff_silent_bias` has the levels `low`, `medium`, `high` and `device_bias`, and `device_bias` is the
+multiplier 1.0 of the prior `cuff_bias_mmhg`; for an accurate device that prior is 0.0 mmHg, so the injected shift is zero,
+the injector changes nothing and the injection is never realised, in one draw out of four. The plan therefore draws
+uniformly among the levels of a cohort whose resolved magnitude is not zero (`drawable_magnitude_levels`, which uses
+`resolve_magnitude`) and lists the others in `settings.excluded_zero_levels`. The level is not removed from the design: with a
+non-zero `cuff_bias_mmhg` it is drawn again, and its sign rule (no random sign) is unchanged. A block in which every level
+resolves to zero is a configuration error.
 
 ## Open decisions for gab (ADR-067)
 
