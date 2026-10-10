@@ -469,7 +469,7 @@ def test_prop_matching_invariant_to_input_order(
     np.random.default_rng(seed).shuffle(shuffled)
     a = match_events(events, dets, CFG)
     b = match_events(events, shuffled, CFG)
-    key = lambda m: (  # noqa: E731
+    key = lambda m: (
         sorted((p.gt.onset_ms, p.det.t_ms) for p in m.pairs),
         sorted(e.onset_ms for e in m.missed),
         sorted(d.t_ms for d in m.duplicates),

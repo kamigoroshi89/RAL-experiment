@@ -1,12 +1,16 @@
-"""ralmon.eval: public API (see 02-interfaces.md#package-public-api)."""
+"""ralmon.eval: public API (see 02-interfaces.md#package-public-api).
+
+The metrics of analisi section 5.5 (``metrics``), the seeded experiment runner (``runner``) and the adapter of the
+proposed method to the ``Detector`` contract (``ours``). Names outside the table of the contract
+(``Matching`` helpers, ``RunOptions``, ``load_experiment``, ``build_detector``, ``split_patients``) are listed in
+``__all__`` for the experiment tasks of WS08 and for WS09.
+"""
 
 from __future__ import annotations
 
-from ralmon.eval._stubs import (
-    ExperimentConfig,
+from ralmon.eval.metrics import (
     MatchConfig,
     Matching,
-    OursDetector,
     accuracy_vs_coverage,
     attribution_confusion,
     detection_delay_ms,
@@ -18,15 +22,12 @@ from ralmon.eval._stubs import (
     mean_interval_width,
     per_class_prf,
     recall_vs_false_alarm_curve,
-    run_experiment,
     severity_rank_agreement,
 )
 
 __all__ = [
-    "ExperimentConfig",
     "MatchConfig",
     "Matching",
-    "OursDetector",
     "accuracy_vs_coverage",
     "attribution_confusion",
     "detection_delay_ms",
@@ -38,6 +39,5 @@ __all__ = [
     "mean_interval_width",
     "per_class_prf",
     "recall_vs_false_alarm_curve",
-    "run_experiment",
     "severity_rank_agreement",
 ]

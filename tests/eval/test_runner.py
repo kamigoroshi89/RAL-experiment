@@ -21,16 +21,13 @@ import pytest
 import yaml
 from hypothesis import given
 from hypothesis import strategies as st
-
-from ralmon.attribution import Detection
-from ralmon.benchmark import LatentDay, ObservedDay
-from ralmon.eval import runner
 from ralmon.eval.runner import (
     ConfigError,
     GuardError,
     HookResult,
     RunFacts,
     RunOptions,
+    TruthAccessError,
     current_git_rev,
     evaluate_guards,
     load_experiment,
@@ -38,11 +35,14 @@ from ralmon.eval.runner import (
     run_experiment,
     split_patients,
 )
+
+from ralmon.attribution import Detection
+from ralmon.benchmark import LatentDay, ObservedDay
+from ralmon.eval import runner
 from tests.eval.helpers import (
     C1,
     C2,
     C3,
-    MINI,
     SMOKE,
     UND,
     T,
@@ -416,9 +416,9 @@ def test_detector_receives_observed_day_only_and_fit_gets_no_test_patient(
         *train,
         *calib,
     ]:  # the fit days show no latent trace and no ground truth at all
-        with pytest.raises(Exception):
+        with pytest.raises(TruthAccessError):
             _ = x.ground_truth
-        with pytest.raises(Exception):
+        with pytest.raises(TruthAccessError):
             _ = x.latent
 
 
@@ -470,7 +470,7 @@ def test_current_git_rev_appends_dirty_suffix(monkeypatch: pytest.MonkeyPatch) -
 
 def test_hand_case_per_class_prf(hand_run: dict[str, Any]) -> None:
     prf = hand_run["metrics"]["per_class_prf"]["ours-s1"]
-    value = lambda c, k: prf[c][k]["value"]  # noqa: E731
+    value = lambda c, k: prf[c][k]["value"]
     assert value("C1", "precision") == pytest.approx(5 / 8)
     assert value("C1", "recall") == pytest.approx(1.0)
     assert value("C1", "f1") == pytest.approx(10 / 13)  # 2 * 5 / (2 * 5 + 3 + 0)
