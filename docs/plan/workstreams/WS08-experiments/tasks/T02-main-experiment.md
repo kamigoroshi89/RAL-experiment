@@ -3,8 +3,8 @@ id: WS08-T02
 title: "Main experiment: B1-B5 versus proposed method"
 workstream: WS08-experiments
 owner: agent
-status: ready
-depends_on: ["WS08-T01", "WS06-T07"]
+status: blocked
+depends_on: ["WS08-T01", "WS06-T07", "WS04-T16"]
 critical_path: true
 non_negotiable: false
 estimate_pd: 2.5
@@ -119,3 +119,8 @@ Review round 1 of the audit adds three decisions that this task must record in i
 ### Hand-over from WS08-T01 (worker, 2026-10-10): assumptions that did not hold
 
 (1) `build_detector(name, env, *, alpha=None)` takes the `DetectorEnvironment` that `make_environment(config, options, seed)` builds; the operating parameters of the detectors are in `run_options.detector_params` and have no default (`timing_tail_ms`, `forecaster.continuous`, `B2.{z_threshold, score_quantile, feature_step_ms}`, `B5-bonferroni.n_tests`). The names are `B1`, `B2`, `B2-residual`, `B2-iforest`, `B3`, `B4`, `B5`, `B5-per-template`, `B5-bonferroni`, `ours`. The configuration needs `run_options.{alpha_grid, n_bootstrap, ci_level, ece_bins}`; a detector with a level (B4, B5, ours) is built once per grid point and `alpha` must be in the grid. (2) The configuration `experiments/main.yaml` (to be created by WS08-T02; it does not exist yet) cannot run on the real registry: `configs/registry/hypertension.yaml` still lacks some of the evidence names of OPF-6 (the `ConfigError` names them; four in the reviewer's run) and leaves `priority_sys` and `priority_int` unset, so the runner refuses `ours` before the run (`ConfigError` naming them), and the committed benchmark configuration cannot be built until a human fills its 65 awaiting rows. (3) The attribution layer needs a device capability profile (`run_options.detector_params.ours.device_profile`, `{node: {capability: bool}}`); with none declared every capability is absent and every violation of the cuff path is UNDETERMINED (the same hand-built day gives UNDETERMINED without a profile and C1 with the profile of the worked day). Nothing declares the capability set of the benchmark devices (the manifest `device_profile` has only `dispenser_content_sensing` and `authenticating_devices`): a decision is needed before kappa results are read. (4) Matching is per patient record and counting per patient-day (WS08-T01 Notes, deviation 1); the tolerance is symmetric, so an early warning issued earlier than `tolerance_ms` before its event is a false alarm (`analysis.run.false_alarms_by_kind`); H8 (half and double tolerance) is three runs of the configuration or a hook that re-matches `RunContext.outputs` with `match_events`. (5) The guards of the audit are in `meta.guards`; for a `headline: true` run the `accepted_decisions` list of the YAML may name only ADRs that are accepted in `docs/plan/03-decisions.md` (checked at load; `ADR-063` and `ADR-061` are still proposed, and D2, F19 and F20 have no ADR yet, so none can be named today); otherwise the run is refused or flagged as listed in the completion note of WS08-T01. A headline run also needs a declared device profile, a `timing_tail_ms` of at least RESP delta2 plus the reorder delay and the day and one hour, and an `alpha_grid` whose smallest level is at least 1 / (n + 1) for the calibration episodes (guards `NO_DEVICE_PROFILE`, `TIMING_TAIL_TOO_SHORT`, `ALPHA_BELOW_CALIBRATION_RESOLUTION`). The headline interval is the cluster one (`ci_cluster_*`, `meta.bootstrap.headline_interval`); the patient-day interval is for reference only. (6) The audit tools are not importable from `src/ralmon/eval`; the re-run on the built detectors is `tests/eval/test_audit_rerun.py` and should be repeated on the benchmark days of this experiment.
+
+### Dependency added (gab, 2026-10-10; ADR-070)
+
+WS04-T16 is now a dependency: the main experiment must not run on a benchmark whose cuff faults are placed uniformly (most injections are not realised) or whose `stuck_at` cannot use the previous evening. The status goes back to `blocked` until WS04-T16 is done.
+

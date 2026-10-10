@@ -81,6 +81,7 @@ Total estimate: 8.0 person-days.
 | WS04-T13 | mimic-priorsource | MimicPriorSource and eICU variant (blocked until credentialing) | agent | WS04-T02, WS00-T04 | no | no | 2 | analisi §5.1 | #priorsource | - |
 | WS04-T14 | second-pathology-optional | OPTIONAL: second pathology (diabetes, simglucose) | agent | WS04-T11, WS08-T02 | no | no | 4 | analisi §5.8, §9 | #priorsource | - |
 | WS04-T15 | multi-day-labelling | Multi-day ground-truth labelling with history (ADR-046, ADR-055 (b)) | agent | WS04-T10, WS05-T10 | yes | no | 1.5 | ADR-046, ADR-055 (b), analisi §5.1 | #trace-schema #monitor | - |
+| WS04-T16 | anchored-cuff-faults | Cuff faults anchored to readings (durations in readings), stuck_at carry-over, effective k in the truth (ADR-070) | agent | WS04-T11, WS04-T15 | yes | no | 2.5 | ADR-070, ADR-066, analisi §5.1 | #trace-schema | - |
 
 Total estimate: 34.0 person-days.
 
@@ -135,7 +136,7 @@ Total estimate: 18.0 person-days.
 | id | slug | title | owner | depends_on | crit | nonneg | pd | sources | interfaces | review_items |
 |---|---|---|---|---|---|---|---|---|---|---|
 | WS08-T01 | runner-metrics | Experiment runner, config and metrics module | agent | WS04-T11, WS06-T01, WS05-T08, WS05-T11 | yes | no | 3 | analisi §5.5 | #metrics #experiment-config-and-outputs | - |
-| WS08-T02 | main-experiment | Main experiment: B1-B5 versus proposed method | agent | WS08-T01, WS06-T07 | yes | no | 2.5 | analisi §5.4, §5.5 | #metrics #detector | R3-W1 R3-W6 AE-1 |
+| WS08-T02 | main-experiment | Main experiment: B1-B5 versus proposed method | agent | WS08-T01, WS06-T07, WS04-T16 | yes | no | 2.5 | analisi §5.4, §5.5 | #metrics #detector | R3-W1 R3-W6 AE-1 |
 | WS08-T03 | ablations | Ablations A1, A2, A3, A5, A7 | agent | WS08-T02 | yes | no | 3 | analisi §5.6 | #experiment-config-and-outputs | R2-W1 R2-W9 |
 | WS08-T04 | ablation-a4-embodied | Ablation A4: embodied channel removed | agent | WS08-T02, WS02-T05 | yes | yes | 2 | analisi §5.6 (A4), §10 (3) | #evidencevector #attribution | R3-W2 AE-4 |
 | WS08-T05 | shift-a6 | Distribution shift and A6: split versus adaptive conformal | agent | WS08-T02 | no | no | 2 | analisi §5.6 (A6), §5.5 | #conformal-calibrator | R2-W4 |
