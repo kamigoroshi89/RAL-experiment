@@ -34,6 +34,7 @@ import ralmon.spec
 from ralmon.attribution import Detection
 from ralmon.baselines import B3PlainSTL, Detector
 from ralmon.baselines.base import BaselineBase, NotFittedError, TimingConfig
+from ralmon.baselines.raw_robustness import make_evaluator
 from ralmon.benchmark import ObservedDay
 from ralmon.signals import Event, EventKind, Sample
 from ralmon.spec import (
@@ -714,6 +715,98 @@ def test_b3_run_stats_before_any_run_and_after_a_second_day() -> None:
     assert b3.run_stats.presence_samples_without_availability_marks == 480
     run(b3, _dense_day(True))  # the counters belong to the last run only
     assert b3.run_stats.presence_samples_without_availability_marks == 0
+
+
+# ---- the lateness rule, anchors before the day, duplicates, the gate of B5 (review findings of WS06-T04) -------------------
+
+
+def test_b3_excludes_a_late_input_exactly_as_the_monitor_does() -> None:
+    """A BP sample of 152 stamped at step 5 is received at step 9; with ``D = 0`` its step was final at 5, so it is
+    late (``t_rx`` after ``ceil(t_dev / T_s) * T_s + D``) and is dropped. A measurement at step 10 then sees the held
+    125 (margin 15, no detection), like ``run_offline``; if the late sample were applied the margin would be -12 and
+    B3 would detect. Dropping the lateness rule of ``SignalGrid`` makes this test fail."""
+    day = observed(
+        [smp("bp", 0, 125.0), smp("bp", 5, 152.0, rx_step=9)],
+        [evt(EventKind.MEASUREMENT, 10)],
+    )
+    plan = make_care_plan()
+    first, result = _monitor_violations(day, plan, 0, [TemplateId.RANGE])
+    assert first == {} and len(result.late_inputs) == 1
+    b3 = make_b3(templ(TemplateId.RANGE))
+    assert run(b3, day, plan) == []
+    assert b3.run_stats is not None and b3.run_stats.late_inputs == 1
+    # on time (received at step 5) the same sample is applied and violates at the measurement
+    on_time = observed(
+        [smp("bp", 0, 125.0), smp("bp", 5, 152.0)], [evt(EventKind.MEASUREMENT, 10)]
+    )
+    assert pairs(run(b3, on_time, plan)) == [(10 * STEP, pytest.approx(12.0))]
+
+
+def test_b3_creates_no_instance_for_an_anchor_stamped_before_the_day() -> None:
+    """On day 1 a MEASUREMENT stamped before the start of the day (but received in it) is not part of the day
+    (empty carry-over, ADR-061): no instance is created for it. Removing the skip creates one with a negative anchor."""
+    t0 = T_DAY
+    early = Event(EventKind.MEASUREMENT, t0 - 3 * STEP, t0 + STEP, "dev", {}, None)
+    inside = Event(EventKind.MEASUREMENT, t0 + 3 * STEP, t0 + 3 * STEP, "dev", {}, None)
+    factory = Factory({})
+    b3 = make_b3(templ(TemplateId.RANGE), factory)
+    day = ObservedDay("p1", 1, 0, (), (early, inside), "plan-1")
+    run(b3, day)
+    (evaluator,) = factory.of(TemplateId.RANGE)
+    assert [i.anchor_ms for i in evaluator.instances] == [3 * STEP]
+    assert b3.run_stats is not None and b3.run_stats.instances == 1
+
+
+def _duplicated_dispenses() -> ObservedDay:
+    """Two dispenses (sequence numbers 1 and 2), each delivered twice on time by the transport."""
+    events = [
+        Event(EventKind.DISPENSE, step * STEP, step * STEP, "dev", {}, seq)
+        for step, seq in ((4, 1), (8, 2))
+        for _copy in (0, 1)
+    ]
+    return observed([], events)
+
+
+def test_b3_does_not_deduplicate_inputs_and_double_counts_doses() -> None:
+    """KNOWN ASYMMETRY (asymmetry (b) of ``base.py``), pinned. The monitor deduplicates by ``(source, name, seq)``;
+    the harness does not. Two dispenses, each received twice, are two doses for the monitor (limit 2, no violation)
+    and four for B3: extra COUNT instances are created and ``dose_count`` reaches 4, so B3 detects a violation of
+    the daily limit that the monitor does not report. The effect grows with the duplicates of a transport."""
+    day = _duplicated_dispenses()
+    plan = make_care_plan()
+    first, result = _monitor_violations(day, plan, 0, [TemplateId.COUNT])
+    assert first == {} and result.stats.duplicate_count == 2
+    b3 = make_b3(templ(TemplateId.COUNT))
+    out = run(b3, day, plan)
+    assert (
+        b3.run_stats is not None and b3.run_stats.instances == 4
+    )  # the monitor creates 2
+    # dose_count is 2 at step 4 (limit 2: margin 0) and 4 at step 8: both copies of the second dispense see the
+    # margin 2 - 4 = -2 and are detected at step 8 with the score 2
+    assert pairs(out) == [(8 * STEP, 2.0), (8 * STEP, 2.0)]
+
+
+def test_b5_exposes_run_stats_and_the_gate_like_b3() -> None:
+    """B5 shares the grid with B3, so it reports the same counters and the same ADR-054 gate."""
+    from tests.baselines.test_b5_conformal_stl import make_b5, train_days
+
+    for with_reports in (True, False):
+        b5 = make_b5(
+            templates=templ(TemplateId.INT),
+            evaluator_factory=make_evaluator,
+            timing=TimingConfig(STEP, 0, 3 * 60 * STEP),
+        )
+        assert b5.run_stats is None and not b5.int_gate_passed
+        b5.fit(train_days(), [])
+        b5.run(_dense_day(with_reports), make_care_plan(), None)
+        stats = b5.run_stats
+        assert stats is not None
+        assert stats.presence_samples_without_availability_marks == (
+            0 if with_reports else 480
+        )
+        assert stats.availability_reports == (2 if with_reports else 0)
+        assert b5.int_gate_passed is with_reports
+        assert stats.instances == 1
 
 
 # ---- the class, its source and its documentation ------------------------------------------------------------------------
