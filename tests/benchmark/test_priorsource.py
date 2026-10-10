@@ -1447,7 +1447,7 @@ def _registry_values() -> set[float]:
 # Unit-conversion constants of the time helpers, not clinical parameters.
 CLINICAL_LITERAL_EXEMPT: dict[tuple[str, float], str] = {
     ("signals/units.py", 3_600_000.0): "MS_PER_HOUR",
-    # Algorithmic constants that coincide with small values of registry 0.2.0 (WS01-T09:
+    # Algorithmic constants that coincide with small values of the real registry (0.2.0, WS01-T09:
     # cuff_error_sd 8 mmHg, scale_hold and scale_resp 10 mmHg); annotated "algorithmic" at the source.
     ("benchmark/rng.py", 8.0): "frozen stream id INJECTION_C1",
     ("benchmark/rng.py", 10.0): "frozen stream id INJECTION_C3",
@@ -1468,13 +1468,16 @@ def _numeric_constants(path: Path) -> list[tuple[int, float]]:
 
 def test_no_clinical_registry_value_appears_in_src_outside_the_loader() -> None:
     clinical = _registry_values()
-    assert {
-        110.0,
-        140.0,
-        100.0,
-        30.0,
-        260.0,
-    } <= clinical  # the band, hold and plausibility values of registry 0.2.0 (WS01-T09)
+    assert (
+        {
+            110.0,
+            140.0,
+            100.0,
+            30.0,
+            260.0,
+        }
+        <= clinical
+    )  # the band, hold and plausibility values of the real registry (0.2.0 and 0.2.1, WS01-T09)
     offenders = []
     for path in sorted((SRC / "ralmon").rglob("*.py")):
         rel = path.relative_to(SRC / "ralmon").as_posix()

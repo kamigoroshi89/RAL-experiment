@@ -3,7 +3,7 @@
 Checks that ``Monitor.load`` makes: signature (ADR-051), exact registry version, ``plan_version`` never
 decreasing per ``care_plan_id``, the feasibility of the plan (alignment of the window parameters, the
 approved range of an overridden value, known names, anchors). The registry is the F0 fixture (ADR-027)
-except in the tests that say otherwise; the real registry (0.2.0) is only loaded and run, no value of
+except in the tests that say otherwise; the real registry is only loaded and run, no value of
 it is pinned.
 """
 
