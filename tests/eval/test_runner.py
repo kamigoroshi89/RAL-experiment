@@ -359,6 +359,7 @@ def test_metrics_json_top_level_keys(hand_run: dict[str, Any]) -> None:
         "n_resamples": 100,
         "level": 0.95,
         "unit": "patient_day",
+        "headline_interval": "cluster",
     }
 
 
@@ -683,6 +684,11 @@ def facts(**kw: Any) -> RunFacts:
         "history": "none",
         "twins": "exclude",
         "n_seeds": 5,
+        "has_device_profile": True,
+        "timing_tail_ms": 90_000_000,
+        "required_tail_ms": 90_000_000,
+        "min_alpha": 0.05,
+        "calibration_episodes": {"ours": 400},
     }
     base.update(kw)
     return RunFacts(**base)
@@ -745,7 +751,24 @@ def test_headline_guards_are_hard_failures_in_a_headline_run_and_flags_otherwise
     assert soft.hard == () and guard in ids(soft.flags)
 
 
-def test_guards_a_decision_that_gab_accepted_lifts_its_guard() -> None:
+@pytest.fixture
+def accepted_adrs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The decisions file as if ADR-063 and ADR-061 were accepted (they are still proposed in the repository)."""
+    monkeypatch.setattr(
+        runner,
+        "adr_statuses",
+        lambda path=None: {
+            "ADR-063": "accepted (test)",
+            "ADR-061": "accepted (test)",
+            "ADR-066": "accepted (gab)",
+            "ADR-062": "proposed [DA-CONFERMARE]",
+        },
+    )
+
+
+def test_guards_a_decision_that_gab_accepted_lifts_its_guard(
+    accepted_adrs: None,
+) -> None:
     report = evaluate_guards(
         facts(detectors=("B3", "ours"), history="ours"),
         options(accepted_decisions=("ADR-063", "ADR-061")),
@@ -753,15 +776,13 @@ def test_guards_a_decision_that_gab_accepted_lifts_its_guard() -> None:
     assert report.hard == ()
 
 
-def test_guard_b5_is_flagged_as_not_the_paper_comparison_until_d2() -> None:
+def test_guard_b5_stays_flagged_as_not_the_paper_comparison(
+    accepted_adrs: None,
+) -> None:
     flagged = evaluate_guards(
         facts(detectors=("B5", "ours")), options(accepted_decisions=("ADR-063",))
     )
     assert "B5_NOT_PAPER_COMPARISON" in ids(flagged.flags)
-    lifted = evaluate_guards(
-        facts(detectors=("B5", "ours")), options(accepted_decisions=("ADR-063", "D2"))
-    )
-    assert "B5_NOT_PAPER_COMPARISON" not in ids(lifted.flags)
 
 
 def test_the_smoke_run_checks_b1_and_records_the_guards(tmp_path: Path) -> None:
