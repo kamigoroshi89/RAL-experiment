@@ -3,7 +3,7 @@ id: WS10-T01
 title: Lab setup plan and safety review
 workstream: WS10-lab-demo
 owner: human
-status: blocked
+status: ready
 depends_on: ["WS07-T02", "WS00-T06", "WS02-T05"]
 critical_path: false
 non_negotiable: false
