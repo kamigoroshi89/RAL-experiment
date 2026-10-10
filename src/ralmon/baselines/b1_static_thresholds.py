@@ -55,14 +55,27 @@ bounds of the registry is an ordinary out-of-band value to B1 (it does not read 
 Known differences from the monitor, which the audit lists. (1) The lateness rule of the grid of B3 and B5 is applied: an
 input received after its step is final is dropped and counted. (2) The harness does not deduplicate inputs by
 ``(source, name, seq)``: a pressure delivered twice raises two alarms and a dose delivered twice counts twice (pinned by
-``test_b1_does_not_deduplicate_inputs``). (3) An input stamped before the start of its day raises no alarm (it is not part of
-the day, ADR-061) but is a delivered value: it can be the last pressure of R2 and a dose of R4. (4) The detectors are run
+``test_b1_does_not_deduplicate_inputs``). (3) An input stamped a whole step or more before the start of its day (step ``ceil((t - t0) / T_s)`` below 0, as in the
+monitor) raises no alarm (it is not part of the day, ADR-061) but is a delivered value: it can be the last pressure of R2 and a dose of R4. (4) The detectors are run
 one day at a time with empty carry-over state (ADR-061): the count over 24 h can lack the doses of the day before. (5) B1 does
 not check that a per-patient value lies in an approved range of the registry (the monitor rejects such a plan); it checks
 that a value is a finite number, that the band is ordered and that the window is a non-negative multiple of the step.
 (6) A deadline that passes after midnight (R3 of a late tick) is detected at a step of the next day, where the per-day monitor
 ends PENDING (the open decision of WS06-T04 about the closing step applies to B1 as well). (7) A non-finite pressure is not a
 reading: it is neither an alarm, nor the last pressure, nor a measurement for R3 (counted in ``run_stats``).
+(8) R3 gives credit for a bare pressure sample with no MEASUREMENT event, which the monitor's SCHED does not (a sample-only
+outage is a miss for the monitor and not for B1); and a MEASUREMENT stamped 1 ms before the anchor counts for the monitor's
+grid (same step) but not for B1, whose window is ``[anchor, anchor + window]`` on device times (generator delays are
+non-negative, so this does not occur there). (9) R1 alarms per pressure sample, while the monitor's RANGE instance is keyed
+per MEASUREMENT event: a sample with no event is an alarm for B1 and no instance for the monitor, and two samples of one
+event are two alarms and one violation. Pinned by ``test_b1_differences_in_what_counts_as_a_measurement_and_as_a_range_instance``.
+
+B1 is a MINIMAL threshold baseline (open decision for the project owner, Notes of WS06-T02): it has no HOLD look-back
+window rule and no day-end COUNT minimum-dose obligation, so its recall on missed doses and on stale or absent measurements
+must not be described as equal clinical knowledge. It runs only the rules whose parameter record the plan holds: report
+``run_stats.rules_active`` with every result (all four rules are active only if the plan has the RANGE, HOLD and COUNT
+records and at least one anchored SCHED instance). Its score is constant (1.0): one operating point, not an AUROC or AP
+candidate, and RESP, SYS and INT violations (the classes C2 and C3) have no rule, so a result is reported per class.
 
 Hyperparameter selection. None. B1 has no operating parameter and nothing is fitted or tuned: its recall against false alarms
 is a single operating point, fixed by the plan. Rules R2 and R4 are included on purpose (the same threshold-type knowledge as
@@ -167,7 +180,13 @@ class B1StaticThresholds(BaselineBase):
     calibrator and no operating parameter. B1 makes no attribution (every ``label`` is None) and ignores the evidence.
 
     Hyperparameter selection. None: B1 has no operating parameter and nothing is fitted or tuned, so its detections are one
-    operating point. Rules R2 and R4 are included on purpose (the same threshold-type knowledge as the proposed method).
+    operating point (constant score 1.0). Rules R2 and R4 are included on purpose (the same threshold-type knowledge as the
+    proposed method).
+
+    Differences from the monitor that a reader of a result needs (details in the module docstring): R3 credits a bare
+    pressure sample and a MEASUREMENT is matched on device times, R1 alarms per sample (the monitor's RANGE is per
+    MEASUREMENT event), there is no deduplication, and the minimal rule set (no HOLD look-back, no day-end count, no RESP,
+    SYS or INT) means a result is reported per class and with ``run_stats.rules_active``.
     """
 
     name = "B1"
@@ -332,7 +351,9 @@ class B1StaticThresholds(BaselineBase):
                 if max(0, -(-(device - t0) // step)) <= final:
                     late += 1
                     continue
-                in_day = device >= t0
+                # the step of the input is ceil((device - t0) / step), as in the monitor and the grid: a device time in
+                # (t0 - step, t0] is step 0 of the day, one a whole step before it or earlier is not part of the day
+                in_day = device - t0 > -step
                 if isinstance(item, Sample):
                     value = item.value
                     if not math.isfinite(value):
