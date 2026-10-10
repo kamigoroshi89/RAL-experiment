@@ -39,8 +39,9 @@ from ralmon.baselines import (
     B5ConformalSTL,
     Detector,
 )
-from ralmon.baselines.access import LeakageError, Split
+from ralmon.baselines.access import AccessPolicy, LeakageError, Split
 from ralmon.baselines.audit import (
+    AuditDays,
     AuditError,
     assert_b1_not_vacuous,
     knowledge_set,
@@ -618,6 +619,75 @@ def test_baseline_sources_do_not_touch_latent_types() -> None:
     assert "LatentDay" not in (SRC / "baselines" / "base.py").read_text(
         encoding="utf-8"
     )
+
+
+# ---- the audit catches a baseline that cheats ------------------------------------------------------------------------
+
+
+class _B3ReadsAScale(B3PlainSTL):
+    """A mutant of B3 that reads a normalisation name, which the baseline is defined without."""
+
+    def _run(self, day: ObservedDay, plan: Any) -> Any:
+        self._registry.get("scale_range")
+        return super()._run(day, plan)
+
+
+class _B4ReadsLatent(B4ConformalOnly):
+    """A mutant of B4 that reads the latent trace of the calibration days (the policy allows it)."""
+
+    def _fit(self, train: Any, calib: Any) -> None:
+        for guarded in calib:
+            _ = guarded.latent
+        super()._fit(train, calib)
+
+
+def test_audit_flags_a_baseline_that_reads_a_scale_name(audit: Audit) -> None:
+    mutant = _B3ReadsAScale(
+        audit.setup.templates, audit.setup.registry, timing=AUDIT_TIMING
+    )
+    report = run_audit(
+        [mutant],
+        audit.days,
+        audit.plan,
+        audit.setup.registry,
+        templates=audit.setup.templates,
+    )
+    assert "scale_range" in report.traces["B3"].run_reads
+    assert any("scale" in problem for problem in report.problems)
+
+
+def test_audit_flags_a_baseline_that_reads_latent_data(audit: Audit) -> None:
+    """With ``calib_latent`` the guard allows the read and the log marks it; the audit reports it. On the poisoned days
+    the read itself raises, so a cheat that the log missed would still fail the run."""
+    mutant = _B4ReadsLatent(
+        PersistenceForecaster(AUDIT_STEP_MS),
+        alpha=AUDIT_ALPHA,
+        timing=AUDIT_TIMING,
+        access_policy=AccessPolicy(calib_latent=True),
+    )
+    with pytest.raises(AssertionError, match="latent trace was read"):
+        run_audit(
+            [mutant],
+            audit.days,
+            audit.plan,
+            audit.setup.registry,
+            templates=audit.setup.templates,
+        )
+    clean = [
+        make_benchmark_day(
+            d.observed.samples, d.observed.events, patient_id=d.observed.patient_id
+        )
+        for d in audit.days.calib
+    ]
+    report = run_audit(
+        [mutant],
+        AuditDays(audit.days.train, clean, audit.days.test),
+        audit.plan,
+        audit.setup.registry,
+        templates=audit.setup.templates,
+    )
+    assert any("latent" in problem for problem in report.problems)
+    assert any("calib_latent" in problem for problem in report.problems)
 
 
 # ---- the audit report -------------------------------------------------------------------------------------------

@@ -424,6 +424,12 @@ def _audit_detector(
             f"{name}: reorder_delay_ms {t.reorder_delay_ms} is not a multiple of step_ms {t.step_ms}; "
             "the lateness rule of the grid then differs from the monitor's (open decision, WS06-T05)"
         )
+    normalising = names[ITEM_SCALE] | names[ITEM_PRIORITY] | names[ITEM_LATENCY]
+    if normalising & (fit_reads | run_reads):
+        problems.append(
+            f"{name}: read a scale, priority or verdict-latency name "
+            f"({', '.join(sorted(normalising & (fit_reads | run_reads)))}); the baselines are defined without normalisation"
+        )
     base_name = _base_name(name)
     for item in _NAME_ITEMS:
         reason = BY_DESIGN.get((base_name, item))
