@@ -3,7 +3,7 @@ id: WS06-T02
 title: B1 static thresholds with simple schedule logic
 workstream: WS06-baselines
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS06-T01", "WS01-T03", "WS05-T02"]
 critical_path: true
 non_negotiable: false
