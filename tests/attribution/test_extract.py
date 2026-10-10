@@ -1527,3 +1527,78 @@ def test_small_range_sequence_results_are_unchanged(
     ).evidence_for(hold_record())
     assert vec.system.ble_link_quality == pytest.approx(ratio)
     assert vec.crypto_temporal.seq_gap_or_replay is flag
+
+
+# ---- review minors --------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_quality_and_pulse_values_are_skipped_in_any_order(
+    bad: float, registry
+) -> None:  # type: ignore[no-untyped-def]
+    """A non-finite value is a defect of the source, not a reading: min and max must not depend on arrival order."""
+    import itertools
+
+    ppg = [
+        sample(SignalId.SPO2, at(20, 5), value=95.0, quality=bad),
+        sample(SignalId.SPO2, at(20, 35), value=95.0, quality=0.2),
+    ]
+    pulses = [
+        sample(SignalId.HR_ECG, at(20, 20), value=72.0),
+        sample(SignalId.HR_PULSE, at(20, 25), value=bad),
+        sample(SignalId.HR_PULSE, at(20, 30), value=90.0),
+    ]
+    seen = set()
+    for perm in itertools.permutations(ppg + pulses):
+        ex = extractor(registry)
+        for s in perm:
+            ex.observe_sample(s)
+        vec = ex.evidence_for(hold_record())
+        seen.add((vec.signal_quality.ppg_sqi, vec.cross_device.pulse_vs_ecg_hr_diff))
+    assert seen == {(0.2, 18.0)}
+
+
+def test_an_anchor_after_the_decision_time_gives_no_witness_reading(registry) -> None:  # type: ignore[no-untyped-def]
+    """An empty witness window is no data, not a denial: robot_present and intake_observed stay None."""
+    items = I(
+        robot_state(at(20, 50), colocated=True),
+        sample(SignalId.PRESENCE, at(20, 51), value=0.0),
+    )
+    ex = feed(extractor(registry, INT_ROBOT), items)
+    assert (
+        ex.evidence_for(int_record()).witness.robot_present is False
+    )  # a normal window reads the level
+    vec = ex.evidence_for(
+        int_record(), anchor_ms=at(21, 30)
+    )  # anchor after the decision time
+    assert (
+        vec.witness.robot_present,
+        vec.witness.identity_confirmed,
+        vec.witness.intake_observed,
+    ) == (None, None, None)
+
+
+def test_missing_registry_names_are_reported_in_one_message(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from ralmon.attribution import EvidenceExtractor, HierarchicalRule
+    from ralmon.spec import load_registry
+
+    real = load_registry(step_ms=STEP_MS)
+    with pytest.raises(RegistryError) as info:
+        EvidenceExtractor(real, step_ms=STEP_MS, reorder_delay_ms=0)
+    message = str(info.value)
+    for name in ("evidence_margin_ms", "evidence_grace_ms", "hr_coherence_max_age_ms"):
+        assert name in message
+    assert "clock_skew_max_ms" not in message  # it exists
+    assert "OPF-6" in message and "docs/formal/08-consistency-review.md" in message
+    assert "hypertension.yaml" in message
+    with pytest.raises(RegistryError) as info:
+        HierarchicalRule(real)
+    message = str(info.value)
+    for name in (
+        "hr_coherence_tolerance",
+        "ecg_sqi_floor",
+        "ppg_sqi_floor",
+        "ble_link_quality_floor",
+    ):
+        assert name in message
+    assert "OPF-6" in message

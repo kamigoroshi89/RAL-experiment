@@ -490,3 +490,83 @@ def test_conflict_text_does_not_assert_an_intake_that_was_not_observed(
 def test_a_failed_authentication_is_stated_as_failed(attributor, registry) -> None:  # type: ignore[no-untyped-def]
     text = alert_of(attributor, registry, "W-08").xi.text
     assert "message authentication failed (crypto_temporal.authenticated)" in text
+
+
+def test_early_warning_grammar_without_a_variant(attributor, registry) -> None:  # type: ignore[no-untyped-def]
+    text = predicted_alert(attributor, registry, None).xi.text
+    assert "this is an early warning, not a definitive verdict" in text
+    assert " a early" not in text
+
+
+def test_the_anchor_time_is_rendered_only_when_it_is_known(
+    attributor, registry
+) -> None:  # type: ignore[no-untyped-def]
+    """A plan key is free text: ``sched@1`` does not say that the tick was at 00:00 (review minor)."""
+    sched = make_record(
+        "sched",
+        key="sched@1",
+        decided_at_ms=hms(9, 30),
+        hi=-60_000.0,
+        lo=-1_800_000.0,
+        sigma_norm=(-1.0, -0.0333),
+    )
+    text = alert_of(attributor, registry, "W-11", sched).xi.text
+    assert "anchored by the scheduled tick)" in text and "00:00" not in text
+    with_deadline = dataclasses.replace(
+        sched, pending_until_ms=hms(9, 30)
+    )  # tick + sched_window of F0
+    text = alert_of(attributor, registry, "W-11", with_deadline).xi.text
+    assert "anchored by the scheduled tick at 09:00" in text
+    # a dynamic key carries the device time of the anchoring event
+    range_text = range_alert(attributor, registry).xi.text
+    assert "anchored by the measurement at 09:05" in range_text
+    # a key of the wrong shape names no anchor
+    odd = make_record(
+        "range",
+        key="other@32700000",
+        decided_at_ms=hms(9, 5),
+        hi=-12.0,
+        sigma_norm=(-0.6, -0.6),
+    )
+    assert (
+        "anchored by the measurement)"
+        in alert_of(attributor, registry, "W-01", odd).xi.text
+    )
+
+
+def test_a_record_that_cannot_make_an_alert_does_not_kill_the_batch(
+    attributor, registry, caplog
+) -> None:  # type: ignore[no-untyped-def]
+    """A PREDICTED record without ``predicted_sigma_norm`` is recorded and logged, the other alerts are returned."""
+    good = make_record(
+        "range",
+        key="range@32700000",
+        decided_at_ms=hms(9, 5),
+        hi=-12.0,
+        sigma_norm=(-0.6, -0.6),
+    )
+    bad = make_record(
+        "sched",
+        key="sched@1",
+        state=VerdictState.PREDICTED_VIOLATION,
+        t_eval_ms=hms(9, 10),
+        hi=0.0,
+        sigma_norm=(-1.0, 0.1),
+        rho=predicted_rho(),
+    )
+    evidence = {
+        good.instance_key: vector("range", worked_case("W-01")["fields"], registry)
+    }
+    with caplog.at_level("WARNING", logger="ralmon.attribution"):
+        alerts = attributor.attribute_all([bad, good], evidence)
+    assert [a.xi.instance_key for a in alerts] == ["range@32700000"]
+    assert [key for key, _ in attributor.failures] == ["sched@1"]
+    assert any("sched@1" in r.getMessage() for r in caplog.records)
+    # update: the failing key is reported once and not retried at every call
+    from ralmon.attribution import RuleAttributor
+
+    own = RuleAttributor(registry, load_templates(registry=registry))
+    first = own.update([bad, good], evidence)
+    assert [a.xi.instance_key for a in first] == ["range@32700000"]
+    assert own.update([], {}) == []
+    assert [key for key, _ in own.failures] == ["sched@1"]

@@ -143,10 +143,9 @@ def registry_and_templates():  # type: ignore[no-untyped-def]
 
 
 def _alert(record, registry, templates, kappa="C2"):  # type: ignore[no-untyped-def]
+    from ralmon.attribution import AttributedCause
     from ralmon.attribution.alert import alert_from_record
     from ralmon.attribution.rule import Decision
-
-    from ralmon.attribution import AttributedCause
 
     decision = Decision(
         kappa=AttributedCause(kappa),
