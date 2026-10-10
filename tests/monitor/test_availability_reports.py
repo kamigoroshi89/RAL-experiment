@@ -385,3 +385,81 @@ def test_hostile_reports_raise_only_named_errors() -> None:
         leaks.run("advance", mon.advance, hhmm(8, 0))
         leaks.run("stats", mon.stats)
     leaks.check()
+
+
+# ---------------------------------------------------------------------------------------------
+# M1 of the review: a presence level held from before the FIRST report must not count (H-INIT)
+# ---------------------------------------------------------------------------------------------
+
+
+def test_a_level_held_from_before_the_first_arrival_report_does_not_witness() -> None:
+    """Probe of the review: presence 1.0 at 07:00 with no arrival report, one arrival report later in the
+    day, a dispense at 21:00. The level is 14 hours old and belongs to no episode that a report opened:
+    INT must not be SATISFIED (strict H-INIT gives PENDING value_undefined:presence) and the gate must not
+    say 0 for a presence sample that was used before the first mark of a run that has marks."""
+    for arrival in (hhmm(20, 0), hhmm(20, 50)):
+        mon = make_monitor()
+        mon.push_sample(smp("presence", hhmm(7, 0), 1.0))
+        mon.push_event(report(arrival, True))
+        mon.push_event(evt("dispense", hhmm(21, 0)))
+        rec = int_record(mon.advance(hhmm(21, 0)), hhmm(21, 0))
+        assert rec.state.value == "pending", arrival
+        assert rec.undecidable is not None
+        assert "value_undefined:presence" in rec.undecidable
+        assert mon.stats().presence_samples_without_availability_marks == 1
+
+
+def test_a_sample_after_the_first_arrival_report_is_a_witness() -> None:
+    mon = make_monitor()
+    mon.push_sample(smp("presence", hhmm(7, 0), 1.0))
+    mon.push_event(report(hhmm(20, 50), True))
+    mon.push_sample(smp("presence", hhmm(20, 58), 1.0))
+    mon.push_event(evt("dispense", hhmm(21, 0)))
+    rec = int_record(mon.advance(hhmm(21, 0)), hhmm(21, 0))
+    assert rec.state.value == "satisfied"
+    assert (
+        mon.stats().presence_samples_without_availability_marks == 1
+    )  # the 07:00 sample
+
+
+def test_a_first_report_that_is_a_departure_still_ends_the_witness_and_is_gated() -> (
+    None
+):
+    mon = make_monitor()
+    mon.push_sample(smp("presence", hhmm(7, 0), 1.0))
+    mon.push_event(report(hhmm(7, 10), False))
+    mon.push_event(evt("dispense", hhmm(21, 0)))
+    rec = int_record(mon.advance(hhmm(21, 0)), hhmm(21, 0))
+    assert rec.state.value == "pending"
+    assert rec.undecidable is not None
+    assert "channel_unavailable:presence" in rec.undecidable
+    assert mon.stats().presence_samples_without_availability_marks == 1
+
+
+def test_a_trace_without_reports_keeps_its_behaviour_and_its_gate() -> None:
+    plain = make_monitor()
+    plain.push_sample(smp("presence", hhmm(7, 0), 1.0))
+    plain.push_event(evt("dispense", hhmm(21, 0)))
+    rec = int_record(plain.advance(hhmm(21, 0)), hhmm(21, 0))
+    assert rec.state.value == "satisfied"
+    assert plain.stats().presence_samples_without_availability_marks == 1
+    # marks given by push_availability (the harness form, CG-6) keep their reading: the first mark clears
+    # the gate whenever it arrives and a True mark does not clear the held level
+    marked = make_monitor()
+    marked.push_sample(smp("presence", hhmm(7, 0), 1.0))
+    marked.push_availability(SignalId.PRESENCE, True, hhmm(20, 0), hhmm(20, 0))
+    marked.push_event(evt("dispense", hhmm(21, 0)))
+    rec = int_record(marked.advance(hhmm(21, 0)), hhmm(21, 0))
+    assert rec.state.value == "satisfied"
+    assert marked.stats().presence_samples_without_availability_marks == 0
+
+
+def test_the_sample_of_the_arrival_instant_is_not_gated() -> None:
+    """A sample and the arrival report of one device time: the report is applied first."""
+    mon = make_monitor()
+    mon.push_sample(smp("presence", hhmm(7, 0), 1.0))
+    mon.push_event(report(hhmm(7, 0), True))
+    mon.push_event(evt("dispense", hhmm(7, 2)))
+    rec = int_record(mon.advance(hhmm(7, 5)), hhmm(7, 2))
+    assert rec.state.value == "satisfied"
+    assert mon.stats().presence_samples_without_availability_marks == 0
