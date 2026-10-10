@@ -223,7 +223,9 @@ Factory = Callable[[Template, Any, int, str | None], Any]
 
 
 def threshold_factory(
-    limit: float = LIMIT, length: int = LENGTH, created: list[ThresholdEvaluator] | None = None
+    limit: float = LIMIT,
+    length: int = LENGTH,
+    created: list[ThresholdEvaluator] | None = None,
 ) -> Factory:
     """RESP gets the threshold stub, every other template never decides."""
 
@@ -295,8 +297,12 @@ def make_b5(
         alpha=alpha,
         aggregation=aggregation,  # type: ignore[arg-type]
         timing=timing,
-        plan_for_day=(lambda day: make_care_plan()) if plan_for_day is None else plan_for_day,
-        evaluator_factory=threshold_factory() if evaluator_factory is None else evaluator_factory,
+        plan_for_day=(lambda day: make_care_plan())
+        if plan_for_day is None
+        else plan_for_day,
+        evaluator_factory=threshold_factory()
+        if evaluator_factory is None
+        else evaluator_factory,
         **kwargs,
     )
 
@@ -509,7 +515,15 @@ class SpyCalibrator:
     """Records every public attribute that B5 touches; a member outside the protocol raises."""
 
     PROTOCOL = frozenset(
-        {"mode", "calibrated_for", "fit", "quantile", "quantile_lower", "predict", "update"}
+        {
+            "mode",
+            "calibrated_for",
+            "fit",
+            "quantile",
+            "quantile_lower",
+            "predict",
+            "update",
+        }
     )
 
     def __init__(self) -> None:
@@ -546,9 +560,13 @@ def test_b5_uses_calibrator_public_api_only() -> None:
     assert "fit" in spy.touched and "predict" in spy.touched
     (episodes,) = spy._inner.fits
     # episodes come from the observed calibration days only: their patients and days, nothing of the training day
-    assert {e.patient_id for e in episodes} == {f"c{i}" for i in range(len(WORKED_RESIDUALS))}
+    assert {e.patient_id for e in episodes} == {
+        f"c{i}" for i in range(len(WORKED_RESIDUALS))
+    }
     assert all(e.template is TemplateId.RESP for e in episodes)
-    assert sorted(e.sigma_true - e.sigma_hat for e in episodes) == sorted(WORKED_RESIDUALS)
+    assert sorted(e.sigma_true - e.sigma_hat for e in episodes) == sorted(
+        WORKED_RESIDUALS
+    )
     assert spy._inner.calibrated_for == "persistence-1"
 
 
@@ -676,7 +694,9 @@ def test_b5_per_template_variant_calibrates_each_template_separately() -> None:
             made.append(SplitConformal())
             return made[-1]
 
-        b5 = make_b5(aggregation=aggregation, templates=every, calibrator_factory=factory)
+        b5 = make_b5(
+            aggregation=aggregation, templates=every, calibrator_factory=factory
+        )
         assert b5.name == name
         b5.fit(train_days(), calibration_days(WORKED_RESIDUALS))
         assert len(made) == expected
@@ -684,7 +704,9 @@ def test_b5_per_template_variant_calibrates_each_template_separately() -> None:
         assert len(fitted) == 1  # only RESP has a predictive part and so episodes
         assert fitted[0].n_scores == len(WORKED_RESIDUALS)
         made.clear()
-        b5.fit(train_days(), calibration_days(WORKED_RESIDUALS))  # a refit replaces the state
+        b5.fit(
+            train_days(), calibration_days(WORKED_RESIDUALS)
+        )  # a refit replaces the state
         assert len(made) == expected
 
 
@@ -693,7 +715,11 @@ def test_b5_per_template_variant_calibrates_each_template_separately() -> None:
 
 @pytest.mark.parametrize(
     ("bp_deadline", "violated"),
-    [(142.0, True), (140.0, False), (130.0, False)],  # rho = -2, 0 (not a violation), +10
+    [
+        (142.0, True),
+        (140.0, False),
+        (130.0, False),
+    ],  # rho = -2, 0 (not a violation), +10
 )
 def test_b5_reduces_to_measured_prefix_at_deadline(
     bp_deadline: float, violated: bool
@@ -703,7 +729,9 @@ def test_b5_reduces_to_measured_prefix_at_deadline(
     never.fit(train_days(), calibration_days(WORKED_RESIDUALS))
     out = pairs(run(never, dispense_day(100.0, bp_deadline)))
     # no prediction can fire (q = +inf): the decision is the sign of the measured raw robustness at the deadline
-    assert out == ([(deadline, bp_deadline - 140.0)] if violated else [])  # score is minus the raw value
+    assert out == (
+        [(deadline, bp_deadline - 140.0)] if violated else []
+    )  # score is minus the raw value
     always = make_b5(calibrator_factory=lambda: FixedCalibrator(-1e9))
     always.fit(train_days(), calibration_days(WORKED_RESIDUALS))
     got = pairs(run(always, dispense_day(100.0, bp_deadline)))
@@ -715,7 +743,9 @@ def test_b5_prediction_then_satisfied_measurement_gives_one_detection() -> None:
     # predicted at the activation with q = -1e9 (always), measured satisfied (+10): the flag falls, no detection later
     always = make_b5(calibrator_factory=lambda: FixedCalibrator(-1e9))
     always.fit(train_days(), calibration_days(WORKED_RESIDUALS))
-    assert [t for t, _ in pairs(run(always, dispense_day(100.0, 130.0)))] == [ACT * STEP]
+    assert [t for t, _ in pairs(run(always, dispense_day(100.0, 130.0)))] == [
+        ACT * STEP
+    ]
 
 
 # ---- 11. causality -------------------------------------------------------------------------------------------
@@ -729,9 +759,7 @@ def fixed_b5() -> B5ConformalSTL:
 @settings(max_examples=60, deadline=None)
 @given(
     sample_specs=st.lists(
-        st.tuples(
-            st.integers(0, 25), st.integers(100, 160), st.integers(0, 3)
-        ),
+        st.tuples(st.integers(0, 25), st.integers(100, 160), st.integers(0, 3)),
         min_size=1,
         max_size=6,
     ),
@@ -764,7 +792,9 @@ def test_b5_deterministic() -> None:
     for _ in range(2):
         b5 = fitted_worked()
         outputs.append(tuple(run(b5, day)))
-        b5.fit(train_days(), calibration_days(WORKED_RESIDUALS))  # a second fit on the same days
+        b5.fit(
+            train_days(), calibration_days(WORKED_RESIDUALS)
+        )  # a second fit on the same days
         outputs.append(tuple(run(b5, day)))
     assert outputs[0] == outputs[1] == outputs[2] == outputs[3]
 
@@ -772,7 +802,9 @@ def test_b5_deterministic() -> None:
 # ---- 13. control: dense, exchangeable days -------------------------------------------------------------------
 
 
-def _walk_day(rng: np.random.Generator, patient: str, start: float, n: int) -> ObservedDay:
+def _walk_day(
+    rng: np.random.Generator, patient: str, start: float, n: int
+) -> ObservedDay:
     """A dense Gaussian random walk: one bp value per step 0..n, a dispense at ``ACT_DENSE``."""
     values = start + np.cumsum(np.concatenate([[0.0], rng.normal(0.0, 1.0, n)]))
     samples = [smp("bp", k, float(v)) for k, v in enumerate(values)]
@@ -789,7 +821,10 @@ def test_b5_control_dense_exchangeable_days() -> None:
 
     200 calibration and 2000 test days, ``numpy.random.default_rng(0)``, a Gaussian random walk from a common start
     3 mmHg above the limit (so that a good part of the test days is alerted), persistence forecaster, the threshold
-    stub with a deadline 20 steps after the dose.
+    stub with a deadline 20 steps after the dose. The score of an episode is ``R = x_20 - x_40`` (the change over the
+    deadline window), which is exchangeable across days. The rate of the error event must stay at or below
+    ``alpha + 3 sqrt(alpha (1 - alpha) / 2000)``; the bound is the one of the task and is loose on this population
+    (many days are not alerted), which the note on the control states.
     """
     rng = np.random.default_rng(0)
     start = LIMIT + 3.0
@@ -797,9 +832,7 @@ def test_b5_control_dense_exchangeable_days() -> None:
     calib = [bench(_walk_day(rng, f"c{i}", start, n_steps)) for i in range(200)]
     tests = [_walk_day(rng, f"t{i}", start, n_steps) for i in range(2000)]
     alpha = 0.1
-    b5 = make_b5(
-        alpha=alpha, evaluator_factory=threshold_factory(length=LEN_DENSE)
-    )
+    b5 = make_b5(alpha=alpha, evaluator_factory=threshold_factory(length=LEN_DENSE))
     b5.fit(train_days(), calib)
     assert b5.n_calibration_episodes == 200
     errors = alerts = 0
@@ -811,7 +844,9 @@ def test_b5_control_dense_exchangeable_days() -> None:
         errors += bool(predicted) and rho_true >= 0.0
     bound = alpha + 3.0 * math.sqrt(alpha * (1.0 - alpha) / 2000)
     assert errors / 2000 <= bound
-    assert alerts / 2000 >= 0.05  # not vacuous: the predictive part does fire on this population
+    assert (
+        alerts / 2000 >= 0.05
+    )  # not vacuous: the predictive part does fire on this population
 
 
 # ---- the raw robustness adapter and the signal grid (module shared with WS06-T04) -------------------------
@@ -826,13 +861,20 @@ def test_adapter_reports_template_unit_and_resets_independently() -> None:
     evaluator = make_evaluator(range_template, _REGISTRY, STEP, "measurement")
     instance = TemplateInstance(TemplateId.RANGE, "r", {}, 2 * STEP)
     evaluator.reset(instance)
-    values = [evaluator.step(k * STEP, {"bp": 125.0, "meas": 1.0 if k == 2 else 0.0}) for k in range(3)]
-    assert values[:2] == [None, None] and values[2] == 15.0  # min(125 - 110, 140 - 125) at the anchor step
+    values = [
+        evaluator.step(k * STEP, {"bp": 125.0, "meas": 1.0 if k == 2 else 0.0})
+        for k in range(3)
+    ]
+    assert (
+        values[:2] == [None, None] and values[2] == 15.0
+    )  # min(125 - 110, 140 - 125) at the anchor step
     evaluator.reset(instance)  # forgets the history: step 0 is accepted again
     assert evaluator.step(0, {"bp": 152.0}) is None
     other = make_evaluator(range_template, _REGISTRY, STEP, "measurement")
     other.reset(TemplateInstance(TemplateId.RANGE, "r2", {}, 0))
-    assert other.step(0, {"bp": 152.0, "meas": 1.0}) == -12.0  # independent of the first evaluator
+    assert (
+        other.step(0, {"bp": 152.0, "meas": 1.0}) == -12.0
+    )  # independent of the first evaluator
 
 
 def test_logging_registry_forwards_and_logs() -> None:
@@ -857,12 +899,18 @@ def test_signal_grid_builds_held_values_impulses_and_derived_signals() -> None:
     for batch in iter_steps(day, TimingConfig(STEP, 0, 0), 5 * STEP):
         step = grid.apply(batch)
         rows[step.k] = step
-    assert "bp" not in rows[0].values and "bp" not in rows[1].values  # undefined before the first sample
+    assert (
+        "bp" not in rows[0].values and "bp" not in rows[1].values
+    )  # undefined before the first sample
     assert rows[2].values["bp"] == 125.0 and rows[5].values["bp"] == 125.0  # held
-    assert rows[2].values["meas"] == 1.0 and rows[3].values["meas"] == 0.0  # an impulse lasts one step
+    assert (
+        rows[2].values["meas"] == 1.0 and rows[3].values["meas"] == 0.0
+    )  # an impulse lasts one step
     assert rows[3].values["dispense"] == 1.0 and rows[4].values["dispense"] == 0.0
     assert rows[3].values["dose_count"] == 1.0 and rows[5].values["dose_count"] == 1.0
-    assert rows[3].values["bp_pre"] == 125.0  # the value before the dose, captured at the dispense
+    assert (
+        rows[3].values["bp_pre"] == 125.0
+    )  # the value before the dose, captured at the dispense
     assert rows[2].measurements == (2 * STEP,) and rows[3].dispenses == (3 * STEP,)
     assert rows[3].measurements == ()
 
@@ -874,7 +922,11 @@ def test_signal_grid_origin_shifts_the_axis_to_the_day() -> None:
         1,
         0,
         (Sample("bp", T_DAY, T_DAY, 125.0, None, None),),
-        (Event(EventKind.DISPENSE, T_DAY + 3 * STEP, T_DAY + 3 * STEP, "dev", {}, None),),
+        (
+            Event(
+                EventKind.DISPENSE, T_DAY + 3 * STEP, T_DAY + 3 * STEP, "dev", {}, None
+            ),
+        ),
         "plan-1",
     )
     # the harness grid of day 1 starts at 24 h; the evaluator axis starts at 0
@@ -912,7 +964,15 @@ def test_b5_range_template_with_the_real_evaluator() -> None:
 
 
 def test_b5_resp_prediction_with_the_real_evaluator_uses_the_plan_ticks() -> None:
-    """RESP needs a measurement in ``[delta1, delta2]`` after the dose; the plan supplies the measurement ticks."""
+    """RESP needs a measurement in ``[delta1, delta2]`` after the dose with a drop of at least ``delta_resp`` (10 mmHg
+    in the fixture registry); the plan supplies the measurement tick.
+
+    Hand derivation. Dose at step ACT with the pre-dose pressure 150; one tick inside the window. Persistence predicts
+    150 at the tick: drop 0, margin ``rho_hat = 0 - 10 = -10``. A calibration day with an actual drop ``d`` has
+    ``rho_true = d - 10``, so the score is ``R = d``. Drops 0..8: ``n = 9``, ``alpha = 0.2``, ``k = ceil(10 * 0.8) = 8``,
+    ``C = 7``; ``-10 + 7 = -3 < 0``: alert at the activation step with score 3, and the measured verdict at the
+    deadline (``rho = -10``) adds no second detection.
+    """
     resp = templ(TemplateId.RESP)
     delta1 = int(_REGISTRY.get("delta1").value) // STEP
     delta2 = int(_REGISTRY.get("delta2").value) // STEP
@@ -930,21 +990,96 @@ def test_b5_resp_prediction_with_the_real_evaluator_uses_the_plan_ticks() -> Non
             patient=patient,
         )
 
-    # delta_resp is 10 mmHg in the fixture registry: the margin at the measurement is drop - 10
     b5 = make_b5(
         templates=resp,
         evaluator_factory=make_evaluator,
         alpha=0.2,
         plan_for_day=lambda day: plan,
+        timing=TimingConfig(
+            STEP, 0, (delta2 + 5) * STEP
+        ),  # long enough for the window to close
     )
-    calib = [bench(day_with(d, f"c{i}")) for i, d in enumerate((10, 14, 16, 18, 20, 22, 24, 26, 28))]
-    b5.fit(train_days(), calib)
-    assert b5.n_calibration_episodes == 9
+    b5.fit(train_days(), [bench(day_with(d, f"c{i}")) for i, d in enumerate(range(9))])
+    assert b5.n_calibration_episodes == 9 and b5.n_censored == 0
     out = b5.run(day_with(0.0, "t"), plan, None)
-    # persistence predicts bp = 150 at the tick: drop 0, rho_hat = -10; the measured verdict at the deadline is -10 too
     (record,) = b5.predictions
-    assert record.sigma_hat == pytest.approx(-10.0)
-    assert out and out[-1].t_ms >= (ACT + delta1) * STEP
+    assert (record.sigma_hat, record.quantile, record.emitted) == (-10.0, 7.0, True)
+    assert pairs(out) == [(ACT * STEP, 3.0)]
+
+
+def test_b5_measured_decisions_agree_with_the_monitor() -> None:
+    """Without a prediction B5 is the measured verdict of the templates: the first violated record of each instance of
+    ``run_offline`` and the detection of B5 are at the same step, for all seven templates (hand-built day, fixture
+    registry). This checks the signal construction and the instance creation that B5 repeats from the monitor."""
+    from ralmon.monitor import run_offline
+    from tests.monitor.helpers import make_config
+
+    def m(h: int, mm: int = 0) -> int:
+        return 60 * h + mm
+
+    plan = make_care_plan(
+        [
+            make_instance(TemplateId.SCHED, "s8", {}, m(8) * STEP),
+            make_instance(TemplateId.SCHED, "s14", {}, m(14) * STEP),
+            make_instance(TemplateId.COUNT, "c-end", {}, T_DAY),
+        ]
+    )
+    samples = [
+        smp("bp", m(8), 150.0),
+        smp("cuff_health", m(8), 0.0),
+        smp("inflation_ms", m(8), 40000.0),
+        smp("bp", m(9, 10), 95.0),
+        smp("cuff_health", m(9, 10), 1.0),
+        smp("bp", m(10), 130.0),
+        smp("bp", m(11, 30), 118.0),
+        smp("presence", m(8, 3), 1.0),
+        smp("bp", m(14, 40), 125.0),
+        smp("cuff_health", m(14, 40), 1.0),
+        smp("inflation_ms", m(14, 40), 40000.0),
+    ]
+    events = [
+        evt(EventKind.MEASUREMENT, m(8)),
+        evt(EventKind.DISPENSE, m(8, 5)),
+        evt(EventKind.INTAKE, m(8, 6)),
+        evt(EventKind.MEASUREMENT, m(9, 10)),
+        evt(EventKind.DISPENSE, m(9, 15)),
+        evt(EventKind.DISPENSE, m(10, 5)),
+        evt(EventKind.MEASUREMENT, m(10)),
+        evt(EventKind.MEASUREMENT, m(11, 30)),
+        evt(EventKind.MEASUREMENT, m(14, 40)),
+    ]
+    day = observed(samples, events)
+    records = run_offline(
+        day,
+        plan,
+        make_config(_REGISTRY),
+        None,
+        None,
+        registry=_REGISTRY,
+        templates=tuple(_LIBRARY.values()),
+    )
+    first: dict[str, int] = {}
+    for r in records:
+        if r.state.value == "violated" and r.instance_key not in first:
+            first[r.instance_key] = r.t_eval_ms
+    expected = sorted(first.values())
+    assert len(expected) == 7  # range, sys, range, hold, count, resp, sched
+    long_tail = TimingConfig(STEP, 0, 25 * 60 * STEP)
+    for aggregation, times in (
+        ("per_template", expected),
+        ("conjunction", sorted(set(expected))),
+    ):
+        b5 = make_b5(
+            templates=tuple(_LIBRARY.values()),
+            evaluator_factory=make_evaluator,
+            aggregation=aggregation,
+            plan_for_day=lambda d: plan,
+            timing=long_tail,
+        )
+        b5.fit(train_days(), [])
+        out = b5.run(day, plan, None)
+        assert [d.t_ms for d in out] == times, aggregation
+        assert all(d.label is None and math.isfinite(d.score) for d in out)
 
 
 # ---- the source of B5 ---------------------------------------------------------------------------------------------------
@@ -966,7 +1101,7 @@ def test_b5_source_has_no_latent_or_scaling_tokens() -> None:
 
 
 def test_b5_exported_from_the_package() -> None:
-    import ralmon.baselines as baselines
+    from ralmon import baselines
 
     assert baselines.B5ConformalSTL is B5ConformalSTL
     assert not hasattr(B5ConformalSTL, "__ralmon_stub_owner__")

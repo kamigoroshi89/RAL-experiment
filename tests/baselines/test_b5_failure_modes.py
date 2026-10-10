@@ -24,17 +24,23 @@ import numpy as np
 import pytest
 
 from ralmon.attribution import Detection
+from ralmon.baselines.base import TimingConfig
 from ralmon.baselines.raw_robustness import make_evaluator
 from ralmon.conformal import CalibrationEpisode, SplitConformal
 from ralmon.signals import EventKind
-from ralmon.spec import RobustnessUnit, Template, TemplateId, TemplateInstance, normalise
+from ralmon.spec import (
+    RobustnessUnit,
+    Template,
+    TemplateId,
+    TemplateInstance,
+    normalise,
+)
 from tests.baselines.conftest import make_care_plan, make_instance
 from tests.baselines.test_b5_conformal_stl import (
     ACT,
     LENGTH,
     LIMIT,
     STEP,
-    TIMING,
     Evaluation,
     FixedCalibrator,
     aggregate_raw,
@@ -61,11 +67,20 @@ NOTES = (
     / "notes"
 )
 
-SPARSE_RESIDUALS = (-50.0, -20.0, 20.0, 50.0) * 5  # five copies each, mmHg (test-local spread)
+SPARSE_RESIDUALS = (
+    -50.0,
+    -20.0,
+    20.0,
+    50.0,
+) * 5  # five copies each, mmHg (test-local spread)
 DENSE_RESIDUALS = (-5.0, -2.0, 2.0, 5.0) * 5
 
 
-def episodes(residuals: tuple[float, ...], template: TemplateId = TemplateId.RESP, sigma_hat: float = 0.0) -> list[CalibrationEpisode]:
+def episodes(
+    residuals: tuple[float, ...],
+    template: TemplateId = TemplateId.RESP,
+    sigma_hat: float = 0.0,
+) -> list[CalibrationEpisode]:
     return [
         CalibrationEpisode(f"p{i}", 0, template, sigma_hat, sigma_hat + r)
         for i, r in enumerate(residuals)
@@ -109,54 +124,51 @@ def test_failure_sparse_sampling_region_never_exits_safe_region() -> None:
     assert (ACT * STEP) < deadline
 
 
+def _gap_day(rng: np.random.Generator, patient: str, gap: int, length: int) -> Any:
+    """A random walk observed every ``gap`` steps; the dose falls between samples and the deadline is measured."""
+    offset = int(rng.integers(0, gap)) if gap > 1 else 0
+    act = 3 * gap + 1 + offset
+    n = act + length
+    walk = LIMIT + 3.0 + np.cumsum(np.concatenate([[0.0], rng.normal(0.0, 1.0, n)]))
+    samples = [
+        smp("bp", k, float(walk[k])) for k in range(n + 1) if k % gap == 0 and k <= act
+    ]
+    samples.append(smp("bp", n, float(walk[n])))  # the measurement at the deadline
+    return observed(samples, [evt(EventKind.DISPENSE, act)], patient=patient)
+
+
 def test_failure_sparse_sampling_quantile_grows_with_the_gap() -> None:
     """A random walk observed every ``gap`` steps: the residual of the held value against the next measurement widens
     with the time since the last sample, so the calibrated constant grows with the gap. ``default_rng(0)``. The
-    alert rates are collected for the note but not compared: the walk also drifts further from its start, which
-    changes the population."""
-    results: dict[int, tuple[float, float]] = {}
+    alert rates are not compared: the walk also drifts further from its start, which changes the population."""
+    quantiles: dict[int, float] = {}
+    length = 20
     for gap in (1, 40, 160):
         rng = np.random.default_rng(0)
-        length = 20
-        act0 = 3 * gap + 1  # the dispense happens between samples, `offset` steps after the last one
-
-        def make_day(patient: str, rng: np.random.Generator = rng, gap: int = gap) -> Any:
-            offset = int(rng.integers(0, gap)) if gap > 1 else 0
-            act = act0 + offset
-            n = act + length
-            walk = LIMIT + 3.0 + np.cumsum(np.concatenate([[0.0], rng.normal(0.0, 1.0, n)]))
-            samples = [smp("bp", k, float(walk[k])) for k in range(0, n + 1) if k % gap == 0 and k <= act]
-            samples.append(smp("bp", n, float(walk[n])))  # the measurement at the deadline
-            return observed(samples, [evt(EventKind.DISPENSE, act)], patient=patient)
-
-        calib = [bench(make_day(f"c{i}")) for i in range(300)]
-        b5 = make_b5(alpha=0.1, evaluator_factory=_length_factory(length))
+        calib = [bench(_gap_day(rng, f"c{i}", gap, length)) for i in range(300)]
+        b5 = make_b5(alpha=0.1, evaluator_factory=threshold_factory(length=length))
         b5.fit(train_days(), calib)
-        alerts = 0
-        quantile = math.nan
-        for i in range(300):
-            day = make_day(f"t{i}")
-            out = run(b5, day)
-            (record,) = b5.predictions
-            quantile = record.quantile
-            alerts += record.emitted
-        results[gap] = (quantile, alerts / 300)
-    assert results[1][0] < results[40][0] < results[160][0]
-
-
-def _length_factory(length: int) -> Any:
-    return threshold_factory(length=length)
+        run(b5, _gap_day(rng, "t", gap, length))
+        (record,) = b5.predictions
+        assert record.quantile is not None
+        quantiles[gap] = record.quantile
+    assert quantiles[1] < quantiles[40] < quantiles[160]
 
 
 def test_failure_small_calibration_set_never_emits() -> None:
     """``n = 10``, ``alpha = 0.05``: ``k = ceil(11 * 0.95) = 11 > n``, so the constant is infinite and nothing is
     predicted, however wide the excursion. Reported by the counters, not hidden (B5-deviations D19)."""
     b5 = make_b5(alpha=0.05)
-    b5.fit(train_days(), calibration_days((-3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0)))
+    b5.fit(
+        train_days(),
+        calibration_days((-3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0)),
+    )
     out = run(b5, dispense_day(250.0, 250.0))  # rho_hat = -110
     (record,) = b5.predictions
     assert record.quantile == math.inf and record.emitted is False
-    assert [t for t, _ in pairs(out)] == [(ACT + LENGTH) * STEP]  # measured verdict at the deadline only
+    assert [t for t, _ in pairs(out)] == [
+        (ACT + LENGTH) * STEP
+    ]  # measured verdict at the deadline only
 
 
 # ---- 15. events and counters have no predictive part -----------------------------------------------------
@@ -188,7 +200,9 @@ class CountingForecaster:
     def fit(self, train_days: Any) -> None:
         pass
 
-    def predict(self, history: Any, t_ms: int, horizon_ms: int, *, signal: str | None = None) -> Any:
+    def predict(
+        self, history: Any, t_ms: int, horizon_ms: int, *, signal: str | None = None
+    ) -> Any:
         self.calls += 1
         raise AssertionError("B5 asked the forecaster for an event template")
 
@@ -199,7 +213,9 @@ def test_failure_sparse_sampling_no_predictive_part_for_event_templates() -> Non
     decide = 8
     templates = templ(TemplateId.SCHED, TemplateId.COUNT, TemplateId.INT)
 
-    def factory(template: Template, registry: Any, step_ms: int, anchor_kind: str | None) -> Any:
+    def factory(
+        template: Template, registry: Any, step_ms: int, anchor_kind: str | None
+    ) -> Any:
         return LateEvaluator(template.unit, decide, -5.0)
 
     forecaster = CountingForecaster()
@@ -208,7 +224,10 @@ def test_failure_sparse_sampling_no_predictive_part_for_event_templates() -> Non
         templates=templates,
         forecaster=forecaster,
         evaluator_factory=factory,
-        calibrator_factory=lambda: FixedCalibrator(-1e9),  # would alert at any prediction
+        calibrator_factory=lambda: FixedCalibrator(
+            -1e9
+        ),  # would alert at any prediction
+        timing=TimingConfig(STEP, 0, 10 * STEP),  # the run reaches the decision step
     )
     b5.fit(train_days(), [])
     plan = make_care_plan([make_instance(TemplateId.SCHED, "sched@3", {}, 3 * STEP)])
@@ -216,7 +235,9 @@ def test_failure_sparse_sampling_no_predictive_part_for_event_templates() -> Non
     out = b5.run(day, plan, None)
     assert forecaster.calls == 0
     assert b5.predictions == ()
-    assert len(out) == 3 and {d.t_ms for d in out} == {decide * STEP}  # nothing before the decision step
+    assert len(out) == 3 and {d.t_ms for d in out} == {
+        decide * STEP
+    }  # nothing before the decision step
     assert all(d.score == 5.0 and d.label is None for d in out)
 
 
@@ -231,7 +252,9 @@ def test_failure_mixed_units_raw_min_masks_dose_violation() -> None:
     pooled = SplitConformal()
     pooled.fit(
         [
-            CalibrationEpisode(f"p{i}", 0, TemplateId.RESP, 10.0, 18.0 if i % 2 == 0 else 2.0)
+            CalibrationEpisode(
+                f"p{i}", 0, TemplateId.RESP, 10.0, 18.0 if i % 2 == 0 else 2.0
+            )
             for i in range(20)
         ],
         0.1,
@@ -242,7 +265,9 @@ def test_failure_mixed_units_raw_min_masks_dose_violation() -> None:
     own = SplitConformal()
     own.fit(
         [
-            CalibrationEpisode(f"p{i}", 0, TemplateId.COUNT, 0.5, 1.0 if i % 2 == 0 else 0.0)
+            CalibrationEpisode(
+                f"p{i}", 0, TemplateId.COUNT, 0.5, 1.0 if i % 2 == 0 else 0.0
+            )
             for i in range(20)
         ],
         0.1,
@@ -259,21 +284,34 @@ def test_failure_mixed_units_raw_min_masks_dose_violation() -> None:
 
 def test_failure_mixed_units_raw_min_misranks_severity() -> None:
     evaluations = [
-        Evaluation("count@1", TemplateId.COUNT, -1.0, "measured"),  # one dose over the limit
-        Evaluation("range@1", TemplateId.RANGE, -12.0, "measured"),  # 12 mmHg outside the band
+        Evaluation(
+            "count@1", TemplateId.COUNT, -1.0, "measured"
+        ),  # one dose over the limit
+        Evaluation(
+            "range@1", TemplateId.RANGE, -12.0, "measured"
+        ),  # 12 mmHg outside the band
     ]
     (group,) = aggregate_raw(evaluations, "conjunction")
-    assert group.value == -12.0 and group.template is TemplateId.RANGE  # the raw minimum is the range instance
-    scales = {TemplateId.RANGE: 20.0, TemplateId.COUNT: 1.0}  # 20 mmHg, 1 dose (illustrative)
+    assert (
+        group.value == -12.0 and group.template is TemplateId.RANGE
+    )  # the raw minimum is the range instance
+    scales = {
+        TemplateId.RANGE: 20.0,
+        TemplateId.COUNT: 1.0,
+    }  # 20 mmHg, 1 dose (illustrative)
     scaled = {e.template: normalise(e.value, scales[e.template]) for e in evaluations}
     assert scaled == {TemplateId.RANGE: pytest.approx(-0.6), TemplateId.COUNT: -1.0}
-    assert min(scaled, key=lambda t: scaled[t]) is TemplateId.COUNT  # with a scale the minimum is the count instance
+    assert (
+        min(scaled, key=lambda t: scaled[t]) is TemplateId.COUNT
+    )  # with a scale the minimum is the count instance
 
     # on the detections: one detection scored 12 for the conjunction; the dose violation, the more severe one once the
     # units are scaled, has no detection of its own
     values = {TemplateId.HOLD: -12.0, TemplateId.COUNT: -1.0}
 
-    def factory(template: Template, registry: Any, step_ms: int, anchor_kind: str | None) -> Any:
+    def factory(
+        template: Template, registry: Any, step_ms: int, anchor_kind: str | None
+    ) -> Any:
         return LateEvaluator(template.unit, 2, values[template.id])
 
     day = observed([smp("bp", 0, 100.0)], [evt(EventKind.DISPENSE, 2)])
@@ -319,7 +357,9 @@ def test_failure_no_attribution_same_range_detection_for_c1_and_c2_days() -> Non
     # RANGE margin min(152 - 110, 140 - 152) = -12 at the measurement step in both days
     assert [(d.t_ms, d.score, d.label) for d in out_clean] == [(5 * STEP, 12.0, None)]
     assert [(d.t_ms, d.score, d.label) for d in out_faulty] == [(5 * STEP, 12.0, None)]
-    assert out_clean == out_faulty  # the same detection for a true excursion and for a faulty cuff
+    assert (
+        out_clean == out_faulty
+    )  # the same detection for a true excursion and for a faulty cuff
 
     # with the system template as well, the faulty cuff is flagged but cannot be told apart by anything B5 outputs
     both = make_b5(
@@ -361,8 +401,16 @@ def test_failure_analysis_note_lists_all_modes() -> None:
         "Benchmark-scale evidence",
         "Wording for the paper",
     ]
-    own_tests = set(re.findall(r"^def (test_\w+)", Path(__file__).read_text(encoding="utf-8"), flags=re.MULTILINE))
+    own_tests = set(
+        re.findall(
+            r"^def (test_\w+)",
+            Path(__file__).read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        )
+    )
     for heading in ("Sparse sampling", "Mixed units", "No attribution"):
         cited = set(re.findall(r"test_\w+", sections[heading]))
         assert cited & own_tests, heading
-    assert "test_b5_control_dense_exchangeable_days" in sections["Control: where B5 works"]
+    assert (
+        "test_b5_control_dense_exchangeable_days" in sections["Control: where B5 works"]
+    )
