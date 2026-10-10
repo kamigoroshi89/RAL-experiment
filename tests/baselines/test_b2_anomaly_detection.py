@@ -226,8 +226,10 @@ def make_b2(
 ) -> Any:
     if mode != "residual" and "plan_for_day" not in kwargs:
         kwargs["plan_for_day"] = plan_for_day
+    if forecaster is None and mode != "iforest":
+        forecaster = StubForecaster()  # the forest alone takes none
     return B2AnomalyDetection(
-        StubForecaster() if forecaster is None else forecaster,
+        forecaster,
         mode=mode,
         z_threshold=z_threshold,
         score_quantile=score_quantile,
@@ -281,6 +283,15 @@ def test_b2_residual_zscore_hand_computed() -> None:
     assert times(out) == [at(180)]
     assert out[0].score == 4.0 / 3.0
     assert out[0].label is None
+
+
+def test_b2_z_keeps_its_sign() -> None:
+    # z is signed: +12 gives +4.0 and -12 gives -4.0 (the detection score uses |z|, so only the row shows the sign)
+    b2 = residual_b2(3.0)
+    b2.run(hr([60, 72]), PLAN, None)
+    assert [r.z for r in b2.residuals] == [4.0]
+    b2.run(hr([60, 48]), PLAN, None)
+    assert [r.z for r in b2.residuals] == [-4.0]
 
 
 def test_b2_zscore_threshold_strict_and_two_sided() -> None:
@@ -476,7 +487,7 @@ def test_b2_modes_and_names() -> None:
             mode=mode,
             z_threshold=3.0 if mode != "iforest" else None,
             score_quantile=0.5 if mode != "residual" else None,
-            feature_step_ms=FEATURE_STEP_4,
+            **({} if mode == "residual" else {"feature_step_ms": FEATURE_STEP_4}),
         )
         assert b2.name == name
     with pytest.raises(ValueError, match="mode"):
@@ -1044,7 +1055,7 @@ def test_b2_iforest_rows_cover_the_day_and_do_not_depend_on_the_tail() -> None:
 def test_b2_iforest_requires_a_plan_source_for_the_schedule_features() -> None:
     with pytest.raises(ValueError, match="plan_for_day"):
         B2AnomalyDetection(
-            StubForecaster(),
+            None,
             mode="iforest",
             score_quantile=0.5,
             seed=0,
@@ -1182,3 +1193,68 @@ def test_b2_scorer_and_plan_sources_default_to_none() -> None:
     assert parameters["plan_for_day"].default is None
     assert parameters["feature_step_ms"].default is None
     assert parameters["signals"].default is None
+
+
+# ---- review round 1: strictness of the arguments, a score on the threshold, the state after a fit -------------------
+
+
+def test_b2_parameters_the_mode_does_not_use_are_refused() -> None:
+    # forecaster: required by residual and both, refused by iforest (None is the way to say "none")
+    with pytest.raises(ValueError, match="forecaster"):
+        make_b2(
+            mode="iforest",
+            forecaster=StubForecaster(),
+            z_threshold=None,
+            score_quantile=0.5,
+        )
+    # plan_for_day: required by the forest modes, refused by residual
+    with pytest.raises(ValueError, match="plan_for_day"):
+        make_b2(mode="residual", plan_for_day=plan_for_day)
+    # feature_step_ms and scorer_factory belong to the forest only
+    with pytest.raises(ValueError, match="feature_step_ms"):
+        make_b2(mode="residual", feature_step_ms=FEATURE_STEP_4)
+    with pytest.raises(ValueError, match="scorer_factory"):
+        make_b2(mode="residual", scorer_factory=lambda seed: StubScorer([]))
+    # the allowed combinations still build: forest alone with no forecaster, residual alone with no plan, both with all
+    make_b2(mode="iforest", z_threshold=None, score_quantile=0.5)
+    make_b2(mode="residual")
+    make_b2(
+        mode="both",
+        z_threshold=3.0,
+        score_quantile=0.5,
+        feature_step_ms=FEATURE_STEP_4,
+        scorer_factory=lambda seed: StubScorer([]),
+    )
+
+
+def test_b2_score_exactly_on_the_threshold_is_not_an_alarm() -> None:
+    # threshold 0.5 (calibration scores all 0.5); run scores 0.5, 0.5, 0.1, 0.5001, 0.1: only the one above it alarms
+    scorer = StubScorer([[0.5] * 5, [0.5, 0.5, 0.1, 0.5001, 0.1]])
+    b2 = make_b2(
+        mode="iforest",
+        z_threshold=None,
+        score_quantile=0.5,
+        feature_step_ms=FEATURE_STEP_5,
+        scorer_factory=lambda seed: scorer,
+    )
+    b2.fit([bench([])], [bench([])])
+    out = b2.run(observed([]), PLAN, None)
+    assert times(out) == [3 * FEATURE_STEP_5]
+    assert [r.alarm for r in b2.iforest_rows] == [False, False, False, True, False]
+
+
+def test_b2_fit_replaces_the_state_of_the_earlier_fit() -> None:
+    b2 = make_b2(
+        mode="both", z_threshold=3.0, score_quantile=0.5, feature_step_ms=FEATURE_STEP_5
+    )
+    b2.fit([bench([])], [bench(CALIB_3)])
+    b2.run(hr([60, 72]), PLAN, None)
+    assert b2.run_stats is not None and b2.residuals and b2.iforest_rows
+    assert b2.residual_scales and b2.iforest_threshold is not None
+    # a second fit with no calibration day drops the run outputs, the scale and the threshold of the first
+    b2.fit([bench([])], [])
+    assert b2.run_stats is None
+    assert b2.residuals == ()
+    assert b2.iforest_rows == ()
+    assert b2.residual_scales == {}
+    assert b2.iforest_threshold is None
