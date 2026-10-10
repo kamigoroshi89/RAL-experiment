@@ -1406,3 +1406,79 @@ def test_extractor_uses_the_anchor_of_a_plan_instance(registry) -> None:  # type
 
 
 _ = (Callable,)  # keep the typing import used by the table helpers
+
+
+# ---- agreement with the monitor on the witness fields (EX-9, ADR-054 episode rule) --------------------------
+
+
+def _agreement_scenario(
+    first: bool,
+    reports: list[tuple[int, bool]],
+    presence: list[tuple[int, float]],
+    intakes: list[int],
+    dispense: int,
+) -> tuple[Inputs, Any]:
+    """The same robot trace for the monitor and for the extractor (state active, ``colocated`` reports)."""
+    from tests.monitor.helpers import Inputs as MonitorInputs
+    from tests.monitor.helpers import evt, smp
+
+    shared = Inputs()
+    shared.events.append(robot_state(0, colocated=first))
+    shared.events.extend(robot_state(t, colocated=flag) for t, flag in reports)
+    shared.samples.extend(sample(SignalId.PRESENCE, t, value=v) for t, v in presence)
+    mon_in = MonitorInputs()
+    mon_in.events.append(evt("dispense", dispense, source="dispenser"))
+    mon_in.events.extend(replace(e, t_rx_ms=e.t_device_ms) for e in shared.events)
+    mon_in.events.extend(evt("intake", t, source="robot") for t in intakes)
+    mon_in.samples.extend(smp("presence", t, v) for t, v in presence)
+    shared.events.extend(event(EventKind.INTAKE, t, "robot") for t in intakes)
+    return shared, mon_in
+
+
+@settings(max_examples=150, deadline=None)
+@given(
+    first=st.booleans(),
+    flips=st.lists(
+        st.tuples(st.integers(6 * 60, 21 * 60 - 1), st.booleans()), max_size=4
+    ),
+    samples=st.lists(
+        st.tuples(st.integers(6 * 60, 21 * 60 - 1), st.sampled_from([0.0, 1.0])),
+        max_size=4,
+    ),
+    intake_minute=st.one_of(st.none(), st.integers(20 * 60 + 55, 21 * 60)),
+)
+def test_extractor_agrees_with_the_monitor_on_the_witness(
+    first: bool,
+    flips: list[tuple[int, bool]],
+    samples: list[tuple[int, float]],
+    intake_minute: int | None,
+) -> None:
+    """EX-9 invariants I1 to I4 for the pair (monitor verdict of INT, extractor witness fields).
+
+    Differences of WS05-T11 that the generator avoids: the first report is at 00:00 (H-INIT), and the robot state is
+    always ``active`` (the monitor reads only ``colocated``).
+    """
+    from tests.monitor.helpers import drive, final, make_monitor
+
+    registry = load_fixture_registry()
+    dispense = at(21, 0)
+    reports = sorted((m * 60_000, flag) for m, flag in flips)
+    presence = sorted((m * 60_000, value) for m, value in samples)
+    intakes = [] if intake_minute is None else [intake_minute * 60_000]
+    shared, mon_in = _agreement_scenario(first, reports, presence, intakes, dispense)
+    mon = make_monitor()
+    records = drive(mon, mon_in, 21 * 60 + 1)
+    verdict = final(records, f"int@{dispense}")
+    vec = feed(extractor(registry, INT_ROBOT), shared).evidence_for(
+        int_record(dispense)
+    )
+    present, intake = vec.witness.robot_present, vec.witness.intake_observed
+    marker = verdict.undecidable or ""
+    if verdict.state.value == "violated":
+        assert present is False and intake in (False, None)  # I1
+    if present is False and intake is False:
+        assert verdict.state.value == "violated"  # I2 (no auth sample in the trace)
+    if verdict.state.value == "pending" and "channel_unavailable" in marker:
+        assert present is not False and intake is not False  # I3
+    if verdict.state.value == "pending" and "value_undefined:presence" in marker:
+        assert present is not False  # I4
