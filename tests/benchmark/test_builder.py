@@ -41,6 +41,7 @@ from ralmon.benchmark.builder import (
     BenchmarkConfigError,
     BenchmarkReader,
     BuildContext,
+    ObservedViewError,
     PatientInjections,
     TruthUnavailableError,
     generate_benchmark,
@@ -49,7 +50,9 @@ from ralmon.benchmark.builder import (
     split_patients,
     verify_benchmark,
 )
-from ralmon.benchmark.inject_c1 import c1_spec
+from ralmon.benchmark.confounders import evaluate_pair
+from ralmon.benchmark.inject_c1 import C1_SUBTYPES, c1_spec
+from ralmon.benchmark.injection import registered_subtypes
 from ralmon.benchmark.latent import T_DAY_MS
 from ralmon.benchmark.latent_day import ForcedSlot
 from ralmon.benchmark.priors import (
@@ -60,8 +63,11 @@ from ralmon.benchmark.priors import (
 )
 from ralmon.benchmark.schedule import check_schedule_consistency, load_schedule
 from ralmon.benchmark.trace import (
+    InjectedClass,
     ManifestError,
+    TraceError,
     read_manifest,
+    write_manifest,
 )
 from ralmon.monitor import MonitorConfig, run_offline_detailed
 from ralmon.signals import Event, EventKind
@@ -907,36 +913,61 @@ def test_care_plan_schedule_consistent_with_registry_windows(
 # ---------------------------------------------------------------------------------------------------
 
 
+def _count_events(
+    reader: BenchmarkReader,
+    patients: Sequence[str],
+    *,
+    tail: bool = False,
+    closing: bool = False,
+) -> dict[str, int]:
+    counted: Counter[str] = Counter()
+    for patient in patients:
+        if closing:
+            events: Sequence[Any] = reader.closing_step_truth(patient)
+        elif tail:
+            tail_day = reader.tail_day(patient)
+            assert tail_day is not None
+            events = reader.truth(patient, tail_day).ground_truth
+        else:  # scored days only: the tail day is not counted
+            events = [
+                e
+                for d in reader.days(patient)
+                for e in reader.truth(patient, d).ground_truth
+            ]
+        for event in events:
+            counted[f"{event.cls.value}/{event.subtype}"] += 1
+    return dict(sorted(counted.items()))
+
+
 def test_event_counts_in_manifest_match_truth_files(
     small: tuple[Path, Any, Path],
 ) -> None:
+    """Headline counts are the virtual patients'; the twins are counted apart (never silently mixed)."""
     out, manifest, _ = small
     reader = open_benchmark(out)
-    counted: Counter[str] = Counter()
-    for patient in reader.patients:
-        for day in reader.days(
-            patient
-        ):  # scored days only: the tail day is not counted
-            for event in reader.truth(patient, day).ground_truth:
-                counted[f"{event.cls.value}/{event.subtype}"] += 1
-    assert dict(counted) == dict(manifest.event_counts)
+    virtual = reader.patient_ids(role="patient")
+    twins = reader.patient_ids(role="confounder_pair")
+    assert len(virtual) == 4 and len(twins) == 4
+    counted = _count_events(reader, virtual)
+    assert counted == dict(manifest.event_counts)
     assert sum(counted.values()) > 0
-    classes = {key.split("/")[0] for key in counted}
-    assert "C1" in classes  # natural and injected C1 events exist in the fixture build
-    tail: Counter[str] = Counter()
-    for patient in reader.patients:
-        tail_day = reader.tail_day(patient)
-        assert tail_day is not None
-        for event in reader.truth(patient, tail_day).ground_truth:
-            tail[f"{event.cls.value}/{event.subtype}"] += 1
-    assert dict(tail) == dict(manifest.settings["tail_event_counts"])
-    # the events the tail days decide at their first step: the closing-step truth of the last scored days
-    closing: Counter[str] = Counter()
-    for patient in reader.patients:
-        for event in reader.closing_step_truth(patient):
-            closing[f"{event.cls.value}/{event.subtype}"] += 1
-    assert dict(closing) == dict(manifest.settings["closing_step_event_counts"])
+    assert "C1" in {key.split("/")[0] for key in counted}
+    assert _count_events(reader, twins) == dict(manifest.settings["twin_event_counts"])
+    total: Counter[str] = Counter(manifest.event_counts)
+    total.update(manifest.settings["twin_event_counts"])
+    assert dict(sorted(total.items())) == dict(manifest.settings["total_event_counts"])
+    # the tail days, and the events they decide at their first step (the closing-step truth of the last scored days)
+    tail = _count_events(reader, virtual, tail=True)
+    assert tail == dict(manifest.settings["tail_event_counts"])
+    closing = _count_events(reader, virtual, closing=True)
+    assert closing == dict(manifest.settings["closing_step_event_counts"])
     assert sum(closing.values()) <= sum(tail.values())
+    assert _count_events(reader, twins, tail=True) == dict(
+        manifest.settings["twin_tail_event_counts"]
+    )
+    assert _count_events(reader, twins, closing=True) == dict(
+        manifest.settings["twin_closing_step_event_counts"]
+    )
 
 
 def test_pair_patients_share_base_and_split(small: tuple[Path, Any, Path]) -> None:
@@ -1184,7 +1215,13 @@ def test_manifest_marks_exactly_one_tail_day_per_patient(
     assert (
         total_days == 4 * 2 + 4 * 1
     )  # four patients of two days, four pair members of one
-    assert manifest.settings["n_patient_days"] == total_days
+    # headline day totals are the virtual patients' (4 x 2); the twin days are a separate field, the sum is explicit
+    assert manifest.settings["n_patient_days"] == 4 * 2
+    assert manifest.settings["n_twin_patient_days"] == 4 * 1
+    assert (
+        reader.n_patient_days() == 8 and reader.n_patient_days(role=None) == total_days
+    )
+    assert reader.n_patient_days(role="confounder_pair") == 4
     assert sum(len(reader.days(p)) for p in reader.patients) == total_days
 
 
@@ -1408,3 +1445,420 @@ def test_public_api_exports() -> None:
     assert not hasattr(benchmark.generate_benchmark, "__ralmon_stub_owner__")
     assert not hasattr(load_benchmark, "__ralmon_stub_owner__")
     assert callable(load_benchmark)
+
+
+# ---------------------------------------------------------------------------------------------------
+# 13. Review round 1: opaque twin ids, a strict verify, the observed-only view, counts, failures
+# ---------------------------------------------------------------------------------------------------
+
+MECHANISM_NAMES = sorted(
+    {
+        *C1_SUBTYPES,
+        *registered_subtypes(InjectedClass.C2),
+        *registered_subtypes(InjectedClass.C3),
+    }
+    | {
+        "double_take_vs_bounce",
+        "nonresponse_vs_falsified_dispense",
+        "refusal_vs_robot_missed",
+    }
+)
+ID_SHAPE = re.compile(r"p\d{4}")
+
+
+def test_twin_ids_carry_no_role_and_have_the_shape_of_a_virtual_id(
+    small: tuple[Path, Any, Path],
+) -> None:
+    """The label of a twin (A or B, a pair, a mechanism) lives in the manifest and the truth side only."""
+    out, manifest, _ = small
+    for patient, entry in manifest.patients.items():
+        assert ID_SHAPE.fullmatch(patient), patient  # twins and virtual patients alike
+        assert entry["care_plan_id"] == f"plan-{patient}"
+    banned = re.compile(r"pair|confounder|member|-A\b|-B\b|twin", re.IGNORECASE)
+    names = [p.name for p in (out / "days").rglob("*")]
+    names += [p.name for p in (out / "plans").rglob("*")]
+    for name in names:
+        assert banned.search(name) is None, name
+    for path in [
+        *sorted((out / "days").rglob("*.json")),
+        *sorted((out / "plans").glob("*.json")),
+    ]:
+        text = path.read_text(encoding="utf-8")
+        assert banned.search(text) is None, path
+        for mechanism in MECHANISM_NAMES:
+            assert f'"{mechanism}"' not in text, (path, mechanism)
+    # the only places that name the role: the manifest and the truth side
+    twin = next(
+        p for p, e in manifest.patients.items() if e["role"] == "confounder_pair"
+    )
+    assert manifest.patients[twin]["pair"].startswith("pair-")
+    assert manifest.patients[twin]["member"] in ("A", "B")
+
+
+def test_twin_ids_are_interleaved_and_the_assignment_is_drawn_from_the_seed(
+    tmp_path: Path,
+) -> None:
+    doc = config_document(tmp_path, n_patients=5, n_days=1, pairs=2, variants=None)
+    config = load_config(write_config(tmp_path, doc))
+    prior = LiteraturePriorSource(
+        Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True
+    )
+    context = BuildContext.create(config, prior, allow_fixture_only=True)
+    virtual, members = context.planned_ids()
+    assert len(virtual) == 5 and len(members) == 38  # 19 variants x 2 pairs
+    everything = [*virtual, *(i for pair in members for i in pair)]
+    assert len(set(everything)) == len(everything) and all(
+        ID_SHAPE.fullmatch(i) for i in everything
+    )
+    numbers = lambda ids: sorted(int(i[1:]) for i in ids)
+    twin_numbers = numbers(i for pair in members for i in pair)
+    assert (
+        numbers(virtual)[-1] > twin_numbers[0]
+    )  # a twin id is not recognisable by being larger
+    first_is_smaller = {int(a[1:]) < int(b[1:]) for a, b in members}
+    assert first_is_smaller == {
+        True,
+        False,
+    }  # member A is the lower id in some pairs and the higher in others
+    # a different seed assigns differently; the same seed assigns the same
+    other = BuildContext.create(
+        load_config(
+            write_config(tmp_path, set_row(doc, "generation_seed", GENERATION_SEED + 1))
+        ),
+        prior,
+        allow_fixture_only=True,
+    )
+    assert other.planned_ids() != context.planned_ids()
+    assert BuildContext.create(
+        config, prior, allow_fixture_only=True
+    ).planned_ids() == (virtual, members)
+
+
+def _copy_tree(source: Path, target: Path) -> Path:
+    for rel, data in files_of(source).items():
+        destination = target / rel
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
+    return target
+
+
+def _refresh_manifest(root: Path) -> None:
+    """Recompute the sha256 of the files the manifest lists (a tamperer who also fixes the manifest)."""
+    manifest = read_manifest(root)
+    files = {
+        rel: hashlib.sha256((root / rel).read_bytes()).hexdigest()
+        for rel in manifest.files
+    }
+    write_manifest(root, dataclasses.replace(manifest, files=files))
+
+
+def _tamper(root: Path, manifest: Any, mutate: Callable[[dict[str, Any]], None]) -> str:
+    patient = patients_with(manifest, "patient")[0]
+    relative = f"days/{patient}/0.json"
+    document = json.loads((root / relative).read_text(encoding="utf-8"))
+    mutate(document)
+    (root / relative).write_text(
+        json.dumps(document, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+    _refresh_manifest(root)
+    return relative
+
+
+def _with_payload(document: dict[str, Any]) -> dict[str, Any]:
+    return next(e for e in document["events"] if e["payload"])
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "unknown_top_key",
+        "unknown_payload_key",
+        "subtype_as_value",
+        "template_as_key",
+        "injected_flag",
+    ],
+)
+def test_verify_rejects_an_observed_file_with_the_injection_vocabulary(
+    small: tuple[Path, Any, Path], tmp_path: Path, case: str
+) -> None:
+    """The reviewer's mutants: the manifest hash is fixed after the edit, so only the content checks can catch it."""
+    out, manifest, _ = small
+    root = _copy_tree(out, tmp_path / case)
+    verify_benchmark(root)
+
+    def mutate(document: dict[str, Any]) -> None:
+        if case == "unknown_top_key":
+            document["injection_log"] = []
+        elif case == "unknown_payload_key":
+            _with_payload(document)["payload"]["record_index"] = 3
+        elif case == "subtype_as_value":
+            document["events"][0]["source"] = "cuff_detached"
+        elif case == "template_as_key":
+            _with_payload(document)["payload"]["resp"] = "x"
+        else:
+            document["samples"][0]["injected"] = True
+
+    relative = _tamper(root, manifest, mutate)
+    with pytest.raises(TraceError):
+        verify_benchmark(root)
+    result = run_cli("verify", root)
+    assert result.returncode == 1 and relative in result.stdout + result.stderr
+
+
+def test_verify_rejects_a_file_that_the_manifest_does_not_list(
+    small: tuple[Path, Any, Path], tmp_path: Path
+) -> None:
+    out, manifest, _ = small
+    root = _copy_tree(out, tmp_path / "stray")
+    patient = patients_with(manifest, "patient")[0]
+    stray = root / "days" / patient / "99.json"
+    stray.write_text('{"injected": true}\n', encoding="utf-8")
+    with pytest.raises(ManifestError, match="99.json"):
+        verify_benchmark(root)
+    assert run_cli("verify", root).returncode == 1
+    stray.unlink()
+    (root / "notes.txt").write_text("not part of the benchmark", encoding="utf-8")
+    with pytest.raises(ManifestError, match="notes.txt"):
+        verify_benchmark(root)
+
+
+def test_the_indistinguishable_flag_is_the_computed_one(tmp_path: Path) -> None:
+    """Pinned to ``evaluate_pair`` on a pair where it is False and one where it is True (not the same for both members only)."""
+    for variant_id, expected in (
+        ("nominal_content_robot", False),
+        ("stress_nocontent_norobot", True),
+    ):
+        sub = tmp_path / variant_id
+        sub.mkdir()
+        doc = config_document(
+            sub, pairs=1, variants=[variant_id], n_patients=1, n_days=1
+        )
+        config = load_config(write_config(sub, doc))
+        prior = LiteraturePriorSource(
+            Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True
+        )
+        context = BuildContext.create(config, prior, allow_fixture_only=True)
+        [(_pair_id, group, variant, ordinal)] = context.pair_units()
+        assert variant.variant_id == variant_id
+        ((first, second),) = context.build_pairs()
+        member = first if first.extra["member"] == "A" else second
+        base = context.pair_base(member.params, member.patient_index, ordinal)
+        computed = evaluate_pair(group, variant, base).indistinguishable_by_construction
+        assert computed is expected  # the fixture run has no arrival jitter
+        for built in (first, second):
+            flags = {
+                e["indistinguishable_by_construction"]
+                for e in built.days[0].truth.injection_log
+            }  # type: ignore[union-attr]
+            assert flags == {expected}, (variant_id, built.extra["member"])
+
+
+def test_the_observed_only_view_cannot_reach_generator_state(
+    small: tuple[Path, Any, Path], tmp_path: Path
+) -> None:
+    out, manifest, _ = small
+    full = open_benchmark(out)
+    with pytest.raises(BenchmarkConfigError):
+        open_benchmark(out, view="everything")  # type: ignore[arg-type]
+    reader = open_benchmark(out, view="observed")
+    patient = patients_with(manifest, "patient")[0]
+    assert reader.view == "observed" and full.view == "full"
+    # what it offers: observed days, care plans, the split, the day lists
+    day = reader.observed(patient, 0)
+    assert day == full.observed(patient, 0)
+    assert reader.care_plan(day.care_plan_id) == full.care_plan(day.care_plan_id)
+    assert reader.days(patient) == full.days(patient) and reader.tail_day(
+        patient
+    ) == full.tail_day(patient)
+    assert reader.patient_ids(split="test") == full.patient_ids(split="test")
+    assert dict(reader.patients[patient]) == {
+        "split": manifest.patients[patient]["split"],
+        "cohort": "main",
+    }
+    for twin in patients_with(manifest, "confounder_pair"):
+        assert set(reader.patients[twin]) == {
+            "split",
+            "cohort",
+        }  # no role, pair, member or mechanism
+    # what it refuses, by name
+    for call in (
+        lambda: reader.truth(patient, 0),
+        lambda: reader.benchmark_day(patient, 0),
+        lambda: reader.closing_step_truth(patient),
+        lambda: reader.baseline_sbp(patient, 0),
+        lambda: reader.manifest,
+        lambda: reader.root,
+        lambda: reader.patient_ids(role="patient"),
+        lambda: reader.patient_ids(role="confounder_pair"),
+        lambda: reader.n_patient_days(),
+    ):
+        with pytest.raises(ObservedViewError):
+            call()
+    assert issubclass(ObservedViewError, TraceError)
+    # an observed-only copy (no truth, no generator) works in that view; the full view refuses the generator sidecar too
+    copy_root = tmp_path / "observed_only"
+    for rel, data in files_of(out).items():
+        if rel.startswith(("truth/", "generator/")):
+            continue
+        target = copy_root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    assert open_benchmark(copy_root, view="observed").observed(patient, 0) == day
+    with pytest.raises(TruthUnavailableError):
+        open_benchmark(copy_root).baseline_sbp(patient, 0)
+    # even with the generator directory present, once the truth directory is gone the full view gives nothing
+    partial = tmp_path / "no_truth_dir"
+    for rel, data in files_of(out).items():
+        if rel.startswith("truth/"):
+            continue
+        target = partial / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    with pytest.raises(TruthUnavailableError):
+        open_benchmark(partial).baseline_sbp(patient, 0)
+
+
+def test_headline_counts_are_the_virtual_patients_and_the_twins_are_apart(
+    small: tuple[Path, Any, Path], tmp_path: Path
+) -> None:
+    out, manifest, _ = small
+    s = manifest.settings
+    assert (
+        s["n_patient_days"] == 8
+        and s["n_twin_patient_days"] == 4
+        and s["n_twin_patients"] == 4
+    )
+    assert s["n_patients"] == 4
+    result = run_cli("verify", out)
+    assert result.returncode == 0
+    config = write_config(
+        tmp_path, variants=["nominal_content_robot"], pairs=1, n_patients=2, n_days=2
+    )
+    built = run_cli(
+        "build",
+        "--config",
+        config,
+        "--out",
+        tmp_path / "counts",
+        "--allow-fixture-only",
+        "--git-rev",
+        GIT_REV,
+    )
+    assert built.returncode == 0, built.stderr
+    # 2 virtual patients x 2 days = 4 patient-days, the 2 twin days are a separate figure
+    assert "virtual patients 2, scored patient-days 4" in built.stdout
+    assert "twin patients 2, scored twin days 2" in built.stdout
+    assert "events on scored days of the virtual patients" in built.stdout
+    assert "events of the twins" in built.stdout
+
+
+def test_the_manifest_hashes_the_configuration_and_the_priors(
+    small: tuple[Path, Any, Path],
+) -> None:
+    _, manifest, tmp = small
+    hashes = manifest.settings["design_sha256"]
+    assert (
+        hashes["config"]
+        == hashlib.sha256((tmp / "config.yaml").read_bytes()).hexdigest()
+    )
+    for name, path in (
+        ("care_plans", CARE_PLANS),
+        ("generator_design", tmp / "generator_design.yaml"),
+        ("injections", tmp / "injections.yaml"),
+    ):
+        assert hashes[name] == hashlib.sha256(path.read_bytes()).hexdigest(), name
+    assert manifest.settings["prior_sha256"] == {
+        "main": hashlib.sha256((tmp / "prior.yaml").read_bytes()).hexdigest()
+    }
+
+
+def test_a_failed_build_removes_what_it_created_and_nothing_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    doc = config_document(tmp_path, pairs=0, variants=[], n_patients=3, n_days=1)
+    config = load_config(write_config(tmp_path, doc))
+    prior = LiteraturePriorSource(
+        Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True
+    )
+    original = BuildContext.build_patient
+    calls: list[int] = []
+
+    def failing(self: BuildContext, *args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("the build fails after the first patient was written")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(BuildContext, "build_patient", failing)
+    created = tmp_path / "created"
+    with pytest.raises(RuntimeError):
+        generate_benchmark(
+            config, prior, created, allow_fixture_only=True, git_rev=GIT_REV
+        )
+    assert not created.exists()  # the directory this build created is gone
+    calls.clear()
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(RuntimeError):
+        generate_benchmark(
+            config, prior, empty, allow_fixture_only=True, git_rev=GIT_REV
+        )
+    assert (
+        empty.is_dir() and list(empty.iterdir()) == []
+    )  # a pre-existing directory stays, emptied of what was written
+    busy = tmp_path / "busy"
+    busy.mkdir()
+    (busy / "keep.txt").write_text("mine", encoding="utf-8")
+    calls.clear()
+    with pytest.raises(BenchmarkConfigError):
+        generate_benchmark(
+            config, prior, busy, allow_fixture_only=True, git_rev=GIT_REV
+        )
+    assert (busy / "keep.txt").read_text(encoding="utf-8") == "mine" and len(
+        list(busy.iterdir())
+    ) == 1
+    # and the next build into the removed directory works
+    monkeypatch.setattr(BuildContext, "build_patient", original)
+    generate_benchmark(config, prior, created, allow_fixture_only=True, git_rev=GIT_REV)
+    verify_benchmark(created)
+
+
+def test_the_revision_is_dirty_for_tracked_changes_and_for_untracked_sources(
+    tmp_path: Path,
+) -> None:
+    from ralmon.benchmark.__main__ import git_revision
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+    git("init", "-q")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "one")
+    clean = git_revision(tmp_path)
+    assert re.fullmatch(r"[0-9a-f]{40}", clean)
+    (tmp_path / "scratch.txt").write_text("unrelated", encoding="utf-8")
+    assert (
+        git_revision(tmp_path) == clean
+    )  # an untracked file outside src and configs is not a generator change
+    (tmp_path / "src" / "b.py").write_text("y = 2\n", encoding="utf-8")
+    assert git_revision(tmp_path) == clean + "-dirty"  # an untracked source file is
+    (tmp_path / "src" / "b.py").unlink()
+    (tmp_path / "src" / "a.py").write_text("x = 2\n", encoding="utf-8")
+    assert git_revision(tmp_path) == clean + "-dirty"
+
+
+def test_the_split_rationale_states_targets_not_counts() -> None:
+    document = yaml.safe_load(DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    row = next(r for r in document["parameters"] if r["parameter"] == "split_fractions")
+    text = row["rationale"] + " " + row["note"]
+    assert "100, 50 and 50" not in text
+    assert (
+        "target" in text and "pair" in text
+    )  # the fractions are targets; pair units make the patient counts vary
