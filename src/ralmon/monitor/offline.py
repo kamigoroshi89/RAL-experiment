@@ -10,15 +10,28 @@ Keyword-only ``registry``, ``templates`` and ``verifier`` are part of the contra
 ``MonitorConfig`` carries only a registry version string, so without them the registry would have to be
 found by the function itself. When ``registry`` is ``None`` it is
 ``load_registry(step_ms=config.step_ms)`` (the real registry, never a fixture); when ``templates`` is
-``None`` it is ``load_templates(registry=registry)``. The contract (ADR-046, accepted) also has a keyword-only
-``history`` argument; WS05-T10 adds it. Until then a day starts with empty state, so a counter that depends
-on the previous day can only under-count (docs/formal/01 section 5.5, item 5).
+``None`` it is ``load_templates(registry=registry)``.
+
+The keyword-only ``history`` (ADR-046, accepted) holds the observed days of the same patient that precede
+``day``, in increasing order of day index, on the continuing axis (``day_index * T_day + clock time``).
+They are replayed first, from the first step of the first history day to the closing step of ``day``,
+with the same cadence, so the state that crosses midnight (the trailing 24 h dose counter, the held
+pressure and the measurement look-back, the instances whose window ends after the closing step of their
+day) carries into the day. The records of the steps before the first step of ``day`` are not returned
+(they were emitted by the run of the day that owns them), and neither is the day-end COUNT obligation
+that closes the previous day at that first step (docs/formal/01 section 5.5, item 1): it belongs to the
+run of its own day. A record of any other instance at the first step of ``day`` is returned, whatever
+the day of its anchor; the closing step of a day is also the first step of the next one, so a consumer
+that wants each instance decided once keys its records by ``(instance_key, t_eval_ms)``. With an empty
+``history`` the run starts with empty state, exactly as before: a counter over 24 h can only under-count
+(docs/formal/01 section 5.5, item 5), and nothing is dropped.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import islice
 from typing import Any
 
 from ralmon.monitor._text import MAX_TIME_MS, as_int, converting, show
@@ -45,6 +58,12 @@ from ralmon.spec import (
 )
 
 __all__ = ["OfflineResult", "run_offline", "run_offline_detailed"]
+
+# algorithmic: the most days a ``history`` may span before ``day`` (from its first day to ``day``). The
+# history needed is H = max(T_day, largest window parameter) (docs/formal/01 section 5.5, item 4), which
+# is one day for the registry; the cost of a run grows with the days replayed, so a caller that holds a
+# longer record of the patient passes only its last days
+MAX_HISTORY_DAYS: int = 14
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,20 +95,34 @@ def run_offline(
     registry: Any | None = None,
     templates: Any | None = None,
     verifier: PlanVerifier | None = None,
+    history: Sequence[ObservedTrace] = (),
 ) -> Sequence[VerdictRecord]:
-    """The measured verdicts of one patient-day: every record of every step ``0..K`` in step order.
+    """The measured verdicts of one patient-day: every record of every step of the day in step order.
+
+    The steps are ``day_index * K .. (day_index + 1) * K`` on the continuing axis of the patient (``K =
+    T_day / T_s``); with a ``history`` the earlier days are replayed first and their records are not
+    returned (module docstring). Raises ``MonitorInputError`` for a history of another patient, with a
+    day index not smaller than the one of ``day`` or not increasing, longer than ``MAX_HISTORY_DAYS``, or
+    with an item that is not an observed day.
 
     ``forecaster`` is typed as in the contract; ``calibrator`` is ``object | None`` where the contract says
     ``ConformalCalibrator | None``, because this package may import only ``ralmon.signals`` and
     ``ralmon.spec`` (the type returns with WS05-T08). Both are accepted and never called: the predictive
     mode is WS05-T08 (``config.predictive`` is refused until then), so any object is accepted and ignored.
-    ``registry``, ``templates`` and ``verifier`` are keyword-only additions, ahead of the contract
-    signature until ADR-047, ADR-048 and ADR-053 are accepted (see the module docstring). The late and
-    rejected inputs and the counters of the run are not reachable from here: use
+    ``registry``, ``templates``, ``verifier`` and ``history`` are the keyword-only arguments of the
+    contract (ADR-053, ADR-046; see the module docstring). The late and rejected inputs and the counters of the run are not reachable from here: use
     ``run_offline_detailed``.
     """
     return _run(
-        day, plan, config, calibrator, forecaster, registry, templates, verifier
+        day,
+        plan,
+        config,
+        calibrator,
+        forecaster,
+        registry,
+        templates,
+        verifier,
+        history,
     ).records
 
 
@@ -106,11 +139,20 @@ def run_offline_detailed(
     registry: Any | None = None,
     templates: Any | None = None,
     verifier: PlanVerifier | None = None,
+    history: Sequence[ObservedTrace] = (),
 ) -> OfflineResult:
     """``run_offline`` with the diagnostics of the run: the same records, plus the inputs that were not
     used and the counters of the monitor (``OfflineResult``). Same arguments, same errors."""
     return _run(
-        day, plan, config, calibrator, forecaster, registry, templates, verifier
+        day,
+        plan,
+        config,
+        calibrator,
+        forecaster,
+        registry,
+        templates,
+        verifier,
+        history,
     )
 
 
@@ -123,25 +165,28 @@ def _run(
     registry: Any | None,
     templates: Any | None,
     verifier: PlanVerifier | None,
+    history: Sequence[ObservedTrace],
 ) -> OfflineResult:
     cfg = check_config(config)
     if not isinstance(day, ObservedTrace):
         raise MonitorInputError(
             f"day must be an observed day (samples, events, ...), got {show(day)}"
         )
-    samples = _items(day.samples, Sample, "samples")
-    events = _items(day.events, Event, "events")
+    samples = _items(day.samples, Sample, "day.samples")
+    events = _items(day.events, Event, "day.events")
     k_day = T_DAY_MS // cfg.step_ms
-    first_step = (
-        as_int(
-            day.day_index,
-            "day_index",
-            MonitorInputError,
-            low=0,
-            high=MAX_TIME_MS // T_DAY_MS - 1,
-        )
-        * k_day
+    day_index = as_int(
+        day.day_index,
+        "day_index",
+        MonitorInputError,
+        low=0,
+        high=MAX_TIME_MS // T_DAY_MS - 1,
     )
+    earlier = _read_history(history, day, day_index)
+    first_step = day_index * k_day  # the first step of the day that is returned
+    run_from = (
+        earlier[0][0] if earlier else day_index
+    ) * k_day  # the first step that is run
     if registry is None:
         try:
             registry = load_registry(step_ms=cfg.step_ms)
@@ -164,17 +209,26 @@ def _run(
         forecaster=forecaster,
         verifier=verifier,
     )
-    monitor._start_at(first_step)  # the days of a patient lie on one continuing axis
+    monitor._start_at(run_from)  # the days of a patient lie on one continuing axis
     monitor.load(plan)
+    # the day-end obligation that closes the previous day sits at this day's first step: that day's own
+    # run decided it. Only a run that replays a history knows the previous day; without one it stays
+    # (the present behaviour of a day that follows another with no history)
+    closed_before = (
+        monitor._day_end_keys_closing_at(first_step) if earlier else frozenset()
+    )
     # inputs in the order of arrival; at one receive time samples come before events (a pressure with
     # the device time of a dispense is pre-dose, M5), then the order of the day
+    # the replayed days come first in the running index, which orders inputs received at one time
+    all_samples = [x for _d, ss, _es in earlier for x in ss] + samples
+    all_events = [x for _d, _ss, es in earlier for x in es] + events
     arrivals: list[tuple[int, int, int, Sample | Event]] = [
-        (x.t_rx_ms, 0, i, x) for i, x in enumerate(samples)
-    ] + [(x.t_rx_ms, 1, i, x) for i, x in enumerate(events)]
+        (x.t_rx_ms, 0, i, x) for i, x in enumerate(all_samples)
+    ] + [(x.t_rx_ms, 1, i, x) for i, x in enumerate(all_events)]
     arrivals.sort(key=lambda a: a[:3])
     records: list[VerdictRecord] = []
     pointer = 0
-    for k in range(first_step, first_step + k_day + 1):
+    for k in range(run_from, first_step + k_day + 1):
         t = k * cfg.step_ms + cfg.reorder_delay_ms
         while pointer < len(arrivals) and arrivals[pointer][0] <= t:
             item = arrivals[pointer][3]
@@ -183,7 +237,12 @@ def _run(
             else:
                 monitor.push_event(item)
             pointer += 1
-        records.extend(monitor.advance(t))
+        produced = monitor.advance(t)
+        if k < first_step:
+            continue  # emitted by the run of the day that owns the step
+        if k == first_step and closed_before:
+            produced = tuple(r for r in produced if r.instance_key not in closed_before)
+        records.extend(produced)
     monitor.close()
     return OfflineResult(
         tuple(records),
@@ -194,17 +253,78 @@ def _run(
 
 
 def _items(value: object, kind: type, what: str) -> list[Any]:
-    """The elements of ``day.samples`` or ``day.events`` as a list of ``kind`` with integer receive times."""
+    """The elements of ``samples`` or ``events`` of a day as a list of ``kind`` with integer receive times;
+    ``what`` names them in a message."""
     try:
         items: list[Any] = list(value)  # type: ignore[call-overload]
     except TypeError as exc:
         raise MonitorInputError(
-            f"day.{what} must be a sequence, got {show(value)}"
+            f"{what} must be a sequence, got {show(value)}"
         ) from exc
     for x in items:
         if not isinstance(x, kind):
             raise MonitorInputError(
-                f"day.{what} must hold {kind.__name__} objects, got {show(x)}"
+                f"{what} must hold {kind.__name__} objects, got {show(x)}"
             )
         as_int(getattr(x, "t_rx_ms", None), "t_rx_ms", MonitorInputError)
     return items
+
+
+def _read_history(
+    history: object, day: ObservedTrace, day_index: int
+) -> list[tuple[int, list[Sample], list[Event]]]:
+    """The validated earlier days as ``(day_index, samples, events)``, in order; ``[]`` for no history.
+
+    Read through a bounded iterator, so that an endless iterable cannot hang the call. Each item must be
+    an observed day of the patient of ``day`` with a day index larger than the previous item's and
+    smaller than ``day_index``, the whole history within ``MAX_HISTORY_DAYS`` days of ``day``.
+    """
+    try:
+        items = list(islice(iter(history), MAX_HISTORY_DAYS + 1))  # type: ignore[call-overload]
+    except TypeError as exc:
+        raise MonitorInputError(
+            f"history must be a sequence of observed days, got {show(history)}"
+        ) from exc
+    if len(items) > MAX_HISTORY_DAYS:
+        raise MonitorInputError(
+            f"history holds more than {MAX_HISTORY_DAYS} days, the most a run replays"
+        )
+    earlier: list[tuple[int, list[Sample], list[Event]]] = []
+    for n, item in enumerate(items):
+        if not isinstance(item, ObservedTrace):
+            raise MonitorInputError(
+                f"history[{n}] must be an observed day (samples, events, ...), got {show(item)}"
+            )
+        index = as_int(
+            item.day_index,
+            f"history[{n}].day_index",
+            MonitorInputError,
+            low=0,
+            high=MAX_TIME_MS // T_DAY_MS - 1,
+        )
+        if item.patient_id != day.patient_id:
+            raise MonitorInputError(
+                f"history[{n}] belongs to patient {show(item.patient_id)}, the day to "
+                f"{show(day.patient_id)}"
+            )
+        if index >= day_index:
+            raise MonitorInputError(
+                f"history[{n}].day_index {index} must be smaller than the day index {day_index}"
+            )
+        if earlier and index <= earlier[-1][0]:
+            raise MonitorInputError(
+                f"history day indices must increase, got {index} after {earlier[-1][0]}"
+            )
+        earlier.append(
+            (
+                index,
+                _items(item.samples, Sample, f"history[{n}].samples"),
+                _items(item.events, Event, f"history[{n}].events"),
+            )
+        )
+    if earlier and day_index - earlier[0][0] > MAX_HISTORY_DAYS:
+        raise MonitorInputError(
+            f"history starts {day_index - earlier[0][0]} days before the day, "
+            f"more than the {MAX_HISTORY_DAYS} a run replays"
+        )
+    return earlier

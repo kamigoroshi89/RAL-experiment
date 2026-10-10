@@ -266,11 +266,10 @@ def test_run_offline_signature() -> None:
         "forecaster",
     ]
     extra = {p.name: p for p in params[5:]}
-    assert set(extra) == {"registry", "templates", "verifier"}
-    assert all(
-        p.kind is inspect.Parameter.KEYWORD_ONLY and p.default is None
-        for p in extra.values()
-    )
+    assert set(extra) == {"registry", "templates", "verifier", "history"}
+    assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in extra.values())
+    assert all(p.default is None for n, p in extra.items() if n != "history")
+    assert extra["history"].default == ()  # ADR-046, WS05-T10
 
 
 def test_run_offline_with_the_real_defaults_loads_and_runs() -> None:

@@ -287,6 +287,6 @@ def test_python_floor_3_10_no_newer_syntax_or_modules() -> None:
 def test_docstrings_name_the_ahead_of_contract_additions() -> None:
     doc: Any = m.VerdictRecord.__doc__ or ""
     assert "ADR-048" in doc  # the extras are ahead of the contract until it is accepted
-    assert "ADR-047" in (m.run_offline.__doc__ or "") or "ADR-048" in (
-        m.run_offline.__doc__ or ""
-    )
+    # the keyword-only arguments are in the contract since ADR-053 and ADR-046 (WS05-T10)
+    assert "ADR-053" in (m.run_offline.__doc__ or "")
+    assert "ADR-046" in (m.run_offline.__doc__ or "")

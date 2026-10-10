@@ -113,3 +113,7 @@ The history input is in the contract (`#monitor` 0.2.0): WS05-T10 adds `history`
 ### ADR-054 decided (gab, 2026-10-09)
 
 Option (b) is chosen. The builder writes a robot `NODE_STATE` report per visit of `ObservedStream.visits`: `payload.colocated` true at the arrival and false at the departure (`payload.state` `active`; the payload key follows ADR-035). WS05-T11 turns the reports into the availability of both robot channels. Gate every INT-based number on `run_offline_detailed(...).stats.presence_samples_without_availability_marks == 0` (the correction above stands: `presence_level_older_than_window_steps` is information only).
+
+### Real signature of the monitor history input (worker of WS05-T10, 2026-10-10)
+
+`run_offline(day, plan, config, calibrator, forecaster, *, registry=None, templates=None, verifier=None, history=())` and `run_offline_detailed(...)` with the same arguments (`history: Sequence[ObservedDay] = ()`, typed in code as `Sequence[ObservedTrace]`). The builder passes the earlier days of the patient (continuing axis, increasing `day_index`, same `patient_id`, at most `MAX_HISTORY_DAYS` = 14 days before the day); the detectors of WS06 still run per day (the `Detector` contract has no history, ADR-046 status). The labeller signature is WS04-T15's.

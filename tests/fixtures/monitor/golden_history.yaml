@@ -1,0 +1,139 @@
+# Golden two-day cases of the history input of run_offline (WS05-T10, ADR-046, docs/formal/01 section 5.5).
+# Hand-computed; every value is arithmetic on the fixture registry F0 (FIXTURE-ONLY, no clinical meaning):
+#   dose_max_24h = 2 dose, dose_min_day_end = 2 dose, delta1 = 3600000 ms, delta2 = 10800000 ms,
+#   delta_resp = 10 mmHg, bound_bp_lower = 50 mmHg, bp_hold_threshold = 100 mmHg, hold_lookback = 3600000 ms.
+#   step_ms = 60000, reorder_delay_ms = 0, K = 1440, T_day = 86400000.
+# The two days are on the continuing axis of the patient (day_index * T_day + clock time, ADR-053 (h)):
+# day 0 is the history, day 1 is the day that is run, so its first step is 1440 (t = 86400000).
+# Times are integer ms; the label is in a comment.
+#
+# Format. A case has: days (day_index, samples, events as in the README format), plan (static
+# instances: sched and day_end anchors), run_day (the day that is run, the other days are its history), and
+# expected, a list of records the run of run_day must return for one instance key:
+#   key, t_eval_ms
+#   with_history     the record the run of run_day returns when the days before it are passed as history,
+#                    or null: no record of this key at all
+#   without_history  the same without history (optional; not asserted when absent)
+# A record gives state, sigma_interval (raw, native unit; -.inf and .inf are infinities), decided_at_ms,
+# pending_until_ms and guard_failed (null when none).
+cases:
+  - id: H-W6
+    source: "docs/formal/01-signals-sampling.md W6 (counter across midnight); ADR-046"
+    run_day: 1
+    plan: {sched: [], day_end: []}
+    days:
+      - day_index: 0
+        samples: []
+        events:
+          - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # day 0 21:00
+          - {kind: dispense, t_device_ms: 75720000, t_rx_ms: 75720000, source: dispenser, payload: {}, seq: null}   # day 0 21:02
+      - day_index: 1
+        samples: []
+        events:
+          - {kind: dispense, t_device_ms: 111600000, t_rx_ms: 111600000, source: dispenser, payload: {}, seq: null}   # day 1 07:00
+    expected:
+      - key: "count@111600000"
+        t_eval_ms: 111600000
+        with_history:
+          {state: violated, sigma_interval: [-1.0, -1.0], decided_at_ms: 111600000, pending_until_ms: 111600000, guard_failed: null}
+        without_history:
+          {state: satisfied, sigma_interval: [1.0, 1.0], decided_at_ms: 111600000, pending_until_ms: 111600000, guard_failed: null}
+    hand_calculation: "The window of the counter at t = 111600000 is (t - T_day, t] = (25200000, 111600000]. With the history it holds 75600000, 75720000 and 111600000: c_d = 3, dose_max_24h - c_d = 2 - 3 = -1 dose, VIOLATED (the point [-1, -1], B = 0 so decided at the anchor). Without it only 111600000 is visible: c_d = 1, 2 - 1 = +1, SATISFIED. The run of day 1 starts at step 1440, the history day is replayed from step 0, and no record before step 1440 is returned."
+
+  - id: H-W6-MORNING
+    source: "docs/formal/01-signals-sampling.md W6 with the day-0 07:00 dose; ADR-046"
+    run_day: 1
+    plan: {sched: [], day_end: []}
+    days:
+      - day_index: 0
+        samples: []
+        events:
+          - {kind: dispense, t_device_ms: 25200000, t_rx_ms: 25200000, source: dispenser, payload: {}, seq: null}   # day 0 07:00
+          - {kind: dispense, t_device_ms: 75600000, t_rx_ms: 75600000, source: dispenser, payload: {}, seq: null}   # day 0 21:00
+          - {kind: dispense, t_device_ms: 75720000, t_rx_ms: 75720000, source: dispenser, payload: {}, seq: null}   # day 0 21:02
+      - day_index: 1
+        samples: []
+        events:
+          - {kind: dispense, t_device_ms: 111600000, t_rx_ms: 111600000, source: dispenser, payload: {}, seq: null}   # day 1 07:00
+    expected:
+      - key: "count@111600000"
+        t_eval_ms: 111600000
+        with_history:
+          {state: violated, sigma_interval: [-1.0, -1.0], decided_at_ms: 111600000, pending_until_ms: 111600000, guard_failed: null}
+        without_history:
+          {state: satisfied, sigma_interval: [1.0, 1.0], decided_at_ms: 111600000, pending_until_ms: 111600000, guard_failed: null}
+    hand_calculation: "The day-0 07:00 dose, 25200000, is exactly 24 h before 111600000 and the window (25200000, 111600000] is open on the left, so it is not counted: c_d = 3 again (75600000, 75720000, 111600000). A closed window would give 4 (W6 of docs/formal/01 section 3.1)."
+
+  - id: H-RESP-MIDNIGHT
+    source: "docs/formal/05 section 7.5 item 2 and Lemma 12b; ADR-046 (a response window across midnight)"
+    run_day: 1
+    plan: {sched: [], day_end: []}
+    days:
+      - day_index: 0
+        samples:
+          - {signal: bp, t_device_ms: 78600000, t_rx_ms: 78600000, value: 150.0, seq: null, quality: null}   # 21:50 pre-dose pressure
+        events:
+          - {kind: dispense, t_device_ms: 79200000, t_rx_ms: 79200000, source: dispenser, payload: {}, seq: null}   # 22:00
+      - day_index: 1
+        samples: []
+        events: []
+    expected:
+      - key: "resp@79200000"
+        t_eval_ms: 86400000
+        with_history:
+          {state: pending, sigma_interval: [-.inf, 90.0], decided_at_ms: null, pending_until_ms: 90000000, guard_failed: null}
+        without_history: null
+      - key: "resp@79200000"
+        t_eval_ms: 90000000
+        with_history:
+          {state: violated, sigma_interval: [-.inf, -.inf], decided_at_ms: 90000000, pending_until_ms: 90000000, guard_failed: obligation_unmet}
+        without_history: null
+    hand_calculation: "The anchor is 79200000 (step 1320); delta1 = 3600000 (60 steps), delta2 = 10800000 (180 steps): the window is steps [1380, 1500] = [82800000, 90000000] ms and k_d = 1500, t_d = 90000000 = day 1 01:00. The pre-dose value is the held pressure 150. At the closing step of day 0 (1440, t = 86400000) no measurement is known: lo = -inf, hi = 150 - 50 - 10 = 90 >= 0 (a measurement of 50 mmHg could still arrive), so PENDING [-inf, 90]. With no measurement in the whole window the body is -inf at k_d: VIOLATED [-inf, -inf] at 90000000 (guard obligation_unmet), decided at the deadline. The run of day 1 alone has no such instance."
+
+  - id: H-HOLD-LOOKBACK
+    source: "docs/formal/01 section 5.5 (held pressure and measurement look-back across midnight); ADR-046"
+    run_day: 1
+    plan: {sched: [], day_end: []}
+    days:
+      - day_index: 0
+        samples:
+          - {signal: bp, t_device_ms: 85800000, t_rx_ms: 85800000, value: 120.0, seq: null, quality: null}   # 23:50
+        events:
+          - {kind: measurement, t_device_ms: 85800000, t_rx_ms: 85800000, source: cuff, payload: {}, seq: null}   # 23:50
+      - day_index: 1
+        samples: []
+        events:
+          - {kind: dispense, t_device_ms: 88200000, t_rx_ms: 88200000, source: dispenser, payload: {}, seq: null}   # day 1 00:30
+    expected:
+      - key: "hold@88200000"
+        t_eval_ms: 88200000
+        with_history:
+          {state: satisfied, sigma_interval: [20.0, 20.0], decided_at_ms: 88200000, pending_until_ms: 88200000, guard_failed: null}
+        without_history:
+          {state: violated, sigma_interval: [-.inf, -.inf], decided_at_ms: 88200000, pending_until_ms: 88200000, guard_failed: no_recent_measurement}
+      - key: "resp@88200000"
+        t_eval_ms: 88200000
+        with_history:
+          {state: pending, sigma_interval: [-.inf, 60.0], decided_at_ms: null, pending_until_ms: 99000000, guard_failed: null}
+    hand_calculation: "The dose at 88200000 is step 1470; hold_lookback = 3600000 (60 steps), so the measurement of step 1430 (85800000, 40 minutes earlier) is inside [1410, 1470]. The held pressure at 1470 is 120 (the sample of 23:50 is the latest), margin 120 - 100 = 20: SATISFIED [20, 20]. Without the history there is no measurement and no pressure: the guard no_recent_measurement fails, [-inf, -inf], VIOLATED. The pre-dose value of the RESP instance is the same held 120: hi = 120 - 50 - 10 = 60, lo = -inf (no measurement yet): PENDING [-inf, 60] until 88200000 + 10800000 = 99000000."
+
+  - id: H-DAYEND-ONCE
+    source: "docs/formal/01 section 5.5 item 1 (the closing step K of a day); ADR-046 (event ownership)"
+    run_day: 1
+    plan: {sched: [], day_end: [86400000, 172800000]}
+    days:
+      - day_index: 0
+        samples: []
+        events: []
+      - day_index: 1
+        samples: []
+        events: []
+    expected:
+      - key: "count@86400000"
+        t_eval_ms: 86400000
+        with_history: null
+      - key: "count@172800000"
+        t_eval_ms: 172800000
+        with_history:
+          {state: violated, sigma_interval: [-2.0, -2.0], decided_at_ms: 172800000, pending_until_ms: 172800000, guard_failed: null}
+    hand_calculation: "The day-end obligation of day 0 is anchored at its closing step, 86400000 = the first step of day 1. It is decided by the run of day 0 (no dose, c_today = 0, 0 - 2 = -2: VIOLATED [-2, -2]); the run of day 1 with history does not return it again. The obligation of day 1 is anchored at 172800000: no dose in day 1, again [-2, -2] VIOLATED at the closing step."
