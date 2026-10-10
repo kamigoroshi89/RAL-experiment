@@ -36,6 +36,7 @@ import json
 import math
 import re
 import sys
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -123,10 +124,12 @@ from ralmon.spec import (
     load_templates,
 )
 
+from . import reference_phi_cp as reference_module
 from .conftest import make_fixture_prior
 from .reference_phi_cp import Params as RefParams
 from .reference_phi_cp import Violation as RefViolation
 from .reference_phi_cp import evaluate as reference_evaluate
+from .reference_phi_cp import owned_by_day
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src" / "ralmon" / "benchmark"
@@ -1335,12 +1338,17 @@ def test_count_limit_is_explained_through_the_24_hour_window_of_the_counter() ->
     [event] = label([event_record], injections=[double_take_record(T(7, 2))])
     assert (event.subtype, event.injected) == ("double_take", True)
     # the window is (decision - 24 h, decision]: the surplus exactly 24 h before is out, 1 ms later is in
+    # (a minute before the closing step: a limit decided at the closing step belongs to the next day, ADR-064)
+    before_end = 2 * DAY - MIN
     at_end = violated(
-        "count", f"count@{DAY}#2", DAY, DAY
+        "count", f"count@{before_end}#2", before_end, before_end
     )  # the limit instance, not the day-end obligation
-    [event] = label([at_end], injections=[double_take_record(0)])
+    next_day = {"latent": make_latent(1, measurements=(T(12),)), "plan": make_plan(1)}
+    [event] = label([at_end], injections=[double_take_record(DAY - MIN)], **next_day)
     assert event.injected is False
-    [event] = label([at_end], injections=[double_take_record(1)])
+    [event] = label(
+        [at_end], injections=[double_take_record(DAY - MIN + 1)], **next_day
+    )
     assert event.injected is True
     # a surplus after the decision does not explain it
     [event] = label([event_record], injections=[double_take_record(T(21, 1))])
@@ -2334,11 +2342,12 @@ def c1_set(events: Sequence[GroundTruthEvent]) -> list[tuple[str | None, int]]:
 
 
 def monitor_violation_set(
-    records: Sequence[VerdictRecord], plan: CarePlan
+    records: Sequence[VerdictRecord], plan: CarePlan, *, day_end_ms: int | None = None
 ) -> list[tuple[str, int]]:
     """The (template, anchor) pairs of the VIOLATED phi_CP verdicts of a monitor run, deduplicated by
     instance key at the first VIOLATED record: written here, from the record fields only, with the
-    anchor conventions of the specification (not the labeller's code)."""
+    anchor conventions of the specification (not the labeller's code). With ``day_end_ms`` the records decided at
+    that instant are left out unless they are the day-end obligation (ownership of ADR-064, written here)."""
     cp = {"range", "sched", "hold", "count", "resp"}
     first: dict[str, VerdictRecord] = {}
     for r in records:
@@ -2358,6 +2367,8 @@ def monitor_violation_set(
     for key, r in first.items():
         name = r.template.value
         assert r.decided_at_ms is not None and r.pending_until_ms is not None
+        if r.decided_at_ms == day_end_ms and key not in day_end:
+            continue  # decided at the shared step: the next day's
         if name == "sched":
             anchor = sched_anchor[key]
             assert anchor is not None
@@ -2446,10 +2457,22 @@ def test_hand_computed_cases_label_as_computed_by_hand(
     )
     assert all(e.subtype == f"spontaneous_{e.template_id}" for e in truth)
     # the independent reference evaluator gives the same instances, anchors and deadlines
+    full = reference_set(case, day)
     reference = sorted(
-        (v.template, v.anchor_ms, v.end_ms) for v in reference_set(case, day)
+        (v.template, v.anchor_ms, v.end_ms)
+        for v in owned_by_day(full, **day_bounds(day))
     )
     assert reference == got
+    # the violations decided at the shared step are the next day's, at the clock times the case lists
+    next_day = sorted(
+        (v.template, v.anchor_ms, v.end_ms)
+        for v in owned_by_day(full, **day_bounds(day + 1))
+        if v.decided_at_ms == (day + 1) * DAY
+    )
+    assert next_day == sorted(
+        (e["template"], clock(e["onset"], day), clock(e["end"], day))
+        for e in case.get("expected_next_day", [])
+    )
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -2468,13 +2491,16 @@ def test_perfect_observation_equals_ground_truth_on_c1(
     # ticks: the observation is built from the case data, independently of the labeller
     observed = perfect_observation(case, day)
     records = run_monitor(observed, plan)
-    monitored = monitor_violation_set(records, plan)
+    monitored = monitor_violation_set(records, plan, day_end_ms=(day + 1) * DAY)
     assert monitored == c1_set(
         truth
     )  # as sets of (template, anchor), multiplicity included
     assert monitored == sorted(
         (t, clock(e["onset"], day)) for e in case["expected"] for t in [e["template"]]
     )
+    # what the monitor decides at the shared step is the next day's (ADR-064)
+    at_the_step = monitor_violation_set(records, plan) != monitored
+    assert at_the_step == bool(case.get("expected_next_day"))
     # and the ideal observation of the labeller is that same perfect observation
     ideal = ideal_observation(latent, PLAN_ID)
     assert [(s.signal, s.t_device_ms, s.value) for s in ideal.samples] == [
@@ -3424,18 +3450,22 @@ def test_labeller_takes_no_observed_day() -> None:
             "mode",
         ]
         # the whole list, so that no further parameter (a view of the observed day under another name) is added
-        assert list(sig.parameters) == [
-            "latent",
-            "plan",
-            "records",
-            "behaviour_log",
-            "run_fn",
-            "config",
-            "latency_bound_fn",
-            "mode",
-            "registry",
-            "templates",
-        ]
+        assert (
+            list(sig.parameters)
+            == [
+                "latent",
+                "plan",
+                "records",
+                "behaviour_log",
+                "run_fn",
+                "config",
+                "latency_bound_fn",
+                "mode",
+                "registry",
+                "templates",
+                "history",  # WS04-T15: the earlier days of the patient (latent days, records, logs)
+            ]
+        )
         for name, parameter in sig.parameters.items():
             text = f"{name} {parameter.annotation}".lower()
             assert "observed" not in text, (function.__name__, name)
@@ -4399,8 +4429,11 @@ def test_natural_double_take_needs_a_surplus_dispense_inside_the_counter_window(
     [event] = label([limit], behaviour=[entry])
     assert event.subtype == "spontaneous_count"
     # a surplus more than 24 h before the decision (here exactly 24 h) is out of the window
-    old = BehaviourEntry(-2 * MIN, 0, AdherenceState.DOUBLE_TAKE, (-2 * MIN, 0))
-    at_end = violated("count", f"count@{DAY}#2", DAY, DAY)
+    # (the decision is a minute before the closing step: a COUNT limit decided at the closing step belongs to the
+    # next day, ADR-064)
+    old = BehaviourEntry(-2 * MIN, 0, AdherenceState.DOUBLE_TAKE, (-2 * MIN, -MIN))
+    before_end = DAY - MIN
+    at_end = violated("count", f"count@{before_end}#2", before_end, before_end)
     [event] = label([at_end], behaviour=[old])
     assert event.subtype == "spontaneous_count"
     # an entry that is not a double take is not one, whatever its dispenses
@@ -4584,3 +4617,1076 @@ def test_real_monitor_refinement_records_give_one_event() -> None:
     assert [(e.template_id, e.end_ms) for e in events] == [("sched", clock("12:30"))]
     # every record of the real run carries pending_until_ms (OP-T05-17), RANGE and HOLD included
     assert all(r.pending_until_ms is not None for r in records)
+
+
+# ===================================================================================================
+# WS04-T15: multi-day labelling with history (ADR-046, ADR-055 (b), ADR-064)
+# ===================================================================================================
+#
+# A day is labelled with the earlier days of the patient as history: the 24 h counter after an evening
+# double take and the response windows that end after midnight are decided in the day that decides them,
+# whatever the day of their onset. Ownership (ADR-064): the truth of an event is the verdict of a run that
+# has all the data stamped up to and including the instant of decision; days are half-open, so a record
+# decided at the shared step of midnight belongs to the day that starts there; the day-end COUNT that closes
+# a day stays with that day; there is no tolerance parameter.
+
+
+def axis(text: str) -> int:
+    """``"<day> <HH:MM[:SS]>"`` on the continuing axis, in ms."""
+    day, _, rest = text.partition(" ")
+    parts = [int(x) for x in rest.split(":")]
+    hours, minutes, seconds = (parts + [0, 0])[:3]
+    return int(day) * DAY + ((hours * 60 + minutes) * 60 + seconds) * SEC
+
+
+def clock_s(text: str) -> int:
+    """``"HH:MM[:SS]"`` as a clock time of the day, in ms."""
+    return axis(f"0 {text}")
+
+
+def patient_plan(
+    n_days: int,
+    *,
+    sched: Sequence[int] = (),
+    count_end: bool | Sequence[int] = True,
+    patient: str = PATIENT,
+) -> CarePlan:
+    """A plan for the whole record of a patient: SCHED instances at the absolute times ``sched`` and the
+    day-end COUNT of the days ``count_end`` (``True``: every day of the record, ``False``: none)."""
+    days = range(n_days) if count_end is True else (count_end or ())
+    instances = [
+        TemplateInstance(TemplateId.SCHED, f"sched@{t}", {}, t) for t in sched
+    ] + [
+        TemplateInstance(TemplateId.COUNT, f"count@{(d + 1) * DAY}", {}, (d + 1) * DAY)
+        for d in days
+    ]
+    return CarePlan(
+        PLAN_ID,
+        "hypertension-fixture",
+        patient,
+        F0.version(),
+        tuple(instances),
+        (),
+        1,
+        None,
+    )
+
+
+def hday(
+    latent: LatentDay,
+    records: Sequence[InjectionRecord] = (),
+    behaviour: Sequence[BehaviourEntry] = (),
+) -> Any:
+    """One day of history: its latent day, its injection records and its behaviour log."""
+    return labelling.HistoryDay(latent, tuple(records), tuple(behaviour))
+
+
+def c1_triples(
+    events: Sequence[GroundTruthEvent],
+) -> list[tuple[str | None, int, int | None]]:
+    return sorted((e.template_id, e.onset_ms, e.end_ms) for e in events if e.cls is C1)  # type: ignore[type-var]
+
+
+def ref_triples(
+    violations: Sequence[RefViolation],
+) -> list[tuple[str, int, int | None]]:
+    return sorted((v.template, v.anchor_ms, v.end_ms) for v in violations)
+
+
+def day_bounds(day: int) -> dict[str, int]:
+    return {"day_start_ms": day * DAY, "day_end_ms": (day + 1) * DAY}
+
+
+def reference_run(
+    latents: Sequence[LatentDay], ticks: Sequence[int], *, count_end: bool = True
+) -> list[RefViolation]:
+    """The reference evaluator over one run through all the days (the full-run truth, before ownership)."""
+    grid = [s for lat in latents for s in lat.samples if s.signal == "bp"]
+    events = [e for lat in latents for e in lat.events]
+    meas = [e.t_device_ms for e in events if e.kind is EventKind.MEASUREMENT]
+    return reference_evaluate(
+        REF_PARAMS,
+        step_ms=MIN,
+        origin_ms=latents[0].day_index * DAY,
+        measurements=meas,
+        bp_samples=[(t, hold_value(grid, t)) for t in meas],
+        dispenses=[e.t_device_ms for e in events if e.kind is EventKind.DISPENSE],
+        sched_ticks=list(ticks),
+        count_end=count_end,
+        n_days=len(latents),
+    )
+
+
+# --- hand-computed patients of several days (the fixture file) ------------------------------------------
+
+
+def load_history_cases() -> list[dict[str, Any]]:
+    document = yaml.safe_load(CASES_PATH.read_text(encoding="utf-8"))
+    return list(document["history_cases"])
+
+
+HISTORY_CASES = load_history_cases()
+HISTORY_CASE_IDS = [c["id"] for c in HISTORY_CASES]
+
+
+def history_case_latents(case: Mapping[str, Any]) -> list[LatentDay]:
+    latents = []
+    for index, day in enumerate(case["days"]):
+        segments = [
+            (clock_s(a), clock_s(b), float(v)) for a, b, v in day["bp_segments"]
+        ]
+        default = float(day["bp_default"])
+
+        def bp(t: int, _s: Any = segments, _d: float = default) -> float:
+            for lo, hi, value in _s:
+                if lo <= t < hi:
+                    return value
+            return _d
+
+        latents.append(
+            make_latent(
+                index,
+                bp=bp,
+                measurements=[clock_s(x) for x in day["measurements"]],
+                dispenses=[clock_s(x) for x in day["dispenses"]],
+                ticks=[clock_s(x) for x in day["sched_ticks"]],
+            )
+        )
+    return latents
+
+
+def history_case_plan(case: Mapping[str, Any]) -> CarePlan:
+    sched = [
+        index * DAY + clock_s(x)
+        for index, day in enumerate(case["days"])
+        for x in day["sched_ticks"]
+    ]
+    ends = [index for index, day in enumerate(case["days"]) if day["count_end"]]
+    return patient_plan(len(case["days"]), sched=sched, count_end=ends)
+
+
+def history_case_triples(
+    events: Sequence[Mapping[str, Any]],
+) -> list[tuple[str, int, int | None]]:
+    return sorted(
+        (
+            e["template"],
+            axis(e["onset"]),
+            None if e["end"] is None else axis(e["end"]),
+        )
+        for e in events
+    )
+
+
+def has_count_end(case: Mapping[str, Any]) -> bool:
+    flags = {bool(day["count_end"]) for day in case["days"]}
+    assert len(flags) == 1  # the reference evaluator takes one flag for the whole run
+    return flags.pop()
+
+
+@pytest.mark.parametrize("case", HISTORY_CASES, ids=HISTORY_CASE_IDS)
+def test_hand_computed_history_cases_label_as_computed_by_hand(
+    case: Mapping[str, Any],
+) -> None:
+    latents, plan = history_case_latents(case), history_case_plan(case)
+    last = len(latents) - 1
+    history = [hday(x) for x in latents[:-1]]
+    truth = truth_of(latents[-1], plan, history=history)
+    assert c1_triples(truth) == history_case_triples(case["expected"]), case["why"]
+    assert all(e.cls is C1 and e.injected is False for e in truth)
+    assert all(e.subtype == f"spontaneous_{e.template_id}" for e in truth)
+    # the independent reference evaluator, over one run of all the days, with the ownership of ADR-064
+    ticks = [i.anchor_ms for i in plan.instances if i.template is TemplateId.SCHED]  # type: ignore[misc]
+    full = reference_run(latents, ticks, count_end=has_count_end(case))
+    assert ref_triples(owned_by_day(full, **day_bounds(last))) == c1_triples(truth)
+    # the same day with no history is the per-day truth of WS04-T10
+    per_day = truth_of(latents[-1], plan)
+    assert c1_triples(per_day) == history_case_triples(case["per_day"])
+
+
+@pytest.mark.parametrize("case", HISTORY_CASES, ids=HISTORY_CASE_IDS)
+def test_the_days_of_a_hand_case_partition_the_run(case: Mapping[str, Any]) -> None:
+    latents, plan = history_case_latents(case), history_case_plan(case)
+    ticks = [i.anchor_ms for i in plan.instances if i.template is TemplateId.SCHED]  # type: ignore[misc]
+    union: list[tuple[str | None, int, int | None]] = []
+    for day in range(len(latents)):
+        union += c1_triples(
+            truth_of(latents[day], plan, history=[hday(x) for x in latents[:day]])
+        )
+    full = reference_run(latents, ticks, count_end=has_count_end(case))
+    inside = owned_in_run(
+        full, n_days=len(latents)
+    )  # not what is decided at the final closing step
+    assert sorted(union) == ref_triples(inside)
+
+
+# --- 1: a day with history equals the events decided in that day of one run over all the days -----------
+
+PATIENT_DAYS = 3
+MULTI_SEEDS = tuple(range(20))
+
+
+def build_multi_day_patients(
+    root: Path, dose_hours: tuple[int, int]
+) -> dict[tuple[int, float], dict[str, Any]]:
+    """Forty seeded patients of three days (fixture prior, natural adherence, no injection), two doses a day."""
+    path = make_fixture_prior(root)
+    prior = LiteraturePriorSource(path, allow_fixture_only=True)
+    windows = (
+        REF_PARAMS.hold_lookback_ms,
+        REF_PARAMS.delta1_ms,
+        REF_PARAMS.delta2_ms,
+        REF_PARAMS.sched_window_ms,
+    )
+    schedule = derive_schedule(
+        (dose_hours[0] * HOUR, dose_hours[1] * HOUR), 6, *windows
+    )
+    adherence_params = prior.adherence()
+    out: dict[tuple[int, float], dict[str, Any]] = {}
+    for seed in MULTI_SEEDS:
+        for shift in SHIFTS:
+            patient = prior.sample_patient(np.random.default_rng(seed), seed)
+            patient = dataclasses.replace(
+                patient, baseline_sbp_mmhg=patient.baseline_sbp_mmhg + shift
+            )
+            adherence = AdherenceModel(
+                adherence_params,
+                AdherenceConfig(intake_lag_ms=LAG, double_take_gap_ms=2 * MIN),
+            )
+            results = assemble_latent_days(
+                patient,
+                schedule,
+                PATIENT_DAYS,
+                [],
+                OneCompartmentEmax(),
+                SEGMENTS,
+                seed,
+                seed,
+                config=assembly_config(adherence),
+            )
+            ticks = [
+                d * DAY + t
+                for d in range(PATIENT_DAYS)
+                for t in (*schedule.measurement_ticks_ms, T(3))
+            ]  # 03:00 of every day has no reading: a SCHED violation
+            out[(seed, shift)] = {
+                "results": results,
+                "latents": [r.latent for r in results],
+                "plan": patient_plan(
+                    PATIENT_DAYS, sched=ticks, patient=patient.patient_id
+                ),
+                "ticks": ticks,
+            }
+    return out
+
+
+# Two schedules, because each assertion needs the one that has enough of what it counts: doses at 08:00 and
+# 22:00 put many RESP windows across midnight (30 of the 50 events the per-day truth lacks), doses at 08:00 and
+# 20:00 put the COUNT consequences of an evening double take across it with a RESP window that never crosses
+# (20 COUNT of 22). Both are compared with the reference; the non-vacuity checks say which one they count on.
+SCHEDULES = {"22": (8, 22), "20": (8, 20)}
+
+
+@pytest.fixture(scope="module")
+def multi_day_patients(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[tuple[int, float], dict[str, Any]]:
+    return build_multi_day_patients(
+        tmp_path_factory.mktemp("fixture_prior_multi"), SCHEDULES["22"]
+    )
+
+
+@pytest.fixture(scope="module")
+def multi_day_patients_20(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[tuple[int, float], dict[str, Any]]:
+    return build_multi_day_patients(
+        tmp_path_factory.mktemp("fixture_prior_multi_20"), SCHEDULES["20"]
+    )
+
+
+def history_of(
+    run: Mapping[str, Any], day: int, *, last_only: bool = False
+) -> list[Any]:
+    results = run["results"][:day]
+    if last_only:
+        results = results[-1:]
+    return [hday(r.latent, r.c1_records, r.behaviour_log) for r in results]
+
+
+def labelled_with_history(
+    run: Mapping[str, Any], day: int, *, last_only: bool = False
+) -> tuple[GroundTruthEvent, ...]:
+    result = run["results"][day]
+    return truth_of(
+        result.latent,
+        run["plan"],
+        result.c1_records,
+        result.behaviour_log,
+        history=history_of(run, day, last_only=last_only),
+    )
+
+
+@pytest.mark.parametrize("shift", SHIFTS)
+@pytest.mark.parametrize("seed", MULTI_SEEDS)
+@pytest.mark.parametrize("schedule", sorted(SCHEDULES))
+def test_a_day_with_history_equals_the_full_run(
+    request: pytest.FixtureRequest, schedule: str, seed: int, shift: float
+) -> None:
+    patients = request.getfixturevalue(
+        "multi_day_patients" if schedule == "22" else "multi_day_patients_20"
+    )
+    run = patients[(seed, shift)]
+    full = reference_run(run["latents"], run["ticks"])
+    for day in (1, 2):
+        truth = labelled_with_history(run, day)
+        expected = ref_triples(owned_by_day(full, **day_bounds(day)))
+        assert c1_triples(truth) == expected, (schedule, seed, shift, day)
+        assert all(not e.injected for e in truth)  # natural adherence, no injection
+
+
+def test_the_full_run_comparison_is_not_vacuous(
+    multi_day_patients: dict[tuple[int, float], dict[str, Any]],
+) -> None:
+    crossing = 0
+    counts = 0
+    for run in multi_day_patients.values():
+        for day in (1, 2):
+            truth = labelled_with_history(run, day)
+            crossing += sum(1 for e in truth if e.onset_ms < day * DAY)
+            counts += sum(1 for e in truth if e.template_id == "count")
+    assert (
+        crossing >= 5
+    )  # events whose onset lies in the previous day (doses at 08:00 and 22:00)
+    assert counts >= 5
+
+
+def test_the_schedule_with_the_evening_double_take_is_not_vacuous_either(
+    multi_day_patients_20: dict[tuple[int, float], dict[str, Any]],
+) -> None:
+    # doses at 08:00 and 20:00: no RESP window crosses midnight, the COUNT events of a previous-day double
+    # take do: the COUNT events that the truth with history has and the per-day truth lacks (20 in 40 patients)
+    gained = 0
+    for run in multi_day_patients_20.values():
+        for day in (1, 2):
+            result = run["results"][day]
+            per_day = Counter(
+                tup(e)
+                for e in truth_of(
+                    result.latent, run["plan"], result.c1_records, result.behaviour_log
+                )
+            )
+            for e in labelled_with_history(run, day):
+                if per_day[tup(e)] > 0:
+                    per_day[tup(e)] -= 1
+                elif e.template_id == "count" and e.end_ms is None:
+                    gained += 1
+    assert gained >= 5
+
+
+# --- 2 and 3: the examples of the task ------------------------------------------------------------------
+
+
+def evening_double_take() -> tuple[LatentDay, LatentDay, CarePlan]:
+    day0 = make_latent(
+        0,
+        bp=lambda t: 118.0 if t >= T(22) else 130.0,
+        measurements=(T(20, 30), T(22, 30)),
+        dispenses=(T(21), T(21, 2)),
+    )
+    day1 = make_latent(
+        1,
+        bp=lambda t: 118.0 if T(8) <= t < T(12) else 130.0,
+        measurements=(T(6, 30), T(9)),
+        dispenses=(T(7),),
+    )
+    return day0, day1, patient_plan(2, count_end=False)
+
+
+def test_evening_double_take_gives_the_morning_count_event() -> None:
+    day0, day1, plan = evening_double_take()
+    morning = T(7, day=1)
+    # the forced double take (an injection record of day 0) explains the event of day 1
+    record = double_take_record(T(21, 2))
+    history = [hday(day0, [record])]
+    labelled = label_latent_day_detailed(
+        day1, plan, [], [], None, CFG, None, MODE_SCHEDULED,
+        registry=F0, templates=LIBRARY, history=history,
+    )  # fmt: skip
+    [event] = labelled.events
+    assert tup(event) == c1_event("double_take", "count", morning, None, injected=True)
+    # the link goes to the record of the history day, not to a record of this day
+    assert labelled.record_index == (None,)
+    assert labelled.history_record_index == ((0, 0),)
+    # a natural double take (the behaviour log of day 0) is labelled double_take, not injected
+    natural = BehaviourEntry(T(21), 0, AdherenceState.DOUBLE_TAKE, (T(21), T(21, 2)))
+    [event] = truth_of(day1, plan, history=[hday(day0, [], [natural])])
+    assert tup(event) == c1_event("double_take", "count", morning, None, injected=False)
+    # nothing in the history explains it: the natural subtype of an unexplained event
+    [event] = truth_of(day1, plan, history=[hday(day0)])
+    assert tup(event) == c1_event(
+        "spontaneous_count", "count", morning, None, injected=False
+    )
+    # the day alone has a trailing count of 1 and no event; day 0 has none either (2 doses: the limit, a tie)
+    assert truth_of(day1, plan) == ()
+    assert truth_of(day0, plan) == ()
+    # the event belongs to day 1: it is decided at 07:00 of day 1
+    [reference] = [
+        v
+        for v in reference_run([day0, day1], [])
+        if v.template == "count" and v.end_ms is None
+    ]
+    assert (reference.anchor_ms, reference.decided_at_ms) == (morning, morning)
+
+
+def unanswered_evening_dose() -> tuple[LatentDay, LatentDay, CarePlan]:
+    day0 = make_latent(0, measurements=(T(21, 30),), dispenses=(T(22),))
+    day1 = make_latent(1, measurements=(T(12),))
+    return day0, day1, patient_plan(2, count_end=False)
+
+
+def test_response_window_across_midnight_is_labelled_where_it_is_decided() -> None:
+    day0, day1, plan = unanswered_evening_dose()
+    # a dose at 22:00 on day 0 with no response: decided at 01:00 of day 1, an event of day 1
+    [event] = truth_of(day1, plan, history=[hday(day0)])
+    assert tup(event) == c1_event(
+        "spontaneous_resp", "resp", T(22), T(1, day=1), injected=False
+    )
+    # day 0 does not carry it (its window is open at the closing step), and neither does a day with no history
+    assert truth_of(day0, plan) == ()
+    assert truth_of(day1, plan) == ()
+    # an injected non-response of day 0 explains it through the intake of the dispense of day 0
+    record = nonresponse_record([T(22) + LAG], T(21, 30), T(23))
+    labelled = label_latent_day_detailed(
+        day1, plan, [], [], None, CFG, None, MODE_SCHEDULED,
+        registry=F0, templates=LIBRARY, history=[hday(day0, [record])],
+    )  # fmt: skip
+    [event] = labelled.events
+    assert tup(event) == c1_event(
+        "drug_nonresponse", "resp", T(22), T(1, day=1), injected=True
+    )
+    assert labelled.history_record_index == ((0, 0),)
+    # answered at 00:30 of day 1 by a drop of 12 (>= 10): satisfied, no event
+    answered = make_latent(
+        1,
+        bp=lambda t: 118.0 if t < T(2) else 130.0,
+        measurements=(T(0, 30), T(12)),
+    )
+    assert truth_of(answered, plan, history=[hday(day0)]) == ()
+
+
+# --- 4: a day without history is unchanged -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("day", DAYS)
+@pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
+def test_day_without_history_is_unchanged(case: Mapping[str, Any], day: int) -> None:
+    latent, plan = case_latent(case, day), case_plan(case, day)
+    present = truth_of(latent, plan)
+    assert truth_of(latent, plan, history=()) == present
+    assert truth_of(latent, plan, history=[]) == present
+    detailed = label_latent_day_detailed(
+        latent, plan, [], [], None, CFG, None, MODE_SCHEDULED,
+        registry=F0, templates=LIBRARY, history=(),
+    )  # fmt: skip
+    assert detailed.events == present
+    assert detailed.history_record_index == (None,) * len(present)
+
+
+def test_an_empty_history_is_not_passed_to_the_runner() -> None:
+    latent, plan = make_latent(measurements=(T(12),)), make_plan()
+    for history in ((), []):
+        stub = Stub()
+        label(run_fn=stub, latent=latent, plan=plan, history=history)
+        [call] = stub.calls
+        assert "history" not in call  # the runner is called exactly as before
+    day0, day1, plan2 = evening_double_take()
+    stub = Stub()
+    label(run_fn=stub, latent=day1, plan=plan2, history=[hday(day0)])
+    [call] = stub.calls
+    [replayed] = call["history"]
+    assert type(replayed) is ObservedDay and replayed.day_index == 0
+    assert replayed == ideal_observation(
+        day0,
+        PLAN_ID,
+        step_ms=MIN,
+        signals=("bp", "meas", "dispense", "sched_tick", "day_end"),
+    )
+
+
+# --- 5: the guard on the day-end COUNT of another day, with a history -----------------------------------
+
+
+def test_patient_level_plan_with_history() -> None:
+    # three days without any dose: every day-end COUNT is violated at its own closing step; the plan lists all
+    # of them; the day 1 labelled with history 0 holds its own (at 2 * DAY) and neither day 0's nor day 2's
+    days = [make_latent(d, measurements=(T(12),)) for d in range(3)]
+    plan = patient_plan(3)
+    [event] = truth_of(days[1], plan, history=[hday(days[0])])
+    assert tup(event) == c1_event(
+        "spontaneous_count", "count", 2 * DAY, 2 * DAY, injected=False
+    )
+    [event] = truth_of(days[0], plan)
+    assert (event.onset_ms, event.end_ms) == (DAY, DAY)
+    # a runner that does not suppress the previous day's obligation at the first step (a stub, the run with
+    # no history) returns it; the guard still skips it, and the day's own obligation stays
+    first = violated("count", f"count@{DAY}", DAY, DAY)
+    own = violated("count", f"count@{2 * DAY}", 2 * DAY, 2 * DAY)
+    later = violated("count", f"count@{3 * DAY}", 3 * DAY, 3 * DAY, t_eval=2 * DAY)
+    events = label(
+        [first, own, later],
+        latent=days[1],
+        plan=plan,
+        history=[hday(days[0])],
+    )
+    assert [(e.onset_ms, e.end_ms) for e in events] == [(2 * DAY, 2 * DAY)]
+
+
+# --- 6: the per-day truth is a subset of the history truth ----------------------------------------------
+
+
+def test_the_per_day_truth_is_a_subset_of_the_history_truth(
+    multi_day_patients: dict[tuple[int, float], dict[str, Any]],
+) -> None:
+    lost = 0
+    natural = 0
+    for run in multi_day_patients.values():
+        result = run["results"][1]
+        per_day = truth_of(
+            result.latent, run["plan"], result.c1_records, result.behaviour_log
+        )
+        with_history = labelled_with_history(run, 1)
+        have = {}
+        for e in with_history:
+            have[tup(e)] = have.get(tup(e), 0) + 1
+        for e in per_day:
+            assert have.get(tup(e), 0) >= 1, tup(
+                e
+            )  # every per-day event is in the history truth
+            have[tup(e)] -= 1
+        lost += len(with_history) - len(per_day)
+        natural += len(with_history)
+    assert lost > 0  # the per-day truth is a strict subset on these patients
+    assert natural > lost
+
+
+# --- 7: hostile history -------------------------------------------------------------------------------------
+
+
+def history_calls(history: Any) -> Any:
+    _day0, day1, plan = evening_double_take()
+    return label_latent_day(
+        day1, plan, [], [], Stub(), CFG, None, MODE_SCHEDULED,
+        registry=F0, templates=LIBRARY, history=history,
+    )  # fmt: skip
+
+
+def test_hostile_history_raises_only_named_errors() -> None:
+    day0, day1, plan = evening_double_take()
+    good = hday(day0, [double_take_record(T(21, 2))], [])
+    history_calls([good])  # the baseline succeeds
+    for junk in JUNK:
+        allowed(lambda j=junk: history_calls(j))
+        allowed(lambda j=junk: history_calls([j]))
+    # every field of a history day and of what it holds
+    for junk in _field_junk():
+        for f in dataclasses.fields(good):
+            allowed(
+                lambda f=f, j=junk: history_calls([clone_with(good, **{f.name: j})])
+            )
+        for f in dataclasses.fields(day0):
+            bad = clone_with(day0, **{f.name: junk})
+            allowed(lambda b=bad: history_calls([hday(b)]))
+        for f in dataclasses.fields(day0.samples[0]):
+            bad = clone_with(
+                day0,
+                samples=(
+                    clone_with(day0.samples[0], **{f.name: junk}),
+                    *day0.samples[1:],
+                ),
+            )
+            allowed(lambda b=bad: history_calls([hday(b)]))
+        for f in dataclasses.fields(day0.events[0]):
+            bad = clone_with(
+                day0,
+                events=(clone_with(day0.events[0], **{f.name: junk}), *day0.events[1:]),
+            )
+            allowed(lambda b=bad: history_calls([hday(b)]))
+        record = double_take_record(T(21, 2))
+        for f in dataclasses.fields(record):
+            allowed(
+                lambda f=f, j=junk, r=record: history_calls(
+                    [hday(day0, [clone_with(r, **{f.name: j})])]
+                )
+            )
+        entry = BehaviourEntry(T(21), 0, AdherenceState.DOUBLE_TAKE, (T(21), T(21, 2)))
+        for f in dataclasses.fields(entry):
+            allowed(
+                lambda f=f, j=junk, e=entry: history_calls(
+                    [hday(day0, [], [clone_with(e, **{f.name: j})])]
+                )
+            )
+    # the named mistakes are refused with a message, not silently accepted
+    other_patient = make_latent(0, patient="p-2", measurements=(T(12),))
+    same_day = make_latent(1, measurements=(T(12),))
+    later_day = make_latent(2, measurements=(T(12),))
+    cases: list[tuple[Any, str]] = [
+        (day0, "list or a tuple"),  # a latent day instead of a list of HistoryDay
+        ([day0], "HistoryDay"),
+        ([hday(other_patient)], "patient"),
+        ([hday(same_day)], "smaller"),
+        ([hday(later_day)], "smaller"),
+        ([hday(day0), hday(day0)], "increase"),
+        ("history", "list or a tuple"),
+        ({"a": hday(day0)}, "list or a tuple"),
+        (
+            [hday(make_latent(0, measurements=(T(12),)))]
+            * (labelling.MAX_HISTORY_DAYS + 1),
+            "more than",
+        ),
+    ]
+    for history, needle in cases:
+        with pytest.raises(LabellingError, match=needle):
+            history_calls(history)
+    # a history day cannot be an observed day (it would carry noise, faults, attacks) or an observed stream
+    with pytest.raises(LabellingError):
+        history_calls([hday(ideal_observation(day0, PLAN_ID))])
+    # history is keyword-only and optional
+    with pytest.raises(TypeError):
+        label_latent_day(  # type: ignore[call-arg, misc]
+            day1, plan, [], [], Stub(), CFG, None, MODE_SCHEDULED, [good]
+        )
+
+
+def test_the_history_keyword_is_in_every_entry_point_and_the_default_is_empty() -> None:
+    for function in (
+        label_latent_day,
+        label_latent_day_detailed,
+        assemble_benchmark_day,
+    ):
+        parameter = inspect.signature(function).parameters["history"]
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        assert parameter.default == ()
+    assert (
+        labelling.MAX_HISTORY_DAYS == 14
+    )  # the bound of run_offline (ralmon.monitor.offline)
+    from ralmon.monitor import offline
+
+    assert labelling.MAX_HISTORY_DAYS == offline.MAX_HISTORY_DAYS
+    assert "HistoryDay" in labelling.__all__
+    assert [f.name for f in dataclasses.fields(labelling.HistoryDay)] == [
+        "latent",
+        "records",
+        "behaviour_log",
+    ]
+
+
+def test_the_history_of_a_runner_with_a_history_day_of_another_patient_is_refused_before_the_run() -> (
+    None
+):
+    _day0, day1, plan = evening_double_take()
+    stub = Stub()
+    other = make_latent(0, patient="p-2", measurements=(T(12),))
+    with pytest.raises(LabellingError):
+        label(run_fn=stub, latent=day1, plan=plan, history=[hday(other)])
+    assert stub.calls == []
+
+
+# --- ownership at the shared step of midnight (ADR-064), tests 8 to 11 ------------------------------------
+
+
+def shared_step_patient(
+    reading: int | None,
+) -> tuple[LatentDay, LatentDay, CarePlan]:
+    """A dose at 21:00 of day 0 (reading 130 at 20:30), RESP window [22:00, 24:00]; day 1 holds a reading of
+    118 at the clock time ``reading`` (ms), or none."""
+    day0 = make_latent(0, measurements=(T(20, 30),), dispenses=(T(21),))
+    day1 = make_latent(
+        1,
+        bp=118.0,
+        measurements=() if reading is None else (reading,),
+    )
+    return day0, day1, patient_plan(2, count_end=False)
+
+
+def test_the_shared_midnight_step_belongs_to_the_day_that_starts_there() -> None:
+    # a reading stamped 24:00 (00:00 of day 1) is inside the closed window: satisfied, no event on either day
+    day0, day1, plan = shared_step_patient(0)
+    assert truth_of(day0, plan) == ()
+    assert truth_of(day1, plan, history=[hday(day0)]) == ()
+    # stamped 24:00:01 it is late: violated at the shared step, an event of day 1 and not of day 0
+    day0, late, plan = shared_step_patient(1 * SEC)
+    assert truth_of(day0, plan) == ()
+    [event] = truth_of(late, plan, history=[hday(day0)])
+    assert tup(event) == c1_event(
+        "spontaneous_resp", "resp", T(21), DAY, injected=False
+    )
+    # and it is the same with any later reading, or none at all in day 1
+    for reading in (MIN, 30 * MIN, T(12), None):
+        day0, later, plan = shared_step_patient(reading)
+        assert truth_of(day0, plan) == ()
+        [event] = truth_of(later, plan, history=[hday(day0)])
+        assert (event.template_id, event.onset_ms, event.end_ms) == ("resp", T(21), DAY)
+
+
+def test_a_record_decided_at_the_closing_step_is_discarded_from_the_closing_day() -> (
+    None
+):
+    day0, late, plan = shared_step_patient(1 * SEC)
+    # the run of day 0 alone does decide VIOLATED at the closing step ...
+    raw = run_offline(
+        ideal_observation(day0, PLAN_ID, step_ms=MIN),
+        plan,
+        CFG,
+        None,
+        None,
+        registry=F0,
+        templates=CP_TEMPLATES,
+    )
+    [decided] = [
+        r
+        for r in raw
+        if r.template is TemplateId.RESP and r.state is VerdictState.VIOLATED
+    ]
+    assert decided.decided_at_ms == DAY
+    # ... and the labelling of day 0 discards it; the run of day 1 with the history decides it again at its first step
+    assert [e for e in truth_of(day0, plan) if e.template_id == "resp"] == []
+    again = run_offline(
+        ideal_observation(late, PLAN_ID, step_ms=MIN),
+        plan,
+        CFG,
+        None,
+        None,
+        registry=F0,
+        templates=CP_TEMPLATES,
+        history=[ideal_observation(day0, PLAN_ID, step_ms=MIN)],
+    )
+    first = next(
+        r
+        for r in again
+        if r.template is TemplateId.RESP and r.state is VerdictState.VIOLATED
+    )
+    assert first.decided_at_ms == DAY == first.t_eval_ms
+    [event] = [e for e in truth_of(late, plan, history=[hday(day0)])]
+    assert (event.template_id, event.onset_ms, event.end_ms) == ("resp", T(21), DAY)
+    # the full run (reference) decides it at the shared step, so day 1 owns it
+    full = reference_run([day0, late], [], count_end=False)
+    [resp] = [v for v in full if v.template == "resp"]
+    assert resp.decided_at_ms == DAY
+    assert owned_by_day(full, **day_bounds(0)) == []
+    assert owned_by_day(full, **day_bounds(1)) == [resp]
+    # a SCHED deadline at the closing step goes the same way
+    tick = T(23, 30)
+    sched_day0 = make_latent(0, measurements=(T(12),), ticks=(tick,))
+    sched_plan = patient_plan(2, sched=[tick], count_end=False)
+    next_day = make_latent(1, measurements=(T(12),))
+    assert truth_of(sched_day0, sched_plan) == ()
+    [event] = truth_of(next_day, sched_plan, history=[hday(sched_day0)])
+    assert (event.template_id, event.onset_ms, event.end_ms) == ("sched", tick, DAY)
+
+
+def test_the_day_end_count_stays_with_the_day_it_closes() -> None:
+    # day 0: one dose and an omitted slot; day 1: two doses
+    omitted = BehaviourEntry(T(21), 0, AdherenceState.OMITTED, ())
+    day0 = make_latent(
+        0,
+        bp=lambda t: 118.0 if T(8) <= t < T(12) else 130.0,
+        measurements=(T(6, 30), T(9)),
+        dispenses=(T(7),),
+    )
+    day1 = make_latent(
+        1,
+        measurements=(T(6, 30), T(9), T(20, 30)),
+        dispenses=(T(7), T(21)),
+        bp=lambda t: 118.0 if T(8) <= t < T(12) or t >= T(22) else 130.0,
+    )
+    plan = patient_plan(2)
+    # the missing dose of day 0 is an event of day 0 ...
+    [event] = [
+        e for e in truth_of(day0, plan, [], [omitted]) if e.template_id == "count"
+    ]
+    assert tup(event) == c1_event("dose_omission", "count", DAY, DAY, injected=False)
+    # ... and not of day 1, as the monitor returns it: its run with history does not return the obligation
+    with_history = truth_of(day1, plan, [], [], history=[hday(day0, [], [omitted])])
+    assert [e for e in with_history if e.template_id == "count"] == []
+    records = run_offline(
+        ideal_observation(day1, PLAN_ID, step_ms=MIN),
+        plan,
+        CFG,
+        None,
+        None,
+        registry=F0,
+        templates=CP_TEMPLATES,
+        history=[ideal_observation(day0, PLAN_ID, step_ms=MIN)],
+    )
+    assert f"count@{DAY}" not in {r.instance_key for r in records}
+    # the exception is the day-end obligation only: a COUNT limit decided at the closing step goes to day 1
+    full = reference_run([day0, day1], [])
+    assert [
+        (v.template, v.decided_at_ms) for v in owned_by_day(full, **day_bounds(0))
+    ] == [("count", DAY)]
+    # a stub that returns the limit at the closing step: dropped from day 0, kept in day 1 at its first step
+    limit = violated("count", f"count@{DAY}#limit", DAY, DAY)
+    assert label([limit], latent=day0, plan=plan) == ()
+    [event] = label([limit], latent=day1, plan=plan, history=[hday(day0)])
+    assert (event.onset_ms, event.end_ms) == (DAY, None)
+
+
+@pytest.mark.parametrize("schedule", sorted(SCHEDULES))
+def test_the_truth_does_not_depend_on_where_the_days_are_cut(
+    request: pytest.FixtureRequest, schedule: str
+) -> None:
+    patients = request.getfixturevalue(
+        "multi_day_patients" if schedule == "22" else "multi_day_patients_20"
+    )
+    across_midnight = 0
+    for (seed, shift), run in patients.items():
+        full = reference_run(run["latents"], run["ticks"])
+        union: list[tuple[str | None, int, int | None]] = []
+        for day in range(PATIENT_DAYS):
+            events = c1_triples(labelled_with_history(run, day))
+            union += events
+            across_midnight += sum(1 for _t, onset, _e in events if onset < day * DAY)
+            # one day of history is enough with the registry of today (H = max(T_day, largest window))
+            assert events == c1_triples(
+                labelled_with_history(run, day, last_only=True)
+            ), (seed, shift, day)
+        # the three labellings, together, are the events of one run over the three days, each once. The
+        # final closing step is excluded explicitly: what the monitor decides there (except the day-end COUNT of
+        # the last day) belongs to a day that does not exist, so no labelling produces it (ground-truth.md,
+        # "The last day of a patient"); `owned_in_run` is the union of the days' ownership
+        whole = owned_in_run(full, n_days=PATIENT_DAYS)
+        assert sorted(union) == ref_triples(whole), (schedule, seed, shift)
+    assert across_midnight >= (5 if schedule == "22" else 1)
+
+
+def owned_in_run(
+    violations: Sequence[RefViolation], *, n_days: int, first_day: int = 0
+) -> list[RefViolation]:
+    """The violations of a run that some day of the run owns (ADR-064): all but those decided at the final
+    closing step, which no day owns (the day-end obligation of the last day excepted)."""
+    return reference_module.owned_in_run(  # type: ignore[attr-defined, no-any-return]
+        violations, first_day_start_ms=first_day * DAY, n_days=n_days
+    )
+
+
+def last_day_patient() -> tuple[LatentDay, LatentDay, CarePlan]:
+    """Day 1 is the last day: a dose at exactly 21:00 (its RESP deadline is 24:00) with no response, and a
+    SCHED tick at 23:30 with no reading until 24:00. Both are decided at the final closing step."""
+    day0 = make_latent(0, measurements=(T(12),))
+    day1 = make_latent(
+        1,
+        measurements=(T(20, 30),),
+        dispenses=(T(21),),
+        ticks=(T(23, 30),),
+    )
+    return day0, day1, patient_plan(2, sched=[T(23, 30, day=1)], count_end=False)
+
+
+def test_the_last_day_of_a_patient_has_no_owner_for_its_closing_step() -> None:
+    day0, day1, plan = last_day_patient()
+    ticks = [T(23, 30, day=1)]
+    # the monitor on the last day does decide both at the final closing step ...
+    records = run_offline(
+        ideal_observation(day1, PLAN_ID, step_ms=MIN),
+        plan,
+        CFG,
+        None,
+        None,
+        registry=F0,
+        templates=CP_TEMPLATES,
+        history=[ideal_observation(day0, PLAN_ID, step_ms=MIN)],
+    )
+    decided = {
+        r.template.value: r.decided_at_ms
+        for r in records
+        if r.state is VerdictState.VIOLATED
+    }
+    assert decided == {"resp": 2 * DAY, "sched": 2 * DAY}
+    # ... the reference agrees, and no day of the run owns them: the labelling of the last day is empty
+    full = reference_run([day0, day1], ticks, count_end=False)
+    assert sorted((v.template, v.decided_at_ms) for v in full) == [
+        ("resp", 2 * DAY),
+        ("sched", 2 * DAY),
+    ]
+    assert owned_in_run(full, n_days=2) == []
+    assert truth_of(day1, plan, history=[hday(day0)]) == ()
+    # one extra unscored TAIL day, labelled with the history, owns both (policy P1 of ground-truth.md)
+    tail = make_latent(2, measurements=(T(12),))
+    tail_plan = patient_plan(3, sched=ticks, count_end=False)
+    events = truth_of(tail, tail_plan, history=[hday(day0), hday(day1)])
+    assert c1_triples(events) == [
+        ("resp", T(21, day=1), 2 * DAY),
+        ("sched", T(23, 30, day=1), 2 * DAY),
+    ]
+    # and the day-end obligation of the last day stays with it (exception (c)), so it is not lost
+    ending = patient_plan(2, count_end=[1])
+    [event] = truth_of(
+        make_latent(1, measurements=(T(12),)), ending, history=[hday(day0)]
+    )
+    assert (event.template_id, event.onset_ms, event.end_ms) == (
+        "count",
+        2 * DAY,
+        2 * DAY,
+    )
+
+
+# --- the rules of ownership and of the history in the labeller, with a stub runner ------------------------
+
+
+def test_the_ownership_rules_with_a_stub_runner() -> None:
+    day = make_latent(1, measurements=(T(12), T(13)), dispenses=(T(7),))
+    plan = patient_plan(2)
+    prior = make_latent(0, measurements=(T(12),))
+    lo, hi = DAY, 2 * DAY
+    on_first_step = violated("range", "range@first", lo, None)
+    at_closing = [
+        violated("range", "range@closing", hi, None),
+        violated("hold", "hold@closing", hi, None),
+        violated("count", "count@closing-limit", hi, None),
+        violated("resp", "resp@closing", hi, hi),
+        violated("sched", f"sched@{hi - 30 * MIN}", hi, hi),
+    ]
+    day_end = violated("count", f"count@{hi}", hi, hi)
+    # (b) with or without history the records at the closing step are not this day's, except (c) the day-end COUNT
+    for history in ((), [hday(prior)]):
+        events = label(
+            [on_first_step, *at_closing, day_end],
+            latent=day,
+            plan=patient_plan(2, sched=[hi - 30 * MIN]),
+            history=history,
+        )
+        assert [(e.template_id, e.onset_ms) for e in events] == [
+            ("range", lo),
+            ("count", hi),
+        ]
+    # an instance decided before the first step but reported again at it (the refinement of a SCHED violation
+    # of the previous day) is the previous day's event and is not read as an error when there is a history
+    refined = violated(
+        "sched", f"sched@{lo - 15 * MIN}", lo - 5 * MIN, lo - 5 * MIN, t_eval=lo
+    )
+    sched_plan = patient_plan(2, sched=[lo - 15 * MIN])
+    assert label([refined], latent=day, plan=sched_plan, history=[hday(prior)]) == ()
+    # with no history the day cannot hold a decision before its first step
+    with pytest.raises(RunnerError):
+        label([refined], latent=day, plan=sched_plan)
+    # the onset of a windowed obligation may lie in the previous day (the dispense of 22:00 of day 0) ...
+    resp = violated("resp", f"resp@{T(22)}", lo + T(1), lo + T(1))
+    [event] = label([resp], latent=day, plan=plan, history=[hday(prior)])
+    assert (event.onset_ms, event.end_ms) == (T(22), lo + T(1))
+    # ... but not before the first day of the history, and not in a day without history
+    with pytest.raises(RunnerError):
+        label([resp], latent=day, plan=plan)
+    early = violated("resp", "resp@early", lo + T(1), lo + T(1) - 10 * DAY)
+    with pytest.raises(RunnerError):
+        label([early], latent=day, plan=plan, history=[hday(prior)])
+
+
+def test_a_history_record_explains_but_never_produces_an_event() -> None:
+    day0, day1, plan = evening_double_take()
+    c2 = other_record(C2, "ble_dropout", T(1), T(2))
+    c3 = other_record(C3, "replay", T(3), T(4))
+    own = other_record(C2, "ble_dropout", T(1, day=1), T(2, day=1))
+    events = truth_of(day1, plan, [own], [], history=[hday(day0, [c2, c3])])
+    assert [(e.cls, e.onset_ms) for e in events] == [
+        (C2, T(1, day=1)),
+        (C1, T(7, day=1)),
+    ]
+
+
+def test_assemble_benchmark_day_takes_the_history_and_keeps_its_own_sidecars() -> None:
+    day0, day1, plan = evening_double_take()
+    record = double_take_record(T(21, 2))
+    spike = spike_record(T(11, day=1), T(13, day=1))
+    observed = ideal_observation(day1, PLAN_ID)
+    assembled = assemble_benchmark_day(
+        observed,
+        day1,
+        plan,
+        [spike],
+        [],
+        None,
+        CFG,
+        None,
+        MODE_SCHEDULED,
+        registry=F0,
+        templates=LIBRARY,
+        history=[hday(day0, [record])],
+    )
+    assert isinstance(assembled, AssembledDay)
+    [event] = assembled.day.ground_truth
+    assert tup(event) == c1_event(
+        "double_take", "count", T(7, day=1), None, injected=True
+    )
+    assert assembled.truth.ground_truth == assembled.day.ground_truth
+    # the sidecar lists the records of this day only; the event is explained by a record of the history, which
+    # is in the sidecar of its own day, so no `truth_indices` of this day points at it
+    [entry] = assembled.truth.injection_log
+    assert entry["subtype"] == "hypertensive_spike" and entry["truth_indices"] == []
+    # no history: the day is assembled as before
+    plain = assemble_benchmark_day(
+        observed, day1, plan, [spike], [], None, CFG, None, MODE_SCHEDULED,
+        registry=F0, templates=LIBRARY,
+    )  # fmt: skip
+    assert plain.day.ground_truth == ()
+
+
+def test_the_document_states_the_ownership_and_the_residual_consequence() -> None:
+    sections = doc_sections()
+    conventions = sections["Onset and end conventions"]
+    for needle in (
+        "ADR-064",
+        "HistoryDay",
+        "history",
+        "half-open",
+        "shared step",
+        "day-end COUNT",
+        "no tolerance",
+        "decided",
+    ):
+        assert needle in conventions, needle
+    # the consequence for the comparison: a baseline run one day at a time, scored with the same ownership
+    assert "one day at a time" in conventions and "WS08" in conventions
+    assert "ADR-061" in conventions
+    for name in (
+        "test_a_day_with_history_equals_the_full_run",
+        "test_the_truth_does_not_depend_on_where_the_days_are_cut",
+        "test_hand_computed_history_cases_label_as_computed_by_hand",
+    ):
+        assert (
+            name in defined_test_names() and name in sections["Non-circularity tests"]
+        )
+    assert "Labelling with a history" in sections["Residual circularity"]
+
+
+def test_the_document_states_the_hole_of_the_last_day_and_the_two_open_policies() -> (
+    None
+):
+    conventions = doc_sections()["Onset and end conventions"]
+    assert "### The last day of a patient" in conventions
+    part = conventions.split("### The last day of a patient", 1)[1].split("\n### ", 1)[
+        0
+    ]
+    for needle in (
+        "76 of 200",
+        "final closing step",
+        "false positive",
+        "P1",
+        "P2",
+        "tail day",
+        "open",
+        "gab",
+        "must not",
+    ):
+        assert needle in part, needle
+    # the earlier, wrong statement that the hole was already covered is gone
+    assert "stated in `ground-truth.md`" not in conventions
+
+
+def test_adr_055_status_does_not_claim_the_per_day_truth_never_adds_an_event() -> None:
+    text = (ROOT / "docs" / "plan" / "03-decisions.md").read_text(encoding="utf-8")
+    line = next(
+        x for x in text.splitlines() if x.startswith("- **Status.** partly accepted")
+    )
+    assert "never adds a spurious one" not in line
+    assert "HC-06" in line

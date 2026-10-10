@@ -32,9 +32,18 @@ Conventions (``docs/benchmark/ground-truth.md`` section "Onset and end conventio
 * Instances still open at the end of the day (``k_d > K``: a RESP window or a SCHED deadline after the closing
   step) are decided early where the monitor's early-decision rule applies (RESP with a pre-dose value that no
   pressure of the physiological domain can answer) and are otherwise PENDING at trace end: they are not
-  violations (docs/formal/05 section 7.5 item 2). A day is labelled with empty history, as ``run_offline`` runs it
-  without ``history``: nothing is carried over from the day before (multi-day labelling with the history of
-  ADR-046 is WS04-T15).
+  violations (docs/formal/05 section 7.5 item 2).
+* Several days (WS04-T15, ADR-046, ADR-055 (b), ADR-064). A day is labelled with the earlier days of the patient as
+  ``history`` (``HistoryDay``: the latent day, its injection records and its behaviour log, in increasing order of
+  day index, the same patient); each history day gets its ideal observation and the monitor replays them first
+  (``run_offline(..., history=...)``), so the 24 h counter, the held pressure and the response windows that cross
+  midnight are decided in the day that decides them, with an onset that may lie in an earlier day. OWNERSHIP: the
+  truth of an event is the verdict of a run that has all the data stamped up to and including the instant of
+  decision; days are half-open (``[d * T_day, (d + 1) * T_day)``), so a record decided at the shared step of
+  midnight (the closing step of day d-1, which is the first step of day d) belongs to day d: the labelling of day
+  d-1 discards its records at its closing step and the labelling of day d keeps those decided at its first step,
+  whatever the anchor day. One exception: the day-end COUNT obligation that closes day d-1 stays with day d-1. There
+  is no tolerance parameter. With no history (or an empty one) the runner is called exactly as before.
 * Time is the continuing axis ``day_index * T_day + clock time`` (ADR-053 (h)); ``run_offline`` starts the
   monitor at the step ``day_index * K``.
 
@@ -57,6 +66,7 @@ hostile arguments; sizes are bounded by named constants.
 from __future__ import annotations
 
 import bisect
+import dataclasses
 import itertools
 import math
 import numbers
@@ -108,6 +118,7 @@ __all__ = [
     "INJECTION_LOG_BASE_KEYS",
     "INJECTION_LOG_LINK_KEYS",
     "LINK_TABLE",
+    "MAX_HISTORY_DAYS",
     "MODES",
     "MODE_DENSE",
     "MODE_SCHEDULED",
@@ -115,6 +126,7 @@ __all__ = [
     "SUBTYPE_DOSE_OMISSION",
     "SUBTYPE_DOUBLE_TAKE",
     "AssembledDay",
+    "HistoryDay",
     "IdealObservationError",
     "LabelledDay",
     "LabellingError",
@@ -190,6 +202,9 @@ MAX_INTAKES_PER_RECORD: Final[int] = (
 )
 MAX_DAY_INDEX: Final[int] = (
     36_500  # algorithmic: latest day index, about a century of days
+)
+MAX_HISTORY_DAYS: Final[int] = (
+    14  # algorithmic: the most days a run of the monitor replays (same value as offline.py)
 )
 MAX_TEXT: Final[int] = (
     4_096  # algorithmic: longest identifier or label read from a record
@@ -781,10 +796,13 @@ def _run(
     day: ObservedDay,
     plan: CarePlan,
     setup: _Setup,
+    history: tuple[ObservedDay, ...] = (),
 ) -> tuple[Any, ...]:
     runner = run_offline if run_fn is None else run_fn
     if not callable(runner):
         raise LabellingError(f"run_fn must be callable, got {_show(run_fn)}")
+    # the history is passed only when there is one: a runner that does not take it is called as before
+    extra: dict[str, Any] = {"history": history} if history else {}
     try:
         result = runner(
             day,
@@ -794,6 +812,7 @@ def _run(
             None,
             registry=setup.registry,
             templates=list(setup.templates),
+            **extra,
         )
     except MemoryError:
         raise
@@ -843,9 +862,20 @@ def _hold_lookback(setup: _Setup, plan: _Plan) -> int:
 
 
 def _violations(
-    records: tuple[Any, ...], latent: _Latent, plan: _Plan, setup: _Setup
+    records: tuple[Any, ...],
+    latent: _Latent,
+    plan: _Plan,
+    setup: _Setup,
+    floor: int | None = None,
 ) -> list[_Violation]:
+    """The violated instances that belong to this day (ownership of ADR-064, module docstring).
+
+    ``floor`` is the start of the earliest history day: with a history, an onset and a decision may lie before
+    the first step of the day (a record of an instance decided in the previous day, reported again by the
+    refinement, is that day's event and is skipped). Without one it is the start of the day.
+    """
     lo, hi = latent.day_start, latent.day_end
+    floor = lo if floor is None else floor
     cp = {t.id for t in setup.templates}
     first: dict[str, VerdictRecord] = {}
     template_of: dict[str, TemplateId] = {}
@@ -895,7 +925,7 @@ def _violations(
                 raise RunnerError(
                     f"a definitive record of {key!r} has no decided_at_ms"
                 )
-            if decided > t_eval or not lo <= decided <= hi:
+            if decided > t_eval or not floor <= decided <= hi:
                 raise RunnerError(
                     f"{key!r} is decided at {decided}, outside this day or after its evaluation"
                 )
@@ -917,12 +947,22 @@ def _violations(
                 )
     found: list[_Violation] = []
     for key, record in first.items():
-        found.append(_violation_of(record, key, plan, setup, latent))
+        decided_at = _int(record.decided_at_ms, "decided_at_ms", RunnerError)
+        if decided_at < lo:
+            continue  # decided in an earlier day: that day's event
+        if decided_at == hi and key not in plan.day_end_anchor:
+            continue  # ADR-064 (b): decided at the shared step, it belongs to the day that starts there
+        found.append(_violation_of(record, key, plan, setup, latent, floor))
     return found
 
 
 def _violation_of(
-    record: VerdictRecord, key: str, plan: _Plan, setup: _Setup, latent: _Latent
+    record: VerdictRecord,
+    key: str,
+    plan: _Plan,
+    setup: _Setup,
+    latent: _Latent,
+    floor: int,
 ) -> _Violation:
     template = record.template
     decided = _int(record.decided_at_ms, "decided_at_ms", RunnerError)
@@ -953,7 +993,7 @@ def _violation_of(
             raise RunnerError(
                 f"{key!r} has its deadline {end} before its anchor {onset}"
             )
-    if not latent.day_start <= onset <= latent.day_end:
+    if not floor <= onset <= latent.day_end:
         raise RunnerError(f"{key!r} is anchored at {onset}, outside this day")
     return _Violation(kind, template, key, onset, end, decided)
 
@@ -972,6 +1012,9 @@ class _C1Record:
     end: int | None
     group: str | None
     intakes: frozenset[int] | None
+    history: int | None = (
+        None  # the position of the history day that holds the record; None: this day's
+    )
 
 
 def _read_injections(
@@ -1043,8 +1086,8 @@ def _intake_times(record: InjectionRecord) -> frozenset[int]:
     )
 
 
-def _read_behaviour(behaviour_log: object, latent: _Latent) -> list[BehaviourEntry]:
-    """The entries of this day (entries of another day are not this day's slots)."""
+def _read_behaviour(behaviour_log: object, day_index: int) -> list[BehaviourEntry]:
+    """The entries of the day ``day_index`` (entries of another day are not its slots)."""
     items = _items(
         behaviour_log, "behaviour_log", MAX_BEHAVIOUR_ENTRIES, LabellingError
     )
@@ -1073,7 +1116,7 @@ def _read_behaviour(behaviour_log: object, latent: _Latent) -> list[BehaviourEnt
             raise LabellingError("an omitted slot cannot have a dispense")
         if entry.state is AdherenceState.DOUBLE_TAKE and len(dispenses) < 2:
             raise LabellingError("a double-take slot needs at least two dispenses")
-        if day == latent.day_index:
+        if day == day_index:
             today.append(entry)
     return today
 
@@ -1109,30 +1152,95 @@ class _Bound:
         return _int(bound, "a latency bound", LabellingError, 0)
 
 
+@dataclass(frozen=True, slots=True)
+class HistoryDay:
+    """One earlier day of the patient, given as history to the labelling of a later day (WS04-T15).
+
+    ``latent`` is the latent day, ``records`` the injection records of that day and ``behaviour_log`` its
+    adherence log. The monitor replays the ideal observation of the latent day before the day to label; the
+    records and the log can explain an event of the labelled day (a surplus dispense of the evening explains the
+    COUNT event of the morning) but they never produce one: the C2 and C3 events of a record belong to its own day.
+    """
+
+    latent: LatentDay
+    records: Sequence[InjectionRecord] = ()
+    behaviour_log: Sequence[BehaviourEntry] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _History:
+    """A validated history day: its position in the argument, its latent day, the C1 records and the slots."""
+
+    position: int
+    latent: _Latent
+    raw: LatentDay
+    c1: tuple[_C1Record, ...]
+    behaviour: tuple[BehaviourEntry, ...]
+    ideal: ObservedDay | None = None
+
+
+def _read_history(history: object, day: _Latent) -> list[_History]:
+    """The validated earlier days, in the order given (which must be increasing, below the day to label)."""
+    items = _items(history, "history", MAX_HISTORY_DAYS, LabellingError)
+    earlier: list[_History] = []
+    for position, item in enumerate(items):
+        if not isinstance(item, HistoryDay):
+            raise LabellingError(
+                f"history[{position}] must be a HistoryDay, got {_show(item)}"
+            )
+        latent = _read_latent(item.latent, LabellingError)
+        if latent.patient_id != day.patient_id:
+            raise LabellingError(
+                f"history[{position}] belongs to another patient than the day to label"
+            )
+        if latent.day_index >= day.day_index:
+            raise LabellingError(
+                f"history[{position}].latent.day_index {latent.day_index} must be smaller than "
+                f"the day index {day.day_index}"
+            )
+        if earlier and latent.day_index <= earlier[-1].latent.day_index:
+            raise LabellingError(
+                f"history day indices must increase, got {latent.day_index} after "
+                f"{earlier[-1].latent.day_index}"
+            )
+        _, c1 = _read_injections(item.records)
+        records = tuple(dataclasses.replace(r, history=position) for r in c1)
+        behaviour = _read_behaviour(item.behaviour_log, latent.day_index)
+        earlier.append(
+            _History(position, latent, item.latent, records, tuple(behaviour))
+        )
+    if earlier and day.day_index - earlier[0].latent.day_index > MAX_HISTORY_DAYS:
+        raise LabellingError(
+            f"history starts {day.day_index - earlier[0].latent.day_index} days before the day, "
+            f"more than the {MAX_HISTORY_DAYS} a run replays"
+        )
+    return earlier
+
+
 @dataclass(slots=True)
 class _Context:
     latent: _Latent
     day: ObservedDay
     step: int
     bound: _Bound
-    records: list[_C1Record]
-    behaviour: list[BehaviourEntry]
+    records: list[_C1Record]  # of this day and, with a history, of the earlier days
+    behaviour: list[BehaviourEntry]  # the slots of this day
+    behaviour_earlier: list[BehaviourEntry]  # the slots of the history days
     measurement_times: list[int]
     dispense_times: list[int]
     intake_of: dict[int, int]
     hold_lookback: Callable[[], int]  # read when a HOLD violation needs it
 
 
-def _context(
-    latent: _Latent,
-    raw_latent: LatentDay,
-    day: ObservedDay,
-    setup: _Setup,
-    bound: _Bound,
-    records: list[_C1Record],
-    behaviour: list[BehaviourEntry],
-    plan: _Plan,
-) -> _Context:
+def _ideal_of(item: _History) -> ObservedDay:
+    assert item.ideal is not None  # set by _label before the history is used
+    return item.ideal
+
+
+def _day_times(
+    day: ObservedDay, raw_latent: LatentDay
+) -> tuple[list[int], list[int], dict[int, int]]:
+    """The measurement times, the dispense times and the dispense-to-intake pairing of one day."""
     measurement_times = sorted(
         e.t_device_ms for e in day.events if e.kind is EventKind.MEASUREMENT
     )
@@ -1150,6 +1258,33 @@ def _context(
         intake_of = dict(zip(dispense_times, intake_times, strict=True))
     else:
         intake_of = {t: t for t in dispense_times}
+    return measurement_times, dispense_times, intake_of
+
+
+def _context(
+    latent: _Latent,
+    raw_latent: LatentDay,
+    day: ObservedDay,
+    setup: _Setup,
+    bound: _Bound,
+    records: list[_C1Record],
+    behaviour: list[BehaviourEntry],
+    plan: _Plan,
+    earlier: Sequence[_History] = (),
+) -> _Context:
+    measurement_times: list[int] = []
+    dispense_times: list[int] = []
+    intake_of: dict[int, int] = {}
+    # the earlier days first: an instance anchored in one of them is explained by its dispense and its reading
+    for item in (*earlier, None):
+        m, d, i = (
+            _day_times(_ideal_of(item), item.raw)
+            if item is not None
+            else _day_times(day, raw_latent)
+        )
+        measurement_times += m
+        dispense_times += d
+        intake_of.update(i)
     return _Context(
         latent,
         day,
@@ -1157,8 +1292,9 @@ def _context(
         bound,
         records,
         behaviour,
-        measurement_times,
-        dispense_times,
+        [e for item in earlier for e in item.behaviour],
+        sorted(measurement_times),
+        sorted(dispense_times),
         intake_of,
         lambda: _hold_lookback(setup, plan),
     )
@@ -1219,7 +1355,7 @@ def _explaining(violation: _Violation, ctx: _Context) -> _C1Record | None:
 
 def _natural_subtype(violation: _Violation, ctx: _Context) -> str:
     if violation.kind == _K_LIMIT:
-        for entry in ctx.behaviour:
+        for entry in (*ctx.behaviour_earlier, *ctx.behaviour):
             if entry.state is AdherenceState.DOUBLE_TAKE and any(
                 violation.decided - T_DAY_MS < t <= violation.decided
                 for t in entry.dispense_times_ms[1:]
@@ -1243,13 +1379,16 @@ class LabelledDay:
 
     ``events`` are sorted by ``(onset_ms, cls, subtype, end_ms)``; ``record_index[i]`` is the position in
     ``records`` of the injection record that explains the C1 event ``i`` or produced the C2 or C3 event ``i``
-    (``None`` for a C1 event that no record explains); ``n_verdict_records`` is the number of records the
-    runner returned.
+    (``None`` for a C1 event that no record explains, or that a record of a history day explains);
+    ``history_record_index[i]`` is ``(day, record)`` for an event that a record of a history day explains (the
+    position of the history day in ``history`` and of the record in its ``records``), else ``None``, and then
+    ``record_index[i]`` is ``None``; ``n_verdict_records`` is the number of records the runner returned.
     """
 
     events: tuple[GroundTruthEvent, ...]
     record_index: tuple[int | None, ...]
     n_verdict_records: int
+    history_record_index: tuple[tuple[int, int] | None, ...] = ()
 
 
 def label_latent_day_detailed(
@@ -1264,6 +1403,7 @@ def label_latent_day_detailed(
     *,
     registry: Any | None = None,
     templates: Sequence[Template] | None = None,
+    history: Sequence[HistoryDay] = (),
 ) -> LabelledDay:
     """``label_latent_day`` with the provenance of each event (see ``LabelledDay``)."""
     try:
@@ -1278,6 +1418,7 @@ def label_latent_day_detailed(
             mode,
             registry,
             templates,
+            history,
         )
     except LabellingError:
         raise
@@ -1299,6 +1440,7 @@ def label_latent_day(
     *,
     registry: Any | None = None,
     templates: Sequence[Template] | None = None,
+    history: Sequence[HistoryDay] = (),
 ) -> tuple[GroundTruthEvent, ...]:
     """The ground truth of a latent day: C1 from phi_CP on the latent trace, C2 and C3 from the records.
 
@@ -1308,7 +1450,12 @@ def label_latent_day(
     without calibrator and forecaster; a stub is accepted). ``config`` is the monitor configuration,
     ``latency_bound_fn`` the template latency bound (``None``: the one of the monitor), ``mode`` is
     ``scheduled`` or ``dense``. ``registry`` and ``templates`` default to the real registry and its template
-    library. There is no observed-day parameter. Raises only ``LabellingError`` and its subclasses.
+    library. There is no observed-day parameter. ``history`` holds the earlier days of the patient (``HistoryDay``,
+    in increasing order of day index, at most ``MAX_HISTORY_DAYS``): the monitor replays them first, so the
+    state that crosses midnight is carried into the day, and the events are those that belong to this day by the
+    ownership of ADR-064 (module docstring); an empty ``history`` is the labelling of a day on its own. The
+    injection records and the behaviour log of a history day may explain an event of this day; they never
+    produce one. Raises only ``LabellingError`` and its subclasses.
     """
     return label_latent_day_detailed(
         latent,
@@ -1321,6 +1468,7 @@ def label_latent_day(
         mode,
         registry=registry,
         templates=templates,
+        history=history,
     ).events
 
 
@@ -1335,36 +1483,70 @@ def _label(
     mode: Any,
     registry: Any,
     templates: Any,
+    history: Any = (),
 ) -> LabelledDay:
     day_latent = _read_latent(latent, LabellingError)
     read_plan = _read_plan(plan)
     if read_plan.patient_id != day_latent.patient_id:
         raise LabellingError("the plan is for another patient than the latent day")
     injections, c1_records = _read_injections(records)
-    behaviour = _read_behaviour(behaviour_log, day_latent)
+    behaviour = _read_behaviour(behaviour_log, day_latent.day_index)
+    read_history = _read_history(history, day_latent)
     setup = _setup(read_plan, config, registry, templates)
     signals = _check_supply(setup)
     assert isinstance(latent, LatentDay) and isinstance(plan, CarePlan)
+    wanted = sorted(signals)
+    # each history day gets the ideal observation of its latent day: the same view as the day to label
+    earlier = [
+        dataclasses.replace(
+            item,
+            ideal=ideal_observation(
+                item.raw,
+                read_plan.care_plan_id,
+                mode,
+                step_ms=setup.config.step_ms,
+                signals=wanted,
+            ),
+        )
+        for item in read_history
+    ]
     day = ideal_observation(
         latent,
         read_plan.care_plan_id,
         mode,
         step_ms=setup.config.step_ms,
-        signals=sorted(signals),
+        signals=wanted,
     )
-    verdicts = _run(run_fn, day, plan, setup)
-    violations = _violations(verdicts, day_latent, read_plan, setup)
+    verdicts = _run(
+        run_fn, day, plan, setup, tuple(_ideal_of(item) for item in earlier)
+    )
+    violations = _violations(
+        verdicts,
+        day_latent,
+        read_plan,
+        setup,
+        earlier[0].latent.day_start if earlier else None,
+    )
     bound = _Bound(latency_bound_fn, setup)
     ctx = _context(
-        day_latent, latent, day, setup, bound, c1_records, behaviour, read_plan
+        day_latent,
+        latent,
+        day,
+        setup,
+        bound,
+        [*(r for item in earlier for r in item.c1), *c1_records],
+        behaviour,
+        read_plan,
+        earlier,
     )
 
-    entries: list[tuple[GroundTruthEvent, int | None]] = []
+    entries: list[tuple[GroundTruthEvent, int | None, tuple[int, int] | None]] = []
     for violation in violations:
         record = _explaining(violation, ctx)
         subtype = (
             record.subtype if record is not None else _natural_subtype(violation, ctx)
         )
+        from_history = record is not None and record.history is not None
         entries.append(
             (
                 GroundTruthEvent(
@@ -1376,7 +1558,10 @@ def _label(
                     violation.template.value,
                     record.group if record is not None else None,
                 ),
-                record.index if record is not None else None,
+                record.index if record is not None and not from_history else None,
+                (record.history, record.index)
+                if record is not None and record.history is not None
+                else None,
             )
         )
     for index, injected in enumerate(injections):
@@ -1384,15 +1569,20 @@ def _label(
             continue  # the C1 truth is the latent trace's: record_to_ground_truth would say injected, no template
         truth = record_to_ground_truth(injected)
         if truth is not None:
-            entries.append((truth, index))
+            entries.append((truth, index, None))
     entries.sort(key=_order)
     return LabelledDay(
-        tuple(e for e, _ in entries), tuple(i for _, i in entries), len(verdicts)
+        tuple(e for e, _, _ in entries),
+        tuple(i for _, i, _ in entries),
+        len(verdicts),
+        tuple(h for _, _, h in entries),
     )
 
 
-def _order(entry: tuple[GroundTruthEvent, int | None]) -> tuple[Any, ...]:
-    event, index = entry
+def _order(
+    entry: tuple[GroundTruthEvent, int | None, tuple[int, int] | None],
+) -> tuple[Any, ...]:
+    event, index, link = entry
     return (
         event.onset_ms,
         event.cls.value,
@@ -1403,6 +1593,7 @@ def _order(entry: tuple[GroundTruthEvent, int | None]) -> tuple[Any, ...]:
         event.injected,
         event.confounder_group or "",
         -1 if index is None else index,
+        (-1, -1) if link is None else link,
     )
 
 
@@ -1435,6 +1626,7 @@ def assemble_benchmark_day(
     *,
     registry: Any | None = None,
     templates: Sequence[Template] | None = None,
+    history: Sequence[HistoryDay] = (),
 ) -> AssembledDay:
     """The ``BenchmarkDay`` of an observed day and its latent day, with the truth and the sidecars.
 
@@ -1442,7 +1634,10 @@ def assemble_benchmark_day(
     ``ObservedDay`` of the same patient, day, seed and care plan (an ``ObservedStream`` carries the latent
     pressure of every reading and is refused). ``truth.injection_log`` has one entry per record, in the order
     of ``records``, with the keys ``INJECTION_LOG_BASE_KEYS`` and ``INJECTION_LOG_LINK_KEYS``;
-    ``truth.behaviour_log`` is the list of the entries as JSON.
+    ``truth.behaviour_log`` is the list of the entries as JSON. ``history`` is passed to the labelling of the day
+    (``label_latent_day``): it holds the earlier days of the patient and changes the truth, not the observed day or
+    the sidecars, which list the records of this day only; an event that a record of a history day explains is
+    ``injected`` and is in no ``truth_indices`` of this day (its record is in the sidecar of its own day).
     """
     try:
         return _assemble(
@@ -1457,6 +1652,7 @@ def assemble_benchmark_day(
             mode,
             registry,
             templates,
+            history,
         )
     except LabellingError:
         raise
@@ -1480,6 +1676,7 @@ def _assemble(
     mode: Any,
     registry: Any,
     templates: Any,
+    history: Any = (),
 ) -> AssembledDay:
     if not isinstance(observed, ObservedDay):
         raise LabellingError(
@@ -1515,6 +1712,7 @@ def _assemble(
         mode,
         registry=registry,
         templates=templates,
+        history=history,
     )
     items, _ = _read_injections(records)
     log = injection_log(list(items))

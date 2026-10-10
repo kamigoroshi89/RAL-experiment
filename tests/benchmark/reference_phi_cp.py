@@ -40,6 +40,16 @@ dispenses of the day count the steps ``1 .. K``.
   ``[k_a + delta1, k_d]`` decide: none is a failed guard (violated), and with ``pre`` undefined and some
   measurement the instance stays undecided; else ``max(pre - bp_j) - delta_resp < 0`` is a violation.
 
+Several days (WS04-T15). ``evaluate(..., n_days=N)`` evaluates one run over ``N`` consecutive days from ``origin_ms``
+(the continuing axis): the run has ``N * K`` steps, ``dose_count`` still looks back one day (``K`` steps), every day
+closing in the run carries the day-end obligation when ``count_end`` is set, and an instance is open at the end
+of the run (not a violation) when its decision step lies after the last step of the LAST day. This is the
+semantics of one run of the monitor over the whole record of a patient; ``owned_by_day`` then says which of the
+violations belong to one day under the ownership rule of ADR-064: a violation belongs to the day in which it is
+decided, days being half-open (``[d * T_day, (d + 1) * T_day)``), so one decided at the shared step of midnight
+belongs to the day that starts there; the day-end obligation that closes day ``d`` is the exception and stays
+with day ``d``.
+
 What it returns for a violated instance is ``Violation(template, anchor_ms, end_ms, decided_at_ms)``:
 the anchor of the labeller's convention (the decision instant for RANGE, HOLD and COUNT limit; the tick for
 SCHED; the dispense step for RESP; the closing step for the day-end count) and ``end_ms`` the deadline for
@@ -118,18 +128,22 @@ def evaluate(
     dispenses: Sequence[int],
     sched_ticks: Sequence[int],
     count_end: bool,
+    n_days: int = 1,
 ) -> list[Violation]:
-    """The violated instances of the five templates for one day (module docstring).
+    """The violated instances of the five templates for ``n_days`` consecutive days (module docstring).
 
-    ``origin_ms`` is the start of the day on the continuing axis (``day_index * T_day``); the day lasts
-    ``K = T_day / step_ms`` steps. ``measurements`` are the device times of the MEASUREMENT events,
+    ``origin_ms`` is the start of the first day on the continuing axis (``day_index * T_day``); each day lasts
+    ``K = T_day / step_ms`` steps and the run has ``n_days * K``. ``measurements`` are the device times of the MEASUREMENT events,
     ``bp_samples`` the ``(device time, value)`` pairs of the ``bp`` signal, ``dispenses`` the device times of
     the DISPENSE events, ``sched_ticks`` the anchors of the SCHED instances of the plan and ``count_end``
-    whether the plan carries the day-end obligation.
+    whether the plan carries the day-end obligation (of every day of the run).
     """
     if DAY_MS % step_ms != 0:
         raise ValueError("the step must divide the day")
-    k_end = DAY_MS // step_ms
+    if n_days < 1:
+        raise ValueError("a run has at least one day")
+    k_day = DAY_MS // step_ms
+    k_end = n_days * k_day  # the last step of the run
 
     def step_of(t: int) -> int:
         return _ceil_div(t - origin_ms, step_ms)
@@ -156,7 +170,7 @@ def evaluate(
     disp_steps = [step_of(t) for t in disp]
 
     def dose_count(k: int) -> int:
-        return sum(1 for s in disp_steps if k - k_end < s <= k)
+        return sum(1 for s in disp_steps if k - k_day < s <= k)
 
     def meas_between(lo: int, hi: int) -> list[int]:
         return [m for m in meas_steps if lo <= m <= hi]
@@ -186,9 +200,11 @@ def evaluate(
 
     # --- COUNT day end --------------------------------------------------------------------------
     if count_end:
-        today = sum(1 for s in disp_steps if 1 <= s <= k_end)
-        if today - params.dose_min_day_end < 0:
-            found.append(Violation("count", at(k_end), at(k_end), at(k_end)))
+        for day in range(n_days):
+            closing = (day + 1) * k_day
+            today = sum(1 for s in disp_steps if day * k_day < s <= closing)
+            if today - params.dose_min_day_end < 0:
+                found.append(Violation("count", at(closing), at(closing), at(closing)))
 
     # --- SCHED ----------------------------------------------------------------------------------
     window = params.sched_window_ms // step_ms
@@ -225,3 +241,42 @@ def evaluate(
             found.append(Violation("resp", at(k_a), at(k_d), at(k_d)))
 
     return sorted(found)
+
+
+def owned_by_day(
+    violations: Sequence[Violation], *, day_start_ms: int, day_end_ms: int
+) -> list[Violation]:
+    """The violations that belong to the day ``[day_start_ms, day_end_ms)`` (ADR-064).
+
+    A violation belongs to the day in which it is decided; days are half-open, so a violation decided at the
+    shared step of midnight belongs to the day that starts there. The day-end obligation (a ``count`` violation
+    with a deadline) that closes the day is decided at ``day_end_ms`` and stays with the day it closes.
+    """
+    owned = []
+    for v in violations:
+        day_end = v.template == "count" and v.end_ms is not None
+        if day_end:
+            if v.decided_at_ms == day_end_ms:
+                owned.append(v)
+        elif day_start_ms <= v.decided_at_ms < day_end_ms:
+            owned.append(v)
+    return sorted(owned)
+
+
+def owned_in_run(
+    violations: Sequence[Violation], *, first_day_start_ms: int, n_days: int
+) -> list[Violation]:
+    """The violations of a run of ``n_days`` days that some day of the run owns (ADR-064).
+
+    It is the union of ``owned_by_day`` over the days of the run, so a violation decided at the FINAL closing step
+    (the end of the last day) is not in it, whatever its template, except the day-end obligation of the last day:
+    the day after the run does not exist, so nothing labels it.
+    """
+    owned: list[Violation] = []
+    for day in range(n_days):
+        owned += owned_by_day(
+            violations,
+            day_start_ms=first_day_start_ms + day * DAY_MS,
+            day_end_ms=first_day_start_ms + (day + 1) * DAY_MS,
+        )
+    return sorted(owned)
