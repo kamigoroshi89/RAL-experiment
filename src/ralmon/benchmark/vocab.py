@@ -34,6 +34,9 @@ WS04-T09 adds the outcome ``declined`` of a ``ROBOT_TASK`` (the patient refused 
 subtype ``measurement_refusal`` against the C2 ``manipulation_failure``, confounder group
 ``refusal_vs_robot_missed``). ``DISPENSE.content_change`` is emitted by the fault-free base when the
 dispenser senses its content (``build_observed_base(..., dispenser_content_sensing=True)``).
+
+WS04-T11 adds the payload key ``colocated`` of a ``NODE_STATE`` report of the robot (a bool; ADR-054 (b),
+ADR-035): the builder writes one report per visit arrival (true) and one per departure (false).
 """
 
 from __future__ import annotations
@@ -49,6 +52,7 @@ from ralmon.signals import EventKind
 __all__ = [
     "ALL_PAYLOAD_KEYS",
     "BLE_DEVICES",
+    "KEY_COLOCATED",
     "KEY_COMMANDED",
     "KEY_CONTENT_CHANGE",
     "KEY_ERROR_CODE",
@@ -158,6 +162,9 @@ STATES: Final = (
     STATE_UNREACHABLE,
 )
 KEY_COMMANDED: Final = "commanded"  # bool: the transition was announced as deliberate
+# WS04-T11 (ADR-054 (b), ADR-035): the robot reports with a bool whether it is co-located with the patient;
+# the monitor turns the report of the source ``robot`` into the availability of ``presence`` and ``intake``.
+KEY_COLOCATED: Final = "colocated"
 
 # DEVICE_ERROR: a device-defined label, never a clinical value.
 KEY_ERROR_CODE: Final = "error_code"
@@ -178,7 +185,7 @@ PAYLOAD_KEYS: Final[Mapping[EventKind, frozenset[str]]] = MappingProxyType(
         EventKind.DISPENSE: frozenset({KEY_CONTENT_CHANGE}),
         EventKind.INTAKE: frozenset(),
         EventKind.ROBOT_TASK: frozenset({KEY_TASK, KEY_OUTCOME, KEY_PATIENT_ID}),
-        EventKind.NODE_STATE: frozenset({KEY_STATE, KEY_COMMANDED}),
+        EventKind.NODE_STATE: frozenset({KEY_STATE, KEY_COMMANDED, KEY_COLOCATED}),
         EventKind.DEVICE_ERROR: frozenset({KEY_ERROR_CODE}),
         EventKind.VERIFICATION: frozenset({KEY_VERIFICATION, KEY_SUBJECT}),
         EventKind.MEASUREMENT_MISSED: frozenset(),
@@ -225,7 +232,7 @@ def _check_value(key: str, value: object) -> None:
             raise VocabularyError(
                 f"payload {key!r} must be a non-empty string, got {value!r}"
             )
-    elif key == KEY_COMMANDED:
+    elif key in (KEY_COMMANDED, KEY_COLOCATED):
         if not isinstance(value, bool):
             raise VocabularyError(f"payload {key!r} must be a bool, got {value!r}")
     elif key in (KEY_ERROR_CODE, KEY_SUBJECT):
