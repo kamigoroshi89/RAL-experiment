@@ -894,6 +894,150 @@ def test_b1_cannot_see_response_cuff_and_integrity_violations() -> None:
         )
 
 
+def test_b1_input_within_one_step_before_the_day_is_step_zero() -> None:
+    """M1 (review). The monitor and the grid give a device time in ``(t0 - step, t0]`` the step 0 of the day
+    (``ceil(t / T_s)``), so such an input IS part of the day; one stamped a whole step before or earlier is not. The
+    boundary: ``t0 - step + 1`` raises the alarm (at the delivery step ``t0``), ``t0 - step`` does not."""
+    t0 = T_DAY
+    plan = plan_of(
+        rec(TemplateId.RANGE, BAND),
+        rec(TemplateId.HOLD, HOLD),
+        rec(TemplateId.COUNT, COUNT),
+    )
+    for stamp, alarmed in ((t0 - STEP + 1, True), (t0 - STEP, False), (t0 - 1, True)):
+        day = day_of([bp(stamp, 152.0, rx=t0)], [], day_index=1)
+        assert times(run(make_b1(), day, plan)) == ([t0] if alarmed else []), stamp
+    # the same step rule for a dispense (hold and dose limit) and for the pressure it is judged on
+    low = day_of([bp(t0 - STEP + 1, 90.0, rx=t0)], [dispense(t0 + STEP)], day_index=1)
+    assert times(run(make_b1(), low, plan)) == [t0, t0 + STEP]
+    early_dose = day_of(
+        [],
+        [dispense(t0 - STEP + 1, rx=t0), dispense(t0 + STEP), dispense(t0 + 2 * STEP)],
+        day_index=1,
+    )
+    assert times(run(make_b1(), early_dose, plan)) == [
+        t0 + 2 * STEP
+    ]  # 3 doses, none alarmed at step 0 (count 1)
+    one_early = day_of(
+        [], [dispense(t0 - STEP + 1, rx=t0), dispense(t0 + STEP)], day_index=1
+    )
+    strict = plan_of(rec(TemplateId.COUNT, {"dose_max_24h": 0.0}))
+    assert times(run(make_b1(), one_early, strict)) == [t0, t0 + STEP]
+
+
+def test_b1_dose_count_ignores_later_stamped_doses_that_arrived_first() -> None:
+    """M2 (review). With a reorder delay that is not a multiple of the step, a dose stamped earlier can be delivered
+    after a later-stamped one without being late. The window of the count at ``t`` is ``(t - 24 h, t]``: the dose that
+    arrived first but is stamped later is not in it. Limit 1: the count at the second delivery is 1, no alarm. Dropping
+    the upper bound of the window counts 2 and alarms."""
+    t0 = T_DAY
+    first = dispense(t0 - 30_000, rx=t0)  # delivered at t0 (delay 30 s)
+    second = dispense(
+        t0 - 40_000, rx=t0 + STEP
+    )  # stamped earlier, delivered one step later, not late
+    plan = plan_of(rec(TemplateId.COUNT, {"dose_max_24h": 1.0}))
+    b1 = make_b1(delay_ms=30_000)
+    assert run(b1, day_of([], [first, second], day_index=1), plan) == []
+    assert b1.run_stats is not None and b1.run_stats.late_inputs == 0
+
+
+def test_b1_schedule_anchor_at_the_next_days_first_step_is_not_checked() -> None:
+    """M3 (review). An instance anchored at exactly ``t0 + 24 h`` belongs to the next day (empty carry-over); one at
+    ``t0`` or one step before the end of the day is checked."""
+    window = {"sched_window": 600_000.0}
+    next_day = plan_of(sched(T_DAY, window))
+    assert run(make_b1(), day_of([]), next_day) == []
+    assert make_b1().run(day_of([]), next_day, None) == ()
+    last_step = plan_of(sched(T_DAY - STEP, window))
+    assert times(run(make_b1(), day_of([]), last_step)) == [T_DAY - STEP + 600_000]
+    first_step = plan_of(sched(0, window))
+    assert times(run(make_b1(), day_of([]), first_step)) == [600_000]
+    on_day_1 = plan_of(sched(T_DAY, window))
+    assert times(run(make_b1(), day_of([], day_index=1), on_day_1)) == [T_DAY + 600_000]
+
+
+@pytest.mark.parametrize("step", [30_000, 60_000])
+@pytest.mark.parametrize(
+    "window",
+    [
+        0.0,
+        -0.0,
+        1.0,
+        29_999.0,
+        30_000.0,
+        30_000.5,
+        45_000.0,
+        60_000.0,
+        90_000.0,
+        120_000.0,
+    ]
+    + [
+        1_800_000.0,
+        1_800_001.0,
+        -30_000.0,
+        -60_000.0,
+        -1.0,
+        float("nan"),
+        float("inf"),
+    ],
+)
+def test_b1_window_alignment_agrees_with_the_monitor(window: float, step: int) -> None:
+    """M4 (review). B1 checks the alignment of the schedule window locally (``tests/test_layering.py`` forbids the
+    import of ``ralmon.monitor.parameters`` from ``src``); this ties its accept and reject set to ``check_alignment``
+    of the monitor, so that the copy cannot drift."""
+    from ralmon.monitor.parameters import check_alignment
+
+    try:
+        check_alignment({"sched_window": window}, step, "reference")
+        accepted = True
+    except PlanFeasibilityError:
+        accepted = False
+    b1 = B1StaticThresholds(timing=TimingConfig(step, 0, 0))
+    b1.fit([], [])
+    plan = plan_of(sched(hours(6), {"sched_window": window}))
+    try:
+        run(b1, day_of([]), plan)
+        b1_accepts = True
+    except PlanFeasibilityError:
+        b1_accepts = False
+    assert b1_accepts == accepted, (window, step)
+
+
+def test_b1_differences_in_what_counts_as_a_measurement_and_as_a_range_instance() -> (
+    None
+):
+    """M5 and M6 (review), pinned against the monitor. (a) R3 gives credit for a bare pressure sample (no MEASUREMENT
+    event): the monitor's SCHED does not, so it reports the miss and B1 does not (a sample-only outage). (b) A
+    MEASUREMENT event one millisecond before the anchor counts for the monitor's grid (same step) but not for B1, whose
+    window is ``[anchor, anchor + window]`` on device times; generator delays are non-negative, so this never occurs there.
+    (c) R1 alarms per pressure sample while the monitor's RANGE is keyed per MEASUREMENT event: a sample with no event
+    is an alarm for B1 and no instance for the monitor; two samples of one event are two alarms and one violation."""
+    anchor = hours(6)
+    monitor_plan = make_care_plan([make_instance(TemplateId.SCHED, "s6", {}, anchor)])
+    b1_plan = plan_of(sched(anchor), rec(TemplateId.RANGE, BAND), schedule=[anchor])
+    bare = day_of([bp(hours(6.1), 125.0)])
+    first, _ = _monitor_violations(bare, monitor_plan, 0, [TemplateId.SCHED])
+    assert first == {"s6": 23_400_000}
+    assert run(make_b1(), bare, b1_plan) == []
+    early = day_of([], [measurement(anchor - 1)])
+    first, _ = _monitor_violations(early, monitor_plan, 0, [TemplateId.SCHED])
+    assert first == {}
+    assert times(run(make_b1(), early, b1_plan)) == [23_400_000]
+    no_event = day_of([bp(hours(1), 152.0)])
+    first, _ = _monitor_violations(no_event, make_care_plan(), 0, [TemplateId.RANGE])
+    assert first == {}
+    assert times(run(make_b1(), no_event, b1_plan)) == [hours(1), 23_400_000]
+    two = day_of(
+        [bp(hours(1), 152.0), bp(hours(1) + 5_000, 152.0)], [measurement(hours(1))]
+    )
+    first, _ = _monitor_violations(two, make_care_plan(), 0, [TemplateId.RANGE])
+    assert len(first) == 1
+    assert times(run(make_b1(), two, plan_of(rec(TemplateId.RANGE, BAND)))) == [
+        hours(1),
+        hours(1) + STEP,
+    ]
+
+
 # ---- stats, determinism, the class and its source ---------------------------------------------------------------------------
 
 
