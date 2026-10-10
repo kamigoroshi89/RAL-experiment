@@ -3,7 +3,7 @@ id: WS05-T11
 title: "Robot-channel availability from NODE_STATE colocated reports (ADR-054 (b))"
 workstream: WS05-monitor
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS05-T10"]
 critical_path: true
 non_negotiable: false
@@ -70,3 +70,7 @@ Write first; each fails before the implementation. Fixture-only, F0, `step_ms = 
 - Not applied: the H-MASK condition "the robot node is `active`". Only `colocated` is read; a robot `NODE_STATE` with `state` `inactive`/`unreachable` and no `colocated` is still ignored by the monitor. Open for gab: if the C2 injector of the robot lifecycle (WS04-T07) must also mask the channels in the monitor, the injector has to write `colocated` false for the outage window (and true at its end), or the monitor must read `state` (this would change the meaning of the mask and needs an ADR).
 - Test 2 and the arrival case of test 3 and test 8 pass before the implementation too (an unmarked channel is available, and the old code ignored every NODE_STATE without error); the red state of the commit `WS05-T11: add failing tests` has 11 failing tests. `test_known_divergence_with_the_extractor_of_evidence_channels` is kept (it drives `push_availability` directly and still pins the monitor side).
 - `docs/formal/` was not touched. `vocab.py` of the benchmark does not yet declare `colocated` in `PAYLOAD_KEYS[NODE_STATE]` (WS04-T11 hand-over below).
+
+### Post-task review (2026-10-10)
+
+Produced: `NODE_STATE colocated` reports handled in `StreamingMonitor.push_event` (episode rule of ADR-054 (b)), two counters in `MonitorStats`, 20 tests, and the text of `evidence-channels.md`. Independent review: PASS, no blocker. Its M1 (a presence level held from before the first arrival report witnessed a later dispense, gate 0) is fixed test-first (`4baac4d` red, `e3294a5` green): the level is cleared at the first report and the gate counts the samples used before it. M3 (ADR-054 status wording) fixed. Deviations from the ADR text, both stated in the code and the notes: the channels are available until the first mark (a trace without reports stays bit-identical to master; the INT marker before the first arrival is `value_undefined:presence`, both PENDING); the `state` half of H-MASK is not read (deferred). Dependents: WS08-T01 stays `blocked` (WS04-T11, WS06-T01, WS05-T08); it must gate on `presence_samples_without_availability_marks == 0` and report the days where it is positive. WS04-T11 must add `colocated` to `vocab.PAYLOAD_KEYS[NODE_STATE]`, write the report with source exactly `robot` and a real bool, at or before its presence sample, and one arrival report per visit. WS04-T07 (done) and WS05-T07: the C2 injector must write `colocated` false for a robot outage window, or an ADR must make the monitor read `state`. Open MINOR: the extractor and the monitor still differ in H-INIT and in the `state` half (WS05-T07).
