@@ -142,3 +142,7 @@ The evidence function is `ralmon.attribution.extract_evidence(day, records, regi
 ### Hand-over from WS06-T01 (agent, 2026-10-10, review fixes)
 
 Do not pass `history` to the proposed method (`run_offline(history=...)`) in a comparison with the baselines until ADR-061 (history input of `Detector.run`, proposed) is accepted: the baselines are run one day at a time with empty state and would be handicapped on any counter that crosses midnight. Either run the proposed method per day as well, or report both variants. `BaselineBase.fit` refuses a day object listed in both `train_days` and `calib_days` and any non-`BenchmarkDay` item (`LeakageError`).
+
+### Hand-over (worker, 2026-10-10, from WS06-T02 review round 1)
+
+B1 (`B1StaticThresholds`, keyword-only `timing`, optional `registry`) runs only the rules whose parameter record the care plan holds, and exposes `run_stats.rules_active`. The runner must HARD-FAIL a benchmark run of B1 unless `run_stats.rules_active == ("R1", "R2", "R3", "R4")` on every plan (the care plans of WS04-T11 must carry RANGE, HOLD and COUNT parameter records with `anchor_ms` None; the monitor's own plan helper emits only static SCHED and COUNT instances, which gives `("R3",)`). B1's score is constant 1.0 (one operating point, no AUROC or AP) and it has no RESP, SYS or INT rule, so metrics for B1 are per class. Open decisions for gab: Notes of WS06-T02.
