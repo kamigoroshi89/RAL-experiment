@@ -1482,3 +1482,48 @@ def test_extractor_agrees_with_the_monitor_on_the_witness(
         assert present is not False and intake is not False  # I3
     if verdict.state.value == "pending" and "value_undefined:presence" in marker:
         assert present is not False  # I4
+
+
+# ---- a forged sequence number must not cost memory proportional to its size (review blocker 1) ----------------
+
+
+@pytest.mark.parametrize("forged", [4_000_000_000, 10**12])
+def test_forged_sequence_number_is_counted_not_materialised(
+    forged: int, registry
+) -> None:  # type: ignore[no-untyped-def]
+    """A naive forger that jumps far ahead (EX-1 (m)) gives the ratio by arithmetic: 3 values present in the span."""
+    items = I(
+        cuff_frame(at(20, 10), 1),
+        cuff_frame(at(20, 20), 2),
+        cuff_frame(at(20, 41), forged),
+    )
+    vec = feed(
+        extractor(registry, CUFF_ONLY, reorder_delay_ms=120_000), items
+    ).evidence_for(hold_record())
+    assert vec.system.ble_link_quality == pytest.approx(3 / forged)
+    assert vec.crypto_temporal.seq_gap_or_replay is True
+
+
+@pytest.mark.parametrize(
+    ("seqs", "ratio", "flag"),
+    [
+        ((1, 2, 3, 4), 1.0, False),
+        ((1, 2, 4), 0.75, True),
+        ((1, 2, 3, 6), 4 / 6, True),
+        (
+            (5, 6, 7),
+            1.0,
+            False,
+        ),  # the base is the smallest value of the window minus one
+        ((7, 9), 0.5, True),
+    ],
+)
+def test_small_range_sequence_results_are_unchanged(
+    seqs, ratio, flag, registry
+) -> None:  # type: ignore[no-untyped-def]
+    items = I(*[cuff_frame(at(20, 10) + 60_000 * i, s) for i, s in enumerate(seqs)])
+    vec = feed(
+        extractor(registry, CUFF_ONLY, reorder_delay_ms=120_000), items
+    ).evidence_for(hold_record())
+    assert vec.system.ble_link_quality == pytest.approx(ratio)
+    assert vec.crypto_temporal.seq_gap_or_replay is flag
