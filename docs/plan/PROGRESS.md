@@ -58,3 +58,7 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 - gab ha scelto la mossa A: la verità di un evento è il verdetto di una corsa che ha tutti i dati fino all'istante di decisione compreso. Un record deciso al passo condiviso (chiusura del giorno d-1, primo passo del giorno d) appartiene al giorno che inizia lì; eccezione: il COUNT di fine giorno resta al giorno che chiude. Nessuna tolleranza in minuti (le finestre sono già chiuse). WS04-T15 è pronto, con quattro test nuovi nelle sue note.
 - Proposta separata ADR-065 (tempo minimo tra due dosi): oggi la specifica non ha una regola di spaziatura, COUNT limita solo il numero di dosi nelle 24 ore. Nessun valore fissato; fuori dal percorso critico.
 
+## Ultimo giorno del paziente: giorno di coda non valutato (ADR-066, 2026-10-10)
+
+- gab ha scelto la politica P1: il costruttore del benchmark genera un giorno in più per paziente (giorno di coda), etichettato con la storia e non valutato, così il passo di chiusura dell'ultimo giorno valutato ha un proprietario. Contano solo i record che il giorno di coda possiede al suo primo passo; monitor e baseline non girano sul giorno di coda. WS04-T11 è pronto con questa regola e un test nuovo nelle sue note.
+
