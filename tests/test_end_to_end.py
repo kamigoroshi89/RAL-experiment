@@ -125,6 +125,35 @@ def test_worked_patient_day_end_to_end(result: Any) -> None:
         assert alert.score == pytest.approx(expected["score"], abs=1e-9), key
 
 
+def test_the_record_at_the_golden_instant_is_pd_rec_11_up_to_the_allocated_level(
+    result: Any,
+) -> None:
+    """PD-REC-11 (12:10): the sticky PREDICTED_VIOLATION record of the instance carries the golden interval."""
+    records, _ = result
+    golden_record = next(g for g in DOC["records"] if g["id"] == "PD-REC-11")
+    want = golden_record["expected"]
+    [rec] = [
+        r
+        for r in records
+        if r.instance_key == golden_record["instance_key"]
+        and r.t_eval_ms == golden_record["eval_at_ms"]
+    ]
+    assert rec.state is PREDICTED and want["state"] == "predicted_violation"
+    assert rec.sigma_interval.lo == want["sigma_interval"][0]
+    assert rec.sigma_interval.hi == pytest.approx(want["sigma_interval"][1])
+    assert rec.sigma_norm_interval == pytest.approx(tuple(want["sigma_norm_interval"]))
+    assert rec.pending_until_ms == want["pending_until_ms"]
+    assert rec.decided_at_ms is None
+    assert rec.rho is not None
+    assert rec.rho.kind is RhoKind.PREDICTED
+    assert rec.rho.value == pytest.approx(want["rho"]["value"])
+    assert rec.rho.guarantee == want["rho"]["guarantee"]
+    assert list(rec.rho.assumptions) == want["rho"]["assumptions"]
+    # the two figures that depend on the level: the golden day uses 0.2 (q 0.09), this run 0.1 (q 0.15)
+    assert rec.rho.alpha == pytest.approx(0.1)
+    assert rec.predicted_sigma_norm == pytest.approx(SIGMA_HAT + Q_AT_PER_TEST_LEVEL)
+
+
 def test_the_false_predictive_alarm_is_issued_by_the_incremental_attributor_and_then_closed() -> (
     None
 ):
