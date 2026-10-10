@@ -102,7 +102,6 @@ from ralmon.monitor import (
     VerdictState,
     run_offline,
 )
-from ralmon.monitor.offline import MAX_HISTORY_DAYS as _MONITOR_MAX_HISTORY_DAYS
 from ralmon.signals import Event, EventKind, Sample, SignalId, default_derived_signals
 from ralmon.spec import (
     CarePlan,
@@ -205,7 +204,7 @@ MAX_DAY_INDEX: Final[int] = (
     36_500  # algorithmic: latest day index, about a century of days
 )
 MAX_HISTORY_DAYS: Final[int] = (
-    _MONITOR_MAX_HISTORY_DAYS  # algorithmic: the most days a run of the monitor replays before a day
+    14  # algorithmic: the most days a run of the monitor replays (same value as offline.py)
 )
 MAX_TEXT: Final[int] = (
     4_096  # algorithmic: longest identifier or label read from a record
