@@ -96,7 +96,8 @@ CLEAN_RANGE = {
     "signal_quality.ppg_sqi": 0.9,
     "signal_quality.cuff_error_code": "",
     "cross_device.pulse_vs_ecg_hr_diff": 2.0,
-    "crypto_temporal.seq_gap_or_replay": False,
+    "system.seq_gap": False,
+    "crypto_temporal.seq_repeat": False,
     "crypto_temporal.timestamp_implausible": False,
 }
 
@@ -107,9 +108,7 @@ def test_analisi_matrix_rows_by_hand(registry, rule) -> None:  # type: ignore[no
     record = make_record("range")
 
     # row 8 (replay): a repeated sequence value with a complete delivery ratio and no link fault -> C3
-    ev = vector(
-        "range", {**CLEAN_RANGE, "crypto_temporal.seq_gap_or_replay": True}, registry
-    )
+    ev = vector("range", {**CLEAN_RANGE, "crypto_temporal.seq_repeat": True}, registry)
     assert rule.decide(record, ev).kappa.value == "C3"
 
     # row 3 (cuff detached, evident failure): a device error code -> C2
@@ -126,7 +125,8 @@ def test_analisi_matrix_rows_by_hand(registry, rule) -> None:  # type: ignore[no
         "system.nav_task_failed": True,
         "system.manip_task_failed": False,
         "signal_quality.cuff_error_code": "",
-        "crypto_temporal.seq_gap_or_replay": False,
+        "system.seq_gap": False,
+        "crypto_temporal.seq_repeat": False,
     }
     decision = rule.decide(make_record("sched"), vector("sched", sched, registry))
     assert decision.kappa.value == "C2"
@@ -186,7 +186,7 @@ def test_empty_evidence_vector_has_provenance_only(registry) -> None:  # type: i
         get_evidence(empty_evidence(TemplateId.INT), "provenance.template_kind")
         is TemplateKind.INTEGRITY
     )
-    assert len(EVIDENCE_PATHS) == 20
+    assert len(EVIDENCE_PATHS) == 24
 
 
 def test_mismatched_template_kind_abstains_without_exception(

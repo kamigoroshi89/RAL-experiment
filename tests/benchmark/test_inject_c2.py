@@ -599,7 +599,9 @@ def test_stuck_at_repeats_last_value_before_onset() -> None:
     out = run([stuck(9 * HOUR, 6 * HOUR)])
     assert values_of(out, "bp") == [128.0, 128.0, 128.0, 128.0]
     (record,) = out.records
-    assert record.evidence_paths == ()
+    assert record.evidence_paths == (
+        "signal_quality.cuff_value_repeated",
+    )  # conditional on a declared display resolution
     assert record.n_changed == 3 and record.realised
     assert not events_of(out, EventKind.DEVICE_ERROR)
     assert values_of(out, "hr_pulse") == [70.0] * 4  # the pulse is not frozen
@@ -893,7 +895,10 @@ def test_dispenser_bounce_adds_extra_dispense_within_gap() -> None:
     (record,) = out.records
     assert record.realised and record.n_changed == 1
     assert record.realised_end_ms is None and record.spec.duration_ms is None
-    assert record.evidence_paths == ()
+    assert record.evidence_paths == (
+        "dispenser.interval_since_previous_ms",
+        "dispenser.content_change",
+    )  # conditional on what the dispenser reports
     assert record.realised_onset_ms == DOSE_TICKS[0]
 
 
@@ -2196,7 +2201,7 @@ def test_the_ground_truth_subtypes_match_the_workstream_readme_list() -> None:
 
 
 def evidence_fields() -> set[str]:
-    """The 20 dotted paths of EvidenceVector, read from the contract document."""
+    """The 24 dotted paths of EvidenceVector 0.2.0, read from the contract document."""
     text = INTERFACES.read_text(encoding="utf-8")
     block = text.split("## EvidenceVector", 1)[1].split("## Attribution", 1)[0]
     groups: dict[str, str] = {}
@@ -2244,15 +2249,19 @@ def catalogue_signatures() -> dict[str, set[str]]:
 
 def test_signature_paths_are_contract_fields() -> None:
     fields = evidence_fields()
-    assert len(fields) == 20  # the contract has twenty fields
+    assert len(fields) == 24  # the contract 0.2.0 has twenty-four fields
     for subtype, paths in EVIDENCE_SIGNATURES.items():
         assert isinstance(paths, tuple) and len(set(paths)) == len(paths), subtype
         assert set(paths) <= fields, (subtype, set(paths) - fields)
     assert EVIDENCE_SIGNATURES["cuff_silent_bias"] == ()
-    assert EVIDENCE_SIGNATURES["stuck_at"] == ()
-    assert (
-        EVIDENCE_SIGNATURES["dispenser_bounce"] == ()
-    )  # no field yet for the dispense interval
+    # #evidencevector 0.2.0 (ADR-074 amendment 2): a frozen value repeats the previous reading of the stream
+    # (conditional on a declared display resolution) and a bounce is a short interval with no content change
+    assert EVIDENCE_SIGNATURES["stuck_at"] == ("signal_quality.cuff_value_repeated",)
+    assert EVIDENCE_SIGNATURES["dispenser_bounce"] == (
+        "dispenser.interval_since_previous_ms",
+        "dispenser.content_change",
+    )
+    assert EVIDENCE_SIGNATURES["ble_dropout"][-1] == "system.seq_gap"
 
 
 def test_signatures_equal_the_fault_model_catalogue() -> None:
@@ -2268,8 +2277,9 @@ def test_declared_diagnosability_limits_are_empty_signatures_in_the_catalogue_to
     None
 ):
     catalogue = catalogue_signatures()
-    for subtype in ("cuff_silent_bias", "stuck_at", "dispenser_bounce"):
-        assert catalogue[subtype] == set()
+    assert (
+        catalogue["cuff_silent_bias"] == set()
+    )  # the one fault that is silent for every reading
 
 
 # ---------------------------------------------------------------------------

@@ -39,6 +39,7 @@ from typing import Final
 from ralmon.attribution.evidence import (
     CrossDeviceEvidence,
     CryptoTemporalEvidence,
+    DispenserEvidence,
     EmbodiedWitnessEvidence,
     EvidenceVector,
     ProvenanceEvidence,
@@ -114,6 +115,8 @@ _LIFECYCLE_STATES: Final = frozenset(
     {"unconfigured", "inactive", "active", "finalized"}
 )
 _FAILED: Final = frozenset({"failed", "timeout", "late"})
+#: Outcomes that are not a failure of the robot: ``declined`` is the patient's refusal (ADR-040 (1)).
+_NOT_FAILED: Final = frozenset({"success", "declined"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +132,24 @@ class DeviceCapabilities:
     authenticates: bool = False  # its messages are verified by the gateway
     error_codes: bool = False  # reports error codes (DEVICE_ERROR)
     battery: bool = False  # reports a battery state (robot)
+    content_sensing: bool = (
+        False  # the dispenser senses its content (DISPENSE.content_change, ADR-032)
+    )
+    #: the display resolution of the cuff readings, in the unit of the reading (mmHg); a device-profile parameter with
+    #: no default: without it equal consecutive readings say nothing and ``cuff_value_repeated`` is ``None``
+    cuff_resolution: float | None = None
+
+    def __post_init__(self) -> None:
+        resolution = self.cuff_resolution
+        if resolution is not None and (
+            isinstance(resolution, bool)
+            or not isinstance(resolution, (int, float))
+            or not math.isfinite(resolution)
+            or resolution <= 0
+        ):
+            raise ValueError(
+                f"cuff_resolution must be a positive finite number or None, got {resolution!r}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +237,9 @@ class EvidenceExtractor:
             tuple[Sample, str, int]
         ] = []  # sample, status, arrival order
         self._events: list[tuple[Event, str, int]] = []
+        self._dispenses: list[
+            tuple[Event, str, int]
+        ] = []  # DISPENSE events, kept for their payload keys
         self._msgs: list[_Msg] = []
         self._snapshots: list[_Snapshot] = []
 
@@ -255,6 +279,15 @@ class EvidenceExtractor:
         """File an event: impulses become samples, the evidence kinds are read by their payload keys."""
         impulse = event_to_sample(event)
         if impulse is not None:
+            if event.kind is EventKind.DISPENSE:
+                # the impulse sample carries no payload: keep the event for the dispenser group (ADR-032)
+                self._dispenses.append(
+                    (
+                        event,
+                        self._classify(event.t_device_ms, event.t_rx_ms),
+                        self._order + 1,
+                    )
+                )
             self.observe_sample(impulse)
             return
         self._order += 1
@@ -351,7 +384,7 @@ class EvidenceExtractor:
         robot_in_scope = ROBOT in w.nodes
         tokens = self._tokens(w)
         lifecycle = self._lifecycle(w, tokens)
-        ratio, seq_flag = self._sequence(w)
+        ratio, repeat_flag, gap_flag = self._sequence(w)
         witness = (
             self._witness(w)
             if robot_in_scope
@@ -366,6 +399,7 @@ class EvidenceExtractor:
             battery_low=self._battery(w, tokens) if robot_in_scope else None,
             nav_task_failed=self._task(w, "navigate") if robot_in_scope else None,
             manip_task_failed=self._task(w, "manipulate") if robot_in_scope else None,
+            seq_gap=gap_flag,
         )
         if robot_in_scope:
             witness, system = self._merge_snapshot(w, witness, system)
@@ -378,14 +412,16 @@ class EvidenceExtractor:
                 ecg_sqi=self._quality(w, SignalId.HR_ECG),
                 ppg_sqi=self._quality(w, SignalId.SPO2),
                 cuff_error_code=self._error_code(w),
+                cuff_value_repeated=self._cuff_value_repeated(w),
             ),
             cross_device=CrossDeviceEvidence(self._hr_difference(w)),
             witness=witness,
             crypto_temporal=CryptoTemporalEvidence(
                 authenticated=self._authenticated(w),
-                seq_gap_or_replay=seq_flag,
+                seq_repeat=repeat_flag,
                 timestamp_implausible=self._timestamps(w),
             ),
+            dispenser=self._dispenser(w),
         )
 
     # ---- selection of inputs ---------------------------------------------------------------------------
@@ -541,8 +577,8 @@ class EvidenceExtractor:
         outcomes = self._outcomes(w, task)
         if any(o in _FAILED for o in outcomes):
             return True
-        if outcomes and all(o == "success" for o in outcomes):
-            return False
+        if outcomes and all(o in _NOT_FAILED for o in outcomes):
+            return False  # 'declined': the patient declined, the robot did its part (ADR-040 (1))
         return None
 
     def _outcomes(
@@ -567,10 +603,8 @@ class EvidenceExtractor:
             ):
                 continue
             outcome = self._text(e, "outcome")
-            if outcome in _FAILED or outcome == "success":
-                found.append(
-                    outcome
-                )  # 'declined' has no evidence field (ADR-040 proposed)
+            if outcome in _FAILED or outcome in _NOT_FAILED:
+                found.append(outcome)
         return found
 
     # ---- signal quality and the cross-device pair -----------------------------------------------------
@@ -631,6 +665,94 @@ class EvidenceExtractor:
             best = diff if best is None else max(best, diff)
         return best
 
+    def _duplicate_orders(self, w: _Window) -> set[int]:
+        """The arrival orders of the second and later arrivals of an accepted ``(node, name, seq)`` by the cut-off.
+
+        A message that repeats an accepted ``(name, seq)`` is a duplicate and is not counted again
+        (docs/formal/01-signals-sampling.md section 3.4); a first arrival that was late is not accepted, so a copy
+        that follows it is not a duplicate. Same rule as the repeat of ``_device_sequence``.
+        """
+        accepted: set[tuple[str, str, int]] = set()
+        duplicates: set[int] = set()
+        for m in sorted(
+            (m for m in self._msgs if m.seq is not None and m.t_rx <= w.cutoff),
+            key=lambda m: (m.t_rx, m.order),
+        ):
+            assert m.seq is not None
+            ident = (m.node, m.name, m.seq)
+            if ident in accepted:
+                duplicates.add(m.order)
+            elif m.status == "ok":
+                accepted.add(ident)
+        return duplicates
+
+    def _cuff_value_repeated(self, w: _Window) -> bool | None:
+        """True when the latest cuff reading equals the previous one of the same stream (ADR-074 amendment 2).
+
+        The two latest accepted ``bp`` readings by device time received by the cut-off and visible by the last
+        admissible step, whatever the day (a reading of the day before is a previous reading of the stream); a
+        re-sent copy of a frame is not a reading. The latest reading must lie in the evidence window (the previous
+        one may precede it): two equal readings of earlier days say nothing about this instance. ``None`` with
+        fewer than two readings, and ``None`` when the profile declares no display resolution: without it the
+        equality of two readings is not evidence of a frozen value, and no default resolution is assumed.
+        """
+        if self._profile.caps(CUFF).cuff_resolution is None:
+            return None
+        duplicates = self._duplicate_orders(w)
+        readings = sorted(
+            (s.t_device_ms, order, s.value)
+            for s, status, order in self._samples
+            if s.signal == SignalId.BP.value
+            and status == "ok"
+            and order not in duplicates
+            and s.t_rx_ms <= w.cutoff
+            and self._vis(s.t_device_ms) <= w.hi_step
+            and math.isfinite(s.value)
+        )
+        if len(readings) < 2 or self._vis(readings[-1][0]) < w.lo_step:
+            return None
+        return readings[-1][2] == readings[-2][2]
+
+    def _dispenser(self, w: _Window) -> DispenserEvidence:
+        """The payload keys of the latest accepted DISPENSE of the window (ADR-032, ADR-040 (2)).
+
+        One opening describes the instance: the latest opening whose visible step lies in the evidence window and
+        that was received by the cut-off, both keys read from that same event; a re-sent copy of an earlier opening
+        (the same ``seq``) is a duplicate and is skipped. A key that is absent, of the wrong
+        type, not finite or (for the interval) negative is ``None``; ``content_change`` is read only where the
+        profile declares ``content_sensing`` for the dispenser. The interval is the one the dispenser reports.
+        """
+        duplicates = self._duplicate_orders(w)
+        openings = sorted(
+            (e.t_device_ms, order, e)
+            for e, status, order in self._dispenses
+            if status == "ok"
+            and order not in duplicates
+            and e.t_rx_ms <= w.cutoff
+            and w.lo_step <= self._vis(e.t_device_ms) <= w.hi_step
+        )
+        if not openings:
+            return DispenserEvidence(None, None)
+        payload = openings[-1][2].payload
+        interval: int | None = None
+        raw_interval = payload.get("interval_since_previous_ms")
+        if (
+            isinstance(raw_interval, int)
+            and not isinstance(raw_interval, bool)
+            and raw_interval >= 0
+        ):
+            interval = raw_interval
+        content: float | None = None
+        raw_content = payload.get("content_change")
+        if (
+            self._profile.caps(DISPENSER).content_sensing
+            and isinstance(raw_content, (int, float))
+            and not isinstance(raw_content, bool)
+            and math.isfinite(raw_content)
+        ):
+            content = float(raw_content)
+        return DispenserEvidence(interval, content)
+
     # ---- sequence, time and authentication evidence (axis R) ------------------------------------------
 
     def _watermark(self, t_dev: TimeMs) -> TimeMs:
@@ -638,14 +760,18 @@ class EvidenceExtractor:
 
     def _device_sequence(
         self, w: _Window, node: str
-    ) -> tuple[float | None, bool | None]:
-        """(delivery ratio, repeat or gap) of one capable device: D-3 and D-9 of evidence-channels.md."""
+    ) -> tuple[float | None, bool | None, bool | None]:
+        """(delivery ratio, repeat, gap) of one capable device: D-3 and D-9 of evidence-channels.md.
+
+        The repeat is integrity evidence (``crypto_temporal.seq_repeat``), the gap is system evidence
+        (``system.seq_gap``); the two share the ``None`` conditions of the old single field (ADR-034).
+        """
         received = [m for m in self._msgs if m.node == node and m.t_rx <= w.cutoff]
         in_window = [m for m in received if w.lo_rx <= m.t_rx <= w.cutoff]
         with_seq = [m for m in received if m.seq is not None]
         window_seq = [m for m in in_window if m.seq is not None]
         if not window_seq:
-            return None, None
+            return None, None, None
         # a repeat: a received (name, seq) equal to an accepted one (arrival order)
         accepted: set[tuple[str, int]] = set()
         repeat = False
@@ -658,7 +784,7 @@ class EvidenceExtractor:
                 accepted.add(ident)
         finalised = [m for m in window_seq if self._watermark(m.t_dev) <= w.cutoff]
         if not finalised:
-            return None, True if repeat else None
+            return None, True if repeat else None, None
         before = [
             m.seq
             for m in with_seq
@@ -676,30 +802,37 @@ class EvidenceExtractor:
             1 for v in {m.seq for m in with_seq if m.seq is not None} if base < v <= top
         )
         ratio = present / size if size else 1.0
-        gap = present < size
-        return ratio, repeat or gap
+        return ratio, repeat, present < size
 
-    def _sequence(self, w: _Window) -> tuple[float | None, bool | None]:
+    @staticmethod
+    def _aggregate(flags: Sequence[bool | None]) -> bool | None:
+        """The aggregation rule (D-10): asserted when one asserts, denied only when every capable device denies."""
+        if any(flag is True for flag in flags):
+            return True
+        if all(flag is False for flag in flags):
+            return False
+        return None
+
+    def _sequence(self, w: _Window) -> tuple[float | None, bool | None, bool | None]:
+        """(delivery ratio, ``seq_repeat``, ``seq_gap``) over the capable devices of the data scope."""
         capable = [d for d in w.devices if self._profile.caps(d).seq]
         if not capable:
-            return None, None
+            return None, None, None
         ratios: list[float | None] = []
-        flags: list[bool | None] = []
+        repeats: list[bool | None] = []
+        gaps: list[bool | None] = []
         for node in capable:
-            ratio, flag = self._device_sequence(w, node)
+            ratio, repeat, gap = self._device_sequence(w, node)
             ratios.append(ratio)
-            flags.append(flag)
+            repeats.append(repeat)
+            gaps.append(gap)
         known = [r for r in ratios if r is not None]
         link: float | None = None
         if known:
             lowest = min(known)
             # a capable device without a basis prevents a denial, never hides a gap
             link = None if (len(known) < len(ratios) and lowest == 1.0) else lowest
-        if any(flag is True for flag in flags):
-            return link, True
-        if all(flag is False for flag in flags):
-            return link, False
-        return link, None
+        return link, self._aggregate(repeats), self._aggregate(gaps)
 
     def _timestamps(self, w: _Window) -> bool | None:
         in_window = {
@@ -867,6 +1000,7 @@ class EvidenceExtractor:
             manip_task_failed=merge(
                 system.manip_task_failed, theirs_s.manip_task_failed, True
             ),
+            seq_gap=system.seq_gap,  # ward-side (BLE devices only): the robot snapshot does not carry it
         )
         return merged_witness, merged_system
 

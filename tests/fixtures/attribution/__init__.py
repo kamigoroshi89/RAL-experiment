@@ -28,7 +28,7 @@ CASES_PATH = HERE / "worked_cases.json"
 STEP_MS = 60_000
 DAY_MS = 86_400_000
 
-#: The twenty fields of the EvidenceVector in contract order (``docs/plan/02-interfaces.md#evidencevector``).
+#: The twenty-four fields of the EvidenceVector 0.2.0 in contract order (``docs/plan/02-interfaces.md#evidencevector``).
 CONTRACT_PATHS: tuple[str, ...] = (
     "provenance.violated_template",
     "provenance.template_kind",
@@ -40,16 +40,20 @@ CONTRACT_PATHS: tuple[str, ...] = (
     "system.battery_low",
     "system.nav_task_failed",
     "system.manip_task_failed",
+    "system.seq_gap",
     "signal_quality.ecg_sqi",
     "signal_quality.ppg_sqi",
     "signal_quality.cuff_error_code",
+    "signal_quality.cuff_value_repeated",
     "cross_device.pulse_vs_ecg_hr_diff",
     "witness.robot_present",
     "witness.identity_confirmed",
     "witness.intake_observed",
     "crypto_temporal.authenticated",
-    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.seq_repeat",
     "crypto_temporal.timestamp_implausible",
+    "dispenser.interval_since_previous_ms",
+    "dispenser.content_change",
 )
 NON_PROVENANCE_PATHS: tuple[str, ...] = CONTRACT_PATHS[2:]
 
@@ -112,6 +116,7 @@ def build_vector(case: Mapping[str, Any], registry: LoadedRegistry) -> Any:
     from ralmon.attribution import (
         CrossDeviceEvidence,
         CryptoTemporalEvidence,
+        DispenserEvidence,
         EmbodiedWitnessEvidence,
         EvidenceVector,
         ProvenanceEvidence,
@@ -138,6 +143,7 @@ def build_vector(case: Mapping[str, Any], registry: LoadedRegistry) -> Any:
             "battery_low",
             "nav_task_failed",
             "manip_task_failed",
+            "seq_gap",
         ),
     )
     return EvidenceVector(
@@ -147,7 +153,10 @@ def build_vector(case: Mapping[str, Any], registry: LoadedRegistry) -> Any:
         ),
         system=SystemHealthEvidence(**system),
         signal_quality=SignalQualityEvidence(
-            **part("signal_quality", ("ecg_sqi", "ppg_sqi", "cuff_error_code"))
+            **part(
+                "signal_quality",
+                ("ecg_sqi", "ppg_sqi", "cuff_error_code", "cuff_value_repeated"),
+            )
         ),
         cross_device=CrossDeviceEvidence(
             **part("cross_device", ("pulse_vs_ecg_hr_diff",))
@@ -160,8 +169,11 @@ def build_vector(case: Mapping[str, Any], registry: LoadedRegistry) -> Any:
         crypto_temporal=CryptoTemporalEvidence(
             **part(
                 "crypto_temporal",
-                ("authenticated", "seq_gap_or_replay", "timestamp_implausible"),
+                ("authenticated", "seq_repeat", "timestamp_implausible"),
             )
+        ),
+        dispenser=DispenserEvidence(
+            **part("dispenser", ("interval_since_previous_ms", "content_change"))
         ),
     )
 

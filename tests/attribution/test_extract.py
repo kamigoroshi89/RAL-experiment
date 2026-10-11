@@ -355,7 +355,8 @@ def cases() -> list[Case]:
             seq_inputs(),
             {
                 "system.ble_link_quality": 1.0,
-                "crypto_temporal.seq_gap_or_replay": False,
+                "system.seq_gap": False,
+                "crypto_temporal.seq_repeat": False,
                 "crypto_temporal.timestamp_implausible": False,
             },
             prof=CUFF_ONLY,
@@ -372,7 +373,8 @@ def cases() -> list[Case]:
             ),
             {
                 "system.ble_link_quality": 1.0,
-                "crypto_temporal.seq_gap_or_replay": False,
+                "system.seq_gap": False,
+                "crypto_temporal.seq_repeat": False,
                 "crypto_temporal.timestamp_implausible": False,
             },
             prof=CUFF_ONLY,
@@ -384,7 +386,8 @@ def cases() -> list[Case]:
             seq_inputs(skip=(2,)),
             {
                 "system.ble_link_quality": 0.75,
-                "crypto_temporal.seq_gap_or_replay": True,
+                "system.seq_gap": True,
+                "crypto_temporal.seq_repeat": False,
             },
             prof=CUFF_ONLY,
             reorder_delay_ms=d120,
@@ -400,14 +403,15 @@ def cases() -> list[Case]:
             ),
             {
                 "crypto_temporal.timestamp_implausible": True,
-                "crypto_temporal.seq_gap_or_replay": False,
+                "system.seq_gap": False,
+                "crypto_temporal.seq_repeat": False,
                 "system.ble_link_quality": 1.0,
             },
             prof=CUFF_ONLY,
             reorder_delay_ms=d120,
         ),
         Case(
-            "crypto_temporal.seq_gap_or_replay[EX-1 (e) seq 2 after the cut-off: a gap, nothing counted late]",
+            "system.seq_gap[EX-1 (e) seq 2 after the cut-off: a gap, nothing counted late]",
             hold(),
             I(
                 cuff_frame(frames[0][0], 1),
@@ -416,7 +420,8 @@ def cases() -> list[Case]:
                 cuff_frame(frames[3][0], 4),
             ),
             {
-                "crypto_temporal.seq_gap_or_replay": True,
+                "system.seq_gap": True,
+                "crypto_temporal.seq_repeat": False,
                 "system.ble_link_quality": 0.75,
                 "crypto_temporal.timestamp_implausible": False,
             },
@@ -424,55 +429,63 @@ def cases() -> list[Case]:
             reorder_delay_ms=d120,
         ),
         Case(
-            "crypto_temporal.seq_gap_or_replay[EX-1 (f) a copy of seq 2 on time: a repeat without gap]",
+            "crypto_temporal.seq_repeat[EX-1 (f) a copy of seq 2 on time: a repeat without gap]",
             hold(),
             seq_inputs(extra=(cuff_frame(at(20, 11, 30), 2),)),
-            {"crypto_temporal.seq_gap_or_replay": True, "system.ble_link_quality": 1.0},
-            prof=CUFF_ONLY,
-            reorder_delay_ms=d120,
-        ),
-        Case(
-            "crypto_temporal.seq_gap_or_replay[EX-1 (g) seq 2 lost and a copy of seq 3: repeat and gap]",
-            hold(),
-            seq_inputs(skip=(2,), extra=(cuff_frame(at(20, 12, 30), 3),)),
             {
-                "crypto_temporal.seq_gap_or_replay": True,
-                "system.ble_link_quality": 0.75,
-            },
-            prof=CUFF_ONLY,
-            reorder_delay_ms=d120,
-        ),
-        Case(
-            "crypto_temporal.seq_gap_or_replay[EX-1 (l) a trailing loss is not seen: ratio 1.0]",
-            hold(),
-            seq_inputs(skip=(4,)),
-            {
-                "crypto_temporal.seq_gap_or_replay": False,
+                "crypto_temporal.seq_repeat": True,
+                "system.seq_gap": False,
                 "system.ble_link_quality": 1.0,
             },
             prof=CUFF_ONLY,
             reorder_delay_ms=d120,
         ),
         Case(
-            "crypto_temporal.seq_gap_or_replay[EX-1 (m) a forged number that jumps ahead: gap, ratio 0.12]",
+            "crypto_temporal.seq_repeat[EX-1 (g) seq 2 lost and a copy of seq 3: repeat and gap]",
+            hold(),
+            seq_inputs(skip=(2,), extra=(cuff_frame(at(20, 12, 30), 3),)),
+            {
+                "crypto_temporal.seq_repeat": True,
+                "system.seq_gap": True,
+                "system.ble_link_quality": 0.75,
+            },
+            prof=CUFF_ONLY,
+            reorder_delay_ms=d120,
+        ),
+        Case(
+            "system.seq_gap[EX-1 (l) a trailing loss is not seen: ratio 1.0]",
+            hold(),
+            seq_inputs(skip=(4,)),
+            {
+                "system.seq_gap": False,
+                "crypto_temporal.seq_repeat": False,
+                "system.ble_link_quality": 1.0,
+            },
+            prof=CUFF_ONLY,
+            reorder_delay_ms=d120,
+        ),
+        Case(
+            "system.seq_gap[EX-1 (m) a forged number that jumps ahead: gap, ratio 0.12]",
             hold(),
             I(
                 *[cuff_frame(at(20, 0) + 600_000 * (i - 1), i) for i in range(1, 6)],
                 cuff_frame(at(20, 41), 50),
             ),
             {
-                "crypto_temporal.seq_gap_or_replay": True,
+                "system.seq_gap": True,
+                "crypto_temporal.seq_repeat": False,
                 "system.ble_link_quality": pytest.approx(0.12, abs=0.005),
             },
             prof=CUFF_ONLY,
             reorder_delay_ms=d120,
         ),
         Case(
-            "crypto_temporal.seq_gap_or_replay[EX-3 (f) a silent capable cuff: None, the dispenser cannot deny]",
+            "system.seq_gap[EX-3 (f) a silent capable cuff: None, the dispenser cannot deny]",
             hold(),
             I(sample(SignalId.DISPENSE, at(20, 50), seq=1)),
             {
-                "crypto_temporal.seq_gap_or_replay": None,
+                "system.seq_gap": None,
+                "crypto_temporal.seq_repeat": None,
                 "crypto_temporal.timestamp_implausible": None,
                 "crypto_temporal.authenticated": None,
                 "system.ble_link_quality": None,
@@ -483,11 +496,12 @@ def cases() -> list[Case]:
             ),
         ),
         Case(
-            "crypto_temporal.seq_gap_or_replay[no device provides seq: None]",
+            "system.seq_gap[no device provides seq: None]",
             hold(),
             seq_inputs(),
             {
-                "crypto_temporal.seq_gap_or_replay": None,
+                "system.seq_gap": None,
+                "crypto_temporal.seq_repeat": None,
                 "system.ble_link_quality": None,
             },
             prof=profile(cuff={"two_clocks": True}),
@@ -888,6 +902,89 @@ def cases() -> list[Case]:
             prof=INT_ROBOT,
         ),
     ]
+
+    # ---- the fields of #evidencevector 0.2.0 (ADR-032, ADR-040, ADR-074 amendment 3) -------------------
+    resolved = profile(
+        cuff={**CUFF_ALL, "cuff_resolution": 1.0},
+        dispenser={"content_sensing": True},
+    )
+
+    def bp(t: int, value: float) -> Any:
+        return sample(SignalId.BP, t, value=value)
+
+    def dispense(t: int, **payload: float | str | bool) -> Any:
+        return event(EventKind.DISPENSE, t, "dispenser", **payload)
+
+    out += [
+        Case(
+            "signal_quality.cuff_value_repeated[two equal readings of the cuff: True]",
+            hold(),
+            I(bp(at(20, 10), 120.0), bp(at(20, 40), 120.0)),
+            {"signal_quality.cuff_value_repeated": True},
+            prof=resolved,
+        ),
+        Case(
+            "signal_quality.cuff_value_repeated[two different readings: False]",
+            hold(),
+            I(bp(at(20, 10), 120.0), bp(at(20, 40), 119.0)),
+            {"signal_quality.cuff_value_repeated": False},
+            prof=resolved,
+        ),
+        Case(
+            "signal_quality.cuff_value_repeated[a first reading has no previous one: None]",
+            hold(),
+            I(bp(at(20, 40), 120.0)),
+            {"signal_quality.cuff_value_repeated": None},
+            prof=resolved,
+        ),
+        Case(
+            "signal_quality.cuff_value_repeated[the profile declares no resolution: None]",
+            hold(),
+            I(bp(at(20, 10), 120.0), bp(at(20, 40), 120.0)),
+            {"signal_quality.cuff_value_repeated": None},
+            prof=CUFF_ONLY,
+        ),
+        Case(
+            "dispenser[a release: a long interval and a positive content change (ADR-040 (2))]",
+            hold(),
+            I(
+                dispense(
+                    at(20, 50),
+                    interval_since_previous_ms=43_200_000,
+                    content_change=1.0,
+                )
+            ),
+            {
+                "dispenser.interval_since_previous_ms": 43_200_000,
+                "dispenser.content_change": 1.0,
+            },
+            prof=resolved,
+        ),
+        Case(
+            "dispenser[a bounce: a short interval and a zero content change]",
+            hold(),
+            I(
+                dispense(
+                    at(20, 50), interval_since_previous_ms=4_000, content_change=0.0
+                )
+            ),
+            {
+                "dispenser.interval_since_previous_ms": 4_000,
+                "dispenser.content_change": 0.0,
+            },
+            prof=resolved,
+        ),
+        Case(
+            "dispenser[an opening that reports neither key: None, None]",
+            hold(),
+            I(dispense(at(20, 50))),
+            {
+                "dispenser.interval_since_previous_ms": None,
+                "dispenser.content_change": None,
+            },
+            prof=resolved,
+        ),
+    ]
     return out
 
 
@@ -940,7 +1037,11 @@ def test_extractor_channel_unavailable_is_none_not_false(registry) -> None:  # t
         "witness.identity_confirmed",
         "witness.intake_observed",
         "crypto_temporal.authenticated",
-        "crypto_temporal.seq_gap_or_replay",
+        "system.seq_gap",
+        "crypto_temporal.seq_repeat",
+        "signal_quality.cuff_value_repeated",
+        "dispenser.interval_since_previous_ms",
+        "dispenser.content_change",
         "crypto_temporal.timestamp_implausible",
         "system.ble_link_quality",
         "system.qos_deadline_missed",
@@ -1000,9 +1101,8 @@ def test_extractor_sequence_gap_explained_by_link_fault(registry) -> None:  # ty
     vec = feed(extractor(registry, cuff, reorder_delay_ms=120_000), link).evidence_for(
         hold_record()
     )
-    assert (
-        vec.crypto_temporal.seq_gap_or_replay is True
-    )  # the field is set by the gap ...
+    assert vec.system.seq_gap is True  # the field is set by the gap ...
+    assert vec.crypto_temporal.seq_repeat is False  # ... and the integrity field is not
     assert vec.system.ble_link_quality is not None and vec.system.ble_link_quality < 1.0
     assert vec.system.node_lifecycle == {"cuff": "link_down"}
     decision = rule.decide(hold_record(), vec)
@@ -1245,6 +1345,7 @@ def snapshot_parts(**kwargs: Any) -> tuple[Any, Any]:
         battery_low=kwargs.get("battery_low"),
         nav_task_failed=kwargs.get("nav_task_failed"),
         manip_task_failed=kwargs.get("manip_task_failed"),
+        seq_gap=None,  # ward-side (BLE devices only): the robot does not publish it
     )
     return witness, system
 
@@ -1501,7 +1602,8 @@ def test_forged_sequence_number_is_counted_not_materialised(
         extractor(registry, CUFF_ONLY, reorder_delay_ms=120_000), items
     ).evidence_for(hold_record())
     assert vec.system.ble_link_quality == pytest.approx(3 / forged)
-    assert vec.crypto_temporal.seq_gap_or_replay is True
+    assert vec.system.seq_gap is True
+    assert vec.crypto_temporal.seq_repeat is False
 
 
 @pytest.mark.parametrize(
@@ -1526,7 +1628,8 @@ def test_small_range_sequence_results_are_unchanged(
         extractor(registry, CUFF_ONLY, reorder_delay_ms=120_000), items
     ).evidence_for(hold_record())
     assert vec.system.ble_link_quality == pytest.approx(ratio)
-    assert vec.crypto_temporal.seq_gap_or_replay is flag
+    assert vec.system.seq_gap is flag
+    assert vec.crypto_temporal.seq_repeat is False
 
 
 # ---- review minors --------------------------------------------------------------------------------------------

@@ -3,7 +3,7 @@ id: WS02-T06
 title: "Attribution as a likelihood table: specification, cells with their source, sensitivity design (ADR-074)"
 workstream: WS02-threat-fault-model
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS02-T04", "WS02-T05", "WS05-T13"]
 critical_path: true
 non_negotiable: false
@@ -20,7 +20,7 @@ Specify the attribution layer of ADR-074: the method returns p(c | e, t) for c i
 
 - `docs/plan/03-decisions.md` ADR-074 (read in full) and ADR-010; `docs/models/attribution-rule.md` (reading classes, relevance map, exclusion conditions, worked cases W-01 to W-15), `docs/models/fault-model.md` (coverage table around lines 395-418: which fields each fault raises; the silent faults raise none), `docs/models/evidence-channels.md`, `docs/models/threat-model.md`.
 - The research prototype and its report: `docs/benchmark/evidence/likelihood-attribution.md` (written by the research run of 2026-10-11 from `/tmp/research/likelihood-attribution.md`; copy it to the repository first, with its scripts under `docs/benchmark/evidence/scripts/likelihood/`, if the copy is not there yet).
-- Sensitivity design in the report: eps grid, priors (uniform and declared alternatives), within-C2 subtype mixture (share of silent faults), abstention threshold, one grouped-field variant for the channels that are not independent given the cause (`ble_link_quality` with `seq_gap_or_replay`; `cross_device` with the signal-quality fields).
+- Sensitivity design in the report: eps grid, priors (uniform and declared alternatives), within-C2 subtype mixture (share of silent faults), abstention threshold, one grouped-field variant for the channels that are not independent given the cause (`ble_link_quality` with `system.seq_gap` (contract 0.2.0 split of `seq_gap_or_replay`, WS05-T13); `cross_device` with the signal-quality fields).
 
 ## File toccati
 
@@ -62,3 +62,7 @@ The output is a set of SUBTYPES (cumulative probability level, sensitivity value
 ### Amendment of 2026-10-11 (gab; ADR-074, amendment 3)
 
 The cells use the fields of `#evidencevector` 0.2.0 (WS05-T13): the dispenser group, `crypto_temporal.seq_repeat`, `system.seq_gap`, `signal_quality.cuff_value_repeated`. `system.seq_gap` and `system.ble_link_quality` form ONE grouped cell (they overlap). The contract bump of `#evidencevector` is NOT made here (WS05-T13); this task bumps `#alert` (`cause_set`) and `#attribution`. The truth used for the scoring of cells and metrics is the TIGHT causal labelling (a C2 event is the cause of an alert only if the faulty device is in the data scope of the template and the alert is decided while the event window is active); the looser labelling is reported next to it.
+
+### Hand-over from WS05-T13 (`#evidencevector` 0.2.0, 2026-10-11)
+
+The extractor computes the dispenser group and `signal_quality.cuff_value_repeated` for every template and does not gate them by data scope. The table must list the masking as a cell rule: the dispenser fields are read only for `hold`, `count`, `resp` and `int`; `cuff_value_repeated` only for the templates that read a cuff measurement (`range`, `sched`, `hold`, `resp`, `sys`); for the other templates the cell is not read. A cell for `cuff_value_repeated` is also `None`-aware (no declared display resolution, no previous reading, or the latest reading outside the evidence window).

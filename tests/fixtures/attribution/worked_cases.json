@@ -13,10 +13,11 @@
     "system.liveliness_ok",
     "system.qos_deadline_missed",
     "system.ble_link_quality",
+    "system.seq_gap",
     "signal_quality.cuff_error_code",
     "cross_device.pulse_vs_ecg_hr_diff",
     "crypto_temporal.authenticated",
-    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.seq_repeat",
     "crypto_temporal.timestamp_implausible"
    ],
    "reason": null,
@@ -29,6 +30,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -43,7 +45,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -61,11 +63,12 @@
     "system.ble_link_quality",
     "system.nav_task_failed",
     "system.manip_task_failed",
+    "system.seq_gap",
     "signal_quality.cuff_error_code",
     "cross_device.pulse_vs_ecg_hr_diff",
     "witness.identity_confirmed",
     "witness.intake_observed",
-    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.seq_repeat",
     "crypto_temporal.timestamp_implausible"
    ],
    "reason": null,
@@ -82,6 +85,7 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -98,7 +102,7 @@
     "witness.robot_present": true,
     "witness.identity_confirmed": true,
     "witness.intake_observed": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -121,6 +125,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -134,7 +139,7 @@
      "rel": "within",
      "param": "hr_coherence_tolerance"
     },
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -152,10 +157,11 @@
     "system.ble_link_quality",
     "system.nav_task_failed",
     "system.manip_task_failed",
+    "system.seq_gap",
     "signal_quality.cuff_error_code",
     "cross_device.pulse_vs_ecg_hr_diff",
     "crypto_temporal.authenticated",
-    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.seq_repeat",
     "crypto_temporal.timestamp_implausible"
    ],
    "reason": null,
@@ -172,6 +178,7 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -185,7 +192,7 @@
      "rel": "within",
      "param": "hr_coherence_tolerance"
     },
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false,
     "crypto_temporal.authenticated": true
    }
@@ -211,6 +218,7 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -224,7 +232,7 @@
      "rel": "within",
      "param": "hr_coherence_tolerance"
     },
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -249,6 +257,7 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -262,7 +271,7 @@
      "rel": "within",
      "param": "hr_coherence_tolerance"
     },
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -280,10 +289,11 @@
     "system.ble_link_quality",
     "system.nav_task_failed",
     "system.manip_task_failed",
+    "system.seq_gap",
     "signal_quality.cuff_error_code",
     "cross_device.pulse_vs_ecg_hr_diff",
     "crypto_temporal.authenticated",
-    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.seq_repeat",
     "crypto_temporal.timestamp_implausible"
    ],
    "reason": null,
@@ -300,6 +310,7 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -316,7 +327,7 @@
     "witness.robot_present": true,
     "witness.identity_confirmed": true,
     "witness.intake_observed": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false,
     "crypto_temporal.authenticated": true
    }
@@ -340,6 +351,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -353,7 +365,7 @@
      "rel": "within",
      "param": "hr_coherence_tolerance"
     },
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false,
     "crypto_temporal.authenticated": true
    }
@@ -378,6 +390,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -392,7 +405,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -419,9 +432,10 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "signal_quality.cuff_error_code": "E1",
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -437,10 +451,11 @@
     "system.liveliness_ok",
     "system.qos_deadline_missed",
     "system.ble_link_quality",
+    "system.seq_gap",
     "signal_quality.cuff_error_code",
     "cross_device.pulse_vs_ecg_hr_diff",
     "crypto_temporal.authenticated",
-    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.seq_repeat",
     "crypto_temporal.timestamp_implausible"
    ],
    "reason": null,
@@ -453,6 +468,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -467,7 +483,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -491,8 +507,9 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": true,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "signal_quality.cuff_error_code": "",
-    "crypto_temporal.seq_gap_or_replay": false
+    "crypto_temporal.seq_repeat": false
    }
   },
   {
@@ -511,8 +528,9 @@
     },
     "system.liveliness_ok": true,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.cuff_error_code": "",
-    "crypto_temporal.seq_gap_or_replay": false
+    "crypto_temporal.seq_repeat": false
    }
   },
   {
@@ -533,8 +551,9 @@
     },
     "system.liveliness_ok": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.cuff_error_code": "",
-    "crypto_temporal.seq_gap_or_replay": false
+    "crypto_temporal.seq_repeat": false
    }
   },
   {
@@ -553,8 +572,9 @@
     },
     "system.liveliness_ok": true,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.cuff_error_code": "",
-    "crypto_temporal.seq_gap_or_replay": false
+    "crypto_temporal.seq_repeat": false
    }
   },
   {
@@ -608,8 +628,9 @@
     "system.ble_link_quality",
     "system.nav_task_failed",
     "system.manip_task_failed",
+    "system.seq_gap",
     "signal_quality.cuff_error_code",
-    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.seq_repeat",
     "crypto_temporal.timestamp_implausible"
    ],
    "reason": null,
@@ -623,8 +644,9 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "signal_quality.cuff_error_code": "",
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "system.diagnostics_ok": true,
     "system.qos_deadline_missed": false,
     "crypto_temporal.timestamp_implausible": false
@@ -650,8 +672,9 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "signal_quality.cuff_error_code": "",
-    "crypto_temporal.seq_gap_or_replay": false
+    "crypto_temporal.seq_repeat": false
    }
   },
   {
@@ -671,8 +694,9 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -693,8 +717,9 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -717,6 +742,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -731,7 +757,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": false,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -743,7 +769,7 @@
    "kappa": "C3",
    "decisive": [
     "system.ble_link_quality",
-    "crypto_temporal.seq_gap_or_replay"
+    "crypto_temporal.seq_repeat"
    ],
    "reason": null,
    "row": 2,
@@ -755,6 +781,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -768,7 +795,7 @@
      "rel": "within",
      "param": "hr_coherence_tolerance"
     },
-    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.seq_repeat": true,
     "crypto_temporal.timestamp_implausible": true
    }
   },
@@ -826,9 +853,10 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "witness.robot_present": false,
     "witness.intake_observed": false,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -850,7 +878,8 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "system.seq_gap": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -876,9 +905,10 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "witness.robot_present": false,
     "witness.intake_observed": false,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false,
     "crypto_temporal.authenticated": false
    }
@@ -905,9 +935,10 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "witness.robot_present": false,
     "witness.intake_observed": false,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -931,9 +962,10 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "witness.robot_present": false,
     "witness.intake_observed": false,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -962,9 +994,10 @@
     },
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": true,
     "witness.robot_present": false,
     "witness.intake_observed": false,
-    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -991,6 +1024,7 @@
     "system.ble_link_quality": 1.0,
     "system.nav_task_failed": false,
     "system.manip_task_failed": false,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1006,7 +1040,7 @@
     },
     "witness.robot_present": true,
     "witness.intake_observed": false,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -1022,9 +1056,10 @@
     "system.liveliness_ok",
     "system.qos_deadline_missed",
     "system.ble_link_quality",
+    "system.seq_gap",
     "signal_quality.cuff_error_code",
     "cross_device.pulse_vs_ecg_hr_diff",
-    "crypto_temporal.seq_gap_or_replay",
+    "crypto_temporal.seq_repeat",
     "crypto_temporal.timestamp_implausible"
    ],
    "reason": null,
@@ -1037,6 +1072,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1050,7 +1086,7 @@
      "rel": "within",
      "param": "hr_coherence_tolerance"
     },
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -1073,6 +1109,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1086,7 +1123,7 @@
      "rel": "within",
      "param": "hr_coherence_tolerance"
     },
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false,
     "crypto_temporal.authenticated": false
    }
@@ -1188,6 +1225,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "below",
      "param": "ecg_sqi_floor"
@@ -1202,7 +1240,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -1227,6 +1265,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1241,7 +1280,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -1262,6 +1301,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1272,7 +1312,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -1293,6 +1333,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1307,7 +1348,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -1330,6 +1371,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1344,7 +1386,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": false,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -1371,6 +1413,7 @@
      "rel": "below",
      "param": "ble_link_quality_floor"
     },
+    "system.seq_gap": true,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1385,7 +1428,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -1397,7 +1440,7 @@
    "kappa": "UNDETERMINED",
    "decisive": [
     "system.ble_link_quality",
-    "crypto_temporal.seq_gap_or_replay"
+    "system.seq_gap"
    ],
    "reason": "conflict",
    "row": 6,
@@ -1412,6 +1455,7 @@
      "rel": "between_floor_and_one",
      "param": "ble_link_quality_floor"
     },
+    "system.seq_gap": true,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1426,7 +1470,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -1438,7 +1482,7 @@
    "kappa": "C3",
    "decisive": [
     "system.ble_link_quality",
-    "crypto_temporal.seq_gap_or_replay"
+    "crypto_temporal.seq_repeat"
    ],
    "reason": null,
    "row": 2,
@@ -1450,6 +1494,7 @@
     "system.liveliness_ok": true,
     "system.qos_deadline_missed": false,
     "system.ble_link_quality": 1.0,
+    "system.seq_gap": false,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1464,7 +1509,7 @@
      "param": "hr_coherence_tolerance"
     },
     "crypto_temporal.authenticated": true,
-    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.seq_repeat": true,
     "crypto_temporal.timestamp_implausible": false
    }
   },
@@ -1490,6 +1535,7 @@
      "rel": "below",
      "param": "ble_link_quality_floor"
     },
+    "system.seq_gap": true,
     "signal_quality.ecg_sqi": {
      "rel": "at_or_above",
      "param": "ecg_sqi_floor"
@@ -1503,7 +1549,7 @@
      "rel": "within",
      "param": "hr_coherence_tolerance"
     },
-    "crypto_temporal.seq_gap_or_replay": true,
+    "crypto_temporal.seq_repeat": false,
     "crypto_temporal.timestamp_implausible": false
    }
   },

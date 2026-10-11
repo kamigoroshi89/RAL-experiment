@@ -410,15 +410,17 @@ READING_WORDS: list[tuple[str, object, str]] = [
     ("witness.intake_observed", False, "no intake observed by the robot"),
     ("crypto_temporal.authenticated", True, "message authentication succeeded"),
     ("crypto_temporal.authenticated", False, "message authentication failed"),
+    ("system.seq_gap", True, "a missing sequence value was found"),
+    ("system.seq_gap", False, "no missing sequence value was found"),
     (
-        "crypto_temporal.seq_gap_or_replay",
+        "crypto_temporal.seq_repeat",
         True,
-        "a repeated or missing sequence value was found",
+        "a repeated sequence value was found",
     ),
     (
-        "crypto_temporal.seq_gap_or_replay",
+        "crypto_temporal.seq_repeat",
         False,
-        "no repeated or missing sequence value was found",
+        "no repeated sequence value was found",
     ),
     (
         "crypto_temporal.timestamp_implausible",

@@ -32,6 +32,7 @@ PARTS = (
     "CrossDeviceEvidence",
     "EmbodiedWitnessEvidence",
     "CryptoTemporalEvidence",
+    "DispenserEvidence",
 )
 
 
@@ -42,6 +43,7 @@ GROUP_CLASS = {
     "cross_device": "CrossDeviceEvidence",
     "witness": "EmbodiedWitnessEvidence",
     "crypto_temporal": "CryptoTemporalEvidence",
+    "dispenser": "DispenserEvidence",
 }
 
 
@@ -76,7 +78,7 @@ def test_evidence_dataclasses_match_contract() -> None:
         assert hasattr(cls, "__slots__"), f"{name} is not slotted"
         if name != "EvidenceVector":
             total += len(names)
-    assert total == 20 == len(CONTRACT_PATHS)
+    assert total == 24 == len(CONTRACT_PATHS)
     paths = [
         f"{group.name}.{leaf.name}"
         for group in dataclasses.fields(attribution.EvidenceVector)

@@ -19,6 +19,7 @@ from ralmon.attribution.attributor import Attributor, RuleAttributor
 from ralmon.attribution.evidence import (
     CrossDeviceEvidence,
     CryptoTemporalEvidence,
+    DispenserEvidence,
     EmbodiedWitnessEvidence,
     EvidenceVector,
     ProvenanceEvidence,
@@ -36,6 +37,7 @@ __all__ = [
     "CrossDeviceEvidence",
     "CryptoTemporalEvidence",
     "Detection",
+    "DispenserEvidence",
     "EmbodiedWitnessEvidence",
     "EvidenceExtractor",
     "EvidenceVector",

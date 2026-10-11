@@ -54,8 +54,9 @@ Subtypes
     the dispenser senses its content, no key otherwise. It gets its own sequence number
     (a bounce that repeated the real one would be a duplicate and not counted, fault model
     section Device faults). It affects ``count``, ``hold``, ``resp`` and ``int`` (M-DUPWIN,
-    FX-16) through the duplicate instance; the evidence signature is empty (no field yet for
-    the dispense interval, FM-GAP-DISP). One record per bounce; ``plan_dispenser_bounces`` draws
+    FX-16) through the duplicate instance; the evidence signature is the dispenser group of
+    ``#evidencevector`` 0.2.0 (the interval and the content change, conditional on the dispenser
+    reporting them; the generator's emission of the interval key is WS04-T18). One record per bounce; ``plan_dispenser_bounces`` draws
     which dispenses bounce from ``DeviceErrorModel.dispenser_bounce_prob``.
   ``nav_delay`` (robot, per tick): the visit of the tick (``kind`` measurement by default, or
     dose) arrives ``magnitude`` ms later: its presence sample and navigation outcome move, the
@@ -189,14 +190,17 @@ EVIDENCE_SIGNATURES: Final[dict[str, tuple[str, ...]]] = {
         "system.liveliness_ok",
         "system.qos_deadline_missed",
         "system.ble_link_quality",
-        "crypto_temporal.seq_gap_or_replay",
+        "system.seq_gap",
     ),
-    "stuck_at": (),
+    "stuck_at": ("signal_quality.cuff_value_repeated",),
     "cuff_silent_bias": (),
     "ecg_noise": ("signal_quality.ecg_sqi", "cross_device.pulse_vs_ecg_hr_diff"),
     "nav_delay": ("system.nav_task_failed",),
     "manipulation_failure": ("system.manip_task_failed",),
-    "dispenser_bounce": (),
+    "dispenser_bounce": (
+        "dispenser.interval_since_previous_ms",
+        "dispenser.content_change",
+    ),
     "cuff_detached": ("signal_quality.cuff_error_code", "system.node_lifecycle"),
 }
 C2_SUBTYPES: Final = tuple(EVIDENCE_SIGNATURES)

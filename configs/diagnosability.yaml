@@ -1,7 +1,7 @@
 # Diagnosability matrix of the Attribution contract (WS02-T05).
 # Machine-readable companion of docs/models/diagnosability-hazards.md. Technical, pre-clinical: no clinical claim.
 # Qualitative entries only: no rate and no clinical value appears here; rates are measured on the benchmark by WS08.
-schema_version: "0.1.0"
+schema_version: "0.2.0"
 contract: "02-interfaces.md#attribution"
 sources:
   - "docs/source/analisi.md section 4.5 (matrix rows 1 to 10, threat model), 4.8 (claim reformulations), 4.9 items 1, 4 and 5, 3.5 (standards), 5.6 (ablation A4), 10 (fourth objection)"
@@ -19,7 +19,7 @@ vocabulary:
   template_id: [range, sched, hold, count, resp, sys, int]
   availability: [available, unavailable]
   channels: [CH-PROV, CH-SYS-WARD, CH-SYS-ROBOT, CH-SQI, CH-XDEV, CH-WIT, CH-CRYPTO, CH-DISP]
-  proposed_channels: [CH-DISP]
+  context_channels: [CH-DISP]
   a4_when: {CH-WIT: unavailable, CH-SYS-ROBOT: unavailable}
   default_deployment: >-
     The unauthenticated deployment U of threat-model.md: every channel is available and message
@@ -27,9 +27,11 @@ vocabulary:
     fields of CH-CRYPTO are readings. The profile is assumed to provide the channels of the exclusion
     set, otherwise C1 is unreachable (attribution-rule.md OP-AR-1, ADR-044 proposed). An outcome whose
     when-set maps CH-CRYPTO to available describes the authenticated deployment A. An unavailable
-    channel means that all of its fields are None. A channel listed in proposed_channels feeds no field
-    of contract 0.1.0; an outcome whose when-set maps it to available is the verdict of analisi §4.5 and
-    is not reproducible by the rule of attribution-rule.md.
+    channel means that all of its fields are None. A channel listed in context_channels (CH-DISP) is fed
+    by the group dispenser of contract 0.2.0 (ADR-032, ADR-040), but the hierarchical rule of
+    attribution-rule.md treats that group as context and has no row that reads it; an outcome whose
+    when-set maps it to available is the verdict of analisi §4.5 and is reproducible only by the
+    likelihood attributor of WS05-T12, not by the hierarchical rule.
   row_verdict: >-
     One rule, applied to every row and checked by script. Let N be the outcomes of the row other than
     those that remove the embodied pair (the A4 outcomes, which are reported separately).
@@ -44,8 +46,10 @@ vocabulary:
     (invariant I4a of attribution-rule.md).
   crypto_channel: >-
     CH-CRYPTO feeds three fields in two roles. The sequence and time fields
-    (crypto_temporal.seq_gap_or_replay, crypto_temporal.timestamp_implausible) belong to every exclusion
-    set and are read in every deployment, which is why the empty when-set has them available. The
+    (crypto_temporal.seq_repeat, crypto_temporal.timestamp_implausible) belong to every exclusion
+    set and are read in every deployment, which is why the empty when-set has them available. The other
+    half of the old sequence field, the gap, is system.seq_gap (contract 0.2.0, ADR-034): it belongs to
+    CH-SYS-WARD with system.ble_link_quality, with which it overlaps. The
     authentication field (crypto_temporal.authenticated) exists only where message authentication is
     deployed. In a when-set, CH-CRYPTO available selects the authenticated deployment (authentication
     backing of a response violation, integrity evidence IE-1); the empty when-set is the deployment
@@ -58,7 +62,7 @@ vocabulary:
 contract_gaps:
   - id: G-1
     ec_id: EC-GAP-1
-    text: "No field carries the dispenser content change or the interval between openings, although the double take and the bounce depend on them. Proposed group dispenser and channel CH-DISP."
+    text: "Closed by contract 0.2.0 (ADR-032 accepted, ADR-040 accepted): the group dispenser (dispenser.interval_since_previous_ms, dispenser.content_change; before minus after, a release is positive and a bounce is zero) feeds channel CH-DISP. The hierarchical rule treats the group as context, so an outcome whose when-set maps CH-DISP to available is the verdict of analisi 4.5 and is reproducible only by the likelihood attributor of WS05-T12, not by the hierarchical rule."
     rows: [DX-06, DX-07, DX-22, DX-27]
     adr: ADR-032
   - id: G-2
@@ -68,7 +72,7 @@ contract_gaps:
     adr: ADR-033
   - id: G-3
     ec_id: EC-GAP-3
-    text: "crypto_temporal.seq_gap_or_replay mixes a loss (a C2 symptom) and a replay (a C3 symptom); interim reading through system.ble_link_quality."
+    text: "Closed by ADR-034 and contract 0.2.0: the single sequence field of 0.1.0 (was seq_gap_or_replay) is split into system.seq_gap (a loss, a C2 symptom, channel CH-SYS-WARD) and crypto_temporal.seq_repeat (a replay, a C3 symptom, channel CH-CRYPTO). Residual: system.seq_gap and system.ble_link_quality carry overlapping information (declared, not resolved); a forged number that jumps ahead leaves a gap and is read as a loss."
     rows: [DX-08, DX-09, DX-13, DX-14, DX-23]
     adr: ADR-034
   - id: G-4
@@ -130,10 +134,11 @@ rows:
       - system.liveliness_ok
       - system.qos_deadline_missed
       - system.ble_link_quality
+      - system.seq_gap
       - signal_quality.cuff_error_code
       - cross_device.pulse_vs_ecg_hr_diff
       - crypto_temporal.authenticated
-      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.seq_repeat
       - crypto_temporal.timestamp_implausible
     proposed_evidence: []
     channels_required_all: [CH-SYS-WARD, CH-SQI, CH-XDEV, CH-CRYPTO]
@@ -178,12 +183,13 @@ rows:
       - system.ble_link_quality
       - system.nav_task_failed
       - system.manip_task_failed
+      - system.seq_gap
       - signal_quality.cuff_error_code
       - cross_device.pulse_vs_ecg_hr_diff
       - crypto_temporal.authenticated
       - witness.identity_confirmed
       - witness.intake_observed
-      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.seq_repeat
       - crypto_temporal.timestamp_implausible
     proposed_evidence: []
     channels_required_all: [CH-SYS-WARD, CH-SYS-ROBOT, CH-SQI, CH-XDEV, CH-CRYPTO]
@@ -331,8 +337,10 @@ rows:
     true_class: C1
     subtypes: [double_take]
     violated_templates: [count]
-    discriminating_evidence: []
-    proposed_evidence: [dispenser/content_change, dispenser/interval_since_previous_ms]
+    discriminating_evidence:
+      - dispenser.interval_since_previous_ms
+      - dispenser.content_change
+    proposed_evidence: []
     channels_required_all: [CH-DISP]
     channels_required_any: []
     distinguishable: conditional
@@ -350,14 +358,14 @@ rows:
         expected_kappa: [C1]
     declared_limit: false
     note: >-
-      Gap G-1 (EC-GAP-1, ADR-032 proposed). Worked case W-06: the table gives UNDETERMINED (reason
-      insufficient) and DIFFERS from the analisi verdict 'yes, if the dispenser measures the content',
-      because the group dispenser does not exist in contract 0.1.0: channel CH-DISP feeds no field and the
-      rule has no row that reads it (C1 is undefined for count, AD-10). The third outcome is the analisi
-      §4.5 verdict (a content change present and an interval above the bounce threshold, registry name
-      dispense_bounce_interval_ms proposed in ADR-032) and is NOT reproducible by the rule of
-      attribution-rule.md until ADR-032 is accepted and a count row is defined; consumers must not turn an
-      outcome whose when-set names a proposed channel into a fixture. count reads no robot field, so A4
+      Gap G-1 (EC-GAP-1, closed by contract 0.2.0 and ADR-032, accepted). Worked case W-06: the table
+      gives UNDETERMINED (reason insufficient) and DIFFERS from the analisi verdict 'yes, if the dispenser
+      measures the content', because the hierarchical rule treats the group dispenser (channel CH-DISP) as
+      context: it has no row that reads it (C1 is undefined for count, AD-10). The third outcome is the
+      analisi §4.5 verdict (a content change present and an interval above the bounce threshold, registry
+      name dispense_bounce_interval_ms proposed in ADR-032) and is reproducible only by the likelihood
+      attributor of WS05-T12, NOT by the hierarchical rule of attribution-rule.md; consumers must not
+      turn an outcome whose when-set names a context channel into a fixture of the hierarchical rule. count reads no robot field, so A4
       repeats the default. A double take and a bounce share the observed Events (confounder
       double_take_vs_bounce of WS04). R3 weakness 4 (a second opening two minutes after the regular one is
       more likely a double take than tampering) is the reason the row is C1.
@@ -368,8 +376,10 @@ rows:
     true_class: C2
     subtypes: [dispenser_bounce]
     violated_templates: [count]
-    discriminating_evidence: []
-    proposed_evidence: [dispenser/content_change, dispenser/interval_since_previous_ms]
+    discriminating_evidence:
+      - dispenser.interval_since_previous_ms
+      - dispenser.content_change
+    proposed_evidence: []
     channels_required_all: [CH-DISP]
     channels_required_any: []
     distinguishable: conditional
@@ -387,14 +397,17 @@ rows:
         expected_kappa: [C2]
     declared_limit: false
     note: >-
-      Gap G-1. Worked case W-07: the vector equals that of W-06 and the result is UNDETERMINED; this
-      DIFFERS from the analisi verdict 'yes' (short interval between events, no content change), which
-      needs the proposed fields of ADR-032. The row verdict is therefore conditional on CH-DISP and not
-      distinguishable as the task start text said; the third outcome is the analisi verdict and is not
-      reproducible by the rule until ADR-032 and a count row exist. The interval 'below one second' of
+      Gap G-1 (closed by contract 0.2.0). Worked case W-07: the vector equals that of W-06 and the result
+      is UNDETERMINED; this DIFFERS from the analisi verdict 'yes' (short interval between events, no
+      content change), which needs the two fields of the group dispenser (ADR-032, ADR-040: a bounce has
+      content_change zero). The row verdict is therefore conditional on CH-DISP and not distinguishable
+      as the task start text said; the third outcome is the analisi verdict and is reproducible only by
+      the likelihood attributor of WS05-T12, not by the hierarchical rule, which treats the group as
+      context. The interval 'below one second' of
       analisi §4.5 is illustrative, unverified; no number is used here. This row is the count template
       only. The duplicate instances that a bounce opens for hold, resp and int (M-DUPWIN, fault-model.md)
-      are row DX-27, which is not distinguishable: the fault raises no field and, by the decision table, a
+      are row DX-27, which is not distinguishable for the hierarchical rule: the fault raises the two
+      conditional dispenser fields, which that rule treats as context, and, by the decision table, a
       duplicate violation of hold or resp with coherent channels reads as C1 even when CH-DISP is
       available, because no rule row reads the dispenser evidence for those templates. A consumer that
       maps the subtype dispenser_bounce to a row must therefore use the pair of subtype and template
@@ -412,7 +425,7 @@ rows:
       - system.ble_link_quality
       - cross_device.pulse_vs_ecg_hr_diff
       - crypto_temporal.authenticated
-      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.seq_repeat
       - crypto_temporal.timestamp_implausible
     proposed_evidence: []
     channels_required_all: []
@@ -439,15 +452,15 @@ rows:
       the row verdict stays conditional, but the authenticated outcome is restricted to a replay whose
       metadata was rewritten (worked case W-08: crypto_temporal.authenticated asserted, C3). The threat
       model finds the authenticated column of a verbatim naive replay partial (a verbatim copy has a valid
-      tag; one Boolean mixes a repeated and a lost sequence value, TM-GAP-SEQ, ADR-034 proposed); the rule
-      reaches C3 for it only through the sequence evidence of a device that provides seq with a complete
+      tag; the repeat is crypto_temporal.seq_repeat and the loss is system.seq_gap since contract 0.2.0,
+      TM-GAP-SEQ closed by ADR-034); the rule reaches C3 for it only through the sequence evidence of a device that provides seq with a complete
       delivery ratio (IE-2, W-08-U) and abstains without seq (W-08-U-noseq, reason conflict). Default
       outcome (unauthenticated): C3 for the naive replay with seq (W-08-U), UNDETERMINED for the naive
       replay without seq (W-08-U-noseq), and for the informed replay (nothing raised, vector as W-10) C1
       if a template is violated and no alert otherwise; the last case is the masquerade of DX-10. A replay
       together with a loss is read as a loss (EC D-3, declared cost). Verbatim naive replay without seq in
       the authenticated deployment (threat-model.md calls it partial): the tag is valid, so
-      crypto_temporal.authenticated is denied, crypto_temporal.seq_gap_or_replay is None and only
+      crypto_temporal.authenticated is denied, crypto_temporal.seq_repeat is None and only
       crypto_temporal.timestamp_implausible is asserted, which is never decisive alone; the table gives
       UNDETERMINED, reason conflict (RS-3, the pattern of W-08-U-noseq), partial with the candidates C2
       and C3. A channel mapping cannot express the absence of seq, so this case is carried by the note and
@@ -464,10 +477,11 @@ rows:
     violated_templates: [count, hold, resp, int]
     discriminating_evidence:
       - system.ble_link_quality
+      - system.seq_gap
       - witness.identity_confirmed
       - witness.intake_observed
       - crypto_temporal.authenticated
-      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.seq_repeat
     proposed_evidence: []
     channels_required_all: []
     channels_required_any: [CH-WIT, CH-CRYPTO]
@@ -562,11 +576,14 @@ rows:
         masquerades_as: C1
     declared_limit: true
     note: >-
-      Declared limit, same evidence as DX-04 (analisi §4.8: silent faults producing plausible values
-      remain indistinguishable from clinical deviations). The fault raises no field and a run of identical
-      values has no field in contract 0.1.0 (fault-model.md, fault-to-evidence table); no field is
-      proposed here because that would be a contract change that no source asks for. The vector equals
-      W-01 (range), so the result is C1 as in W-04. Under A4 hold and resp lose C1 to UNDETERMINED. A
+      Declared limit for the hierarchical rule, same evidence as DX-04 (analisi §4.8: silent faults
+      producing plausible values remain indistinguishable from clinical deviations). Contract 0.2.0 adds
+      signal_quality.cuff_value_repeated (FM-GAP-FLAT closed), which stuck_at raises only if the cuff
+      profile declares a display resolution and a previous reading exists (condition REP of
+      fault-model.md); the field separates stuck_at for a rule that reads it (the likelihood attributor of
+      WS05-T12), but the hierarchical rule treats it as context, and it is not listed as discriminating
+      evidence of this row. For the hierarchical rule the vector equals W-01 (range), so the result is C1
+      as in W-04. Under A4 hold and resp lose C1 to UNDETERMINED. A
       frozen in-band value can hide a latent violation (SATISFIED, FX-7), counted by WS08 as a missed
       event.
   - id: DX-12
@@ -616,7 +633,7 @@ rows:
       - system.liveliness_ok
       - system.qos_deadline_missed
       - system.ble_link_quality
-      - crypto_temporal.seq_gap_or_replay
+      - system.seq_gap
     proposed_evidence: []
     channels_required_all: []
     channels_required_any: [CH-SYS-WARD]
@@ -654,7 +671,7 @@ rows:
       - system.liveliness_ok
       - system.qos_deadline_missed
       - system.ble_link_quality
-      - crypto_temporal.seq_gap_or_replay
+      - system.seq_gap
     proposed_evidence: []
     channels_required_all: []
     channels_required_any: [CH-SYS-WARD]
@@ -771,7 +788,7 @@ rows:
       Same structure as DX-05 with the manipulation outcome (the manipulation variant of worked case W-05,
       decision table row 4 via SE-7). The decisive field is robot-derived and A4 removes it. The
       alternative cause of the same symptom is a patient who refuses (C1, DX-21): the pair is separated
-      only by the outcome declined of ADR-040 (proposed), and even then a refusal does not reach C1
+      only by the outcome declined of ADR-040 (accepted: declined does not make manip_task_failed True), and even then a refusal does not reach C1
       because it leaves the cuff silent (W-05-silent-040).
   - id: DX-18
     analisi_row: null
@@ -859,10 +876,11 @@ rows:
       - system.ble_link_quality
       - system.nav_task_failed
       - system.manip_task_failed
+      - system.seq_gap
       - signal_quality.cuff_error_code
       - cross_device.pulse_vs_ecg_hr_diff
       - crypto_temporal.authenticated
-      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.seq_repeat
       - crypto_temporal.timestamp_implausible
     proposed_evidence: []
     channels_required_all: [CH-SYS-WARD, CH-SYS-ROBOT, CH-SQI, CH-XDEV, CH-CRYPTO]
@@ -914,7 +932,7 @@ rows:
       Worked cases W-05-silent (without ADR-040) and W-05-silent-040 (with the outcome declined): a
       refusal leaves the cuff silent in the evidence window, so system.ble_link_quality,
       signal_quality.cuff_error_code and the crypto fields are None and C1 is unreachable whatever the
-      robot reports; the result is UNDETERMINED, reason insufficient. ADR-040 (proposed) is necessary but
+      robot reports; the result is UNDETERMINED, reason insufficient. ADR-040 (accepted) is necessary but
       not sufficient: it only keeps the C2 side of the pair (a failed manipulation, DX-17) separated. C1
       is reached only if other cuff traffic lies in the evidence window (W-05-late-traffic), which the
       benchmark as generated does not produce. R3 weakness 4 (missed measurements are a process deviation
@@ -947,8 +965,8 @@ rows:
       is inferred. The count template has no C1 under the contract (AD-10), so with no system evidence the
       vector equals W-06 and the result is UNDETERMINED. When the cause is a lost real dispense (a
       dispenser-link dropout, a dropped message or a killed dispenser node) the link or node evidence
-      gives C2 instead (DX-13, DX-14, DX-15). No dispenser field exists to tell an omission from other
-      causes (gap G-1). count reads no robot field, so A4 repeats the default.
+      gives C2 instead (DX-13, DX-14, DX-15). The dispenser group (gap G-1, closed by contract 0.2.0) is context for the hierarchical
+      rule and does not tell an omission from other causes. count reads no robot field, so A4 repeats the default.
   - id: DX-23
     analisi_row: null
     basis: inferred
@@ -960,9 +978,10 @@ rows:
       - signal_quality.ecg_sqi
       - signal_quality.ppg_sqi
       - system.ble_link_quality
+      - system.seq_gap
       - cross_device.pulse_vs_ecg_hr_diff
       - crypto_temporal.authenticated
-      - crypto_temporal.seq_gap_or_replay
+      - crypto_temporal.seq_repeat
       - crypto_temporal.timestamp_implausible
     proposed_evidence: []
     channels_required_all: []
@@ -993,7 +1012,7 @@ rows:
       (IE-1, the last outcome). Injected values inside the care-plan band can raise no violation, in which
       case there is no alert and WS08 counts an undetected C3 event (threat-model.md). Verbatim naive
       replay without seq in the authenticated deployment (threat-model.md calls it partial): the tag is
-      valid, so crypto_temporal.authenticated is denied, crypto_temporal.seq_gap_or_replay is None and
+      valid, so crypto_temporal.authenticated is denied, crypto_temporal.seq_repeat is None and
       only crypto_temporal.timestamp_implausible is asserted, which is never decisive alone; the table
       gives UNDETERMINED, reason conflict (RS-3, the pattern of W-08-U-noseq), partial with the candidates
       C2 and C3. A channel mapping cannot express the absence of seq, so this case is carried by the note
@@ -1026,7 +1045,7 @@ rows:
       Declared limit, derived: analisi lists perception spoofing as an attacker capability and 'simulated
       presence' as an injection but has no matrix row. The robot reports what its sensors were made to
       perceive, and no field says how the observation was obtained (threat-model.md, presence_spoof;
-      Non-claims 3: presence is not identity). At the informed level nothing in the twenty fields
+      Non-claims 3: presence is not identity). At the informed level nothing in the twenty-two evidence fields
       contradicts the spoof; at the naive level only witness.identity_confirmed can read False, and only
       if the robot checks identity. Alone, a spoof can raise no violation (it can only move int upward),
       so there is no alert (NO_ALERT); its effect is to change the evidence of violations that others
@@ -1140,12 +1159,13 @@ rows:
     declared_limit: true
     note: >-
       Derived from fault-model.md (M-DUPWIN, FX-16, OP-12) and the decision table; there is no worked
-      case. A bounce raises no field (fault-to-evidence table: the set of paths is empty), and the extra
+      case. A bounce raises the two conditional fields of the group dispenser (fault-to-evidence table, condition DSP), and the extra
       DISPENSE anchors a duplicate instance of hold, resp and int that can be violated where the real
       instance is not. With coherent channels a duplicate hold violation reads as C1 (exclusion set of
       hold satisfied), a duplicate resp violation reads as C1 when the dose is backed by the witness or by
       authentication (as W-02) and is UNDETERMINED otherwise, and a duplicate int violation is
       UNDETERMINED, reason provenance-only (AD-3, hazard H-10): a C2 bounce can masquerade as a clinical
-      deviation through hold and resp. The dispenser evidence of ADR-032 does not change this, because no
-      rule row reads it for these templates. Under A4 hold and resp lose C1 to UNDETERMINED (transition
+      deviation through hold and resp. The dispenser group of contract 0.2.0 (ADR-032) does not change this for the
+      hierarchical rule, because no rule row reads it for these templates (it is context); the
+      likelihood attributor of WS05-T12 reads it. Under A4 hold and resp lose C1 to UNDETERMINED (transition
       table). The count instance of the same fault is DX-07. The occurrence rate is measured by WS08.

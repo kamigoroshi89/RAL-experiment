@@ -10,8 +10,9 @@ one, else the path mask of evidence-channels.md), and the other channels are set
 
 The check is that every expected cause of an outcome that the rule can produce is produced by at least one of those
 vectors (several expected causes are a union over templates and cases, not alternatives for one vector). An outcome
-whose ``when`` names the proposed channel ``CH-DISP`` (the analisi verdict of DX-06 and DX-07, not reproducible by the
-rule until ADR-032) and an expected cause ``NO_ALERT`` (a statement about detection) are skipped, with a recorded reason
+whose ``when`` names the channel ``CH-DISP`` (the analisi verdict of DX-06 and DX-07: the dispenser group of
+``#evidencevector`` 0.2.0 exists, but the hierarchical rule treats it as context, so only the likelihood attributor of
+WS05-T12 can reproduce it) and an expected cause ``NO_ALERT`` (a statement about detection) are skipped, with a recorded reason
 (``test_skipped_outcomes_have_a_recorded_reason``). The rows are read through the file; none is retyped.
 """
 
@@ -56,11 +57,13 @@ CHANNEL_FIELDS = {
         "system.liveliness_ok",
         "system.qos_deadline_missed",
         "system.ble_link_quality",
+        "system.seq_gap",
     ),
     "CH-SQI": (
         "signal_quality.ecg_sqi",
         "signal_quality.ppg_sqi",
         "signal_quality.cuff_error_code",
+        "signal_quality.cuff_value_repeated",
     ),
     "CH-XDEV": ("cross_device.pulse_vs_ecg_hr_diff",),
 }
@@ -79,7 +82,8 @@ CLEAN = {
     "cross_device.pulse_vs_ecg_hr_diff": 2.0,
     "witness.identity_confirmed": True,
     "witness.intake_observed": True,
-    "crypto_temporal.seq_gap_or_replay": False,
+    "system.seq_gap": False,
+    "crypto_temporal.seq_repeat": False,
     "crypto_temporal.timestamp_implausible": False,
 }
 
@@ -91,7 +95,7 @@ def named_cases(row: dict[str, Any]) -> list[str]:
 
 def skip_reason(outcome: dict[str, Any]) -> str | None:
     if "CH-DISP" in outcome["when"]:
-        return "proposed channel CH-DISP (ADR-032): the analisi verdict, not reproducible by the rule"
+        return "channel CH-DISP (ADR-032): the analisi verdict; the hierarchical rule treats the dispenser group as context"
     if not set(outcome["expected_kappa"]) - {"NO_ALERT"}:
         return "NO_ALERT is a statement about detection: the rule runs on violated records only"
     return None
@@ -150,7 +154,8 @@ ADVERSE: dict[str, Any] = {
     "witness.identity_confirmed": False,
     "witness.intake_observed": False,
     "crypto_temporal.authenticated": False,
-    "crypto_temporal.seq_gap_or_replay": True,
+    "system.seq_gap": True,
+    "crypto_temporal.seq_repeat": True,
     "crypto_temporal.timestamp_implausible": True,
 }
 

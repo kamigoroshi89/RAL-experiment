@@ -21,7 +21,8 @@ CLEAN = {
     "signal_quality.cuff_error_code": "",
     "cross_device.pulse_vs_ecg_hr_diff": 2.0,
     "crypto_temporal.authenticated": True,
-    "crypto_temporal.seq_gap_or_replay": False,
+    "system.seq_gap": False,
+    "crypto_temporal.seq_repeat": False,
     "crypto_temporal.timestamp_implausible": False,
 }
 EVIDENCE_KINDS = {

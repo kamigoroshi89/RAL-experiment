@@ -22,7 +22,7 @@ Blocked until WS07-T03 is done (device nodes, gateway, link drop parameters, sup
 
 - `docs/models/fault-model.md` (WS02-T01: `Subtype vocabulary`, `Fault-to-evidence table`, `Injection parameter sheet`, `Non-faults and boundaries`) and `docs/models/evidence-channels.md` (WS02-T03: what each `EvidenceVector` field means and how it is derived).
 - `docs/source/analisi.md` §5.2 (fault list: lifecycle transitions, process kill, message drops with tc netem, localisation noise, impossible goals), §5.1 (3) (C2 injections with onset, duration and magnitude), §4.6 row 15:00.
-- `docs/plan/02-interfaces.md#ros-2-interfaces` (liveliness, heartbeat: a lost heartbeat is C2 evidence) and `#evidencevector` (20 fields; `None` means unavailable).
+- `docs/plan/02-interfaces.md#ros-2-interfaces` (liveliness, heartbeat: a lost heartbeat is C2 evidence) and `#evidencevector` (24 fields in contract 0.2.0, WS05-T13; `None` means unavailable).
 - `docs/plan/workstreams/WS07-ros2-sim/README.md` (internal interfaces: gateway parameters, supervisor announcements, robot hooks) and the T03 task file.
 - `ros2/ralmon_sim/config/package_availability.yaml` (`tc_netem` and RMW findings from WS07-T01).
 
