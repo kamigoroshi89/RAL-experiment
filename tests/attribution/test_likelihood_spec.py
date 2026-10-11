@@ -11,7 +11,10 @@ Numbers used here (eps, qc, ...) are values of the SENSITIVITY GRID of the speci
 
 from __future__ import annotations
 
+import collections
+import copy
 import dataclasses
+import itertools
 import math
 import re
 from collections.abc import Mapping
@@ -119,6 +122,62 @@ def applicable(cfg: Mapping[str, Any], template: str) -> list[Mapping[str, Any]]
     return [c for c in cfg["components"] if template in c["templates"]]
 
 
+def _mode_weight(expr: str, par: Mapping[str, float]) -> float:
+    return float(eval(expr, {"__builtins__": {}}, dict(par)))
+
+
+def joint_prob(
+    cfg: Mapping[str, Any],
+    group: str,
+    comp_id: str,
+    readings: Mapping[str, str | None],
+    par: Mapping[str, float],
+) -> float:
+    """P(joint reading of the available members of a grouped cell | component); None members are summed over.
+
+    Formula of the specification: P(j) = sum over modes m of weight(m) * [(1-eps) 1(j=m) + eps/(K-1) 1(j!=m)] for a component
+    with modes (K = number of joint classes); a component without modes is, in the cross-device group, the product of its marginals
+    and, in the ble_seq_gap group, the single mode ``clean``.
+    """
+    spec = cfg["grouped_cells"][group]
+    fields = spec["fields"]
+    eps = par["eps"]
+    k_classes = spec["K"]
+    modes = spec["modes"].get(comp_id)
+    total = 0.0
+    for combo in itertools.product("AD", repeat=len(fields)):
+        if any(
+            readings.get(f) is not None and readings[f] != c
+            for f, c in zip(fields, combo, strict=True)
+        ):
+            continue
+        if group == "ble_seq_gap":
+            joint = spec["joint_class_map"][",".join(combo)]
+            mode_weights = (
+                {m: _mode_weight(w, par) for m, w in modes.items()}
+                if modes
+                else {m: _mode_weight(w, par) for m, w in spec["default_mode"].items()}
+            )
+            total += sum(
+                w * ((1 - eps) if joint == m else eps / (k_classes - 1))
+                for m, w in mode_weights.items()
+            )
+        elif modes:
+            joint = ",".join(combo)
+            mode_weights = {m: _mode_weight(w, par) for m, w in modes.items()}
+            total += sum(
+                w * ((1 - eps) if joint == m else eps / (k_classes - 1))
+                for m, w in mode_weights.items()
+            )
+        else:
+            prod = 1.0
+            for f, c in zip(fields, combo, strict=True):
+                pa = p_asserted(cfg, comp_id, f, par)
+                prod *= pa if c == "A" else 1 - pa
+            total += prod
+    return total
+
+
 def reference_posterior(
     cfg: Mapping[str, Any],
     template: str,
@@ -126,6 +185,7 @@ def reference_posterior(
     par: Mapping[str, float],
     prior: Mapping[str, float] | None = None,
     mask: frozenset[str] = frozenset(),
+    grouped_off: bool = False,
 ) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
     """(component, subtype, class) posteriors; pseudo-code of the specification, design ``uniform`` (weight 1 per component)."""
     prior = prior or {c: 1 / 3 for c in CLASSES}
@@ -137,10 +197,24 @@ def reference_posterior(
     for comp in comps:
         n_class = sum(1 for c in comps if c["class"] == comp["class"])
         lp = math.log(prior[comp["class"]] / z) + math.log(1 / n_class)
+        pair = cfg["grouped_cells"]["ble_seq_gap"]["fields"]
+        if (
+            cfg["grouped_cells"]["ble_seq_gap"]["reference_mode"] == "grouped"
+            and not grouped_off
+        ):
+            avail = {f: (None if f in mask else readings.get(f)) for f in pair}
+            if any(v is not None for v in avail.values()):
+                lp += math.log(joint_prob(cfg, "ble_seq_gap", comp["id"], avail, par))
         for field in reads:
             reading = readings.get(field)
             if reading is None or field in mask:
                 continue  # unavailable: factor 1
+            if (
+                field in pair
+                and not grouped_off
+                and cfg["grouped_cells"]["ble_seq_gap"]["reference_mode"] == "grouped"
+            ):
+                continue  # the pair is ONE joint cell in the reference
             pa = p_asserted(cfg, comp["id"], field, par)
             lp += math.log(pa if reading == "A" else 1 - pa)
         log_post[comp["id"]] = lp
@@ -168,6 +242,33 @@ def walk_numbers(node: Any, path: tuple[str, ...] = ()):
     elif isinstance(node, list):
         for i, v in enumerate(node):
             yield from walk_numbers(v, (*path, str(i)))
+
+
+def number_is_allowed(path: tuple[str, ...]) -> bool:
+    """A number may stand only inside a declared sensitivity range or design, at an exact place of the file."""
+    if (
+        len(path) >= 3
+        and path[0] in {"parameters", "cells", "grouped_cells"}
+        and path[2] == "sensitivity_range"
+    ):
+        return True
+    if len(path) >= 3 and path[0] == "sensitivity_design" and path[2] == "range":
+        return True
+    return (
+        len(path) >= 2
+        and path[0] in {"class_priors", "pi_designs"}
+        and path[1] in {"designs", "sensitivity_range"}
+    )
+
+
+def numbers_outside_the_whitelist(
+    config: Mapping[str, Any],
+) -> list[tuple[tuple[str, ...], float]]:
+    return [
+        (p, v)
+        for p, v in walk_numbers(config)
+        if v not in (0, 1) and not number_is_allowed(p)
+    ]
 
 
 def contract_section(name: str) -> str:
@@ -224,13 +325,12 @@ def test_structural_cells_use_eps_and_no_literal_probability(
     forms = {t["form"] for t in cfg["cell_tokens"].values()}
     assert "eps" in forms and "1-eps" in forms
     # no bare probability anywhere outside a sensitivity range or a declared sensitivity design
-    for path, value in walk_numbers(cfg):
-        if value in (0, 1):
-            continue
-        assert any(p in ("sensitivity_range", "designs", "range") for p in path), (
-            path,
-            value,
-        )
+    assert numbers_outside_the_whitelist(cfg) == []
+    # the whitelist is positional: a number under a key that is not a declared range cannot pass as one
+    tampered = copy.deepcopy(cfg)
+    tampered["templates"]["range"]["sensitivity_range"] = 0.3
+    tampered["parameters"][0]["note"] = 0.2
+    assert len(numbers_outside_the_whitelist(tampered)) == 2
 
 
 def test_silent_faults_do_not_zero_diagnostics_ok(cfg: dict[str, Any]) -> None:
@@ -292,7 +392,11 @@ def test_every_cell_names_its_source_and_status(cfg: dict[str, Any]) -> None:
         cfg["pi_designs"],
         *cfg["grouped_cells"].values(),
     ]
-    assert len(cfg["cells"]) > 60
+    assert len(cfg["cells"]) == 86
+    by_status = collections.Counter(c["status"] for c in cfg["cells"])
+    assert by_status == {"structural": 19, AWAITING: 67}
+    by_token = collections.Counter(c["token"] for c in cfg["cells"])
+    assert by_token == {"R": 19, "C": 29, "Cn": 2, "S": 4, "V": 2, "N": 30}
     for row in rows:
         assert row["source_type"] in SOURCE_TYPES, row
         assert row.get("source_ref"), row
@@ -707,3 +811,231 @@ def test_the_spec_lists_the_tight_labelling_and_the_two_diagnostics_profiles_as_
         "driver_with_diagnostics",
         "without_diagnostics",
     }
+
+
+# ---------------------------------------------------------------------------------------------
+# Fix round after the independent review
+# ---------------------------------------------------------------------------------------------
+
+
+def doc_section(doc: str, heading: str) -> str:
+    start = doc.index(f"\n## {heading}")
+    end = doc.find("\n## ", start + 4)
+    return doc[start : end if end != -1 else None]
+
+
+def test_ble_seq_gap_is_the_reference_grouped_cell(
+    cfg: dict[str, Any], doc: str
+) -> None:
+    # B1: ADR-074 amendment 3 and ADR-075: seq_gap and ble_link_quality are ONE grouped cell in the reference
+    grouped = cfg["grouped_cells"]
+    assert grouped["ble_seq_gap"]["reference_mode"] == "grouped"
+    assert grouped["cross_device_signal_quality"]["reference_mode"] == "independent"
+    assert set(grouped["ble_seq_gap"]["fields"]) == {
+        "system.ble_link_quality",
+        "system.seq_gap",
+    }
+    design = {d["name"]: d for d in cfg["sensitivity_design"]}
+    assert design["grouped_variant"]["reference"] == "reference"
+    assert {"reference", "fully_independent", "reference_plus_cross_device"} <= set(
+        design["grouped_variant"]["range"]
+    )
+    assert "REFERENCE" in doc_section(
+        doc, "Grouped cells (the reference pair and the sensitivity variants)"
+    )
+    assert "fully independent" in doc
+    model = doc_section(doc, "The model")
+    assert "off by default" not in doc
+    assert "the independent product is the reference" not in doc
+    assert "ONE joint cell" in model
+    # the reference posterior multiplies the joint term for the pair, not the two marginals
+    readings = {"system.ble_link_quality": "A", "system.seq_gap": "A"}
+    grouped_post = reference_posterior(cfg, "hold", readings, GRID)[0]
+    independent_post = reference_posterior(
+        cfg, "hold", readings, GRID, grouped_off=True
+    )[0]
+    assert grouped_post["ble_dropout"] != pytest.approx(independent_post["ble_dropout"])
+    # the hand-over of WS05-T12 no longer says that the grouped pair is off by default
+    t12 = (
+        ROOT / "docs/plan/workstreams/WS05-monitor/tasks/T12-likelihood-attributor.md"
+    ).read_text(encoding="utf-8")
+    handover = t12[t12.index("Hand-over from WS02-T06") :]
+    assert "off by default" not in handover
+    assert "ble_seq_gap" in handover and "reference" in handover
+
+
+def _parse_reads_table(doc: str) -> tuple[list[str], dict[str, set[str]]]:
+    section = doc_section(doc, "Fields read per template, and the masks")
+    lines = [ln for ln in section.splitlines() if ln.startswith("|")]
+    header = [c.strip() for c in lines[0].strip().strip("|").split("|")]
+    separator = [c.strip() for c in lines[1].strip().strip("|").split("|")]
+    assert all(set(c) <= {"-", ":"} and c for c in separator), separator
+    reads: dict[str, set[str]] = {t: set() for t in header[1:]}
+    for ln in lines[2:]:
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        assert len(cells) == len(header), ln
+        for template, mark in zip(header[1:], cells[1:], strict=True):
+            if mark == "read":
+                reads[template].add(cells[0].strip("`"))
+    return header, reads
+
+
+def test_reads_table_of_the_document_matches_the_yaml(
+    cfg: dict[str, Any], doc: str
+) -> None:
+    header, reads = _parse_reads_table(doc)
+    assert header == ["field", *TEMPLATES]
+    for template in TEMPLATES:
+        assert reads[template] == set(cfg["templates"][template]["reads"]), template
+
+
+@pytest.mark.parametrize("group", ["ble_seq_gap", "cross_device_signal_quality"])
+def test_every_grouped_joint_sums_to_one_for_every_availability_pattern(
+    cfg: dict[str, Any], group: str
+) -> None:
+    spec = cfg["grouped_cells"][group]
+    assert spec["K"] == 2 ** len(spec["fields"]) or group == "ble_seq_gap"
+    assert "eps/(K-1)" in spec["joint_formula"].replace(" ", "")
+    assert spec["none_rule"]
+    comps = [c["id"] for c in cfg["components"]]
+    for eps, qc in itertools.product((0.001, 0.01, 0.1), (0.25, 0.5, 0.75)):
+        par = {**GRID, "eps": eps, "qc": qc}
+        for comp in comps:
+            full = {f: None for f in spec["fields"]}
+            # no member available: the factor is 1
+            assert joint_prob(cfg, group, comp, full, par) == pytest.approx(1.0), (
+                group,
+                comp,
+            )
+            # for every subset of available members, the probabilities of their joint readings sum to 1
+            for avail in itertools.product((False, True), repeat=len(spec["fields"])):
+                members = [f for f, a in zip(spec["fields"], avail, strict=True) if a]
+                total = 0.0
+                for values in itertools.product("AD", repeat=len(members)):
+                    readings = {f: None for f in spec["fields"]}
+                    readings.update(dict(zip(members, values, strict=True)))
+                    total += joint_prob(cfg, group, comp, readings, par)
+                assert total == pytest.approx(1.0), (group, comp, members, eps, qc)
+
+
+def test_grouped_modes_are_distributions_and_cross_device_has_a_none_rule(
+    cfg: dict[str, Any],
+) -> None:
+    for group, spec in cfg["grouped_cells"].items():
+        for comp, modes in spec["modes"].items():
+            assert sum(_mode_weight(w, GRID) for w in modes.values()) == pytest.approx(
+                1.0
+            ), (group, comp)
+    xdev = cfg["grouped_cells"]["cross_device_signal_quality"]
+    assert "summed over" in xdev["none_rule"] or "marginalis" in xdev["none_rule"]
+    # None member of the cross-device group: the joint of the others is the marginal (summing over the unavailable one)
+    par = {**GRID}
+    for comp in ("ecg_noise", "replay_informed", "ble_dropout"):
+        fields = xdev["fields"]
+        a = joint_prob(
+            cfg,
+            "cross_device_signal_quality",
+            comp,
+            {fields[0]: "A", fields[1]: "A", fields[2]: None},
+            par,
+        )
+        b = sum(
+            joint_prob(
+                cfg,
+                "cross_device_signal_quality",
+                comp,
+                {fields[0]: "A", fields[1]: "A", fields[2]: v},
+                par,
+            )
+            for v in "AD"
+        )
+        assert a == pytest.approx(b)
+
+
+def test_timestamp_cells_beyond_the_bound_are_conditional(
+    cfg: dict[str, Any], doc: str
+) -> None:
+    # I3: 'beyond the bound only' (fault-model.md, threat-model.md, TX-8 (a)) is not a structural 1 - eps
+    field = "crypto_temporal.timestamp_implausible"
+    for comp in ("clock_skew", "out_of_order", "timestamp_manipulation"):
+        cell = cell_index(cfg)[(comp, field)]
+        assert cell["token"] != "R", comp
+        assert cell["status"] == AWAITING and cell["sensitivity_range"], comp
+        assert cell["condition"] == "BOUND", comp
+    section = doc_section(
+        doc, "Known failure modes (from the research, stated plainly)"
+    )
+    assert "beyond the bound" in section
+    for name in ("clock_skew", "timestamp_manipulation", "out_of_order"):
+        assert name in section
+    assert "outside benchmark v1" in section
+    subtypes = {s["name"]: s for s in cfg["subtypes"]}
+    for name in ("clock_skew", "timestamp_manipulation", "out_of_order"):
+        assert subtypes[name]["in_benchmark_v1"] is False
+
+
+def test_body_states_adr_075_the_interval_chain_and_the_sessions(doc: str) -> None:
+    # I4 (a)
+    assert "ADR-075" in doc and "DA-CONFERMARE" in doc
+    assert "is not a C2 predicate" in doc
+    # I4 (b)
+    assert "ADR-074 amendment 4" in doc
+    assert "coherent on the interval chain" in doc
+    assert "7 of 16" in doc
+    assert "naive forger is not coherent" in doc
+    # I4 (c)
+    assert "sessions" in doc
+    assert "in practice a `ble_dropout` signal" in doc
+
+
+def test_pair_quantity_names_the_within_subtype_weights(doc: str) -> None:
+    section = doc_section(doc, "The pair quantity")
+    assert "within-subtype" in section
+    assert "pi design in force" in section
+    assert "uniform over components" in section
+    assert "reference design" in section and "awaiting" in section
+
+
+def test_dead_awaiting_cells_are_exactly_the_documented_ones(
+    cfg: dict[str, Any], doc: str
+) -> None:
+    reads_of: dict[str, set[str]] = {}
+    for comp in cfg["components"]:
+        reads_of[comp["id"]] = (
+            set().union(*(set(cfg["templates"][t]["reads"]) for t in comp["templates"]))
+            if comp["templates"]
+            else set()
+        )
+    dead = {
+        (c["component"], c["field"])
+        for c in cfg["cells"]
+        if c["field"] not in reads_of[c["component"]]
+    }
+    assert dead == {
+        ("presence_spoof_naive", "witness.identity_confirmed"),
+        ("out_of_order", "crypto_temporal.timestamp_implausible"),
+        ("ecg_noise", "cross_device.pulse_vs_ecg_hr_diff"),
+        ("ecg_noise", "signal_quality.ecg_sqi"),
+    }
+    section = doc_section(
+        doc, "Known failure modes (from the research, stated plainly)"
+    )
+    assert "presence_spoof" in section and "dead" in section
+    assert "message_drop" in section
+    assert "replay" in section and "seq_gap" in section and "H-SUPP" in section
+
+
+def test_status_table_counts_are_the_recounted_ones(
+    cfg: dict[str, Any], doc: str
+) -> None:
+    section = doc_section(doc, "Status of the numbers, in one table")
+    counts = collections.Counter(c["token"] for c in cfg["cells"])
+    conditional = counts["C"] + counts["Cn"] + counts["S"] + counts["V"]
+    assert f"{conditional} conditional cells" in section
+    assert f"{counts['N']} natural-repeat cells" in section
+    assert f"{counts['R']} structural" in section
+
+
+def test_catalogue_wording_counts_double_take_once(doc: str) -> None:
+    section = doc_section(doc, "The subtype catalogue")
+    assert "double_take` is both" in section
