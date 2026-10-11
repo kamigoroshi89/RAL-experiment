@@ -76,3 +76,7 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 
 - La diagnostica sul generatore vero ha mostrato che il giorno senza guasti non è pulito (53% di letture fuori banda, B1 allarma sul 95,7% dei giorni, 2,54 `spontaneous_range` e 1,15 `spontaneous_resp` per paziente-giorno): la media trattata, 140,3 mmHg, sta sul bordo alto della banda. gab ha scelto di tenere la popolazione ancorata alla letteratura e di dichiarare il fondo (non tarare per rendere il giorno pulito), di misurare i falsi allarmi sulle finestre senza iniezioni, di escludere `ecg_noise` da questa versione e di non generare il benchmark finché non sono chiuse due condizioni: una ADR su RESP con riformulazioni e il test di non additività.
 
+## RESP tenuta e dichiarata; flussi casuali verificati (ADR-072, ADR-073, 2026-10-11)
+
+- gab ha scelto R3: RESP resta com'è e il paper dichiara che a regime le sue violazioni sono in gran parte un artefatto della specifica (AUC 0,55 per dose); metriche per template con media a pesi uguali e RESP riportata a parte (task WS08-T08); fonte di `delta_resp` e della regola dichiarata (la regola non ha fonte clinica nel repository); R1b archiviata come lavoro futuro; il confronto AUC 0,55 contro 0,965 è registrato in `docs/benchmark/results-to-discuss.md`. Il test di additività con una sola iniezione passa per tutti i 18 sottotipi (nessun flusso casuale condiviso): ADR-073 propone due correzioni e attende la decisione sulla doppia presa forzata. I report delle analisi sono ora in `docs/benchmark/evidence/`.
+

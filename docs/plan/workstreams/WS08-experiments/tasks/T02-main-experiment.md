@@ -4,7 +4,7 @@ title: "Main experiment: B1-B5 versus proposed method"
 workstream: WS08-experiments
 owner: agent
 status: blocked
-depends_on: ["WS08-T01", "WS06-T07", "WS04-T16"]
+depends_on: ["WS08-T01", "WS06-T07", "WS04-T16", "WS08-T08"]
 critical_path: true
 non_negotiable: false
 estimate_pd: 2.5
@@ -127,3 +127,7 @@ WS04-T16 is now a dependency: the main experiment must not run on a benchmark wh
 ### Decision of 2026-10-11 (gab; ADR-071)
 
 The false-alarm figure of the main experiment is measured on windows without injections (a metric to be added to `ralmon.eval`, follow-up of WS08-T01); natural truth events are truth; noise alarms are false alarms; the injected C1 subtypes `hypertensive_spike` and `drug_nonresponse` are read as the excess over the natural background; `ecg_noise` is out of this version. The real benchmark is not generated until the RESP ADR and the non-additivity test are closed (ADR-071 (d)).
+
+### Dependency added (gab, 2026-10-11; ADR-071, ADR-072)
+
+WS08-T08 (per-template metrics, equal-weight aggregate without RESP, false alarms outside injection windows) is now a dependency.
