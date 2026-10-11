@@ -80,7 +80,13 @@ Conventions of the attacks on the cuff stream (``replay``, ``injection_naive``,
     sequence with no numbers (a device that provides none) gets forged messages with none.
 
 ``dispense_forgery`` (point): a synthesised ``DISPENSE`` event of the dispenser at the onset (no
-payload, no ``auth`` sample, no ``INTAKE``, nothing in the latent day). Informed: the number after
+``content_change``, no ``auth`` sample, no ``INTAKE``, nothing in the latent day). When the device profile says that
+the dispenser reports the interval (WS04-T18), the forged event carries ``interval_since_previous_ms``: the interval
+since the latest earlier ``DISPENSE`` of the stream when it is written (genuine ones that arrived, and forged ones
+written before it), absent when there is none, whatever the level. The naive forger's interval is thus whatever
+the real stream gives; the informed forger copies the bounce timing by where it puts the message (one bounce gap after
+a real opening it reports the bounce interval). The genuine dispenser never saw the forged opening, so the interval of
+its next genuine opening is measured from the previous genuine one. Informed: the number after
 the last earlier dispense and every later dispense of the dispenser shifted by one (TM-OP-7: the
 informed forgery renumbers), ``settings["next_dispenser_seq"]`` follows. Naive: its own number
 from ``FORGED_SEQ_START`` (the first one that no dispense at that instant uses); the device's
@@ -959,7 +965,17 @@ def dispense_forgery(
             while seq in used:
                 seq += 1
             work.attacker_next[device] = _seq_in_range(seq + 1)
-        events.append(Event(EventKind.DISPENSE, t, t, device, {}, seq))
+        payload: dict[str, Any] = {}
+        profile = context.device_profile
+        if profile is not None and profile.dispenser_reports_interval:
+            earlier_t = [
+                e.t_device_ms for e in events if _is_dispense(e) and e.t_device_ms <= t
+            ]
+            if earlier_t:
+                # the interval the stream gives, whatever the level; the informed forger copies the bounce
+                # timing by where it puts the message (module docstring, WS04-T18)
+                payload[vocab.KEY_INTERVAL] = t - max(earlier_t)
+        events.append(Event(EventKind.DISPENSE, t, t, device, payload, seq))
         n = 1 + shifted
         if auth:
             events.append(_gateway_failure(device, t))

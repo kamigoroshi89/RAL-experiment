@@ -114,7 +114,8 @@ GENERATOR_VALUES: dict[str, Any] = {  # FIXTURE-ONLY arithmetic
     "robot_dwell_ms": 10 * MIN,
     "vitals_period_ms": MIN,
     "driver_period_ms": HOUR,  # TEST VALUE of WS04-T18: the real driver period is awaiting_human_value
-    "driver_stale_lease_ms": 10 * MIN,  # TEST VALUE of WS04-T18: the real lease is awaiting_human_value
+    "driver_stale_lease_ms": 10
+    * MIN,  # TEST VALUE of WS04-T18: the real lease is awaiting_human_value
 }
 DURATIONS = {"short": 10 * MIN, "medium": 30 * MIN, "long": HOUR}  # FIXTURE-ONLY
 MULTIPLES = {  # FIXTURE-ONLY multiples of a reference quantity, spanning it
@@ -702,9 +703,16 @@ def test_manifest_records_revision_provenance_and_settings(
     assert isinstance(settings["disabled_subtypes"], list)
     assert settings["n_scored_days"] == 2 and settings["tail_day"] is True
     assert settings["registry_version"] == F0.version()
-    assert settings["device_profile"] == {
+    assert settings[
+        "device_profile"
+    ] == {  # WS04-T18: the device profile is recorded whole
         "dispenser_content_sensing": False,
         "authenticating_devices": [],
+        "cuff_resolution_mmhg": 1.0,
+        "pulse_resolution_bpm": 1.0,
+        "dispenser_reports_interval": True,
+        "diagnostics_profile": "without_diagnostics",
+        "driver": None,
     }
     assert read_manifest(out) == manifest or read_manifest(out).files == manifest.files
 

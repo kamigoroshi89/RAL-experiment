@@ -2718,6 +2718,7 @@ FORBIDDEN_PACKAGES = (
 ALLOWED_RALMON_IMPORTS = {
     "injection.py": (
         "ralmon.signals",
+        "ralmon.benchmark.device_profile",
         "ralmon.benchmark.latent",
         "ralmon.benchmark.measurement",
         "ralmon.benchmark.priors",

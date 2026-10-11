@@ -87,6 +87,16 @@ from ralmon.benchmark.confounders import (
     load_confounder_design,
     realise_scenario,
 )
+from ralmon.benchmark.device_profile import (
+    DEFAULT_CUFF_RESOLUTION_MMHG,
+    DEFAULT_PULSE_RESOLUTION_BPM,
+    DIAGNOSTICS_PROFILES,
+    PROFILE_WITH_DIAGNOSTICS,
+    PROFILE_WITHOUT_DIAGNOSTICS,
+    DeviceProfileError,
+    DriverDiagnostics,
+    GeneratorDeviceProfile,
+)
 from ralmon.benchmark.inject_c1 import (
     C1_SUBTYPES,
     C1InjectionError,
@@ -219,6 +229,20 @@ _REQUIRED_ROWS: Final = (
     "split_fractions",
     "monitor_step_ms",
     "monitor_reorder_delay_ms",
+)
+# The rows of the profile 'driver_with_diagnostics' (WS04-T18): no default, awaiting_human_value in generator_design.yaml.
+# A build of the profile 'without_diagnostics' does not read them, so they do not stop it while they are awaiting.
+_DRIVER_ROWS: Final = ("driver_period_ms", "driver_stale_lease_ms")
+_PROFILE_REQUIRED: Final = frozenset(
+    {"dispenser_content_sensing", "authenticating_devices"}
+)
+_PROFILE_OPTIONAL: Final = frozenset(
+    {
+        "cuff_resolution_mmhg",
+        "pulse_resolution_bpm",
+        "dispenser_reports_interval",
+        "diagnostics_profile",
+    }
 )
 _CONFIG_KEYS: Final = frozenset(
     {
@@ -476,6 +500,12 @@ class BenchmarkConfig:
     allow_no_segments: bool
     confounder_variants: tuple[str, ...] | None
     rows: tuple[ParameterRow, ...] = field(default=(), repr=False)
+    # the device profile of WS04-T18 (``device_profile`` section; the keys are optional, the defaults are the ones of
+    # ``ralmon.benchmark.device_profile``: 1 mmHg / 1 bpm, the interval reported, no diagnostics)
+    cuff_resolution_mmhg: float | None = DEFAULT_CUFF_RESOLUTION_MMHG
+    pulse_resolution_bpm: float | None = DEFAULT_PULSE_RESOLUTION_BPM
+    dispenser_reports_interval: bool = True
+    diagnostics_profile: str = PROFILE_WITHOUT_DIAGNOSTICS
 
     @property
     def latent_step_ms(self) -> int:
@@ -634,12 +664,14 @@ def load_config(path: str | Path) -> BenchmarkConfig:
             f"{target}: labelling needs exactly mode, one of {list(MODES)}"
         )
     profile = document["device_profile"]
-    if not isinstance(profile, Mapping) or set(profile) != {
-        "dispenser_content_sensing",
-        "authenticating_devices",
-    }:
+    if (
+        not isinstance(profile, Mapping)
+        or not _PROFILE_REQUIRED <= set(profile)
+        or not set(profile) <= _PROFILE_REQUIRED | _PROFILE_OPTIONAL
+    ):
         raise BenchmarkConfigError(
-            f"{target}: device_profile needs dispenser_content_sensing and authenticating_devices"
+            f"{target}: device_profile needs dispenser_content_sensing and authenticating_devices "
+            f"and may have {sorted(_PROFILE_OPTIONAL)}"
         )
     sensing, devices = (
         profile["dispenser_content_sensing"],
@@ -653,6 +685,18 @@ def load_config(path: str | Path) -> BenchmarkConfig:
         raise BenchmarkConfigError(
             f"{target}: dispenser_content_sensing is a bool, authenticating_devices a list of {list(vocab.BLE_DEVICES)}"
         )
+    cuff_res = profile.get("cuff_resolution_mmhg", DEFAULT_CUFF_RESOLUTION_MMHG)
+    pulse_res = profile.get("pulse_resolution_bpm", DEFAULT_PULSE_RESOLUTION_BPM)
+    reports_interval = profile.get("dispenser_reports_interval", True)
+    diagnostics = profile.get("diagnostics_profile", PROFILE_WITHOUT_DIAGNOSTICS)
+    if diagnostics not in DIAGNOSTICS_PROFILES:
+        raise BenchmarkConfigError(
+            f"{target}: diagnostics_profile must be one of {list(DIAGNOSTICS_PROFILES)}"
+        )
+    try:
+        GeneratorDeviceProfile(cuff_res, pulse_res, reports_interval)
+    except DeviceProfileError as exc:
+        raise BenchmarkConfigError(f"{target}: device_profile: {exc}") from exc
     if not isinstance(document["allow_no_segments"], bool):
         raise BenchmarkConfigError(f"{target}: allow_no_segments must be a bool")
     confounders = document["confounders"]
@@ -696,6 +740,10 @@ def load_config(path: str | Path) -> BenchmarkConfig:
         allow_no_segments=document["allow_no_segments"],
         confounder_variants=None if variants is None else tuple(variants),
         rows=parsed.rows,
+        cuff_resolution_mmhg=None if cuff_res is None else float(cuff_res),
+        pulse_resolution_bpm=None if pulse_res is None else float(pulse_res),
+        dispenser_reports_interval=reports_interval,
+        diagnostics_profile=diagnostics,
     )
 
 
@@ -940,7 +988,12 @@ class BuildContext:
                 design_rows += list(load_design_file(path).rows)
             except PriorConfigError as exc:
                 raise BenchmarkConfigError(str(exc)) from exc
-        awaiting = [r.parameter for r in design_rows if not r.filled]
+        with_driver = config.diagnostics_profile == PROFILE_WITH_DIAGNOSTICS
+        awaiting = [
+            r.parameter
+            for r in design_rows
+            if not r.filled and (with_driver or r.parameter not in _DRIVER_ROWS)
+        ]
         if awaiting:
             raise UnfilledParameterError(
                 f"design parameter(s) {', '.join(sorted(awaiting))} are awaiting_human_value: "
@@ -1010,6 +1063,7 @@ class BuildContext:
         self.measurement: MeasurementDesign = load_measurement_design(
             config.generator_design_path, inflation_min_ms=inflation_min
         )
+        self.device_profile = self._device_profile(config)
         adherence_config = load_adherence_config(config.generator_design_path)
         peak = load_filled_rows(
             config.generator_design_path, ("circadian_peak_clock_ms",)
@@ -1096,6 +1150,31 @@ class BuildContext:
                 f"one prior was given for {len(ids)} cohorts: pass a mapping"
             )
         return {ids[0]: prior}
+
+    @staticmethod
+    def _device_profile(config: BenchmarkConfig) -> GeneratorDeviceProfile:
+        """The declared device profile of the run (``ralmon.benchmark.device_profile``).
+
+        For the profile 'driver_with_diagnostics' the period and the lease are read from the design rows
+        ``driver_period_ms`` and ``driver_stale_lease_ms``, which have no default: while they are awaiting the run is
+        refused (the check on the design rows has already named them).
+        """
+        driver: DriverDiagnostics | None = None
+        if config.diagnostics_profile == PROFILE_WITH_DIAGNOSTICS:
+            values = load_filled_rows(config.generator_design_path, _DRIVER_ROWS)
+            try:
+                driver = DriverDiagnostics(
+                    period_ms=values["driver_period_ms"],
+                    stale_lease_ms=values["driver_stale_lease_ms"],
+                )
+            except DeviceProfileError as exc:
+                raise BenchmarkConfigError(f"driver profile: {exc}") from exc
+        return GeneratorDeviceProfile(
+            config.cuff_resolution_mmhg,
+            config.pulse_resolution_bpm,
+            config.dispenser_reports_interval,
+            driver,
+        )
 
     def _windows(self) -> dict[str, int]:
         get = self.registry.get
@@ -1736,9 +1815,10 @@ class BuildContext:
             bp_bounds_mmhg=self.bp_bounds,
             hr_bounds_bpm=self.design.hr_bounds_bpm,
             authenticating_devices=authenticating,
+            device_profile=self.device_profile,
         )
         result = apply_observation_injections(stream_, specs, context)
-        observed = finalize_observed(result.stream)
+        observed = finalize_observed(result.stream, self.device_profile)
         observed = _withhold(observed, robot_present, task_outcomes)
         if robot_present:
             observed = self._with_reports(observed, result.stream.visits)
@@ -1884,6 +1964,7 @@ class BuildContext:
             measurement_index=ordinal % n_ticks if n_ticks else 0,
             nominal_bounce_gap_ms=self.design.nominal_bounce_gap_ms,
             task_deadline_offset_ms=self.sched_window_ms,
+            device_profile=self.device_profile,
         )  # fmt: skip
 
     def build_pairs(
@@ -2282,6 +2363,7 @@ class _Writer:
             "device_profile": {
                 "dispenser_content_sensing": config.dispenser_content_sensing,
                 "authenticating_devices": list(config.authenticating_devices),
+                **context.device_profile.manifest_entry(),
             },
             "design_sha256": dict(context.design_sha256),
             "prior_sha256": dict(context.prior_sha256),

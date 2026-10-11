@@ -99,3 +99,25 @@ parameters:
     consumer_task: WS04-T06
     rationale: null
     note: "Period of the hr_ecg and spo2 samples of the observed trace, integer ms; it must divide 86 400 000 and give at most 100 000 samples a day. A segment of another sample period is held to this grid (grid point j takes segment sample (j * period) // segment period). The human chooses it together with the monitor step T_s and the sample period of the extracted segments, with the rationale. No value has been chosen by an agent."
+  - parameter: driver_period_ms
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T18 (ADR-074); the liveness contract of docs/models/evidence-channels.md item 5; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T18
+    rationale: null
+    note: "Period of the NODE_STATE `diagnostics` reports of the device drivers under the profile 'driver_with_diagnostics', integer ms in [1, 86 400 000]: the driver reports `ok` (or `stale`) at the start of each day and at every period after it. Read ONLY when device_profile.diagnostics_profile of the build configuration is `driver_with_diagnostics`; the profile 'without_diagnostics' (the default) never reads it, so the row may stay awaiting for such a build. NO default anywhere: a build with the diagnostics profile and this row awaiting is refused (UnfilledParameterError). The evidence of a violated instance reads the reports of its evidence window, so the value must be put against the windows of the monitor; the thesis bridge node (proposal A) fixes the period of the lab devices. The human supplies the value, its source and the rationale. No value has been chosen by an agent."
+  - parameter: driver_stale_lease_ms
+    unit: "ms"
+    value: null
+    dist: null
+    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T18 (ADR-074); the liveness contract of docs/models/evidence-channels.md item 5; no value chosen by an agent"
+    source_type: design_choice
+    verified_by: null
+    status: awaiting_human_value
+    consumer_task: WS04-T18
+    rationale: null
+    note: "Silence beyond which a device that is expected to publish is `stale`, integer ms in [1, 86 400 000]. An ON-DEMAND device (the cuff, the dispenser) is stale only with an open session that has sent no message for MORE than this lease; an idle one is `ok`; a continuous device (ECG, oximeter) is stale when silent for more than the lease. The session of a cuff reading opens when the measurement starts, so the lease must exceed the nominal time from the start of a measurement to its reading (inflation_ms_nominal plus its spread), or every reading shows a short `stale`. Read ONLY when device_profile.diagnostics_profile of the build configuration is `driver_with_diagnostics`; the profile 'without_diagnostics' never reads it, so the row may stay awaiting for such a build. NO default anywhere: a build with the diagnostics profile and this row awaiting is refused. The human supplies the value, its source and the rationale; the thesis bridge node fixes it for the lab devices. No value has been chosen by an agent."

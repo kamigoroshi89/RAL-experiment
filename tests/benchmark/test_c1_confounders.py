@@ -3564,7 +3564,7 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
     },
     "confounders": {
         "ralmon.benchmark",
-        "ralmon.benchmark.adherence", "ralmon.benchmark.inject_c1", "ralmon.benchmark.inject_c2",
+        "ralmon.benchmark.adherence", "ralmon.benchmark.device_profile", "ralmon.benchmark.inject_c1", "ralmon.benchmark.inject_c2",
         "ralmon.benchmark.inject_c3", "ralmon.benchmark.injection", "ralmon.benchmark.latent",
         "ralmon.benchmark.latent_day", "ralmon.benchmark.measurement", "ralmon.benchmark.pkpd",
         "ralmon.benchmark.priors", "ralmon.benchmark.rng", "ralmon.benchmark.schedule",

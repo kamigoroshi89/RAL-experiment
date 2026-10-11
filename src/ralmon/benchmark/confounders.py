@@ -78,6 +78,7 @@ import numpy as np
 
 from ralmon.benchmark import vocab
 from ralmon.benchmark.adherence import AdherenceState
+from ralmon.benchmark.device_profile import GeneratorDeviceProfile
 from ralmon.benchmark.inject_c1 import c1_spec, observe_refusals
 from ralmon.benchmark.injection import (
     InjectionContext,
@@ -569,7 +570,8 @@ class PairBase:
     ``nominal_bounce_gap_ms`` is the resolved nominal gap of the bounce (the design row
     ``dispenser_bounce_magnitude_nominal``; required by the nominal variants, shorter than the
     double-take gap) and ``task_deadline_offset_ms`` the registry ``sched_window`` that the C2
-    robot faults need.
+    robot faults need. ``device_profile`` (WS04-T18) is the declared device profile of the run (the cuff
+    resolution at the device boundary, the dispenser interval, the driver diagnostics); ``None``: as before.
     """
 
     patient: PatientParams
@@ -587,6 +589,7 @@ class PairBase:
     measurement_index: int = 0
     nominal_bounce_gap_ms: int | None = None
     task_deadline_offset_ms: int | None = None
+    device_profile: GeneratorDeviceProfile | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.patient, PatientParams):
@@ -618,6 +621,12 @@ class PairBase:
             _int("nominal_bounce_gap_ms", self.nominal_bounce_gap_ms, 1, T_DAY_MS)
         if self.task_deadline_offset_ms is not None:
             _int("task_deadline_offset_ms", self.task_deadline_offset_ms, 1, T_DAY_MS)
+        if self.device_profile is not None and not isinstance(
+            self.device_profile, GeneratorDeviceProfile
+        ):
+            raise ConfounderError(
+                "device_profile must be a GeneratorDeviceProfile or None"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -952,6 +961,7 @@ def _realise(scenario: Scenario, base: PairBase) -> RealisedScenario:
         task_deadline_offset_ms=base.task_deadline_offset_ms,
         dispenser_content_sensing=scenario.content_sensing,
         authenticating_devices=scenario.authenticating_devices,
+        device_profile=base.device_profile,
     )
     # A deployment without a robot has no robot in the room: the injectors read the stream without
     # its visits, so a forged dispense reads the witness as None (never a negative) and its record
@@ -969,7 +979,9 @@ def _realise(scenario: Scenario, base: PairBase) -> RealisedScenario:
         result = dataclasses.replace(
             result, stream=dataclasses.replace(result.stream, visits=stream.visits)
         )
-    released = _withhold(finalize_observed(result.stream), scenario)
+    released = _withhold(
+        finalize_observed(result.stream, base.device_profile), scenario
+    )
     records = (*latent.c1_records, *result.records)
     return RealisedScenario(
         scenario=scenario,
@@ -1047,7 +1059,10 @@ def _views(
             [(e.t_device_ms, e.source, _payload(e)) for e in tasks]
         ),
         FIELD_INTERVAL: _by_repr(
-            [(e.t_device_ms, e.t_rx_ms, e.source) for e in dispenses]
+            [
+                (e.t_device_ms, e.t_rx_ms, e.source, e.payload.get(vocab.KEY_INTERVAL))
+                for e in dispenses
+            ]
         ),
         FIELD_SEQ: tuple(e.seq for e in ordered),
         FIELD_VERIFICATION: _by_repr(

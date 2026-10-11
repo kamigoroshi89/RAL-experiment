@@ -58,7 +58,6 @@ from ralmon.benchmark.latent import T_DAY_MS
 from ralmon.benchmark.measurement import (
     ObservedStream,
     assign_dispense_intervals,
-    build_observed_base,
 )
 from ralmon.benchmark.priors import (
     DeviceErrorModel,
@@ -67,7 +66,7 @@ from ralmon.benchmark.priors import (
 )
 from ralmon.benchmark.schedule import Schedule
 from ralmon.benchmark.trace import InjectedClass
-from ralmon.signals import Event, EventKind, Sample
+from ralmon.signals import Event, EventKind
 
 from .test_builder import (
     GENERATOR_DESIGN,
@@ -81,16 +80,16 @@ from .test_inject_c2 import (
     DOSE_TICKS,
     HOUR,
     MIN,
-    ble,
     bias,
+    ble,
     bounce,
     fixture_stream,
     manip,
     run,
     stuck,
 )
-from .test_measurement import DESIGN, LIB, latent_day
 from .test_measurement import build as build_base
+from .test_measurement import latent_day
 
 DAY = T_DAY_MS
 PERIOD = HOUR  # TEST VALUE: the real driver period is awaiting_human_value
@@ -121,9 +120,7 @@ def fractional_stream(day_index: int = 0) -> ObservedStream:
     """The hand-written fixture day with non-integer cuff readings and pulse rates."""
     stream = fixture_stream(bps=[128.4, 131.6, 127.5, 133.2], day_index=day_index)
     samples = tuple(
-        dataclasses.replace(s, value=s.value + 0.37)
-        if s.signal == "hr_pulse"
-        else s
+        dataclasses.replace(s, value=s.value + 0.37) if s.signal == "hr_pulse" else s
         for s in stream.samples
     )
     return dataclasses.replace(stream, samples=samples)
@@ -154,7 +151,10 @@ def test_cuff_readings_are_multiples_of_the_resolution() -> None:
         ),
     )
     assert [s.value for s in coarse.samples if s.signal == "bp"] == [
-        130.0, 130.0, 130.0, 135.0,
+        130.0,
+        130.0,
+        130.0,
+        135.0,
     ]  # fmt: skip  (127.5 / 5 = 25.5 rounds half to even, to 26)
     assert all(s.value % 5 == 0 for s in coarse.samples if s.signal == "bp")
     assert all(s.value % 2 == 0 for s in coarse.samples if s.signal == "hr_pulse")
@@ -185,9 +185,7 @@ def test_rounding_is_after_the_injectors_so_a_frozen_value_stays_frozen() -> Non
     stream = fractional_stream()
     biased = run([bias(9 * HOUR, 4 * HOUR, 2.3)], stream_=stream)
     unrounded = [s.value for s in biased.stream.samples if s.signal == "bp"]
-    shown = finalize_observed(
-        biased.stream, device_profile=GeneratorDeviceProfile()
-    )
+    shown = finalize_observed(biased.stream, device_profile=GeneratorDeviceProfile())
     assert [s.value for s in shown.samples if s.signal == "bp"] == [
         float(round(v)) for v in unrounded
     ]
@@ -207,7 +205,14 @@ def test_fault_free_repeat_rate_matches_the_rounding_formula() -> None:
     """
     schedule = Schedule(
         dose_ticks_ms=(),
-        measurement_ticks_ms=(6 * HOUR, 8 * HOUR, 12 * HOUR, 16 * HOUR, 20 * HOUR, 22 * HOUR),
+        measurement_ticks_ms=(
+            6 * HOUR,
+            8 * HOUR,
+            12 * HOUR,
+            16 * HOUR,
+            20 * HOUR,
+            22 * HOUR,
+        ),
     )
     errors = DeviceErrorModel(8.0, 0.0, 0.0, 0.0)
     resolution = 1.0
@@ -240,7 +245,9 @@ def test_fault_free_repeat_rate_matches_the_rounding_formula() -> None:
             unrounded_repeats += a == b
             pairs += 1
     assert pairs == 600 * 5
-    assert unrounded_repeats == 0  # without rounding the natural repeat probability is exactly 0
+    assert (
+        unrounded_repeats == 0
+    )  # without rounding the natural repeat probability is exactly 0
     assert expected > 20  # the check is not vacuous
     assert abs(repeats - expected) <= 4.0 * math.sqrt(variance), (repeats, expected)
 
@@ -259,9 +266,7 @@ def rounding_builds(
     rounded_dir, rounded = build_benchmark(
         tmp, "rounded", document=rounded_doc, prior_path=prior
     )
-    free_dir, free = build_benchmark(
-        tmp, "free", document=free_doc, prior_path=prior
-    )
+    free_dir, free = build_benchmark(tmp, "free", document=free_doc, prior_path=prior)
     return rounded_dir, free_dir, rounded, free
 
 
@@ -338,7 +343,9 @@ def test_idle_cuff_never_reports_stale_over_24h() -> None:
         message_times=(),
     )
     levels = reports_of(events, vocab.SOURCE_CUFF)
-    assert [t for t, _ in levels] == [k * PERIOD for k in range(24)]  # ok at start, then each period
+    assert [t for t, _ in levels] == [
+        k * PERIOD for k in range(24)
+    ]  # ok at start, then each period
     assert {level for _, level in levels} == {"ok"}
     # the same over a built day: five readings, an idle cuff between them (a lease above the inflation time)
     out = run([], stream_=fixture_stream(), device_profile=diagnostics_profile())
@@ -365,10 +372,16 @@ def test_open_session_with_stopped_publisher_goes_stale_after_the_lease() -> Non
         message_times=(),
     )
     levels = dict(reports_of(stopped, vocab.SOURCE_CUFF))
-    assert levels[t0] == "ok"  # the session has just opened: silent for less than the lease
-    assert levels[t0 + LEASE] == "ok"  # silent for exactly the lease is not yet stale (MORE than the lease)
+    assert (
+        levels[t0] == "ok"
+    )  # the session has just opened: silent for less than the lease
+    assert (
+        levels[t0 + LEASE] == "ok"
+    )  # silent for exactly the lease is not yet stale (MORE than the lease)
     assert levels[t0 + LEASE + 10 * MIN] == "stale"
-    assert levels[t0 - 10 * MIN] == "ok" and levels[0] == "ok"  # idle before the session
+    assert (
+        levels[t0 - 10 * MIN] == "ok" and levels[0] == "ok"
+    )  # idle before the session
     assert levels[DAY - 10 * MIN] == "stale"  # nobody closed the session
     # a restored session: ok again from the restoration, and a transition report is there
     restored = driver_reports(
@@ -382,15 +395,24 @@ def test_open_session_with_stopped_publisher_goes_stale_after_the_lease() -> Non
         message_times=(),
     )
     seq = reports_of(restored, vocab.SOURCE_CUFF)
-    assert (t0 + LEASE + 1, "stale") in seq and (t0 + 40 * MIN, "ok") in seq  # a report at the first ms beyond the lease
+    assert (t0 + LEASE + 1, "stale") in seq and (
+        t0 + 40 * MIN,
+        "ok",
+    ) in seq  # a report at the first ms beyond the lease
     assert [level for t, level in seq if t > t0 + 40 * MIN] == ["ok"] * 13
     # the strict lease: silent for exactly the lease is not stale yet
     edge = dict(
         reports_of(
             driver_reports(
-                vocab.SOURCE_CUFF, MODE_ON_DEMAND, period_ms=MIN, stale_lease_ms=LEASE,
-                day_start_ms=0, day_end_ms=DAY, sessions=(Session(HOUR, None),), message_times=(),
-            ),  # fmt: skip
+                vocab.SOURCE_CUFF,
+                MODE_ON_DEMAND,
+                period_ms=MIN,
+                stale_lease_ms=LEASE,
+                day_start_ms=0,
+                day_end_ms=DAY,
+                sessions=(Session(HOUR, None),),
+                message_times=(),
+            ),
             vocab.SOURCE_CUFF,
         )
     )
@@ -398,7 +420,9 @@ def test_open_session_with_stopped_publisher_goes_stale_after_the_lease() -> Non
 
 
 def test_a_continuous_device_is_stale_when_silent_beyond_the_lease() -> None:
-    times = tuple(range(0, 4 * HOUR, MIN)) + tuple(range(5 * HOUR, DAY, MIN))  # silent from 04:00 to 05:00
+    times = tuple(range(0, 4 * HOUR, MIN)) + tuple(
+        range(5 * HOUR, DAY, MIN)
+    )  # silent from 04:00 to 05:00
     events = driver_reports(
         vocab.SOURCE_ECG,
         MODE_CONTINUOUS,
@@ -413,49 +437,87 @@ def test_a_continuous_device_is_stale_when_silent_beyond_the_lease() -> None:
     assert levels[3 * HOUR + 30 * MIN] == "ok"
     assert levels[4 * HOUR + 30 * MIN] == "stale"  # silent for 30 min > the lease
     assert levels[5 * HOUR + 30 * MIN] == "ok"
-    assert levels[4 * HOUR - MIN + LEASE + 1] == "stale"  # a transition report at the first ms beyond the lease
+    assert (
+        levels[4 * HOUR - MIN + LEASE + 1] == "stale"
+    )  # a transition report at the first ms beyond the lease
     assert levels[5 * HOUR] == "ok"  # and one at the recovery
 
 
-def test_dropout_over_a_reading_makes_the_cuff_stale_and_an_idle_dropout_does_not() -> None:
+def test_dropout_over_a_reading_makes_the_cuff_stale_and_an_idle_dropout_does_not() -> (
+    None
+):
     # fixture readings at 08:00:30, 10:00:30, ...: the cuff session opens at the arrival, 30 s before the reading
     profile = diagnostics_profile(period=10 * MIN)
-    lost = run([ble(9 * HOUR + 59 * MIN, 31 * MIN, "cuff")], stream_=fixture_stream(), device_profile=profile)
+    lost = run(
+        [ble(9 * HOUR + 59 * MIN, 31 * MIN, "cuff")],
+        stream_=fixture_stream(),
+        device_profile=profile,
+    )
     cuff = reports_of(lost.stream.events, vocab.SOURCE_CUFF)
     start = 10 * HOUR  # the session opens at 10:00:00
     window_end = 9 * HOUR + 59 * MIN + 31 * MIN
-    assert (start + LEASE + 1, "stale") in cuff  # stale at the first ms beyond the lease
-    assert (start + 2 * LEASE, "stale") in cuff  # and at the periodic report inside the outage
+    assert (
+        start + LEASE + 1,
+        "stale",
+    ) in cuff  # stale at the first ms beyond the lease
+    assert (
+        start + 2 * LEASE,
+        "stale",
+    ) in cuff  # and at the periodic report inside the outage
     stale_times = [t for t, level in cuff if level == "stale"]
     assert min(stale_times) == start + LEASE + 1 and max(stale_times) < window_end
-    assert (window_end, "ok") in cuff  # restored when the gateway reports the link active
+    assert (
+        window_end,
+        "ok",
+    ) in cuff  # restored when the gateway reports the link active
     assert {level for t, level in cuff if t >= window_end} == {"ok"}
     assert {level for t, level in cuff if t <= start + LEASE} == {"ok"}
     # the dispenser, the other device, stays ok
-    assert {level for _, level in reports_of(lost.stream.events, vocab.SOURCE_DISPENSER)} == {"ok"}
+    assert {
+        level for _, level in reports_of(lost.stream.events, vocab.SOURCE_DISPENSER)
+    } == {"ok"}
     # a dropout of the idle cuff between two readings loses nothing and is no report of the driver about the sensor
-    idle = run([ble(5 * HOUR, 2 * HOUR, "cuff")], stream_=fixture_stream(), device_profile=profile)
-    assert {level for _, level in reports_of(idle.stream.events, vocab.SOURCE_CUFF)} == {"ok"}
+    idle = run(
+        [ble(5 * HOUR, 2 * HOUR, "cuff")],
+        stream_=fixture_stream(),
+        device_profile=profile,
+    )
+    assert {
+        level for _, level in reports_of(idle.stream.events, vocab.SOURCE_CUFF)
+    } == {"ok"}
     assert not any(
-        e.kind is EventKind.NODE_STATE and e.payload.get("state") == "link_down" for e in idle.stream.events
+        e.kind is EventKind.NODE_STATE and e.payload.get("state") == "link_down"
+        for e in idle.stream.events
     )  # nothing was lost, so the gateway reported nothing
 
 
 def test_a_refused_or_failed_measurement_opens_no_session() -> None:
     """A patient who refuses, or a manipulation that fails, sends no message: no session, no stale (C1 stays C1)."""
-    out = run([manip(10 * HOUR)], stream_=fixture_stream(), device_profile=diagnostics_profile(period=10 * MIN))
-    assert {level for _, level in reports_of(out.stream.events, vocab.SOURCE_CUFF)} == {"ok"}
+    out = run(
+        [manip(10 * HOUR)],
+        stream_=fixture_stream(),
+        device_profile=diagnostics_profile(period=10 * MIN),
+    )
+    assert {level for _, level in reports_of(out.stream.events, vocab.SOURCE_CUFF)} == {
+        "ok"
+    }
 
 
 def test_profile_without_diagnostics_emits_no_diagnostics_report() -> None:
     for profile in (None, GeneratorDeviceProfile()):
-        out = run([ble(10 * HOUR, HOUR, "cuff")], stream_=fixture_stream(), device_profile=profile)
+        out = run(
+            [ble(10 * HOUR, HOUR, "cuff")],
+            stream_=fixture_stream(),
+            device_profile=profile,
+        )
         assert not any(vocab.KEY_DIAGNOSTICS in e.payload for e in out.stream.events)
     # the day is the same as without a profile, apart from the interval of the dispenser
     plain = run([], stream_=fixture_stream())
     withp = run([], stream_=fixture_stream(), device_profile=GeneratorDeviceProfile())
-    strip = lambda s: [  # noqa: E731
-        dataclasses.replace(e, payload={k: v for k, v in e.payload.items() if k != vocab.KEY_INTERVAL})
+    strip = lambda s: [
+        dataclasses.replace(
+            e, payload={k: v for k, v in e.payload.items() if k != vocab.KEY_INTERVAL}
+        )
         for e in s.stream.events
     ]
     assert strip(plain) == strip(withp) and plain.stream.samples == withp.stream.samples
@@ -488,15 +550,30 @@ def test_the_builder_refuses_the_diagnostics_profile_while_the_rows_are_awaiting
         device_profile={"diagnostics_profile": PROFILE_WITH_DIAGNOSTICS},
     )  # fmt: skip
     config = load_config(write_config(tmp_path, doc))
-    prior = LiteraturePriorSource(Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True)
+    prior = LiteraturePriorSource(
+        Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True
+    )
     with pytest.raises(UnfilledParameterError) as info:
-        generate_benchmark(config, prior, tmp_path / "refused", allow_fixture_only=True, git_rev=GIT_REV)
-    assert "driver_stale_lease_ms" in str(info.value) and "driver_period_ms" in str(info.value)
+        generate_benchmark(
+            config,
+            prior,
+            tmp_path / "refused",
+            allow_fixture_only=True,
+            git_rev=GIT_REV,
+        )
+    assert "driver_stale_lease_ms" in str(info.value) and "driver_period_ms" in str(
+        info.value
+    )
     assert not (tmp_path / "refused").exists()
     # the same rows left awaiting do not stop the build of the profile without diagnostics
-    plain = config_document(tmp_path, n_patients=1, n_days=1, variants=[], leave_unset=unset)
+    plain = config_document(
+        tmp_path, n_patients=1, n_days=1, variants=[], leave_unset=unset
+    )
     out, manifest = build_benchmark(tmp_path, "plain", document=plain)
-    assert manifest.settings["device_profile"]["diagnostics_profile"] == PROFILE_WITHOUT_DIAGNOSTICS
+    assert (
+        manifest.settings["device_profile"]["diagnostics_profile"]
+        == PROFILE_WITHOUT_DIAGNOSTICS
+    )
     assert manifest.settings["device_profile"]["driver"] is None
     assert (out / "manifest.json").is_file()
 
@@ -521,8 +598,14 @@ def test_a_built_benchmark_with_the_diagnostics_profile_records_it_and_reports_o
     entry = manifest.settings["device_profile"]
     assert entry["diagnostics_profile"] == "driver_with_diagnostics"
     assert entry["driver"]["devices"] == ["cuff", "dispenser"]
-    assert entry["driver"]["period_ms"] == HOUR and entry["driver"]["stale_lease_ms"] == 10 * MIN  # test values
-    assert entry["driver"]["activity_modes"] == {"cuff": "on_demand", "dispenser": "on_demand"}
+    assert (
+        entry["driver"]["period_ms"] == HOUR
+        and entry["driver"]["stale_lease_ms"] == 10 * MIN
+    )  # test values
+    assert entry["driver"]["activity_modes"] == {
+        "cuff": "on_demand",
+        "dispenser": "on_demand",
+    }
     reader = open_benchmark(out)
     seen: dict[str, set[str]] = {"cuff": set(), "dispenser": set()}
     for patient in reader.patients:
@@ -530,12 +613,58 @@ def test_a_built_benchmark_with_the_diagnostics_profile_records_it_and_reports_o
             day = reader.observed(patient, d)
             for device in seen:
                 reports = reports_of(day.events, device)
-                assert reports and reports[0][0] == d * DAY  # ok at the start of every day
+                assert (
+                    reports and reports[0][0] == d * DAY
+                )  # ok at the start of every day
                 assert reports[0][1] == "ok"
                 seen[device] |= {level for _, level in reports}
             for e in day.events:
                 vocab.check_payload(e.kind, e.payload)
     assert seen["cuff"] <= {"ok", "stale"} and "ok" in seen["cuff"]
+
+
+def test_the_driver_reports_do_not_change_the_verdicts_of_the_monitor(
+    tmp_path: Path,
+) -> None:
+    """The monitor reads no non-robot NODE_STATE: the verdicts of a day equal those of the day without the reports."""
+    from ralmon.monitor import MonitorConfig, run_offline_detailed
+
+    from .test_builder import F0, STEP_MS, TEMPLATES
+
+    doc = config_document(
+        tmp_path,
+        n_patients=2,
+        n_days=2,
+        variants=[],
+        device_profile={"diagnostics_profile": PROFILE_WITH_DIAGNOSTICS},
+    )
+    out, _ = build_benchmark(tmp_path, document=doc)
+    reader = open_benchmark(out)
+    cfg = MonitorConfig(STEP_MS, 0, False, None, "likely", F0.version())
+    n = 0
+    for patient in reader.patients:
+        plan = reader.care_plan(reader.observed(patient, 0).care_plan_id)
+        for d in reader.days(patient):
+            day = reader.observed(patient, d)
+            bare = dataclasses.replace(
+                day,
+                events=tuple(
+                    e for e in day.events if vocab.KEY_DIAGNOSTICS not in e.payload
+                ),
+            )
+            assert len(bare.events) < len(day.events)
+            history = [reader.observed(patient, k) for k in range(d)]
+            args = (plan, cfg, None, None)
+            kwargs: dict[str, Any] = {
+                "registry": F0,
+                "templates": TEMPLATES,
+                "history": history,
+            }
+            with_reports = run_offline_detailed(day, *args, **kwargs)
+            without = run_offline_detailed(bare, *args, **kwargs)
+            assert with_reports.records == without.records
+            n += 1
+    assert n == 4
 
 
 # ---------------------------------------------------------------------------
@@ -568,11 +697,17 @@ def test_dispense_payload_has_interval_and_signed_content_change() -> None:
     )  # fmt: skip
     first, second = dispenses(out.stream.events)
     assert first.t_device_ms == DOSE_TICKS[0] and second.t_device_ms == DOSE_TICKS[1]
-    assert vocab.KEY_INTERVAL not in first.payload  # the first opening of a stream has no previous opening
+    assert (
+        vocab.KEY_INTERVAL not in first.payload
+    )  # the first opening of a stream has no previous opening
     interval = second.payload[vocab.KEY_INTERVAL]
     assert type(interval) is int and interval == DOSE_TICKS[1] - DOSE_TICKS[0] >= 0
     # content_change is before minus after: a release is positive
-    assert first.payload[vocab.KEY_CONTENT_CHANGE] == second.payload[vocab.KEY_CONTENT_CHANGE] == 1.0
+    assert (
+        first.payload[vocab.KEY_CONTENT_CHANGE]
+        == second.payload[vocab.KEY_CONTENT_CHANGE]
+        == 1.0
+    )
     # each opening has its own sequence number (a re-sent copy with the same seq is skipped by the extractor)
     assert first.seq is not None and second.seq is not None and first.seq != second.seq
     # the payload is a declared one and the day is a valid observed day
@@ -583,7 +718,11 @@ def test_dispense_payload_has_interval_and_signed_content_change() -> None:
 
 
 def test_the_first_opening_of_a_day_has_no_interval_across_midnight() -> None:
-    day1 = run([], stream_=fractional_stream(day_index=1), device_profile=GeneratorDeviceProfile())
+    day1 = run(
+        [],
+        stream_=fractional_stream(day_index=1),
+        device_profile=GeneratorDeviceProfile(),
+    )
     opens = dispenses(day1.stream.events)
     assert opens[0].t_device_ms >= DAY
     assert vocab.KEY_INTERVAL not in opens[0].payload
@@ -604,7 +743,9 @@ def test_the_interval_is_reported_by_the_device_not_derived_from_what_arrived() 
 def test_no_interval_without_the_capability_or_without_a_profile() -> None:
     for profile in (None, GeneratorDeviceProfile(dispenser_reports_interval=False)):
         out = run([], stream_=fixture_stream(), device_profile=profile)
-        assert not any(vocab.KEY_INTERVAL in e.payload for e in dispenses(out.stream.events))
+        assert not any(
+            vocab.KEY_INTERVAL in e.payload for e in dispenses(out.stream.events)
+        )
 
 
 def test_assign_dispense_intervals_is_idempotent_and_keeps_other_payload_keys() -> None:
@@ -612,7 +753,10 @@ def test_assign_dispense_intervals_is_idempotent_and_keeps_other_payload_keys() 
     once = assign_dispense_intervals(stream)
     twice = assign_dispense_intervals(once)
     assert once.events == twice.events
-    assert [e.payload[vocab.KEY_CONTENT_CHANGE] for e in dispenses(once.events)] == [1.0, 1.0]
+    assert [e.payload[vocab.KEY_CONTENT_CHANGE] for e in dispenses(once.events)] == [
+        1.0,
+        1.0,
+    ]
     assert [e for e in once.events if e.kind is not EventKind.DISPENSE] == [
         e for e in stream.events if e.kind is not EventKind.DISPENSE
     ]
@@ -628,7 +772,9 @@ def test_bounce_has_content_change_zero_and_release_positive() -> None:
     assert (real.t_device_ms, extra.t_device_ms) == (DOSE_TICKS[0], DOSE_TICKS[0] + gap)
     assert real.payload[vocab.KEY_CONTENT_CHANGE] == 1.0  # a release is positive
     assert extra.payload[vocab.KEY_CONTENT_CHANGE] == 0.0  # a bounce releases nothing
-    assert extra.payload[vocab.KEY_INTERVAL] == gap  # the sub-second interval since the real opening
+    assert (
+        extra.payload[vocab.KEY_INTERVAL] == gap
+    )  # the sub-second interval since the real opening
     assert vocab.KEY_INTERVAL not in real.payload
     assert later.payload[vocab.KEY_CONTENT_CHANGE] == 1.0
     assert later.payload[vocab.KEY_INTERVAL] == DOSE_TICKS[1] - (DOSE_TICKS[0] + gap)
@@ -659,30 +805,43 @@ def test_a_forged_dispense_reports_the_interval_the_stream_gives() -> None:
         # the genuine device did not see the forgery: its next opening is measured from the real opening
         later = [e for e in opens if e.t_device_ms == DOSE_TICKS[1]]
         assert later[0].payload[vocab.KEY_INTERVAL] == DOSE_TICKS[1] - DOSE_TICKS[0]
-        assert len({e.seq for e in opens}) == len(opens)
+        if (
+            level == "informed"
+        ):  # the informed forger continues the counter; the naive one repeats a number
+            assert len({e.seq for e in opens}) == len(opens)
     assert len(dispenses(bounced.stream.events)) == 3
     # a forged dispense before every real one has no previous opening: no interval
-    early = run([forgery("naive", HOUR)], stream_=base, device_profile=GeneratorDeviceProfile())
+    early = run(
+        [forgery("naive", HOUR)], stream_=base, device_profile=GeneratorDeviceProfile()
+    )
     first = dispenses(early.stream.events)[0]
     assert first.t_device_ms == HOUR and vocab.KEY_INTERVAL not in first.payload
     # without the capability nothing is added
     quiet = run([forgery("naive", HOUR)], stream_=base)
-    assert not any(vocab.KEY_INTERVAL in e.payload for e in dispenses(quiet.stream.events))
+    assert not any(
+        vocab.KEY_INTERVAL in e.payload for e in dispenses(quiet.stream.events)
+    )
 
 
 def test_interval_payload_is_a_declared_integer_key() -> None:
     assert vocab.KEY_INTERVAL == "interval_since_previous_ms"
     assert vocab.KEY_DIAGNOSTICS == "diagnostics"
     assert vocab.DIAGNOSTICS_VALUES == ("ok", "warn", "error", "stale")
-    vocab.check_payload(EventKind.DISPENSE, {"interval_since_previous_ms": 500, "content_change": 0.0})
+    vocab.check_payload(
+        EventKind.DISPENSE, {"interval_since_previous_ms": 500, "content_change": 0.0}
+    )
     vocab.check_payload(EventKind.DISPENSE, {"interval_since_previous_ms": 0})
     for bad in (-1, 1.5, True, "500", float("nan")):
         with pytest.raises(vocab.VocabularyError):
             vocab.check_payload(EventKind.DISPENSE, {"interval_since_previous_ms": bad})
-    vocab.check_payload(EventKind.NODE_STATE, {"state": "active", "diagnostics": "stale"})
+    vocab.check_payload(
+        EventKind.NODE_STATE, {"state": "active", "diagnostics": "stale"}
+    )
     for bad in ("fine", 1, None, True):
         with pytest.raises(vocab.VocabularyError):
-            vocab.check_payload(EventKind.NODE_STATE, {"state": "active", "diagnostics": bad})
+            vocab.check_payload(
+                EventKind.NODE_STATE, {"state": "active", "diagnostics": bad}
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -700,7 +859,9 @@ def robot_pairs(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Any]:
     return build_benchmark(tmp, document=doc)
 
 
-def test_colocated_events_follow_the_robot_visits(robot_pairs: tuple[Path, Any]) -> None:
+def test_colocated_events_follow_the_robot_visits(
+    robot_pairs: tuple[Path, Any],
+) -> None:
     out, manifest = robot_pairs
     reader = open_benchmark(out)
     dwell = 10 * MIN  # the FIXTURE-ONLY robot_dwell_ms of test_builder.GENERATOR_VALUES
@@ -727,8 +888,12 @@ def test_colocated_events_follow_the_robot_visits(robot_pairs: tuple[Path, Any])
                 if e.kind is EventKind.ROBOT_TASK and e.payload.get("task") == "navigate"
             )  # fmt: skip
             assert arrivals, (patient, d)
-            true_at = sorted(e.t_device_ms for e in reports if e.payload["colocated"] is True)
-            false_at = sorted(e.t_device_ms for e in reports if e.payload["colocated"] is False)
+            true_at = sorted(
+                e.t_device_ms for e in reports if e.payload["colocated"] is True
+            )
+            false_at = sorted(
+                e.t_device_ms for e in reports if e.payload["colocated"] is False
+            )
             assert true_at == arrivals  # True at the arrival of every visit
             # False where no other visit keeps the robot in the room: the departure of the last visit of a run
             expected_false: list[int] = []

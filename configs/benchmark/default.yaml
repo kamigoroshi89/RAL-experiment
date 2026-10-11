@@ -34,9 +34,22 @@ cohorts:
     prior: ../priors/literature_hypertension.yaml
 labelling:
   mode: scheduled
+# The device profile of the run (WS04-T18, ADR-074; ralmon.benchmark.device_profile). The three last keys are optional;
+# the values below are the defaults of the code. cuff_resolution_mmhg / pulse_resolution_bpm: the display resolution at
+# the device boundary, applied to the observed cuff readings after the injectors (1 mmHg and 1 bpm is the decision of
+# gab, ADR-074 amendment 2; null: no rounding, the benchmarks built before WS04-T18); it is the value the extractor must
+# be given as DeviceCapabilities.cuff_resolution. dispenser_reports_interval: the DISPENSE payload carries
+# interval_since_previous_ms. diagnostics_profile: `without_diagnostics` (no driver report) or `driver_with_diagnostics`
+# (NODE_STATE `diagnostics` reports of the cuff and dispenser drivers under the liveness contract of
+# docs/models/evidence-channels.md; it needs the rows driver_period_ms and driver_stale_lease_ms of generator_design.yaml,
+# which have no default and are awaiting_human_value: a build with this profile is refused while they are).
 device_profile:
   dispenser_content_sensing: false
   authenticating_devices: []
+  cuff_resolution_mmhg: 1.0
+  pulse_resolution_bpm: 1.0
+  dispenser_reports_interval: true
+  diagnostics_profile: without_diagnostics
 allow_no_segments: false
 confounders:
   variants: null
