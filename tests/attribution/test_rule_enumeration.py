@@ -142,6 +142,31 @@ def table(template: str, x: dict[str, Any], old: bool) -> Any:
     return row
 
 
+def combinations_of_row(template: str, wanted_row: int) -> list[tuple[int, ...]]:
+    """Every combination (codes in the order of ``reads``) that the table decides with ``wanted_row``."""
+    fields = reads(template, old=False)
+    sizes = [n_classes(f) for f in fields]
+    tail, k = 1, 0
+    for s in reversed(sizes):
+        if tail * s > 4_000_000:
+            break
+        tail *= s
+        k += 1
+    head, rest = fields[: len(fields) - k], fields[len(fields) - k :]
+    remainder = np.arange(tail)
+    tail_codes: dict[str, Any] = {}
+    for f in reversed(rest):
+        tail_codes[f] = (remainder % n_classes(f)).astype(np.int8)
+        remainder = remainder // n_classes(f)
+    found: list[tuple[int, ...]] = []
+    for combo in itertools.product(*[range(n_classes(f)) for f in head]):
+        x = {f: np.full(tail, c, np.int8) for f, c in zip(head, combo, strict=True)}
+        x.update(tail_codes)
+        for i in np.flatnonzero(table(template, x, old=False) == wanted_row):
+            found.append((*combo, *(int(tail_codes[f][i]) for f in rest)))
+    return found
+
+
 def enumerate_template(template: str, old: bool = False) -> tuple[int, int, list[int]]:
     """(fields read, combinations, combinations per row 1 to 8)."""
     fields = reads(template, old)
@@ -343,3 +368,41 @@ def test_hierarchical_rule_agrees_with_the_vectorised_table(template: str) -> No
             ),
         )
         assert got.row == want, (template, codes)
+
+
+@pytest.mark.parametrize("template", ["range", "sched", "hold", "resp"])
+def test_rule_agrees_on_the_neighbourhood_of_the_c1_exclusion_set(
+    template: str,
+) -> None:
+    """Every combination that reaches C1 and every single-field change of each: the rule and the table agree."""
+    from ralmon.attribution import HierarchicalRule
+
+    registry = load_fixture_registry()
+    rule = HierarchicalRule(registry)
+    fields = reads(template, old=False)
+    sizes = [n_classes(f) for f in fields]
+    c1 = combinations_of_row(
+        template, 5
+    )  # the C1 combinations, by the vectorised enumeration
+    assert len(c1) == {"range": 18, "sched": 2, "hold": 18, "resp": 90}[template]
+    seen: set[tuple[int, ...]] = set()
+    for base in c1:
+        seen.add(base)
+        for i, size in enumerate(sizes):
+            for c in range(size):
+                seen.add((*base[:i], c, *base[i + 1 :]))
+    changed = 0
+    for combo in sorted(seen):
+        codes = dict(zip(fields, combo, strict=True))
+        x = {f: np.array([c], np.int8) for f, c in codes.items()}
+        want = int(table(template, x, old=False)[0])
+        values = {PATH[f]: reading(f, c, registry) for f, c in codes.items()}
+        got = rule.decide(
+            make_record(template),
+            vector(
+                template, {k: v for k, v in values.items() if v is not None}, registry
+            ),
+        )
+        assert got.row == want, (template, codes)
+        changed += want != 5
+    assert changed > 0  # the neighbourhood really leaves the C1 region

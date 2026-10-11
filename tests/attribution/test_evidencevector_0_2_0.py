@@ -482,6 +482,71 @@ def test_extractor_cuff_value_repeated_ignores_readings_after_the_decision(
     )  # the 21:30 reading is after the hold at 21:00
 
 
+def test_cuff_value_repeated_skips_a_resent_frame(registry) -> None:  # type: ignore[no-untyped-def]
+    """A re-sent copy of a frame is a duplicate and not a new reading (01-signals-sampling.md section 3.4)."""
+    items = I(
+        bp(at(20, 10), 120.0, seq=1),
+        bp(at(20, 40), 130.0, seq=2),
+        bp(at(20, 45), 130.0, seq=2),  # the same frame again, stamped later
+    )
+    vec = feed(extractor(registry, RESOLVED), items).evidence_for(hold_record())
+    assert (
+        vec.signal_quality.cuff_value_repeated is False
+    )  # 130 against 120, not 130 against its own copy
+    assert (
+        vec.crypto_temporal.seq_repeat is True
+    )  # the copy is still integrity evidence
+
+
+def test_cuff_value_repeated_none_when_the_latest_reading_is_outside_the_window(
+    registry,
+) -> None:  # type: ignore[no-untyped-def]
+    """Two equal readings two and one days before the window say nothing about the instance."""
+    day = 86_400_000
+    items = I(bp(at(20, 10) + day, 120.0), bp(at(20, 10) + 2 * day, 120.0))
+    vec = feed(extractor(registry, RESOLVED), items).evidence_for(
+        hold_record(at(21, 0) + 3 * day)
+    )
+    assert vec.signal_quality.cuff_value_repeated is None
+    # the previous reading may precede the window when the latest lies inside it
+    items = I(bp(at(20, 10) + 2 * day, 120.0), bp(at(20, 40) + 3 * day, 120.0))
+    vec = feed(extractor(registry, RESOLVED), items).evidence_for(
+        hold_record(at(21, 0) + 3 * day)
+    )
+    assert vec.signal_quality.cuff_value_repeated is True
+
+
+def test_dispenser_group_skips_a_restamped_copy_of_an_earlier_opening(registry) -> None:  # type: ignore[no-untyped-def]
+    items = I(
+        event(
+            EventKind.DISPENSE,
+            at(20, 20),
+            "dispenser",
+            seq=1,
+            interval_since_previous_ms=43_200_000,
+            content_change=1.0,
+        ),
+        event(
+            EventKind.DISPENSE,
+            at(20, 40),
+            "dispenser",
+            seq=2,
+            interval_since_previous_ms=600_000,
+            content_change=0.0,
+        ),
+        event(
+            EventKind.DISPENSE,
+            at(20, 50),
+            "dispenser",
+            seq=1,  # a copy of the first frame, re-stamped
+            interval_since_previous_ms=43_200_000,
+            content_change=1.0,
+        ),
+    )
+    vec = feed(extractor(registry, CONTENT), items).evidence_for(hold_record())
+    assert dispenser_values(vec) == (600_000, 0.0)
+
+
 def test_cuff_resolution_is_a_capability_not_a_default() -> None:
     from ralmon.attribution.extract import DeviceCapabilities
 
@@ -664,12 +729,34 @@ def test_a4_mask_counts() -> None:
     assert "unchanged** (fourteen fields" in text
     # the contract sentence agrees with the mask (ADR-049 (n)): six wholly robot-derived fields become None,
     # the four aggregates are recomputed over the device nodes
-    rule = CONTRACT.split("## EvidenceVector\n", 1)[1].split("## Attribution", 1)[0]
-    assert (
-        "all `witness` fields and robot-derived `system` fields become `None`."
-        not in rule
+    rules = CONTRACT.split("## EvidenceVector\n", 1)[1].split("## Attribution", 1)[0]
+    assert "all `witness` fields and robot-derived" not in rules
+    sentence = next(
+        line
+        for line in rules.splitlines()
+        if "become `None`" in line and "recomputed" in line
     )
-    assert "six" in rule and "recomputed" in rule
+    # the six names of the class None and the four of the class recompute, as named by the sentence
+    none_part, rest = sentence.split("become `None`", 1)
+    recompute_part = rest.split("recomputed", 1)[0]
+    none_names = set(re.findall(r"`([a-z_.]+)`", none_part))
+    recompute_names = set(re.findall(r"`([a-z_.]+)`", recompute_part)) - {"system"}
+    assert "witness" in none_names  # "the three `witness` fields"
+    from_table_none = {p for p, k in table.items() if k == "None"}
+    from_table_recompute = {p for p, k in table.items() if k == "recompute"}
+    named_none = {
+        p for p in CONTRACT_PATHS if p in none_names or p.split(".")[0] in none_names
+    } & from_table_none
+    assert named_none == from_table_none and len(from_table_none) == 6
+    assert len(none_names - {"witness", "None"}) == 3 and "witness" in none_names
+    assert {p.split(".")[1] for p in from_table_recompute} == recompute_names
+    assert len(recompute_names) == 4
+    # the remainder: fourteen fields, of which two are provenance fields (they are not evidence)
+    assert "other fourteen fields" in sentence
+    assert "two `provenance` fields" in sentence and "twelve" in sentence
+    unchanged = [p for p, k in table.items() if k == "unchanged"]
+    assert len(unchanged) == 14
+    assert sum(p.startswith("provenance.") for p in unchanged) == 2
 
 
 def test_new_fields_do_not_depend_on_the_robot(registry) -> None:  # type: ignore[no-untyped-def]
