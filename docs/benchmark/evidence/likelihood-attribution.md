@@ -881,3 +881,672 @@ python3 sens_data.py; python3 sweeps.py; python3 sweeps_report.py
 python3 main_report.py m120; python3 main_sens.py; python3 extras.py; python3 cells_table.py
 python3 assemble_report.py             # this file
 ```
+
+
+## 9. Follow-up of 2026-10-11 (decision 1 taken: the output is a set of subtypes)
+
+### 9.0 What changed, and what did not
+
+* **Decision recorded.** gab chose a SET of causes at the level of SUBTYPES: the most probable subtypes up to a declared cumulative probability (0.8, 0.9 and 0.95 are sensitivity values; 0.9 is the printed row); UNDETERMINED is the full set of the subtypes applicable at the alert's template. Metrics: coverage (the true subtype is in the set) and mean set size.
+* **Sections 0 to 8 are unchanged**, and so are their numbers. The class-level module `likelihood_attr.py` is untouched; everything new is in `subtype_model.py`, `config/subtype_priors.yaml` and the scripts of section 9.8. The pairs and the main population were rebuilt with the same seeds to also store the cuff readings (`p40b`, `m120b`): 0 of 10 662 pair alerts differ from the earlier build and the main population has the same 3600 days and 17 015 alerts. One change to the generator copy: an optional counterfactual switch `RALMON_DIAG_IDLE_STALE_MS` in `driver_diag.py` (off by default; section 9.2.5). No generator defect was found (9.2.3).
+* **The subtype model.** p(s | e, t) is proportional to prior_t(class(s)) times pi(s | class, t) times the product over the fields of P(class_f | s): the channels are independent given the SUB-CAUSE (the latent-class variant G2 of section 1.1), the class posterior is the sum over the sub-causes of a class, and a subtype merges the knowledge levels of replay, dispense_forgery and presence_spoof. C1 now has its own subtypes (double_take, dose_omission, spontaneous_count at `count`; drug_nonresponse, spontaneous_resp at `resp`; hypertensive_spike, spontaneous_range at `range`; hypotension_below_hold, spontaneous_hold at `hold`; measurement_refusal at `sched`), all with the same all-eps cells.
+* **pi(subtype | class) is explicit** in `/tmp/research/likelihood/config/subtype_priors.yaml` as RELATIVE weights normalised over the sub-causes applicable at the template. Designs (all sensitivity values; none is a proposal): `uniform` (reference), `quiet_rare` (the quiet sub-causes get weight 0.25: the silent faults stuck_at, cuff_silent_bias, dispenser_bounce; the informed-level attacks; the spontaneous C1 events), `quiet_common` (weight 4), the last two labelled illustrative. Where the values would have to come from: ward incident statistics and device failure data (none collected); awaiting gab.
+* **Truth.** The true subtype is the subtype of the ground-truth event matched to the alert (scoring side only). Three labellings of the main population are reported because item 2 shows that the labelling matters: the labelling of section 5; the same with the dropout target restricted to the template's data scope ("scope-aware"); and "tight" (scope-aware and the alert decided while the event window is open).
+
+### 9.1 Pairs at the level of subtypes
+
+
+#### 9.1.1 Subtype level, variant V0, design uniform, reference point of the cells (eps .01, qc .5)
+Lambda = log P(e | subtype_A) - log P(e | subtype_B) at the alert of the common template; pairs, strata and matching as in section 4. Subtype pairs: g1 double_take against dispenser_bounce; g2 drug_nonresponse against dispense_forgery; g3 measurement_refusal against manipulation_failure; g4 dispenser_bounce against dispense_forgery.
+| group | stratum | pairs | Lambda_A > 0 | Lambda_B < 0 | both (correct direction) | D > 0 | D = 0 | D < 0 | median Lambda_A (nats) | median Lambda_B | class-level median Lambda_A (section 4.2) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| double_take_vs_bounce | dist | 256 | 0/256 (0%; 0-1) | 0/256 (0%; 0-1) | 0/256 (0%; 0-1) | 0/256 (0%; 0-1) | 256 | 0 | 0.000 | 0.000 | 2.322 |
+| double_take_vs_bounce | indist | 38 | 0/38 (0%; 0-9) | 0/38 (0%; 0-9) | 0/38 (0%; 0-9) | 0/38 (0%; 0-9) | 38 | 0 | 0.000 | 0.000 | 2.322 |
+| nonresponse_vs_falsified_dispense | dist | 108 | 108/108 (100%; 97-100) | 80/108 (74%; 65-81) | 80/108 (74%; 65-81) | 94/108 (87%; 79-92) | 14 | 0 | 5.278 | -3.912 | 2.229 |
+| nonresponse_vs_falsified_dispense | indist | 53 | 53/53 (100%; 93-100) | 0/53 (0%; 0-7) | 0/53 (0%; 0-7) | 0/53 (0%; 0-7) | 53 | 0 | 0.683 | 0.683 | 0.872 |
+| refusal_vs_robot_missed | dist | 40 | 0/40 (0%; 0-9) | 40/40 (100%; 91-100) | 0/40 (0%; 0-9) | 40/40 (100%; 91-100) | 0 | 0 | 0.000 | -4.595 | 0.983 |
+| refusal_vs_robot_missed | indist | 80 | 0/80 (0%; 0-5) | 0/80 (0%; 0-5) | 0/80 (0%; 0-5) | 0/80 (0%; 0-5) | 80 | 0 | 0.000 | 0.000 | 0.763 |
+| bounce_vs_forged_dispense | dist | 209 | 209/209 (100%; 98-100) | 123/209 (59%; 52-65) | 123/209 (59%; 52-65) | 123/209 (59%; 52-65) | 86 | 0 | 5.278 | -3.229 | -0.843 |
+| bounce_vs_forged_dispense | indist | 39 | 39/39 (100%; 91-100) | 0/39 (0%; 0-9) | 0/39 (0%; 0-9) | 0/39 (0%; 0-9) | 39 | 0 | 0.683 | 0.683 | -1.922 |
+| ALL | dist | 613 | 317/613 (52%; 48-56) | 243/613 (40%; 36-44) | 203/613 (33%; 30-37) | 257/613 (42%; 38-46) | 356 | 0 | | | |
+| ALL | indist | 210 | 92/210 (44%; 37-51) | 0/210 (0%; 0-2) | 0/210 (0%; 0-2) | 0/210 (0%; 0-2) | 210 | 0 | | | |
+
+In the indistinguishable stratum D = 0 exactly in all pairs, as for classes; the lean (Lambda of an identical stream) is now between the two actual subtypes and is much smaller than the class-level lean, because the mixture over the loud sub-causes of the class is gone.
+
+#### 9.1.2 Distribution of Lambda (nats), subtype level, V0: min / q25 / median / q75 / max
+| group | stratum | member | min | q25 | median | q75 | max |
+|---|---|---|---|---|---|---|---|
+| double_take_vs_bounce | dist | A | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| double_take_vs_bounce | dist | B | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| double_take_vs_bounce | dist | D | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| double_take_vs_bounce | indist | A | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| double_take_vs_bounce | indist | B | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| double_take_vs_bounce | indist | D | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| nonresponse_vs_falsified_dispense | dist | A | 0.683 | 4.300 | 5.278 | 5.961 | 5.961 |
+| nonresponse_vs_falsified_dispense | dist | B | -3.912 | -3.912 | -3.912 | 0.683 | 5.278 |
+| nonresponse_vs_falsified_dispense | dist | D | 0.000 | 0.683 | 9.190 | 9.190 | 9.873 |
+| nonresponse_vs_falsified_dispense | indist | A | 0.683 | 0.683 | 0.683 | 1.366 | 1.366 |
+| nonresponse_vs_falsified_dispense | indist | B | 0.683 | 0.683 | 0.683 | 1.366 | 1.366 |
+| nonresponse_vs_falsified_dispense | indist | D | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| refusal_vs_robot_missed | dist | A | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| refusal_vs_robot_missed | dist | B | -4.595 | -4.595 | -4.595 | -4.595 | -4.595 |
+| refusal_vs_robot_missed | dist | D | 4.595 | 4.595 | 4.595 | 4.595 | 4.595 |
+| refusal_vs_robot_missed | indist | A | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| refusal_vs_robot_missed | indist | B | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| refusal_vs_robot_missed | indist | D | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| bounce_vs_forged_dispense | dist | A | 0.683 | 1.366 | 5.278 | 5.961 | 5.961 |
+| bounce_vs_forged_dispense | dist | B | -7.824 | -3.912 | -3.229 | 0.683 | 5.961 |
+| bounce_vs_forged_dispense | dist | D | 0.000 | 0.000 | 4.595 | 9.190 | 13.785 |
+| bounce_vs_forged_dispense | indist | A | 0.683 | 0.683 | 0.683 | 0.683 | 1.366 |
+| bounce_vs_forged_dispense | indist | B | 0.683 | 0.683 | 0.683 | 0.683 | 1.366 |
+| bounce_vs_forged_dispense | indist | D | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+
+#### 9.1.3 Distinguishable pairs by separating channel set: D > 0 rate, subtype level (V0)
+| group | separated_by | pairs | D > 0 | D = 0 | D < 0 | mean D |
+|---|---|---|---|---|---|---|
+| bounce_vs_forg | content_change | 39 | 0 | 39 | 0 | 0.000 |
+| bounce_vs_forg | content_change,dispense_seq | 20 | 16 | 4 | 0 | 3.676 |
+| bounce_vs_forg | content_change,dispense_seq,verification | 28 | 25 | 3 | 0 | 12.308 |
+| bounce_vs_forg | content_change,verification | 36 | 18 | 18 | 0 | 4.595 |
+| bounce_vs_forg | dispense_seq | 22 | 21 | 1 | 0 | 4.386 |
+| bounce_vs_forg | dispense_seq,verification | 26 | 22 | 4 | 0 | 11.665 |
+| bounce_vs_forg | verification | 38 | 21 | 17 | 0 | 5.079 |
+| double_take_vs | content_change | 39 | 0 | 39 | 0 | 0.000 |
+| double_take_vs | content_change,dispense_interval | 37 | 0 | 37 | 0 | 0.000 |
+| double_take_vs | content_change,dispense_interval,witness | 37 | 0 | 37 | 0 | 0.000 |
+| double_take_vs | content_change,witness | 35 | 0 | 35 | 0 | 0.000 |
+| double_take_vs | dispense_interval | 34 | 0 | 34 | 0 | 0.000 |
+| double_take_vs | dispense_interval,witness | 36 | 0 | 36 | 0 | 0.000 |
+| double_take_vs | witness | 38 | 0 | 38 | 0 | 0.000 |
+| nonresponse_vs | dispense_seq | 13 | 0 | 13 | 0 | 0.000 |
+| nonresponse_vs | dispense_seq,verification | 14 | 14 | 0 | 0 | 9.190 |
+| nonresponse_vs | dispense_seq,verification,witness | 15 | 15 | 0 | 0 | 9.873 |
+| nonresponse_vs | dispense_seq,witness | 14 | 14 | 0 | 0 | 0.683 |
+| nonresponse_vs | verification | 48 | 47 | 1 | 0 | 8.999 |
+| nonresponse_vs | verification,witness | 4 | 4 | 0 | 0 | 9.873 |
+| refusal_vs_rob | robot_task_outcome | 40 | 40 | 0 | 0 | 4.595 |
+
+#### 9.1.4 McNemar between method variants, subtype level, on 'D > 0' (distinguishable pairs matched in both); exact binomial on the discordant pairs
+| group | variant X | variant Y | pairs | b (X right, Y not) | c (Y right, X not) | exact p |
+|---|---|---|---|---|---|---|
+| double_take_vs | V0 full (diag ON) | V1 full, no diagnostics | 256 | 0 | 0 | 1 |
+| nonresponse_vs | V0 full (diag ON) | V1 full, no diagnostics | 108 | 0 | 0 | 1 |
+| refusal_vs_rob | V0 full (diag ON) | V1 full, no diagnostics | 40 | 0 | 0 | 1 |
+| bounce_vs_forg | V0 full (diag ON) | V1 full, no diagnostics | 209 | 0 | 0 | 1 |
+| ALL | V0 full (diag ON) | V1 full, no diagnostics | 613 | 0 | 0 | 1 |
+| double_take_vs | V0 full (diag ON) | V2 no witness | 256 | 0 | 0 | 1 |
+| nonresponse_vs | V0 full (diag ON) | V2 no witness | 108 | 14 | 0 | 0.000122 |
+| refusal_vs_rob | V0 full (diag ON) | V2 no witness | 40 | 0 | 0 | 1 |
+| bounce_vs_forg | V0 full (diag ON) | V2 no witness | 209 | 0 | 0 | 1 |
+| ALL | V0 full (diag ON) | V2 no witness | 613 | 14 | 0 | 0.000122 |
+| double_take_vs | V0 full (diag ON) | V3 no verification | 256 | 0 | 0 | 1 |
+| nonresponse_vs | V0 full (diag ON) | V3 no verification | 108 | 61 | 0 | 8.67e-19 |
+| refusal_vs_rob | V0 full (diag ON) | V3 no verification | 40 | 0 | 0 | 1 |
+| bounce_vs_forg | V0 full (diag ON) | V3 no verification | 209 | 39 | 0 | 3.64e-12 |
+| ALL | V0 full (diag ON) | V3 no verification | 613 | 100 | 0 | 1.58e-30 |
+| double_take_vs | V0 full (diag ON) | V4 no witness, no verif. | 256 | 0 | 0 | 1 |
+| nonresponse_vs | V0 full (diag ON) | V4 no witness, no verif. | 108 | 94 | 0 | 1.01e-28 |
+| refusal_vs_rob | V0 full (diag ON) | V4 no witness, no verif. | 40 | 0 | 0 | 1 |
+| bounce_vs_forg | V0 full (diag ON) | V4 no witness, no verif. | 209 | 39 | 0 | 3.64e-12 |
+| ALL | V0 full (diag ON) | V4 no witness, no verif. | 613 | 133 | 0 | 1.84e-40 |
+| double_take_vs | V0 full (diag ON) | V5 + dispenser channels (ADR-032 proto) | 256 | 0 | 217 | 9.5e-66 |
+| nonresponse_vs | V0 full (diag ON) | V5 + dispenser channels (ADR-032 proto) | 108 | 0 | 0 | 1 |
+| refusal_vs_rob | V0 full (diag ON) | V5 + dispenser channels (ADR-032 proto) | 40 | 0 | 0 | 1 |
+| bounce_vs_forg | V0 full (diag ON) | V5 + dispenser channels (ADR-032 proto) | 209 | 0 | 64 | 1.08e-19 |
+| ALL | V0 full (diag ON) | V5 + dispenser channels (ADR-032 proto) | 613 | 0 | 281 | 5.15e-85 |
+
+#### 9.1.5 Summary of the variants at subtype level (distinguishable stratum, all groups) next to the class level of section 4.6
+| variant | dist pairs | D > 0 (subtype) | both correct (subtype) | D > 0 by group g1/g2/g3/g4 (subtype) | D > 0 (class level, 4.6) | indist D = 0 |
+|---|---|---|---|---|---|---|
+| V0 full (diag ON) | 613 | 257/613 (42%; 38-46) | 203/613 (33%; 30-37) | 0/256 / 94/108 / 40/40 / 123/209 | 257/613 (42%) | 210/210 |
+| V1 full, no diagnostics | 613 | 257/613 (42%; 38-46) | 203/613 (33%; 30-37) | 0/256 / 94/108 / 40/40 / 123/209 | 257/613 (42%) | 210/210 |
+| V2 no witness | 613 | 243/613 (40%; 36-44) | 203/613 (33%; 30-37) | 0/256 / 80/108 / 40/40 / 123/209 | 243/613 (40%) | 210/210 |
+| V3 no verification | 613 | 157/613 (26%; 22-29) | 84/613 (14%; 11-17) | 0/256 / 33/108 / 40/40 / 84/209 | 157/613 (26%) | 210/210 |
+| V4 no witness, no verif. | 613 | 124/613 (20%; 17-24) | 84/613 (14%; 11-17) | 0/256 / 0/108 / 40/40 / 84/209 | 124/613 (20%) | 210/210 |
+| V5 + dispenser channels (ADR-032 proto) | 613 | 538/613 (88%; 85-90) | 362/613 (59%; 55-63) | 217/256 / 94/108 / 40/40 / 187/209 | 538/613 (88%) | 210/210 |
+
+#### 9.1.6 Sensitivity to the within-class prior pi(subtype | class) (config/subtype_priors.yaml): Lambda and D at subtype level, V0 and V5
+Only the level split inside dispense_forgery enters Lambda (naive against informed: the other subtypes have one component), so the design moves the pairs of groups 2 and 4 only.
+| design | status | variant | D > 0 g1/g2/g3/g4 | median Lambda_A, indist g1/g2/g3/g4 | both correct (all dist) |
+|---|---|---|---|---|---|
+| uniform | reference | V0 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.68 / 0.00 / 0.68 | 203/613 |
+| uniform | reference | V5 | 0.85 / 0.87 / 1.00 / 0.89 | 0.68 / 0.68 / 0.00 / 4.60 | 362/613 |
+| quiet_rare | illustrative | V0 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 1.57 / 0.00 / 1.57 | 203/613 |
+| quiet_rare | illustrative | V5 | 0.85 / 0.87 / 1.00 / 0.89 | 0.68 / 1.57 / 0.00 / 5.48 | 360/613 |
+| quiet_common | illustrative | V0 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.22 / 0.00 / 0.22 | 203/613 |
+| quiet_common | illustrative | V5 | 0.85 / 0.87 / 1.00 / 0.89 | 0.68 / 0.22 / 0.00 / 4.13 | 381/613 |
+
+Sensitivity to eps and qc (design uniform, V0): D > 0 and median Lambda_A of the indistinguishable stratum
+| eps | qc | D > 0 g1/g2/g3/g4 | median Lambda_A indist g1/g2/g3/g4 |
+|---|---|---|---|
+| 0.001 | 0.25 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.69 / 0.00 / 0.69 |
+| 0.001 | 0.5 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.69 / 0.00 / 0.69 |
+| 0.001 | 0.75 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.69 / 0.00 / 0.69 |
+| 0.01 | 0.25 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.68 / 0.00 / 0.68 |
+| 0.01 | 0.5 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.68 / 0.00 / 0.68 |
+| 0.01 | 0.75 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.68 / 0.00 / 0.68 |
+| 0.05 | 0.25 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.64 / 0.00 / 0.64 |
+| 0.05 | 0.5 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.64 / 0.00 / 0.64 |
+| 0.05 | 0.75 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.64 / 0.00 / 0.64 |
+| 0.1 | 0.25 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.59 / 0.00 / 0.59 |
+| 0.1 | 0.5 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.59 / 0.00 / 0.59 |
+| 0.1 | 0.75 | 0.00 / 0.87 / 1.00 / 0.59 | 0.00 / 0.59 / 0.00 / 0.59 |
+
+
+Reading of 9.1.
+* **The directions are those of the class level** (D > 0 in 257 of 613 distinguishable pairs, the same McNemar counts: no diagnostics 0 discordant, no witness b = 14, no verification b = 100, neither b = 133, with the ADR-032 channels c = 281), because D compares the same fields and the only field-level mixture that disappears is the one over the loud sub-causes of the class.
+* **The lean collapses.** At class level a quiet pair carried a lean of +2.32 (group 1) and -1.92 (group 4) from the mixture over the loud C2 sub-causes; between the two actual subtypes the median Lambda of an identical stream is 0.00 (group 1: double take against bounce, 294 of 294 pairs have Lambda = 0 for both members: **the table gives likelihood ratio exactly 1**), 0.68 (groups 2 and 4: ln 2, the naive level of the forgery excluded by a denied sequence field) and 0.00 (group 3). The remaining lean is the level split inside dispense_forgery, and it moves with the design (1.57 / 0.68 / 0.22 for quiet_rare / uniform / quiet_common).
+* **Both-correct-direction rises** from 169 to 203 of 613 (V0) and from 316 to 362 (V5), for the same reason.
+* **The class posterior as the sum of the subtypes** (9.4.2): argmax = truth 859 of 1879 under all designs; kappa at tau 0.8: 1634 UNDETERMINED / 245 right / 0 wrong (uniform), 1455 / 245 / **179 wrong** (quiet_rare: all confident C1 for quiet members), 1671 / 208 / 0 (quiet_common). On the main population the class posterior has log score / Brier 0.884 / 0.532 (uniform), 0.837 / 0.512 (quiet_rare), 0.938 / 0.564 (quiet_common), against 0.901 / 0.536 for the independent class table.
+
+### 9.2 Diagnostics and the log score
+
+**Short answer.** With diagnostics the main-population log score is 0.9010 against 0.8940 without (0.0070 nats per alert, 105.6 nats over 15 084 alerts): worse. The two profiles differ in one field only, `system.diagnostics_ok` (checked on all 17 015 alerts), so the whole change is that field's. The worsening is real under the labelling of section 5, but it is produced by the labelling and by one cell, not by the diagnostics: it reverses under a labelling that respects the dropout's target (-0.0174) and under a tight time window (-0.0312). The driver switch does not make idle cuffs stale.
+
+
+alerts scored 15084; mean log score with diagnostics 0.9010, without 0.8940; difference (with minus without) +0.0070 nats per alert, total +105.6 nats
+
+#### 9.2.1 Change of the log score caused by the diagnostics field, by template, true cause and reading class (sum of the per-alert differences; positive = worse with diagnostics)
+| template | truth | DIAG class | alerts | sum of change (nats) | mean change |
+|---|---|---|---|---|---|
+| count | C1 | D | 975 | -79.13 | -0.0812 |
+| count | C2 | D | 325 | +249.83 | +0.7687 |
+| count | C3 | D | 190 | -23.09 | -0.1215 |
+| hold | C1 | D | 283 | -6.95 | -0.0245 |
+| hold | C2 | A | 24 | -16.26 | -0.6774 |
+| hold | C2 | D | 174 | +12.76 | +0.0734 |
+| hold | C2 | U | 58 | +0.00 | +0.0000 |
+| hold | C3 | D | 100 | -2.48 | -0.0248 |
+| range | C1 | D | 7420 | +0.00 | +0.0000 |
+| range | C1 | U | 86 | +0.00 | +0.0000 |
+| range | C2 | D | 280 | +0.00 | +0.0000 |
+| range | C3 | D | 451 | +0.00 | +0.0000 |
+| range | C3 | U | 6 | +0.00 | +0.0000 |
+| resp | C1 | D | 2419 | -62.11 | -0.0257 |
+| resp | C2 | A | 34 | -8.51 | -0.2504 |
+| resp | C2 | D | 1214 | +123.47 | +0.1017 |
+| resp | C2 | U | 94 | +0.00 | +0.0000 |
+| resp | C3 | D | 252 | -7.87 | -0.0312 |
+| sched | C1 | D | 159 | -4.42 | -0.0278 |
+| sched | C2 | A | 77 | -81.01 | -1.0521 |
+| sched | C2 | D | 212 | +12.67 | +0.0598 |
+| sched | C2 | U | 187 | +0.00 | +0.0000 |
+| sched | C3 | D | 64 | -1.35 | -0.0210 |
+
+By template: count +147.6, hold -12.9, range +0.0, resp +45.0, sched -74.1
+By true cause: C1 -152.6, C2 +293.0, C3 -34.8
+By reading class: A -105.8, D +211.3, U +0.0
+
+#### 9.2.2 The cell P(DIAG = A | cause) against the empirical rate of A among the alerts of that cause (diagnostic only, not used to fit)
+| template | cause | model P(A) | empirical A | empirical A or D | alerts |
+|---|---|---|---|---|---|
+| count | C1 | 0.010 | 0.000 (0/975) | 975 | 975 |
+| count | C2 | 0.582 | 0.000 (0/325) | 325 | 325 |
+| count | C3 | 0.010 | 0.000 (0/190) | 190 | 190 |
+| hold | C1 | 0.010 | 0.000 (0/283) | 283 | 283 |
+| hold | C2 | 0.123 | 0.121 (24/198) | 198 | 256 |
+| hold | C3 | 0.010 | 0.000 (0/100) | 100 | 100 |
+| range | C1 | 0.010 | 0.000 (0/7420) | 7420 | 7506 |
+| range | C2 | 0.010 | 0.000 (0/280) | 280 | 280 |
+| range | C3 | 0.010 | 0.000 (0/451) | 451 | 457 |
+| resp | C1 | 0.010 | 0.000 (0/2419) | 2419 | 2419 |
+| resp | C2 | 0.132 | 0.027 (34/1248) | 1248 | 1342 |
+| resp | C3 | 0.010 | 0.000 (0/252) | 252 | 252 |
+| sched | C1 | 0.010 | 0.000 (0/159) | 159 | 159 |
+| sched | C2 | 0.157 | 0.266 (77/289) | 289 | 476 |
+| sched | C3 | 0.010 | 0.000 (0/64) | 64 | 64 |
+
+#### 9.2.3 Alerts matched to a ble_dropout: reading class of DIAG by dropout target
+| target | template | DIAG | alerts |
+|---|---|---|---|
+| cuff | count | D | 14 |
+| cuff | hold | A | 19 |
+| cuff | hold | D | 1 |
+| cuff | resp | A | 25 |
+| cuff | resp | D | 22 |
+| cuff | sched | A | 60 |
+| cuff | sched | D | 2 |
+| dispenser | count | D | 18 |
+| dispenser | resp | D | 4 |
+| ecg | count | D | 135 |
+| ecg | hold | A | 2 |
+| ecg | hold | D | 44 |
+| ecg | hold | U | 1 |
+| ecg | resp | A | 1 |
+| ecg | resp | D | 433 |
+| ecg | resp | U | 2 |
+| ecg | sched | A | 4 |
+| ecg | sched | D | 19 |
+| ecg | sched | U | 8 |
+| oximeter | count | D | 135 |
+| oximeter | hold | A | 1 |
+| oximeter | hold | D | 52 |
+| oximeter | hold | U | 1 |
+| oximeter | resp | A | 5 |
+| oximeter | resp | D | 449 |
+| oximeter | resp | U | 5 |
+| oximeter | sched | A | 9 |
+| oximeter | sched | D | 23 |
+| oximeter | sched | U | 9 |
+
+
+**Why, exactly.**
+1. *Which alerts get worse:* only the alerts whose true cause is C2 and whose diagnostics field is **denied** (D): `count` +249.8 nats (325 alerts, +0.77 each), `resp` +123.5 (1 214), `hold` +12.8, `sched` +12.7. A denied `diagnostics_ok` lowers the posterior of C2 by the cell (1 - P(A | C2)): 0.42 at `count`, 0.87 at `resp`, 0.84 at `sched`. The alerts with C1 (-152.6 nats) and C3 (-34.8) improve, and the C2 alerts with the field asserted improve most (`sched` -1.05 each, -81 in all); `range` is unchanged (no C2 sub-cause that can violate `range` raises the field).
+2. *The cell does not fit the benchmark at `count`:* the uniform mixture over the five C2 sub-causes that can violate `count` (bounce, ble_dropout, message_drop, process_kill, uncommanded transition) gives P(stale | C2) = 0.582, while the benchmark injects only the bounce and the dropout, and **0 of the 325 `count` alerts labelled C2 has the field asserted** (9.2.2).
+3. *Most of those alerts are not caused by a fault of their scope:* 9.2.3 splits the alerts labelled `ble_dropout` by the dropout's target. At `count` 284 of the 302 alerts labelled `ble_dropout` sit on a dropout of the cuff, the ECG device or the oximeter (270 of them ECG or oximeter), none of which is in the data scope of COUNT (dispenser only; the 18 on the dispenser also read D, presumably alerts decided after the recovery, not checked), and at `resp` 895 of 946 sit on an ECG or oximeter dropout, outside the scope (cuff and dispenser); the label comes from `TEMPLATES_AFFECTED`, which lists `count`, `resp`, `hold` and `sched` for any `ble_dropout` whatever its target, plus a 24-hour window after the event. The driver reports `ok` for the cuff and the dispenser, which is right; the truth label says C2, which is not. With the dropout restricted to targets in the template's scope the sign reverses (9.2.4).
+4. *Per field contribution:* there is only one field. Its contribution per class: asserted -105.8 nats (better), denied +211.3 (worse), unavailable 0; by cause C1 -152.6, C2 +293.0, C3 -34.8 (labelling of section 5).
+
+
+Fields whose value differs between the profile with and without diagnostics, over the 17015 VIOLATED alerts of m120: {'system.diagnostics_ok': 16535}. The log-score change is therefore the contribution of `system.diagnostics_ok` alone.
+
+#### 9.2.4 Main-population log score with and without driver diagnostics, by labelling of the truth (lower is better; the labelling is the only thing that changes between rows)
+| labelling | alerts scored | with diagnostics | without | change | change summed by true cause (nats): C1 / C2 / C3 |
+|---|---|---|---|---|---|
+| labelling of section 5 (injected first, window 24 h, any dropout target) | 15084 | 0.9010 | 0.8940 | +0.0070 | -152.6 / +293.0 / -34.8 |
+| window 1 h, any dropout target | 14174 | 0.7776 | 0.7960 | -0.0184 | -206.8 / -34.0 / -20.7 |
+| window 0 (alert decided while the event window is open), any target | 6751 | 0.6673 | 0.6985 | -0.0312 | -176.2 / -18.4 / -16.0 |
+| dropout target in the template's data scope, window 24 h | 15393 | 0.8002 | 0.8176 | -0.0174 | -208.4 / -13.8 / -46.0 |
+| dropout target in scope, window 1 h | 14188 | 0.7642 | 0.7854 | -0.0211 | -212.3 / -66.6 / -21.1 |
+| dropout target in scope, window 0 | 6755 | 0.6606 | 0.6930 | -0.0324 | -177.4 / -25.5 / -16.2 |
+
+#### 9.2.5 Counterfactual: a driver that reports an IDLE cuff as stale (an aggregator with a timeout; a BLE cuff that connects only when it measures is silent between measurements). Same table, cells unchanged (P(stale | C1) = eps), dropout-scope labelling, window 24 h
+| driver | timeout of the idle cuff | alerts | C1 alerts with DIAG asserted | log score with | log score without | change |
+|---|---|---|---|---|---|---|
+| the switch of this run (stale only in link_down windows) | - | 15393 | 0/12606 (0.0%) | 0.8002 | 0.8176 | -0.0174 |
+| naive: stale when no cuff message for T_idle | 1 h | 15393 | 11170/12606 (88.6%) | 1.1137 | 0.8176 | +0.2961 |
+| naive: stale when no cuff message for T_idle | 6 h | 15393 | 10897/12606 (86.4%) | 1.1124 | 0.8176 | +0.2948 |
+
+
+**STALE for the cuff: what the documents say, and what the switch does.**
+* `evidence-channels.md` (field table, derivation table, D-8): `system.diagnostics_ok` is False "if a node of the scope reported level error or stale in the window", True if every capable node reported ok, else `None`. The payload is `NODE_STATE.diagnostics` in {ok, warn, error, stale}. **No document defines when a node is STALE: no period, no timeout, no lease for the diagnostics.** The lease (`liveliness_lease_ms`) and the data-stream deadline (`qos_deadline_ms`, "null for an event-driven device") are run parameters of the device profile without a value (D-8, EC-OP-18: the generator has no lease parameter), and they feed `liveliness_ok` and `qos_deadline_missed`, not `diagnostics_ok`. Nothing in `evidence-channels.md` or `fault-model.md` says that a BLE cuff connects only when it measures; the closest statement is that an event-driven device may declare no deadline.
+* **What the switch does** (`driver_diag.py`): `ok` at t = 0 and every hour (period 1 h; 10 minutes gives the identical vectors), for the cuff whether or not it measures; `stale` only in the `link_down` ... `active` windows that the gateway wrote for a `ble_dropout`, at the start and every hour inside it; there is no lease (stale is immediate). **An idle cuff is not reported stale**: 0 of the 12 606 C1 alerts and 0 of the 1 268 C3 alerts (scope-aware labelling) have the field asserted, 135 C2 alerts have it, all in dropout windows (9.2.3). The cell P(stale | C1) = eps is therefore consistent with the generator. It is a REQUIREMENT on the real driver (9.2.5): ROS 2 diagnostics aggregators mark an item STALE when it has not been updated within a timeout, so a naive bridge for a device that is silent between measurements would report STALE continuously (general ROS 2 behaviour, not checked in this repository); in the counterfactual 88.6% of the C1 alerts have the field asserted and the log score worsens by +0.296 nats. That is a statement about this prototype's generator, not a measurement of a real driver.
+* **No generator defect, so no fix and no rerun was needed.** The requested rerun "both ways" is 9.2.4 (with and without diagnostics, six labellings) plus 9.2.5 (the idle-stale counterfactual).
+* The choice of the scope-aware labelling was made after seeing the sign of the change; all rows are printed.
+
+### 9.3 The channel 'identical repeated value' (for stuck_at)
+
+**Definition.** `cuff.identical_repeat` (outside the contract, prototype): A if the last two cuff `bp` readings received by the decision time of the alert (the previous day's readings included) are exactly equal, D if they differ, `None` if fewer than two exist. It is read by the templates that read the cuff (range, sched, hold, resp, sys). Cells: P(A | stuck_at) = 1 - eps (every reading of the window repeats the last value before the onset); P(A | any other sub-cause) = max(rep_nat, eps), rep_nat a SENSITIVITY value derived below. A denied reading lowers stuck_at by (eps against 1 - rep_nat).
+
+#### 9.3.1 Natural probability of an identical repeat
+
+
+Fault-free run `ff` (injection rates 0, 120 patients x 30 days, seed 0): 17917 cuff readings, 17797 consecutive pairs, **exactly equal: 0** (observed frequency 0.0000).
+Share of readings that are integers: 0.0000; smallest non-zero |difference| between consecutive readings: 0.00137 mmHg; readings at the clip bounds: min 82.44, max 206.15, share equal to the min or max: 0.0001.
+SD of the difference of consecutive readings: 20.09 mmHg (median |difference| 13.67).
+Generator measurement process: bp = latent SBP + cuff_bias + cuff_error_sd * z, a float with no rounding in `measurement.py` (no resolution parameter exists); `cuff_error_sd_mmhg` in the prior file = 8.0 (('Stergiou GS et al., AAMI/ESH/ISO collaboration statement, Hypertension 2018;71:368-374 (ISO 81060-2 criterion 1: SD of differences at most 8 mmHg; edition and clause to be confirmed) (detail: docs/formal/parameter-literature-proposal.md)', 'filled')).
+Analytic: two floats drawn from continuous noise are equal with probability 0, so **rep_nat = 0 exactly in this generator** and the fault-free frequency 0/17797 agrees.
+
+For a device with a display resolution r mmHg (a SENSITIVITY value: the cuff specification is not in the repository) the natural probability that two consecutive readings are equal is E[max(0, 1 - |Delta| / r)] over the difference Delta of consecutive pre-rounding readings (valid when the first reading falls uniformly in its quantisation cell). With the empirical Delta of the fault-free run and, as a cross-check, a Gaussian Delta with the same SD:
+| r (mmHg) | rep_nat, empirical Delta | rep_nat, Gaussian Delta (SD 20.1) |
+|---|---|---|
+| 0.1 | 0.0021 | 0.0020 |
+| 1.0 | 0.0200 | 0.0198 |
+| 2.0 | 0.0388 | 0.0395 |
+| 5.0 | 0.0980 | 0.0983 |
+
+
+The generator has **no resolution**: the cuff value is a float (`latent + bias + sd * z`, `measurement.py`; no rounding, no resolution parameter), so the analytic natural probability is 0 and the fault-free run agrees (0 of 17 797 consecutive pairs). That makes the channel a perfect detector of stuck_at in this benchmark, which is an artefact. For a real cuff the resolution r is a device-specification value that is not in the repository; the table above gives rep_nat for r = 1, 2, 5 mmHg (grid values) from the fault-free differences, and the channel is evaluated by rounding the benchmark's readings to r before comparing (the frozen window stays identical, natural equality arises at about rep_nat: observed 0.0299 / 0.0483 / 0.1297 against the formula's 0.0200 / 0.0388 / 0.0980 for r = 1 / 2 / 5; the alerts are not a random sample of consecutive pairs: for example 12 of the 20 float-equal cases are alerts raised inside an active stuck_at window that carry another cause's label, the others replays and cuff_detached; see 9.3.3).
+
+
+#### 9.3.2 Effective k of stuck_at (readings of the stream inside the frozen window), from the injection log of m120 (realised stuck_at records)
+| readings in the window | records |
+|---|---|
+| 1 | 30 |
+| 2 | 29 |
+| 3 | 8 |
+Window durations of the records (h): [1.0, 4.0, 12.0] (placeholders 1/4/12 h). Every reading in the window repeats the last value before the onset, so with k readings in the window the first repeats the earlier reading and the others repeat each other: all k readings are identical to their predecessor, P(A | stuck_at, alert at a reading of the window) = 1 up to the leak eps.
+
+Labelling: labelling of section 5 (injected first, window 24 h, any dropout target); 15084 alerts.
+
+
+
+#### 9.3.3 (tight labelling) Reading class of the channel at the matched alerts (cuff-reading templates range, sched, hold, resp), by true subtype and display resolution r of the cuff (None = the generator's floats)
+| true subtype | alerts | r | A (identical) | D (differ) | U (fewer than two readings) |
+|---|---|---|---|---|---|
+| ble_dropout | 47 | 1.0 | 2 (4.3%) | 44 | 1 |
+| ble_dropout | 47 | 2.0 | 3 (6.4%) | 43 | 1 |
+| ble_dropout | 47 | 5.0 | 5 (10.6%) | 41 | 1 |
+| ble_dropout | 47 | None | 0 (0.0%) | 46 | 1 |
+| cuff_silent_bias | 156 | 1.0 | 5 (3.2%) | 148 | 3 |
+| cuff_silent_bias | 156 | 2.0 | 6 (3.8%) | 147 | 3 |
+| cuff_silent_bias | 156 | 5.0 | 20 (12.8%) | 133 | 3 |
+| cuff_silent_bias | 156 | None | 0 (0.0%) | 153 | 3 |
+| dispense_forgery | 60 | 1.0 | 0 (0.0%) | 60 | 0 |
+| dispense_forgery | 60 | 2.0 | 2 (3.3%) | 58 | 0 |
+| dispense_forgery | 60 | 5.0 | 8 (13.3%) | 52 | 0 |
+| dispense_forgery | 60 | None | 0 (0.0%) | 60 | 0 |
+| injection_naive | 157 | 1.0 | 0 (0.0%) | 156 | 1 |
+| injection_naive | 157 | 2.0 | 1 (0.6%) | 155 | 1 |
+| injection_naive | 157 | 5.0 | 3 (1.9%) | 153 | 1 |
+| injection_naive | 157 | None | 0 (0.0%) | 156 | 1 |
+| nav_delay | 2 | 1.0 | 0 (0.0%) | 2 | 0 |
+| nav_delay | 2 | 2.0 | 0 (0.0%) | 2 | 0 |
+| nav_delay | 2 | 5.0 | 0 (0.0%) | 2 | 0 |
+| nav_delay | 2 | None | 0 (0.0%) | 2 | 0 |
+| replay | 201 | 1.0 | 5 (2.5%) | 196 | 0 |
+| replay | 201 | 2.0 | 9 (4.5%) | 192 | 0 |
+| replay | 201 | 5.0 | 18 (9.0%) | 183 | 0 |
+| replay | 201 | None | 3 (1.5%) | 198 | 0 |
+| stuck_at | 96 | 1.0 | 90 (93.8%) | 6 | 0 |
+| stuck_at | 96 | 2.0 | 90 (93.8%) | 6 | 0 |
+| stuck_at | 96 | 5.0 | 90 (93.8%) | 6 | 0 |
+| stuck_at | 96 | None | 90 (93.8%) | 6 | 0 |
+
+Natural rate of A among the cuff-template alerts whose true subtype is not stuck_at (values rounded to r mmHg before comparing), against the fault-free formula of 9.3.1 (rep_nat):
+- r = None: 20/5110 = 0.0039 (rep_nat 0.0)
+- r = 1.0: 153/5110 = 0.0299 (rep_nat 0.02)
+- r = 2.0: 247/5110 = 0.0483 (rep_nat 0.0388)
+- r = 5.0: 663/5110 = 0.1297 (rep_nat 0.098)
+
+
+
+**Effect on the set, tight labelling.**
+
+#### 9.3.4 (tight labelling) Effect of the channel on the subtype set (design uniform, reference cells; rep_nat = the value of 9.3.1 for the resolution r)
+Silent-fault alerts of the main population (433: stuck_at 137, cuff_silent_bias 256, dispenser_bounce 40; dispenser_bounce is at COUNT, which does not read the cuff, so it cannot change). 'Contains C1': the set holds at least one C1 subtype (the masquerade). 'Exact': the set is exactly the true subtype.
+| level | r | true subtype | alerts | coverage without -> with | mean size without -> with | contains C1 without -> with | exact without -> with | sets that lose all C1 subtypes |
+|---|---|---|---|---|---|---|---|---|
+| 0.8 | None | stuck_at | 96 | 92 -> 90 | 5.07 -> 1.33 | 95 -> 6 | 0 -> 89 | 89 |
+| 0.8 | None | cuff_silent_bias | 156 | 151 -> 151 | 4.60 -> 4.37 | 151 -> 151 | 0 -> 0 | 0 |
+| 0.8 | None | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.8 | 1.0 | stuck_at | 96 | 92 -> 89 | 5.07 -> 1.93 | 95 -> 35 | 0 -> 60 | 60 |
+| 0.8 | 1.0 | cuff_silent_bias | 156 | 151 -> 146 | 4.60 -> 4.27 | 151 -> 148 | 0 -> 0 | 3 |
+| 0.8 | 1.0 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.8 | 2.0 | stuck_at | 96 | 92 -> 89 | 5.07 -> 1.95 | 95 -> 35 | 0 -> 60 | 60 |
+| 0.8 | 2.0 | cuff_silent_bias | 156 | 151 -> 145 | 4.60 -> 4.25 | 151 -> 148 | 0 -> 0 | 3 |
+| 0.8 | 2.0 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.8 | 5.0 | stuck_at | 96 | 92 -> 89 | 5.07 -> 3.80 | 95 -> 95 | 0 -> 0 | 0 |
+| 0.8 | 5.0 | cuff_silent_bias | 156 | 151 -> 150 | 4.60 -> 4.24 | 151 -> 151 | 0 -> 0 | 0 |
+| 0.8 | 5.0 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.9 | None | stuck_at | 96 | 94 -> 90 | 6.77 -> 2.09 | 95 -> 35 | 0 -> 60 | 60 |
+| 0.9 | None | cuff_silent_bias | 156 | 152 -> 152 | 6.04 -> 5.10 | 154 -> 153 | 0 -> 0 | 1 |
+| 0.9 | None | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.9 | 1.0 | stuck_at | 96 | 94 -> 90 | 6.77 -> 2.43 | 95 -> 35 | 0 -> 60 | 60 |
+| 0.9 | 1.0 | cuff_silent_bias | 156 | 152 -> 147 | 6.04 -> 4.97 | 154 -> 150 | 0 -> 0 | 4 |
+| 0.9 | 1.0 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.9 | 2.0 | stuck_at | 96 | 94 -> 90 | 6.77 -> 3.94 | 95 -> 35 | 0 -> 0 | 60 |
+| 0.9 | 2.0 | cuff_silent_bias | 156 | 152 -> 152 | 6.04 -> 5.02 | 154 -> 150 | 0 -> 0 | 4 |
+| 0.9 | 2.0 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.9 | 5.0 | stuck_at | 96 | 94 -> 89 | 6.77 -> 5.51 | 95 -> 95 | 0 -> 0 | 0 |
+| 0.9 | 5.0 | cuff_silent_bias | 156 | 152 -> 152 | 6.04 -> 5.04 | 154 -> 153 | 0 -> 0 | 1 |
+| 0.9 | 5.0 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.95 | None | stuck_at | 96 | 95 -> 90 | 7.78 -> 2.85 | 95 -> 35 | 0 -> 60 | 60 |
+| 0.95 | None | cuff_silent_bias | 156 | 152 -> 152 | 7.09 -> 6.33 | 155 -> 155 | 0 -> 0 | 0 |
+| 0.95 | None | dispenser_bounce | 3 | 3 -> 3 | 6.00 -> 6.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.95 | 1.0 | stuck_at | 96 | 95 -> 90 | 7.78 -> 4.99 | 95 -> 95 | 0 -> 0 | 0 |
+| 0.95 | 1.0 | cuff_silent_bias | 156 | 152 -> 152 | 7.09 -> 6.25 | 155 -> 155 | 0 -> 0 | 0 |
+| 0.95 | 1.0 | dispenser_bounce | 3 | 3 -> 3 | 6.00 -> 6.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.95 | 2.0 | stuck_at | 96 | 95 -> 90 | 7.78 -> 5.93 | 95 -> 95 | 0 -> 0 | 0 |
+| 0.95 | 2.0 | cuff_silent_bias | 156 | 152 -> 152 | 7.09 -> 6.27 | 155 -> 155 | 0 -> 0 | 0 |
+| 0.95 | 2.0 | dispenser_bounce | 3 | 3 -> 3 | 6.00 -> 6.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.95 | 5.0 | stuck_at | 96 | 95 -> 90 | 7.78 -> 7.14 | 95 -> 95 | 0 -> 0 | 0 |
+| 0.95 | 5.0 | cuff_silent_bias | 156 | 152 -> 152 | 7.09 -> 6.33 | 155 -> 155 | 0 -> 0 | 0 |
+| 0.95 | 5.0 | dispenser_bounce | 3 | 3 -> 3 | 6.00 -> 6.00 | 3 -> 3 | 0 -> 0 | 0 |
+
+#### 9.3.5 (tight labelling) Alerts of other causes that the channel wrongly removes from their set (true subtype in the set without the channel, not with it), non-stuck_at alerts of the main population
+| level | r | non-stuck_at cuff-template alerts with A | true subtype removed | by (cause, subtype) |
+|---|---|---|---|---|
+| 0.8 | None | 20 | 12 | {('C1', 'spontaneous_resp'): 10, ('C1', 'spontaneous_hold'): 2} |
+| 0.8 | 1.0 | 148 | 1 | {('C3', 'injection_informed'): 1} |
+| 0.8 | 2.0 | 241 | 2 | {('C3', 'injection_informed'): 1, ('C3', 'injection_naive'): 1} |
+| 0.8 | 5.0 | 643 | 0 | - |
+| 0.9 | None | 20 | 1 | {('C3', 'replay'): 1} |
+| 0.9 | 1.0 | 148 | 3 | {('C3', 'injection_informed'): 2, ('C3', 'replay'): 1} |
+| 0.9 | 2.0 | 241 | 4 | {('C3', 'injection_informed'): 2, ('C3', 'replay'): 2} |
+| 0.9 | 5.0 | 643 | 8 | {('C3', 'injection_informed'): 6, ('C3', 'replay'): 2} |
+| 0.95 | None | 20 | 2 | {('C3', 'replay'): 2} |
+| 0.95 | 1.0 | 148 | 6 | {('C3', 'injection_informed'): 2, ('C3', 'replay'): 4} |
+| 0.95 | 2.0 | 241 | 7 | {('C3', 'injection_informed'): 2, ('C3', 'replay'): 5} |
+| 0.95 | 5.0 | 643 | 8 | {('C3', 'replay'): 8} |
+
+#### 9.3.6 (tight labelling) All alerts of the main population: coverage and mean size without and with the channel (design uniform)
+| level | r | coverage without | coverage with | mean size without | mean size with |
+|---|---|---|---|---|---|
+| 0.8 | None | 6264/6755 (92.7%) | 6346/6755 (93.9%) | 5.872 | 5.246 |
+| 0.8 | 1.0 | 6264/6755 (92.7%) | 6347/6755 (94.0%) | 5.872 | 5.204 |
+| 0.8 | 2.0 | 6264/6755 (92.7%) | 6347/6755 (94.0%) | 5.872 | 5.172 |
+| 0.8 | 5.0 | 6264/6755 (92.7%) | 6350/6755 (94.0%) | 5.872 | 5.217 |
+| 0.9 | None | 6449/6755 (95.5%) | 6445/6755 (95.4%) | 7.825 | 7.169 |
+| 0.9 | 1.0 | 6449/6755 (95.5%) | 6438/6755 (95.3%) | 7.825 | 7.094 |
+| 0.9 | 2.0 | 6449/6755 (95.5%) | 6442/6755 (95.4%) | 7.825 | 7.145 |
+| 0.9 | 5.0 | 6449/6755 (95.5%) | 6437/6755 (95.3%) | 7.825 | 7.162 |
+| 0.95 | None | 6524/6755 (96.6%) | 6517/6755 (96.5%) | 8.983 | 8.693 |
+| 0.95 | 1.0 | 6524/6755 (96.6%) | 6513/6755 (96.4%) | 8.983 | 8.678 |
+| 0.95 | 2.0 | 6524/6755 (96.6%) | 6512/6755 (96.4%) | 8.983 | 8.690 |
+| 0.95 | 5.0 | 6524/6755 (96.6%) | 6511/6755 (96.4%) | 8.983 | 8.766 |
+
+
+
+**Effect on the set, labelling of section 5.**
+
+#### 9.3.4 (labelling of section 5) Effect of the channel on the subtype set (design uniform, reference cells; rep_nat = the value of 9.3.1 for the resolution r)
+Silent-fault alerts of the main population (433: stuck_at 137, cuff_silent_bias 256, dispenser_bounce 40; dispenser_bounce is at COUNT, which does not read the cuff, so it cannot change). 'Contains C1': the set holds at least one C1 subtype (the masquerade). 'Exact': the set is exactly the true subtype.
+| level | r | true subtype | alerts | coverage without -> with | mean size without -> with | contains C1 without -> with | exact without -> with | sets that lose all C1 subtypes |
+|---|---|---|---|---|---|---|---|---|
+| 0.8 | None | stuck_at | 137 | 134 -> 84 | 4.93 -> 2.39 | 137 -> 53 | 0 -> 84 | 84 |
+| 0.8 | None | cuff_silent_bias | 256 | 248 -> 246 | 4.76 -> 4.46 | 251 -> 249 | 0 -> 0 | 2 |
+| 0.8 | None | dispenser_bounce | 40 | 17 -> 13 | 5.85 -> 5.17 | 40 -> 38 | 0 -> 0 | 2 |
+| 0.8 | 1.0 | stuck_at | 137 | 134 -> 85 | 4.93 -> 2.77 | 137 -> 79 | 0 -> 58 | 58 |
+| 0.8 | 1.0 | cuff_silent_bias | 256 | 248 -> 242 | 4.76 -> 4.43 | 251 -> 246 | 0 -> 0 | 5 |
+| 0.8 | 1.0 | dispenser_bounce | 40 | 17 -> 13 | 5.85 -> 5.28 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.8 | 2.0 | stuck_at | 137 | 134 -> 88 | 4.93 -> 2.71 | 137 -> 77 | 0 -> 60 | 60 |
+| 0.8 | 2.0 | cuff_silent_bias | 256 | 248 -> 240 | 4.76 -> 4.40 | 251 -> 245 | 0 -> 0 | 6 |
+| 0.8 | 2.0 | dispenser_bounce | 40 | 17 -> 13 | 5.85 -> 5.33 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.8 | 5.0 | stuck_at | 137 | 134 -> 90 | 4.93 -> 3.98 | 137 -> 137 | 0 -> 0 | 0 |
+| 0.8 | 5.0 | cuff_silent_bias | 256 | 248 -> 248 | 4.76 -> 4.40 | 251 -> 251 | 0 -> 0 | 0 |
+| 0.8 | 5.0 | dispenser_bounce | 40 | 17 -> 11 | 5.85 -> 5.38 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.9 | None | stuck_at | 137 | 136 -> 84 | 6.53 -> 3.09 | 137 -> 80 | 0 -> 57 | 57 |
+| 0.9 | None | cuff_silent_bias | 256 | 251 -> 249 | 6.27 -> 5.29 | 253 -> 251 | 0 -> 0 | 2 |
+| 0.9 | None | dispenser_bounce | 40 | 17 -> 15 | 7.08 -> 6.40 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.9 | 1.0 | stuck_at | 137 | 136 -> 85 | 6.53 -> 3.28 | 137 -> 79 | 0 -> 58 | 58 |
+| 0.9 | 1.0 | cuff_silent_bias | 256 | 251 -> 245 | 6.27 -> 5.24 | 253 -> 247 | 0 -> 0 | 6 |
+| 0.9 | 1.0 | dispenser_bounce | 40 | 17 -> 15 | 7.08 -> 6.50 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.9 | 2.0 | stuck_at | 137 | 136 -> 88 | 6.53 -> 4.24 | 137 -> 77 | 0 -> 0 | 60 |
+| 0.9 | 2.0 | cuff_silent_bias | 256 | 251 -> 251 | 6.27 -> 5.26 | 253 -> 246 | 0 -> 0 | 7 |
+| 0.9 | 2.0 | dispenser_bounce | 40 | 17 -> 15 | 7.08 -> 6.60 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.9 | 5.0 | stuck_at | 137 | 136 -> 90 | 6.53 -> 5.32 | 137 -> 137 | 0 -> 0 | 0 |
+| 0.9 | 5.0 | cuff_silent_bias | 256 | 251 -> 251 | 6.27 -> 5.29 | 253 -> 252 | 0 -> 0 | 1 |
+| 0.9 | 5.0 | dispenser_bounce | 40 | 17 -> 17 | 7.08 -> 6.65 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.95 | None | stuck_at | 137 | 137 -> 84 | 7.54 -> 3.99 | 137 -> 80 | 0 -> 57 | 57 |
+| 0.95 | None | cuff_silent_bias | 256 | 251 -> 250 | 7.32 -> 6.52 | 254 -> 253 | 0 -> 0 | 1 |
+| 0.95 | None | dispenser_bounce | 40 | 40 -> 38 | 8.12 -> 7.83 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.95 | 1.0 | stuck_at | 137 | 137 -> 85 | 7.54 -> 5.39 | 137 -> 137 | 0 -> 0 | 0 |
+| 0.95 | 1.0 | cuff_silent_bias | 256 | 251 -> 251 | 7.32 -> 6.51 | 254 -> 254 | 0 -> 0 | 0 |
+| 0.95 | 1.0 | dispenser_bounce | 40 | 40 -> 40 | 8.12 -> 7.92 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.95 | 2.0 | stuck_at | 137 | 137 -> 88 | 7.54 -> 5.98 | 137 -> 137 | 0 -> 0 | 0 |
+| 0.95 | 2.0 | cuff_silent_bias | 256 | 251 -> 251 | 7.32 -> 6.52 | 254 -> 254 | 0 -> 0 | 0 |
+| 0.95 | 2.0 | dispenser_bounce | 40 | 40 -> 40 | 8.12 -> 7.97 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.95 | 5.0 | stuck_at | 137 | 137 -> 90 | 7.54 -> 6.82 | 137 -> 137 | 0 -> 0 | 0 |
+| 0.95 | 5.0 | cuff_silent_bias | 256 | 251 -> 251 | 7.32 -> 6.56 | 254 -> 254 | 0 -> 0 | 0 |
+| 0.95 | 5.0 | dispenser_bounce | 40 | 40 -> 40 | 8.12 -> 8.03 | 40 -> 40 | 0 -> 0 | 0 |
+
+#### 9.3.5 (labelling of section 5) Alerts of other causes that the channel wrongly removes from their set (true subtype in the set without the channel, not with it), non-stuck_at alerts of the main population
+| level | r | non-stuck_at cuff-template alerts with A | true subtype removed | by (cause, subtype) |
+|---|---|---|---|---|
+| 0.8 | None | 18 | 25 | {('C2', 'manipulation_failure'): 1, ('C1', 'spontaneous_range'): 23, ('C1', 'spontaneous_hold'): 1} |
+| 0.8 | 1.0 | 319 | 178 | {('C2', 'manipulation_failure'): 5, ('C1', 'spontaneous_range'): 163, ('C3', 'injection_informed'): 5, ('C3', 'dispense_forgery'): 1, ('C1', 'hypertensive_spike'): 4} |
+| 0.8 | 2.0 | 559 | 303 | {('C2', 'manipulation_failure'): 10, ('C1', 'spontaneous_range'): 278, ('C1', 'hypertensive_spike'): 11, ('C3', 'injection_informed'): 3, ('C3', 'injection_naive'): 1} |
+| 0.8 | 5.0 | 1468 | 697 | {('C2', 'manipulation_failure'): 17, ('C1', 'spontaneous_range'): 680} |
+| 0.9 | None | 18 | 5 | {('C2', 'manipulation_failure'): 4, ('C3', 'replay'): 1} |
+| 0.9 | 1.0 | 319 | 162 | {('C2', 'manipulation_failure'): 8, ('C1', 'spontaneous_range'): 142, ('C3', 'dispense_forgery'): 3, ('C1', 'hypertensive_spike'): 4, ('C3', 'injection_informed'): 4, ('C3', 'replay'): 1} |
+| 0.9 | 2.0 | 559 | 282 | {('C1', 'spontaneous_range'): 256, ('C2', 'manipulation_failure'): 3, ('C1', 'hypertensive_spike'): 11, ('C3', 'injection_informed'): 5, ('C3', 'dispense_forgery'): 5, ('C3', 'replay'): 2} |
+| 0.9 | 5.0 | 1468 | 19 | {('C2', 'manipulation_failure'): 3, ('C1', 'spontaneous_range'): 3, ('C3', 'injection_informed'): 10, ('C3', 'replay'): 3} |
+| 0.95 | None | 18 | 24 | {('C2', 'manipulation_failure'): 1, ('C1', 'spontaneous_range'): 20, ('C3', 'injection_informed'): 1, ('C3', 'replay'): 2} |
+| 0.95 | 1.0 | 319 | 172 | {('C1', 'spontaneous_range'): 162, ('C3', 'injection_informed'): 5, ('C3', 'replay'): 5} |
+| 0.95 | 2.0 | 559 | 34 | {('C1', 'spontaneous_range'): 21, ('C3', 'injection_informed'): 6, ('C3', 'replay'): 7} |
+| 0.95 | 5.0 | 1468 | 33 | {('C1', 'spontaneous_range'): 20, ('C3', 'replay'): 12, ('C3', 'injection_informed'): 1} |
+
+#### 9.3.6 (labelling of section 5) All alerts of the main population: coverage and mean size without and with the channel (design uniform)
+| level | r | coverage without | coverage with | mean size without | mean size with |
+|---|---|---|---|---|---|
+| 0.8 | None | 12873/15084 (85.3%) | 12949/15084 (85.8%) | 4.866 | 4.558 |
+| 0.8 | 1.0 | 12873/15084 (85.3%) | 12789/15084 (84.8%) | 4.866 | 4.506 |
+| 0.8 | 2.0 | 12873/15084 (85.3%) | 12664/15084 (84.0%) | 4.866 | 4.464 |
+| 0.8 | 5.0 | 12873/15084 (85.3%) | 12273/15084 (81.4%) | 4.866 | 4.493 |
+| 0.9 | None | 13136/15084 (87.1%) | 13076/15084 (86.7%) | 6.353 | 5.525 |
+| 0.9 | 1.0 | 13136/15084 (87.1%) | 12916/15084 (85.6%) | 6.353 | 5.454 |
+| 0.9 | 2.0 | 13136/15084 (87.1%) | 12805/15084 (84.9%) | 6.353 | 5.472 |
+| 0.9 | 5.0 | 13136/15084 (87.1%) | 13072/15084 (86.7%) | 6.353 | 5.515 |
+| 0.95 | None | 13309/15084 (88.2%) | 13272/15084 (88.0%) | 7.443 | 6.796 |
+| 0.95 | 1.0 | 13309/15084 (88.2%) | 13128/15084 (87.0%) | 7.443 | 6.766 |
+| 0.95 | 2.0 | 13309/15084 (88.2%) | 13269/15084 (88.0%) | 7.443 | 6.772 |
+| 0.95 | 5.0 | 13309/15084 (88.2%) | 13267/15084 (88.0%) | 7.443 | 6.829 |
+
+
+
+
+Reading of 9.3.
+* **Effective k.** 67 realised stuck_at records in m120: 30 with one reading in the window, 29 with two, 8 with three (windows of 1, 4 and 12 h, placeholders). Every reading repeats its predecessor, so the cell for the alert's reading is 1 - eps; in the tight labelling 90 of the 96 stuck_at alerts read A (6 read D: decided inside the window, but the last two readings are not both frozen).
+* **Labelling of section 5 (n = 137 stuck_at alerts):** 47 to 53 of them read D: they are alerts decided after the frozen window, labelled stuck_at only because of the 24-hour window (49 of the 53 D cases at r = None are decided after the window, 4 inside it); the channel correctly reads D for them and removes stuck_at from their set, so coverage of stuck_at falls (136 to 84-90 at level 0.9). This is the channel working and the label being wrong.
+* **How many silent-fault alerts stop being confusable with C1** (level 0.9, r = 1 mmHg, rep_nat 0.0200; the numbers of the generator's floats, r = None, in brackets): tight labelling, stuck_at 96 alerts: sets containing a C1 subtype 95 -> 35 (35), sets that are exactly {stuck_at} 0 -> 60 (60), true subtype kept in 90 of 94; labelling of section 5, stuck_at 137: contains C1 137 -> 79 (80), coverage 136 -> 85 (84). cuff_silent_bias (256): at most 7 sets lose their C1 subtypes (a denied reading only removes stuck_at), coverage 251 -> 245..251. dispenser_bounce (40): unchanged in practice (the COUNT template does not read the cuff; its hold and resp alerts do).
+* **What it wrongly removes** (non-stuck_at alerts whose true subtype leaves the set; level 0.9): tight labelling 1 of 20 A-reading alerts (r = None), 3 of 148 (r = 1), 4 of 241 (r = 2), 8 of 643 (r = 5), mostly injection_informed and replay; labelling of section 5: 5 of 18, 162 of 319, 282 of 559, 19 of 1468, mostly spontaneous_range C1 alerts (r = 1 and 2: 142 and 256) because of the level 0.9 cut. The cost grows with rep_nat, and at level 0.95 it is 24 / 172 / 34 / 33 (section-5 labelling). With r = 5 mmHg (rep_nat 0.098) the channel no longer separates stuck_at from C1 at level 0.9 (contains C1 95 of 96 either way).
+* **Sensitivity to the cumulative level:** at 0.8 the same pattern with smaller sets (stuck_at tight, r = None: contains C1 95 -> 6, exact 0 -> 89); at 0.95 the sets keep more subtypes (r = 1: contains C1 95 -> 95).
+* **Whole main population** (9.3.6): coverage 95.5% -> 95.4% (tight, level 0.9, r = None) and mean size 7.83 -> 7.17 (6.35 -> 5.53 under the labelling of section 5, coverage 87.1% -> 86.7%).
+* **Not determined:** the real resolution and noise of the cuff (the formula needs the difference of consecutive readings of a real stream; here the benchmark's, SD 20.1 mmHg, supplies it), and whether a real stuck cuff repeats exactly (a frozen display would; a frozen internal value re-measured would not).
+
+### 9.4 Set metrics: coverage and mean size
+
+Coverage = the true subtype is in the set. The old kappa and the class table at tau 0.8 are written as sets: a definite class kappa is the set of the subtypes of that class applicable at the template (coverage if the class is right), UNDETERMINED is the full set of the subtypes applicable at the template (coverage 1, large size). 'top-1' keeps only the most probable subtype. Level 0.9 and design uniform unless stated; Wilson 95% intervals; members/alerts of one event are correlated.
+
+
+#### 9.4.1 Pair members (1879 with a matched alert), by group and stratum: coverage of the true subtype and mean set size. Subtype set: cumulative level 0.9, design uniform, reference cells, V0 evidence. UNDETERMINED of a kappa = the full set of the subtypes applicable at the alert's template.
+| group | stratum | members | subtype set | class table, kappa at tau 0.8 as set | old rule (diag ON), kappa as set | top-1 subtype | full set (no information) |
+|---|---|---|---|---|---|---|---|
+| double_take_vs_bounce | dist | 527 | 271/527 (51%; 47-56) size 5.16 | 527/527 (100%; 99-100) size 11.26 | 527/527 (100%; 99-100) size 11.26 | 0/527 (0%; 0-1) size 1.00 | 527/527 (100%; 99-100) size 11.26 |
+| double_take_vs_bounce | indist | 77 | 39/77 (51%; 40-62) size 5.08 | 77/77 (100%; 95-100) size 11.12 | 77/77 (100%; 95-100) size 11.12 | 0/77 (0%; 0-5) size 1.00 | 77/77 (100%; 95-100) size 11.12 |
+| nonresponse_vs_falsified_dispense | dist | 364 | 362/364 (99%; 98-100) size 6.86 | 364/364 (100%; 99-100) size 14.20 | 364/364 (100%; 99-100) size 14.20 | 304/364 (84%; 79-87) size 1.00 | 364/364 (100%; 99-100) size 17.63 |
+| nonresponse_vs_falsified_dispense | indist | 111 | 111/111 (100%; 97-100) size 10.51 | 111/111 (100%; 97-100) size 19.92 | 111/111 (100%; 97-100) size 19.92 | 54/111 (49%; 40-58) size 1.00 | 111/111 (100%; 97-100) size 19.92 |
+| refusal_vs_robot_missed | dist | 80 | 80/80 (100%; 95-100) size 4.50 | 80/80 (100%; 95-100) size 14.00 | 80/80 (100%; 95-100) size 12.00 | 80/80 (100%; 95-100) size 1.00 | 80/80 (100%; 95-100) size 14.00 |
+| refusal_vs_robot_missed | indist | 160 | 160/160 (100%; 98-100) size 8.00 | 160/160 (100%; 98-100) size 14.00 | 160/160 (100%; 98-100) size 14.00 | 80/160 (50%; 42-58) size 1.00 | 160/160 (100%; 98-100) size 14.00 |
+| bounce_vs_forged_dispense | dist | 482 | 325/482 (67%; 63-71) size 4.60 | 482/482 (100%; 99-100) size 10.99 | 482/482 (100%; 99-100) size 9.92 | 163/482 (34%; 30-38) size 1.00 | 482/482 (100%; 99-100) size 12.90 |
+| bounce_vs_forged_dispense | indist | 78 | 41/78 (53%; 42-63) size 5.26 | 78/78 (100%; 95-100) size 11.46 | 78/78 (100%; 95-100) size 11.46 | 37/78 (47%; 37-58) size 1.00 | 78/78 (100%; 95-100) size 11.46 |
+| ALL | dist | 1453 | 1038/1453 (71%; 69-74) size 5.36 | 1453/1453 (100%; 100-100) size 12.06 | 1453/1453 (100%; 100-100) size 11.59 | 547/1453 (38%; 35-40) size 1.00 | 1453/1453 (100%; 100-100) size 13.55 |
+| ALL | indist | 426 | 351/426 (82%; 78-86) size 7.62 | 426/426 (100%; 99-100) size 14.56 | 426/426 (100%; 99-100) size 14.56 | 171/426 (40%; 36-45) size 1.00 | 426/426 (100%; 99-100) size 14.56 |
+
+By true subtype (design uniform, level 0.9): coverage and mean size of the subtype set
+| group | true subtype | members | coverage, size |
+|---|---|---|---|
+| bounce_vs_forg | dispense_forgery | 252 | 210/252 (83%; 78-87) size 4.19 |
+| bounce_vs_forg | dispenser_bounce | 308 | 156/308 (51%; 45-56) size 5.11 |
+| double_take_vs | dispenser_bounce | 310 | 16/310 (5%; 3-8) size 5.28 |
+| double_take_vs | double_take | 294 | 294/294 (100%; 99-100) size 5.00 |
+| nonresponse_vs | dispense_forgery | 275 | 273/275 (99%; 97-100) size 6.59 |
+| nonresponse_vs | drug_nonresponse | 200 | 200/200 (100%; 98-100) size 9.26 |
+| refusal_vs_rob | manipulation_failure | 120 | 120/120 (100%; 97-100) size 6.33 |
+| refusal_vs_rob | measurement_refusal | 120 | 120/120 (100%; 97-100) size 7.33 |
+
+#### 9.4.2 Pair members, all strata: coverage and mean size by cumulative level and within-class prior design (cells at the reference point)
+| design | level | coverage, size (all 1879) | distinguishable | indistinguishable |
+|---|---|---|---|---|
+| uniform | 0.8 | 1132/1879 (60%; 58-62) size 4.92 | 888/1453 (61%; 59-64) size 4.65 | 244/426 (57%; 53-62) size 5.83 |
+| uniform | 0.9 | 1389/1879 (74%; 72-76) size 5.88 | 1038/1453 (71%; 69-74) size 5.36 | 351/426 (82%; 78-86) size 7.62 |
+| uniform | 0.95 | 1835/1879 (98%; 97-98) size 6.90 | 1409/1453 (97%; 96-98) size 6.35 | 426/426 (100%; 99-100) size 8.77 |
+| quiet_rare | 0.8 | 1056/1879 (56%; 54-58) size 3.96 | 847/1453 (58%; 56-61) size 3.71 | 209/426 (49%; 44-54) size 4.79 |
+| quiet_rare | 0.9 | 1217/1879 (65%; 63-67) size 5.49 | 869/1453 (60%; 57-62) size 4.99 | 348/426 (82%; 78-85) size 7.21 |
+| quiet_rare | 0.95 | 1381/1879 (73%; 71-75) size 6.39 | 1031/1453 (71%; 69-73) size 5.80 | 350/426 (82%; 78-86) size 8.39 |
+| quiet_common | 0.8 | 1428/1879 (76%; 74-78) size 4.24 | 1147/1453 (79%; 77-81) size 3.95 | 281/426 (66%; 61-70) size 5.21 |
+| quiet_common | 0.9 | 1541/1879 (82%; 80-84) size 5.51 | 1153/1453 (79%; 77-81) size 5.04 | 388/426 (91%; 88-93) size 7.08 |
+| quiet_common | 0.95 | 1835/1879 (98%; 97-98) size 6.67 | 1409/1453 (97%; 96-98) size 6.18 | 426/426 (100%; 99-100) size 8.35 |
+
+Class posterior (sum over the subtypes) of the pair members under the three designs, against the class-level table of section 3 (reference cells, uniform class prior): argmax class = truth class and kappa at tau 0.8
+| design | argmax = truth /1879 | UNDETERMINED / confident right / confident wrong at 0.8 | confident C1 for non-C1 |
+|---|---|---|---|
+| uniform | 859 | 1634 / 245 / 0 | 0 |
+| quiet_rare | 859 | 1455 / 245 / 179 | 179 |
+| quiet_common | 859 | 1671 / 208 / 0 | 0 |
+(class-level table, independence given the class: 859, 1711 / 168 / 0, 0; the subtype model is the latent-class variant G2: 859, 1634 / 245 / 0 in section 6.1)
+
+#### 9.4.3 Main population m120, labelling of section 5 (injected first, 24 h): coverage of the true subtype and mean set size per template; subtype set at level 0.9, design uniform
+| template | alerts | subtype set | class table, kappa at tau 0.8 as set | old rule (diag ON), kappa as set | top-1 subtype | full set (no information) |
+|---|---|---|---|---|---|---|
+| range | 8243 | 8037/8243 (98%; 97-98) size 4.98 | 8220/8243 (100%; 100-100) size 7.95 | 7564/8243 (92%; 91-92) size 2.16 | 215/8243 (3%; 2-3) size 1.00 | 8243/8243 (100%; 100-100) size 8.00 |
+| sched | 699 | 501/699 (72%; 68-75) size 3.67 | 698/699 (100%; 99-100) size 11.68 | 698/699 (100%; 99-100) size 11.45 | 444/699 (64%; 60-67) size 1.00 | 699/699 (100%; 99-100) size 14.00 |
+| hold | 639 | 491/639 (77%; 73-80) size 9.12 | 635/639 (99%; 98-100) size 19.59 | 634/639 (99%; 98-100) size 19.10 | 146/639 (23%; 20-26) size 1.00 | 639/639 (100%; 99-100) size 21.00 |
+| count | 1490 | 1165/1490 (78%; 76-80) size 5.23 | 1490/1490 (100%; 100-100) size 11.00 | 1474/1490 (99%; 98-99) size 10.95 | 174/1490 (12%; 10-13) size 1.00 | 1490/1490 (100%; 100-100) size 11.00 |
+| resp | 4013 | 2942/4013 (73%; 72-75) size 9.62 | 4008/4013 (100%; 100-100) size 19.69 | 3987/4013 (99%; 99-100) size 19.59 | 176/4013 (4%; 4-5) size 1.00 | 4013/4013 (100%; 100-100) size 20.00 |
+| ALL | 15084 | 13136/15084 (87%; 87-88) size 6.35 | 15051/15084 (100%; 100-100) size 12.04 | 14357/15084 (95%; 95-96) size 8.81 | 1155/15084 (8%; 7-8) size 1.00 | 15084/15084 (100%; 100-100) size 12.32 |
+
+By true cause: C1: subtype set: 11319/11342 (100%; 100-100) size 6.26, class table: 11316/11342 (100%; 100-100) size 11.21, old rule (diag ON): 11303/11342 (100%; 100-100) size 7.32; C2: subtype set: 1057/2679 (39%; 38-41) size 6.87, class table: 2672/2679 (100%; 99-100) size 15.68, old rule (diag ON): 2401/2679 (90%; 88-91) size 14.44; C3: subtype set: 760/1063 (71%; 69-74) size 6.02, class table: 1063/1063 (100%; 100-100) size 11.66, old rule (diag ON): 653/1063 (61%; 58-64) size 10.55
+
+By true subtype (subtype set, level 0.9, design uniform):
+| cause | true subtype | alerts | coverage, size |
+|---|---|---|---|
+| C1 | dose_omission | 198 | 198/198 (100%; 98-100) size 6.00 |
+| C1 | double_take | 437 | 437/437 (100%; 99-100) size 5.02 |
+| C1 | drug_nonresponse | 52 | 52/52 (100%; 93-100) size 10.08 |
+| C1 | hypertensive_spike | 326 | 324/326 (99%; 98-100) size 4.99 |
+| C1 | hypotension_below_hold | 37 | 37/37 (100%; 91-100) size 9.08 |
+| C1 | measurement_refusal | 159 | 159/159 (100%; 98-100) size 5.99 |
+| C1 | spontaneous_count | 340 | 340/340 (100%; 99-100) size 5.02 |
+| C1 | spontaneous_hold | 246 | 246/246 (100%; 98-100) size 11.30 |
+| C1 | spontaneous_range | 7180 | 7160/7180 (100%; 100-100) size 5.00 |
+| C1 | spontaneous_resp | 2367 | 2366/2367 (100%; 100-100) size 10.07 |
+| C2 | ble_dropout | 1503 | 61/1503 (4%; 3-5) size 8.25 |
+| C2 | cuff_detached | 327 | 287/327 (88%; 84-91) size 2.35 |
+| C2 | cuff_silent_bias | 256 | 251/256 (98%; 96-99) size 6.27 |
+| C2 | dispenser_bounce | 40 | 17/40 (42%; 29-58) size 7.08 |
+| C2 | manipulation_failure | 252 | 246/252 (98%; 95-99) size 5.36 |
+| C2 | nav_delay | 164 | 59/164 (36%; 29-44) size 6.73 |
+| C2 | stuck_at | 137 | 136/137 (99%; 96-100) size 6.53 |
+| C3 | dispense_forgery | 355 | 355/355 (100%; 99-100) size 7.41 |
+| C3 | injection_informed | 214 | 208/214 (97%; 94-99) size 6.18 |
+| C3 | injection_naive | 232 | 160/232 (69%; 63-75) size 4.59 |
+| C3 | replay | 262 | 37/262 (14%; 10-19) size 5.24 |
+
+#### 9.4.4 Main population m120, scope-aware labelling (a dropout counts only if its target is in the template's data scope, window 24 h): coverage of the true subtype and mean set size per template; subtype set at level 0.9, design uniform
+| template | alerts | subtype set | class table, kappa at tau 0.8 as set | old rule (diag ON), kappa as set | top-1 subtype | full set (no information) |
+|---|---|---|---|---|---|---|
+| range | 8243 | 8037/8243 (98%; 97-98) size 4.98 | 8220/8243 (100%; 100-100) size 7.95 | 7564/8243 (92%; 91-92) size 2.16 | 215/8243 (3%; 2-3) size 1.00 | 8243/8243 (100%; 100-100) size 8.00 |
+| sched | 767 | 602/767 (78%; 75-81) size 3.84 | 766/767 (100%; 99-100) size 11.67 | 766/767 (100%; 99-100) size 11.67 | 531/767 (69%; 66-72) size 1.00 | 767/767 (100%; 100-100) size 14.00 |
+| hold | 669 | 606/669 (91%; 88-93) size 9.12 | 665/669 (99%; 98-100) size 19.56 | 663/669 (99%; 98-100) size 19.17 | 159/669 (24%; 21-27) size 1.00 | 669/669 (100%; 99-100) size 21.00 |
+| count | 1646 | 1599/1646 (97%; 96-98) size 5.20 | 1646/1646 (100%; 100-100) size 11.00 | 1625/1646 (99%; 98-99) size 10.94 | 228/1646 (14%; 12-16) size 1.00 | 1646/1646 (100%; 100-100) size 11.00 |
+| resp | 4068 | 3835/4068 (94%; 94-95) size 9.60 | 4063/4068 (100%; 100-100) size 19.67 | 4035/4068 (99%; 99-99) size 19.58 | 213/4068 (5%; 5-6) size 1.00 | 4068/4068 (100%; 100-100) size 20.00 |
+| ALL | 15393 | 14679/15393 (95%; 95-96) size 6.35 | 15360/15393 (100%; 100-100) size 12.06 | 14653/15393 (95%; 95-96) size 8.92 | 1346/15393 (9%; 8-9) size 1.00 | 15393/15393 (100%; 100-100) size 12.36 |
+
+By true cause: C1: subtype set: 12582/12606 (100%; 100-100) size 6.49, class table: 12579/12606 (100%; 100-100) size 11.81, old rule (diag ON): 12567/12606 (100%; 100-100) size 8.31; C2: subtype set: 1176/1519 (77%; 75-79) size 5.23, class table: 1513/1519 (100%; 99-100) size 13.99, old rule (diag ON): 1241/1519 (82%; 80-84) size 11.79; C3: subtype set: 921/1268 (73%; 70-75) size 6.23, class table: 1268/1268 (100%; 100-100) size 12.25, old rule (diag ON): 845/1268 (67%; 64-69) size 11.53
+
+#### 9.4.5 Main population m120, tight labelling (scope-aware, alert decided while the event window is open): coverage of the true subtype and mean set size per template; subtype set at level 0.9, design uniform
+| template | alerts | subtype set | class table, kappa at tau 0.8 as set | old rule (diag ON), kappa as set | top-1 subtype | full set (no information) |
+|---|---|---|---|---|---|---|
+| range | 425 | 363/425 (85%; 82-88) size 4.57 | 424/425 (100%; 99-100) size 7.13 | 95/425 (22%; 19-27) size 3.33 | 115/425 (27%; 23-31) size 1.00 | 425/425 (100%; 99-100) size 8.00 |
+| sched | 534 | 440/534 (82%; 79-85) size 3.84 | 532/534 (100%; 99-100) size 11.12 | 530/534 (99%; 98-100) size 12.21 | 420/534 (79%; 75-82) size 1.00 | 534/534 (100%; 99-100) size 14.00 |
+| hold | 611 | 567/611 (93%; 90-95) size 9.49 | 601/611 (98%; 97-99) size 19.64 | 590/611 (97%; 95-98) size 19.80 | 116/611 (19%; 16-22) size 1.00 | 611/611 (100%; 99-100) size 21.00 |
+| count | 1530 | 1521/1530 (99%; 99-100) size 5.23 | 1530/1530 (100%; 100-100) size 11.00 | 1524/1530 (100%; 99-100) size 10.98 | 153/1530 (10%; 9-12) size 1.00 | 1530/1530 (100%; 100-100) size 11.00 |
+| resp | 3655 | 3558/3655 (97%; 97-98) size 9.60 | 3607/3655 (99%; 98-99) size 19.65 | 3541/3655 (97%; 96-97) size 19.60 | 122/3655 (3%; 3-4) size 1.00 | 3655/3655 (100%; 100-100) size 20.00 |
+| ALL | 6755 | 6449/6755 (95%; 95-96) size 7.83 | 6694/6755 (99%; 99-99) size 16.23 | 6280/6755 (93%; 92-94) size 16.05 | 926/6755 (14%; 13-15) size 1.00 | 6755/6755 (100%; 100-100) size 16.82 |
+
+By true cause: C1: subtype set: 5365/5437 (99%; 98-99) size 8.59, class table: 5385/5437 (99%; 99-99) size 17.48, old rule (diag ON): 5304/5437 (98%; 97-98) size 17.37; C2: subtype set: 580/617 (94%; 92-96) size 3.57, class table: 614/617 (100%; 99-100) size 11.40, old rule (diag ON): 441/617 (71%; 68-75) size 9.42; C3: subtype set: 504/701 (72%; 68-75) size 5.67, class table: 695/701 (99%; 98-100) size 10.79, old rule (diag ON): 535/701 (76%; 73-79) size 11.73
+
+#### 9.4.6 Main population (labelling of section 5): cumulative level x design
+| design | level | all alerts: coverage, size | C1 | C2 | C3 | silent faults (stuck_at, cuff_silent_bias, dispenser_bounce) |
+|---|---|---|---|---|---|---|
+| uniform | 0.8 | 12873/15084 (85%; 85-86) size 4.87 | 11318/11342 (100%; 100-100) size 4.85 | 1039/2679 (39%; 37-41) size 4.99 | 516/1063 (49%; 46-52) size 4.70 | 399/433 (92%; 89-94) size 4.91 |
+| uniform | 0.9 | 13136/15084 (87%; 87-88) size 6.35 | 11319/11342 (100%; 100-100) size 6.26 | 1057/2679 (39%; 38-41) size 6.87 | 760/1063 (71%; 69-74) size 6.02 | 404/433 (93%; 91-95) size 6.42 |
+| uniform | 0.95 | 13309/15084 (88%; 88-89) size 7.44 | 11342/11342 (100%; 100-100) size 7.32 | 1085/2679 (41%; 39-42) size 8.07 | 882/1063 (83%; 81-85) size 7.22 | 428/433 (99%; 97-100) size 7.47 |
+| quiet_rare | 0.8 | 5294/15084 (35%; 34-36) size 3.69 | 3839/11342 (34%; 33-35) size 3.65 | 990/2679 (37%; 35-39) size 3.85 | 465/1063 (44%; 41-47) size 3.75 | 279/433 (64%; 60-69) size 3.66 |
+| quiet_rare | 0.9 | 12874/15084 (85%; 85-86) size 5.50 | 11288/11342 (100%; 99-100) size 5.35 | 996/2679 (37%; 35-39) size 6.17 | 590/1063 (56%; 53-58) size 5.39 | 280/433 (65%; 60-69) size 5.50 |
+| quiet_rare | 0.95 | 13175/15084 (87%; 87-88) size 6.98 | 11298/11342 (100%; 99-100) size 6.75 | 1118/2679 (42%; 40-44) size 8.11 | 759/1063 (71%; 69-74) size 6.57 | 397/433 (92%; 89-94) size 7.02 |
+| quiet_common | 0.8 | 11904/15084 (79%; 78-80) size 4.52 | 10360/11342 (91%; 91-92) size 4.54 | 1006/2679 (38%; 36-39) size 4.54 | 538/1063 (51%; 48-54) size 4.25 | 425/433 (98%; 96-99) size 4.61 |
+| quiet_common | 0.9 | 12523/15084 (83%; 82-84) size 5.84 | 10585/11342 (93%; 93-94) size 5.79 | 1011/2679 (38%; 36-40) size 6.11 | 927/1063 (87%; 85-89) size 5.67 | 429/433 (99%; 98-100) size 5.87 |
+| quiet_common | 0.95 | 13352/15084 (89%; 88-89) size 7.13 | 11340/11342 (100%; 100-100) size 7.03 | 1074/2679 (40%; 38-42) size 7.59 | 938/1063 (88%; 86-90) size 7.07 | 430/433 (99%; 98-100) size 7.14 |
+
+
+Reading of 9.4.
+* **Pair members (1879), level 0.9, uniform:** coverage 1389 of 1879 (74%), mean size 5.88; distinguishable 71% (size 5.36), indistinguishable 82% (size 7.62). The old kappa and the class table cover 100% at sizes 11.6 to 14.6 because UNDETERMINED is the full set (91% of the members). Coverage at levels 0.8 / 0.9 / 0.95: 60% / 74% / 98% (sizes 4.9 / 5.9 / 6.9).
+* **The set is not calibrated to its level**: it is a posterior under a model, and coverage 74% at level 0.9 says the model is wrong for the part that fails: the bounce members of group 1 (**16 of 310 covered, 5%**: a silent bounce is outweighed by three silent C1 subtypes at COUNT, with the table giving likelihood ratio 1), the bounce members of group 4 (51%), the forged dispenses of group 4 (83%). Double take, drug non-response, the refusal and the manipulation failure are covered 100%.
+* **Main population, section-5 labelling:** coverage 87% (13 136 of 15 084), mean size 6.35, against the old rule 95% (size 8.81) and the class table 100% (size 12.04). By cause: C1 100% (size 6.26), C2 39% (6.87), C3 71% (6.02); the C2 figure is the mislabelled `ble_dropout` alerts (4% of 1 503; the dropout targets outside the template's scope). Scope-aware labelling: 95% (14 679 of 15 393), size 6.35, old rule 95% (8.92); C2 77%. Tight labelling: **95% (6 449 of 6 755), size 7.83, against the old rule 93% at size 16.05 and the class table 99% at size 16.23**; C2 94% (size 3.57). By template (tight): range 85%, sched 82%, hold 93%, count 99%, resp 97%. The old rule's coverage at `range` is 22% in the tight labelling (a confident C1 for alerts caused by silent faults and attacks).
+* **Design and level:** on the pair members quiet_common covers most (76% / 82% / 98% at levels 0.8 / 0.9 / 0.95 against 60% / 74% / 98% for uniform and 56% / 65% / 73% for quiet_rare); in the main population uniform covers most at 0.8 and 0.9 (85%, 87%), quiet_common 79% and 83%, and quiet_rare only 35% at 0.8 (85% at 0.9), being poorly matched to a population dominated by quiet C1 events. The benchmark is not used to choose among them.
+
+### 9.5 What could not be determined, and what to decide
+
+* The within-class weights, eps, qc, the cumulative level and the class priors remain sensitivity values awaiting gab; the coverage of the set is conditional on them, and the benchmark's base rates were deliberately not used to set them.
+* Item 3 cannot say what the channel costs on a real cuff: the false-removal figures are for rounding the benchmark's float readings to r mmHg; the real resolution, noise and freezing behaviour are device properties not in the repository.
+* The real driver's STALE semantics (item 2) is a requirement, not a measurement.
+* Matching is still the provisional matching of section 3; the labellings of the main population are three, and the conclusion about diagnostics depends on which is used (9.2.4).
+* The set output is defined per alert; cascades, predicted alerts and the multi-alert aggregation of one event are not treated.
+
+### 9.6 Files added by this follow-up
+
+`/tmp/research/likelihood/{subtype_model.py,config/subtype_priors.yaml}`; scripts `pairs_subtype.py`, `diag_decomp.py`, `diag_variants.py`, `xrep_nat.py`, `xrep_report.py {tight|unscoped}`, `set_metrics.py`, `setlib.py`, `sens_data2.py`, `assemble_section9.py`; logs and tables in `logs/` and `out/` (`pairs_subtype.md`, `diag_decomp.md`, `diag_variants.md`, `xrep_nat.md`, `xrep_report_*.md`, `set_metrics.md`); data `out/pairs_p40b_sw1.pkl`, `out/main_{m120b,ff,idle1h,idle6h}.pkl`.
+
+Reproduction (from `scripts/`): `python3 run_members.py 40 p40b 1`; `python3 run_main.py m120b 120 30 default`; `RALMON_RATES=0,0,0 python3 run_main.py ff 120 30 default`; `RALMON_DIAG_IDLE_STALE_MS=3600000 python3 run_main.py idle1h 120 30 default`; `python3 sens_data2.py`; then the report scripts above and `python3 assemble_section9.py`.

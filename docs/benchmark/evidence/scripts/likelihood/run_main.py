@@ -5,7 +5,8 @@ import sys, os, time, pickle, yaml
 TAG, NP, ND, PROF = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
 os.environ["RALMON_DRIVER_DIAG"] = "1"
 import common, mkcfg
-CFG = mkcfg.mk(f"main_{TAG}", n_patients=NP, n_days=ND, pairs=0, g4=True)
+RATES = tuple(float(x) for x in os.environ.get("RALMON_RATES", "0.3,0.3,0.2").split(","))
+CFG = mkcfg.mk(f"main_{TAG}", n_patients=NP, n_days=ND, pairs=0, g4=True, rates=RATES)
 if PROF == "rich":
     doc = yaml.safe_load(open(CFG)); doc["device_profile"] = {"dispenser_content_sensing": True, "authenticating_devices": ["dispenser"]}
     open(CFG, "w").write(yaml.safe_dump(doc, sort_keys=False))
@@ -56,7 +57,9 @@ def work(args):
                 gt=[(g.cls.value, g.subtype, g.template_id, g.onset_ms, g.end_ms, g.injected) for g in t.ground_truth],
                 log=[dict(cls=e["cls"], subtype=e["subtype"], realised=e["realised"], onset_ms=e["onset_ms"], end_ms=e["end_ms"],
                           templates=list(e["details"].get("templates", [])), level=e["level"], params=e["params"]) for e in t.injection_log],
-                dispenses=[(e.t_device_ms, e.payload.get("content_change")) for e in day.events if e.kind is EventKind.DISPENSE]))
+                dispenses=[(e.t_device_ms, e.payload.get("content_change")) for e in day.events if e.kind is EventKind.DISPENSE],
+                bp=[(x.t_rx_ms, x.value) for x in day.samples if x.signal == "bp"],
+                bp_prev=[(x.t_rx_ms, x.value) for x in days[d - 1].observed.samples if x.signal == "bp"] if d > 0 else []))
     return out
 
 if __name__ == "__main__":
