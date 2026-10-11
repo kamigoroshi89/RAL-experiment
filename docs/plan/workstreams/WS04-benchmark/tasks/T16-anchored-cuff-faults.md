@@ -3,7 +3,7 @@ id: WS04-T16
 title: "Cuff faults anchored to readings (durations in readings), stuck_at carry-over, effective k in the truth (ADR-070)"
 workstream: WS04-benchmark
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS04-T11", "WS04-T15"]
 critical_path: true
 non_negotiable: false
