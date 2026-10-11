@@ -139,7 +139,9 @@ POST = {"a": 0.5, "b": 0.25, "c": 0.125, "d": 0.125}  # scores 0.5, 0.75, 0.875,
 
 def test_set_contains_subtypes_below_threshold() -> None:
     prediction_set = sets().prediction_set
-    assert prediction_set(POST, 0.5) == ("a",)  # score at most the threshold: equality is inside
+    assert prediction_set(POST, 0.5) == (
+        "a",
+    )  # score at most the threshold: equality is inside
     assert prediction_set(POST, 0.75) == ("a", "b")
     assert prediction_set(POST, 0.8) == ("a", "b")
     assert prediction_set(POST, 0.875) == ("a", "b", "c", "d")  # ties ordered by name
@@ -163,7 +165,7 @@ def test_the_calibrated_set_uses_the_calibration_threshold() -> None:
     assert out.full_set_fallback is False
     out = cal.predict_set(POST, "range", 0.5, patient_id="t1", model_version="m1")
     assert out.threshold == 0.625
-    assert out.subtypes == ("a", "b")
+    assert out.subtypes == ("a",)  # scores 0.5 and 0.75; only 0.5 is at most 0.625
 
 
 def test_a_pure_empty_set_is_filled_with_the_most_probable_subtype() -> None:
@@ -200,7 +202,12 @@ def test_mondrian_cell_with_few_members_falls_back_to_full_set() -> None:
     assert few.n == 2
     assert "hold" in few.reason
     out = cal.predict_set(POST, "hold", 0.2, patient_id="t1", model_version="m1")
-    assert out.subtypes == ("a", "b", "c", "d")  # every applicable subtype (the keys of the posterior)
+    assert out.subtypes == (
+        "a",
+        "b",
+        "c",
+        "d",
+    )  # every applicable subtype (the keys of the posterior)
     assert out.full_set_fallback is True
     assert out.fallback_reason == few.reason
     assert out.cell == "hold"
@@ -229,7 +236,9 @@ def test_mondrian_min_cell_size_can_force_the_fallback() -> None:
 def test_mondrian_uses_one_threshold_per_template() -> None:
     cal = mondrian()
     items = [example(f"r{i}", "range", p) for i, p in enumerate(P_TRUE)]
-    items += [example(f"h{i}", "hold", p) for i, p in enumerate(P_TRUE[:4])]  # scores .125 .25 .375 .5
+    items += [
+        example(f"h{i}", "hold", p) for i, p in enumerate(P_TRUE[:4])
+    ]  # scores .125 .25 .375 .5
     cal.fit(items, model_version="m1")
     assert cal.threshold("range", 0.5).value == 0.625
     assert cal.threshold("hold", 0.5).value == 0.375  # n = 4, k = ceil(5 * 0.5) = 3
@@ -240,7 +249,9 @@ def test_marginal_pools_the_templates() -> None:
     cal = marginal()
     cal.fit(mixed(), model_version="m1")
     assert cal.threshold("hold", 0.2).n == 11
-    assert cal.threshold("sched", 0.2).n == 11  # the template is not a cell of the marginal variant
+    assert (
+        cal.threshold("sched", 0.2).n == 11
+    )  # the template is not a cell of the marginal variant
 
 
 def test_template_ids_and_plain_strings_name_the_same_cell() -> None:
@@ -248,7 +259,9 @@ def test_template_ids_and_plain_strings_name_the_same_cell() -> None:
 
     cal = mondrian()
     cal.fit(nine("range"), model_version="m1")
-    assert cal.threshold(TemplateId.RANGE, 0.5).value == cal.threshold("range", 0.5).value
+    assert (
+        cal.threshold(TemplateId.RANGE, 0.5).value == cal.threshold("range", 0.5).value
+    )
 
 
 # --- 4. patient-wise separation ----------------------------------------------------------------------------
@@ -360,7 +373,7 @@ def synthetic_alert(rng: random.Random, patient: str) -> Any:
 def test_coverage_on_exchangeable_synthetic_scores(alpha: float) -> None:
     rng = random.Random(20261012)
     reps, n_cal, n_test = 80, 300, 300
-    covered = total = 0
+    covered = pure = total = 0
     for r in range(reps):
         cal = marginal()
         cal.fit(
@@ -377,13 +390,16 @@ def test_coverage_on_exchangeable_synthetic_scores(alpha: float) -> None:
                 model_version="syn",
             )
             covered += alert.true_subtype in out.subtypes
+            pure += alert.true_subtype in sets().prediction_set(
+                alert.posteriors, out.threshold
+            )
             total += 1
-    rate = covered / total
-    # coverage is in [1 - alpha, 1 - alpha + 1/(n+1)] on average (continuous scores; the empty-set fill
-    # only raises it); the replication standard error of the pooled rate is below 0.0025 here
+    rate = pure / total  # the pure rule: the conformal statement
+    assert covered >= pure  # the fill of an empty set can only raise the coverage
+    # coverage is in [1 - alpha, 1 - alpha + 1/(n+1)] on average (continuous scores); the standard error of the pooled rate over the replications is se
     se = math.sqrt(alpha * (1 - alpha) * (1 / n_cal + 1 / n_test) / reps)
-    assert 1 - alpha - 4 * se <= rate <= 1 - alpha + 1 / (n_cal + 1) + 4 * se + 0.002
-    assert se < 0.0025
+    assert 1 - alpha - 4 * se <= rate <= 1 - alpha + 1 / (n_cal + 1) + 4 * se
+    assert se < 0.005
 
 
 # --- 7. the model-version token ------------------------------------------------------------------------------
@@ -494,7 +510,9 @@ def test_cumulative_level_set_breaks_ties_by_subtype_name() -> None:
     assert f(even, 0.6) == ("a", "b", "m")
 
 
-def test_cumulative_level_set_reads_probabilities_and_level_as_decimal_literals() -> None:
+def test_cumulative_level_set_reads_probabilities_and_level_as_decimal_literals() -> (
+    None
+):
     """0.7 + 0.2 is 0.8999999999999999 in doubles; read as decimals the two reach the level 0.9 exactly."""
     f = sets().cumulative_level_set
     post = {"c": 0.7, "b": 0.2, "a": 0.1}
