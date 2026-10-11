@@ -17,3 +17,10 @@ The decisions cite these files under `/tmp/research/...`; the copies here are th
 | `scripts/` | diagnostic experiments (`exp*.py`), `bias-model/`, the single-injection additivity test | `/tmp/research/diag/`, `/tmp/research/obs3/`, `/tmp/research/nonadd/` |
 
 The scripts ran on a copy of the repository (`git archive HEAD`) with `PYTHONPATH` set to that copy and with temporary override files for the prior and design rows; to rerun one, adapt the paths first. They are kept as the record of the method and are not part of the test suite (`tests/` does not import them).
+
+Added 2026-10-11 (ADR-074, pairs):
+
+| File | Decision that rests on it | Original path |
+|---|---|---|
+| `likelihood-attribution.md` and `scripts/likelihood/` | ADR-074 (likelihood table, recompute of the 2160 pair members, sensitivity); the prototype `likelihood_attr.py` is research code, not the implementation of WS05-T12 | `/tmp/research/likelihood-attribution.md`, `/tmp/research/likelihood/` (46 MB of raw output not copied) |
+| `pairs-allocation.md`, `scripts/pairs/`, `pairs/*.patch` | pairs ADR (fourth group `bounce_vs_forged_dispense`, strata, number of pairs); the patches add the fourth group (`g4_confounders.patch`) and an optional informed-attacker copy of `content_change` (`g4_inject_c3_optional.patch`) | `/tmp/research/pairs-allocation.md`, `/tmp/research/pairs/` |

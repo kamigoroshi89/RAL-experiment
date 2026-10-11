@@ -1,0 +1,82 @@
+--- repo/src/ralmon/benchmark/confounders.py	2026-10-11 12:19:04.000000000 +0200
++++ repo_g4/src/ralmon/benchmark/confounders.py	2026-10-11 12:56:20.128541123 +0200
+@@ -137,10 +137,12 @@
+ GROUP_DOUBLE_TAKE_VS_BOUNCE: Final = "double_take_vs_bounce"
+ GROUP_NONRESPONSE_VS_FORGERY: Final = "nonresponse_vs_falsified_dispense"
+ GROUP_REFUSAL_VS_ROBOT_MISSED: Final = "refusal_vs_robot_missed"  # added from R3-W4
++GROUP_BOUNCE_VS_FORGED: Final = "bounce_vs_forged_dispense"
+ GROUPS: Final = (
+     GROUP_DOUBLE_TAKE_VS_BOUNCE,
+     GROUP_NONRESPONSE_VS_FORGERY,
+     GROUP_REFUSAL_VS_ROBOT_MISSED,
++    GROUP_BOUNCE_VS_FORGED,
+ )
+ 
+ FIELD_CONTENT: Final = "content_change"
+@@ -222,6 +224,11 @@
+         (InjectedClass.C2, "manipulation_failure"),
+         False,
+     ),
++    GROUP_BOUNCE_VS_FORGED: _GroupInfo(
++        (InjectedClass.C2, "dispenser_bounce"),
++        (InjectedClass.C3, "dispense_forgery"),
++        False,
++    ),
+ }
+ 
+ 
+@@ -379,7 +386,7 @@
+                 raise ConfounderError(
+                     f"group 1 takes bounce_gap in {_GAPS} and no attacker"
+                 )
+-        elif group == GROUP_NONRESPONSE_VS_FORGERY:
++        elif group in (GROUP_NONRESPONSE_VS_FORGERY, GROUP_BOUNCE_VS_FORGED):
+             if attacker is None or gap is not None:
+                 raise ConfounderError(
+                     f"group 2 takes attacker in {_ATTACKERS} and no bounce_gap"
+@@ -399,7 +406,7 @@
+     def content_sensing(self) -> bool:
+         """The dispenser senses its content: a knob of the double-take pair only (group 1)."""
+         return (
+-            self.group == GROUP_DOUBLE_TAKE_VS_BOUNCE
++            self.group in (GROUP_DOUBLE_TAKE_VS_BOUNCE, GROUP_BOUNCE_VS_FORGED)
+             and FIELD_CONTENT not in self.withheld
+         )
+ 
+@@ -414,7 +421,7 @@
+     @property
+     def authenticating(self) -> bool:
+         return (
+-            self.group == GROUP_NONRESPONSE_VS_FORGERY
++            self.group in (GROUP_NONRESPONSE_VS_FORGERY, GROUP_BOUNCE_VS_FORGED)
+             and FIELD_VERIFICATION not in self.withheld
+         )
+ 
+@@ -812,6 +819,27 @@
+                      c1_specs=empty, c2_specs=(bounce,), c3_specs=empty, forced_slots=(slot,), **common)  # fmt: skip
+         return a, b
+ 
++    if name == GROUP_BOUNCE_VS_FORGED:
++        gap = base.nominal_bounce_gap_ms
++        if gap is None:
++            raise ConfounderError("this group needs nominal_bounce_gap_ms")
++        assert var.attacker is not None
++        bounce = _spec(
++            InjectedClass.C2, "dispenser_bounce", tick, magnitude=float(gap),
++            magnitude_unit="ms", params={"target": DISPENSER_DEVICE},
++            level=GAP_NOMINAL, confounder_group=name,
++        )
++        forgery = _spec(
++            InjectedClass.C3, "dispense_forgery", tick + gap, level=var.attacker,
++            confounder_group=name,
++        )
++        slot = ForcedSlot(0, base.dose_index, AdherenceState.ON_TIME)
++        a = Scenario(member="A", mechanism=info.member_a[1], mechanism_class=info.member_a[0],
++                     c1_specs=empty, c2_specs=(bounce,), c3_specs=empty, forced_slots=(slot,), **common)  # fmt: skip
++        b = Scenario(member="B", mechanism=info.member_b[1], mechanism_class=info.member_b[0],
++                     c1_specs=empty, c2_specs=empty, c3_specs=(forgery,), forced_slots=(slot,), **common)  # fmt: skip
++        return a, b
++
+     # group 2: the dose is taken and does nothing (A), or never taken and forged (B)
+     lag = model.config.intake_lag_ms
+     length = schedule.slot_lengths_ms()[base.dose_index]

@@ -1,0 +1,15 @@
+--- repo/src/ralmon/benchmark/inject_c3.py	2026-10-11 12:19:04.000000000 +0200
++++ repo_g4/src/ralmon/benchmark/inject_c3.py	2026-10-11 13:12:30.465258244 +0200
+@@ -959,7 +959,11 @@
+             while seq in used:
+                 seq += 1
+             work.attacker_next[device] = _seq_in_range(seq + 1)
+-        events.append(Event(EventKind.DISPENSE, t, t, device, {}, seq))
++        import os as _os
++        _payload: dict[str, float | int | str | bool] = {}
++        if _os.environ.get("G4_INFORMED_COPIES_CONTENT") == "1" and level == "informed" and context.dispenser_content_sensing:
++            _payload[vocab.KEY_CONTENT_CHANGE] = 0.0
++        events.append(Event(EventKind.DISPENSE, t, t, device, _payload, seq))
+         n = 1 + shifted
+         if auth:
+             events.append(_gateway_failure(device, t))
