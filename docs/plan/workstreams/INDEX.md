@@ -136,12 +136,13 @@ Total estimate: 18.0 person-days.
 | id | slug | title | owner | depends_on | crit | nonneg | pd | sources | interfaces | review_items |
 |---|---|---|---|---|---|---|---|---|---|---|
 | WS08-T01 | runner-metrics | Experiment runner, config and metrics module | agent | WS04-T11, WS06-T01, WS05-T08, WS05-T11 | yes | no | 3 | analisi §5.5 | #metrics #experiment-config-and-outputs | - |
-| WS08-T02 | main-experiment | Main experiment: B1-B5 versus proposed method | agent | WS08-T01, WS06-T07, WS04-T16 | yes | no | 2.5 | analisi §5.4, §5.5 | #metrics #detector | R3-W1 R3-W6 AE-1 |
+| WS08-T02 | main-experiment | Main experiment: B1-B5 versus proposed method | agent | WS08-T01, WS06-T07, WS04-T16, WS08-T08 | yes | no | 2.5 | analisi §5.4, §5.5 | #metrics #detector | R3-W1 R3-W6 AE-1 |
 | WS08-T03 | ablations | Ablations A1, A2, A3, A5, A7 | agent | WS08-T02 | yes | no | 3 | analisi §5.6 | #experiment-config-and-outputs | R2-W1 R2-W9 |
 | WS08-T04 | ablation-a4-embodied | Ablation A4: embodied channel removed | agent | WS08-T02, WS02-T05 | yes | yes | 2 | analisi §5.6 (A4), §10 (3) | #evidencevector #attribution | R3-W2 AE-4 |
 | WS08-T05 | shift-a6 | Distribution shift and A6: split versus adaptive conformal | agent | WS08-T02 | no | no | 2 | analisi §5.6 (A6), §5.5 | #conformal-calibrator | R2-W4 |
 | WS08-T06 | unlabeled-real-run | Unlabeled real-data run for alert load (blocked until access) | agent | WS08-T02, WS04-T13 | no | no | 1.5 | analisi §5.1, §5.8 | #priorsource | - |
 | WS08-T07 | result-freeze | Reproducibility check and result freeze | agent | WS08-T03, WS08-T04, WS08-T05 | yes | no | 1 | analisi §5.1, §5.5 | #experiment-config-and-outputs | AE-1 |
+| WS08-T08 | per-template-background-metrics | Per-template metrics, equal-weight aggregate without RESP, false alarms outside injection windows (ADR-071 (b), ADR-072 (b)) | agent | WS08-T01 | yes | no | 2 | ADR-071, ADR-072, analisi §5.5 | #metrics | - |
 
 Total estimate: 15.0 person-days.
 
