@@ -112,7 +112,7 @@ def p_asserted(
     cell = cell_index(cfg).get((comp_id, field))
     token = cell["token"] if cell else cfg["default_cell"]["token"]
     form = cfg["cell_tokens"][token]["form"]
-    return float(eval(form, {"__builtins__": {}}, {**par, "max": max}))  # noqa: S307 - trusted config under test
+    return float(eval(form, {"__builtins__": {}}, {**par, "max": max}))
 
 
 def applicable(cfg: Mapping[str, Any], template: str) -> list[Mapping[str, Any]]:
@@ -313,7 +313,7 @@ def test_contract_versions_bumped() -> None:
     assert "ADR-074" in alert and "amendment 1" in alert
     block = alert[alert.index("class Alert(Detection)") :]
     block = block[: block.index("```")]
-    names = [m.group(1) for m in re.finditer(r"^    (\w+):", block, flags=re.M)]
+    names = [m.group(1) for m in re.finditer(r"^    (\w+):", block, flags=re.MULTILINE)]
     assert names[-2:] == ["p_kappa", "cause_set"]
     assert re.search(r"cause_set: Sequence\[str\] \| None = None", block)
     attribution = contract_section("Attribution")
