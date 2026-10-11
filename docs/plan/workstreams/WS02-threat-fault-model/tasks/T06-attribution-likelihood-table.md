@@ -54,3 +54,7 @@ Specify the attribution layer of ADR-074: the method returns p(c | e, t) for c i
 - `python3 tools/check_plan.py` exits 0.
 
 ## Notes
+
+### Amendment of 2026-10-11 (gab; ADR-074, decision 1)
+
+The output is a set of SUBTYPES (cumulative probability level, sensitivity value) and the cells are at subtype level; the table gives pi(subtype | class) as explicit priors with sensitivity; `p_kappa` is the class-level sum. Add a contract field for the set (`Alert.cause_set`, additive) in the same contract bump. Metrics: coverage and mean set size per stratum (WS08-T09).
