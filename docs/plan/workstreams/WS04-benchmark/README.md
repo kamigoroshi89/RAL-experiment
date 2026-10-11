@@ -196,5 +196,5 @@ Run from the repository root once T01 to T12 are `done` (T13 needs WS00-T04, T14
 | WS04-T13 | MimicPriorSource and eICU variant (blocked until credentialing) | agent | blocked | WS04-T02, WS00-T04 |
 | WS04-T14 | OPTIONAL: second pathology (diabetes, simglucose) | agent | blocked | WS04-T11 |
 | WS04-T15 | Multi-day ground-truth labelling with history (ADR-046, ADR-055 (b)) | agent | blocked | WS04-T10, WS05-T10 |
-| WS04-T16 | Cuff faults anchored to readings (durations in readings), stuck_at carry-over, effective k in the truth (ADR-070) | agent | ready | WS04-T11, WS04-T15 |
-| WS04-T18 | Generator: cuff resolution (rounding), driver diagnostics reports under two device profiles, dispenser interval, ADR-040 conventions (ADR-074) | agent | blocked | WS05-T13, WS04-T16 |
+| WS04-T16 | Cuff faults anchored to readings (durations in readings), stuck_at carry-over, effective k in the truth (ADR-070) | agent | done | WS04-T11, WS04-T15 |
+| WS04-T18 | Generator: cuff resolution (rounding), driver diagnostics reports under two device profiles, dispenser interval, ADR-040 conventions (ADR-074) | agent | ready | WS05-T13, WS04-T16 |

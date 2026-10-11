@@ -87,7 +87,7 @@ from ralmon.benchmark.trace import (
     TraceError,
     validate_day,
 )
-from ralmon.signals import DurationMs, Event, EventKind, Sample, TimeMs
+from ralmon.signals import DurationMs, Event, EventKind, Sample, SignalId, TimeMs
 
 __all__ = [
     "MAGNITUDE_MS",
@@ -102,6 +102,8 @@ __all__ = [
     "MAX_TIME_MS",
     "MIN_MAGNITUDE_LEVELS",
     "PIPELINE_STAGES",
+    "READINGS_UNIT",
+    "READING_DURATION_SUBTYPES",
     "SHAPE_POINT",
     "SHAPE_TICK",
     "SHAPE_WINDOW",
@@ -134,6 +136,7 @@ __all__ = [
     "injection_sub_index",
     "load_design_mapping",
     "load_injection_design",
+    "reading_instants",
     "record_to_ground_truth",
     "register_injector",
     "registered_subtypes",
@@ -168,6 +171,14 @@ MAGNITUDE_REAL: Final = "real"  # any finite signed number
 MAGNITUDE_POSITIVE: Final = "positive"  # a finite number above zero
 MAGNITUDE_MS: Final = "ms"  # a positive integral number of ms, at most one day
 _MAGNITUDES: Final = (MAGNITUDE_NONE, MAGNITUDE_REAL, MAGNITUDE_POSITIVE, MAGNITUDE_MS)
+# The window faults whose duration is a number of consecutive cuff readings of the day, not a time
+# (ADR-070 (a), WS04-T16): the rows of their duration levels are in this unit, integers of at least 1,
+# strictly increasing from the first level to the last. Every other duration is in ms.
+_BP: Final = SignalId.BP.value
+READINGS_UNIT: Final = "readings"
+READING_DURATION_SUBTYPES: Final = frozenset(
+    {"cuff_detached", "cuff_silent_bias", "stuck_at"}
+)
 
 # Resource guards of the generator.
 MAX_INJECTIONS_PER_DAY: Final[int] = 1_000  # algorithmic: specs applied to one day
@@ -599,6 +610,7 @@ class InjectionWork:
 
     __slots__ = (
         "attacker_next",
+        "base_ident",
         "care_plan_id",
         "context",
         "day_index",
@@ -609,6 +621,7 @@ class InjectionWork:
         "latent_hold",
         "measurements",
         "patient_id",
+        "robot_ident",
         "samples",
         "seed",
         "settings",
@@ -635,6 +648,60 @@ class InjectionWork:
         self.genuine: tuple[tuple[Sample, ...], tuple[Event, ...]] | None = None
         self.unsequenced: list[tuple[int, int]] = []
         self.attacker_next: dict[str, int] = {}
+        # the identity and instant of every cuff reading as given (the fault-free base) and, once the robot
+        # stage has run, after it: the snapshots of the ledger of ``reading_ledger``
+        self.base_ident: dict[int, int] = self._reading_identities()
+        self.robot_ident: dict[int, int] | None = None
+
+    def _reading_identities(self) -> dict[int, int]:
+        """``{identity: instant}`` of the cuff readings: the measurement index when the stream has the
+        generator-side records (a reading keeps its identity when ``nav_delay`` moves it), else the instant."""
+        if self.measurements:
+            return {m.index: m.t_ms for m in self.measurements}
+        return {t: t for t in reading_instants(self.samples)}
+
+    def end_robot_stage(self) -> None:
+        """Take the snapshot of the readings after the robot stage (the pipeline calls it once)."""
+        self.robot_ident = self._reading_identities()
+
+    def reading_ledger(self, onset_ms: int, end_ms: int) -> dict[str, int]:
+        """Where the cuff readings of the window ``[onset_ms, end_ms)`` went, by cause (ADR-070 (b)).
+
+        ``n_readings_drawn``: readings of the stream as given inside the window (the ``k`` the plan drew).
+        ``n_readings_lost_robot``: of those, the ones the robot stage took out of the window, either
+        removed (``n_readings_removed_robot``: ``manipulation_failure`` dropped the measurement) or moved out
+        (``nav_delay``); ``n_readings_gained_robot``: readings it moved in. A reading moved inside the window
+        is neither lost nor gained. ``n_readings_lost_device``: readings inside the window after the robot
+        stage that an earlier device fault (``cuff_detached``) has since removed. ``n_readings_covered``:
+        ``bp`` samples inside the window now, the effective ``k``; it equals drawn - lost_robot +
+        gained_robot - lost_device. Called directly (no pipeline) the robot snapshot is the base, so
+        nothing is lost to the robot. A link fault runs later and does not enter: a lost message still
+        counts as covered. A stream without measurement records identifies a reading by its instant, so a
+        moved reading then counts as lost and gained.
+        """
+        after_robot = self.base_ident if self.robot_ident is None else self.robot_ident
+
+        def inside(t: int) -> bool:
+            return onset_ms <= t < end_ms
+
+        base = {i for i, t in self.base_ident.items() if inside(t)}
+        robot = {i for i, t in after_robot.items() if inside(t)}
+        now = [
+            s.t_device_ms
+            for s in self.samples
+            if s.signal == _BP and inside(s.t_device_ms)
+        ]
+        present = set(now)
+        return {
+            "n_readings_drawn": len(base),
+            "n_readings_lost_robot": len(base - robot),
+            "n_readings_removed_robot": sum(1 for i in base if i not in after_robot),
+            "n_readings_gained_robot": len(robot - base),
+            "n_readings_lost_device": sum(
+                1 for i in robot if after_robot[i] not in present
+            ),
+            "n_readings_covered": len(now),
+        }
 
     @property
     def day_start_ms(self) -> TimeMs:
@@ -1245,6 +1312,11 @@ def _check_context(context: object) -> InjectionContext:
     return context
 
 
+def reading_instants(samples: Iterable[Sample]) -> tuple[int, ...]:
+    """The sorted instants (``t_device_ms``) of the cuff readings, the ``bp`` samples."""
+    return tuple(sorted({s.t_device_ms for s in samples if s.signal == _BP}))
+
+
 def check_previous_day(work: object, context: object) -> ObservedStream | None:
     """The previous day of the context, validated against the day of ``work`` (None if absent).
 
@@ -1344,6 +1416,7 @@ def apply_observation_injections(
     work.check_bounds()
     records: list[InjectionRecord] = []
     records.extend(_run_stage(STAGE_ROBOT, ordered, work, ctx))
+    work.end_robot_stage()
     records.extend(_run_stage(STAGE_DEVICE, ordered, work, ctx))
     _number(work, ctx)
     records.extend(_run_stage(STAGE_LINK, ordered, work, ctx))
@@ -1633,6 +1706,43 @@ def _quantity(
     return QuantityDesign(key, unit, reference, tuple(made))
 
 
+def _check_duration_unit(
+    where: str, cls: InjectedClass, subtype: str, duration: QuantityDesign
+) -> None:
+    """A duration is in ms, except for the three cuff faults of ADR-070, whose rows are readings (WS04-T16)."""
+    if cls is not InjectedClass.C2 or subtype not in READING_DURATION_SUBTYPES:
+        if duration.unit != "ms":
+            raise InjectionDesignError(f"{where}: a duration is in ms")
+        return
+    if duration.unit != READINGS_UNIT:
+        raise InjectionDesignError(
+            f"{where}: the duration of {subtype} is a number of consecutive readings "
+            f"(unit {READINGS_UNIT!r}, ADR-070), not {duration.unit!r}"
+        )
+    previous: float | None = None
+    for level in duration.levels:
+        if level.unit != READINGS_UNIT:
+            raise InjectionDesignError(
+                f"{where}: row {level.name!r} is in {level.unit!r}; the duration rows of {subtype} are in {READINGS_UNIT!r}"
+            )
+        if level.value is None:
+            continue
+        if not float(level.value).is_integer():
+            raise InjectionDesignError(
+                f"row {level.name!r} must be an integer number of readings, got {level.value}"
+            )
+        if level.value < 1:
+            raise InjectionDesignError(
+                f"row {level.name!r} must be at least 1 reading, got {level.value}"
+            )
+        if previous is not None and not level.value > previous:
+            raise InjectionDesignError(
+                f"the duration rows of {subtype} must be ordered (strictly increasing from the first level to the last): "
+                f"{level.name!r} is {level.value:g} after {previous:g}"
+            )
+        previous = level.value
+
+
 def load_injection_design(
     path: str | os.PathLike[str], *, section: str = "c2"
 ) -> Mapping[str, SubtypeDesign]:
@@ -1726,8 +1836,11 @@ def load_injection_design(
                 raise InjectionDesignError(
                     f"{where}: magnitude unit disagrees with the injector"
                 )
-            if duration is not None and duration.unit != "ms":
-                raise InjectionDesignError(f"{where}: a duration is in ms")
+            if duration is not None:
+                assert (
+                    cls is not None
+                )  # an injector was found, so the section names a class
+                _check_duration_unit(where, cls, str(subtype), duration)
             if tuple(targets) != injector.targets and injector.targets:
                 raise InjectionDesignError(
                     f"{where}: targets disagree with the injector"

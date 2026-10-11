@@ -70,7 +70,8 @@ BIAS_LEVELS = {
     ),
 }
 
-# The 55 rows that still wait for a human value, by file.
+# The 46 rows that still wait for a human value, by file (the nine duration rows of the three cuff faults were
+# entered as proposals in readings by WS04-T16, ADR-070 (a): 55 - 9).
 AWAITING_PRIOR = ["mean_delay_ms"]
 AWAITING_DESIGN = [
     "circadian_peak_clock_ms",
@@ -79,8 +80,13 @@ AWAITING_DESIGN = [
     "robot_dwell_ms",
     "vitals_period_ms",
 ]
-FILLED_NOW = 39
-AWAITING_NOW = 55
+READINGS_ROWS = {
+    f"{family}_duration_{level}": value
+    for family in ("stuck_at", "cuff_silent_bias", "cuff_detached")
+    for level, value in (("short", 1), ("medium", 2), ("long", 3))
+}
+FILLED_NOW = 48
+AWAITING_NOW = 46
 
 
 def flat(text: str | None) -> str:
@@ -217,26 +223,31 @@ def test_ble_durations_are_ordered_and_tied_to_the_window() -> None:
         assert "ADR-068" in text, level
 
 
-def test_cuff_duration_rows_and_device_bias_stay_untouched() -> None:
-    """The duration rows wait for WS04-T16 (unit change); the device_bias level is a definition."""
+def test_cuff_duration_rows_are_in_readings_and_device_bias_stays_a_definition() -> (
+    None
+):
+    """The duration rows were entered by WS04-T16 (unit readings); the device_bias level is a definition."""
     rows = injection_rows()
-    for family in ("stuck_at", "cuff_silent_bias", "cuff_detached"):
-        for level in ("short", "medium", "long"):
-            assert rows[f"{family}_duration_{level}"].status == "awaiting_human_value"
+    for name, value in READINGS_ROWS.items():
+        assert rows[name].status == "filled", name
+        assert rows[name].unit == "readings", name
+        assert rows[name].value == value, name
+        assert rows[name].verified_by is None, name
     assert rows["cuff_silent_bias_magnitude_device_bias"].value == 1.0
     assert rows["cuff_silent_bias_magnitude_device_bias"].unit == "x cuff_bias_mmhg"
     assert rows["cuff_silent_bias_magnitude_device_bias"].status == "filled"
 
 
-def test_awaiting_rows_are_exactly_the_other_55() -> None:
+def test_awaiting_rows_are_exactly_the_other_46() -> None:
     expected_injections = {
         name
         for name, row in injection_rows().items()
         if row.status == "awaiting_human_value"
     }
-    assert len(expected_injections) == 49
+    assert len(expected_injections) == 40
     assert not (expected_injections & set(BLOCK2_DURATIONS))
     assert not (expected_injections & set(BIAS_LEVELS))
+    assert not (expected_injections & set(READINGS_ROWS))
     files = {f.path.name: f for f in collect_parameter_files(ROOT)}
     awaiting = {
         name: [r.parameter for r in f.rows if r.status == "awaiting_human_value"]
