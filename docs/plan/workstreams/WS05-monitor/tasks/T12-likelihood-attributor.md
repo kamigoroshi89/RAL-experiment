@@ -3,7 +3,7 @@ id: WS05-T12
 title: "Likelihood attributor: posterior over C1, C2, C3 and Alert.p_kappa (ADR-074)"
 workstream: WS05-monitor
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS02-T06", "WS05-T07", "WS05-T13", "WS05-T14"]
 critical_path: true
 non_negotiable: false
