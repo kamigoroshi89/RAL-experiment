@@ -3,7 +3,7 @@ id: WS05-T13
 title: "EvidenceVector 0.2.0: dispenser group, seq_repeat / seq_gap, cuff_value_repeated, ADR-033 and ADR-040 conventions (contract, extractor, rule, tests, documents)"
 workstream: WS05-monitor
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS05-T07"]
 critical_path: true
 non_negotiable: false
