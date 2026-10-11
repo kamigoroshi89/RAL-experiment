@@ -46,3 +46,7 @@ ADR-074, ADR-072 (b), `docs/models/attribution-likelihood.md`, `docs/benchmark/e
 - `python3 tools/check_plan.py` exits 0.
 
 ## Notes
+
+### Amendment of 2026-10-11 (gab; ADR-074, decision 1)
+
+Add to the metrics: set coverage (the true subtype is in the set) and mean set size, per stratum and per template; the pair likelihood ratio is taken between the two specific subtypes, not between classes. Tests: `test_set_coverage_and_size_hand_values`, `test_pair_llr_between_subtypes`.
