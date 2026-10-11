@@ -39,7 +39,6 @@ import yaml
 from ralmon.benchmark.anchoring import (
     ANCHORED_SUBTYPES,
     anchored_choices,
-    annotate_reading_counts,
     draw_anchored_window,
     observability_table,
 )
@@ -53,7 +52,9 @@ from ralmon.benchmark.injection import (
     InjectionContext,
     InjectionDesignError,
     apply_observation_injections,
+    ground_truth_events,
     load_injection_design,
+    record_to_ground_truth,
 )
 from ralmon.benchmark.latent import T_DAY_MS
 from ralmon.benchmark.priors import LiteraturePriorSource
@@ -476,6 +477,28 @@ def test_the_manifest_records_the_day_zero_exclusion_and_the_unit(
 # ---------------------------------------------------------------------------------------------------
 
 
+LEDGER = (
+    "n_readings_drawn",
+    "n_readings_lost_robot",
+    "n_readings_gained_robot",
+    "n_readings_lost_device",
+    "n_readings_covered",
+)
+
+
+def ledger(record: Any) -> tuple[int, int, int, int, int]:
+    """``(drawn, lost to the robot stage, gained from it, lost to an earlier device fault, covered)``."""
+    values = tuple(record.details[key] for key in LEDGER)
+    drawn, lost_robot, gained, lost_device, got = values
+    assert got == drawn - lost_robot + gained - lost_device  # the ledger balances
+    return values  # type: ignore[return-value]
+
+
+def only(out: Any, subtype: str) -> Any:
+    [record] = [r for r in out.records if r.spec.subtype == subtype]
+    return record
+
+
 def test_effective_k_after_the_robot_stage() -> None:
     ticks = default_ticks()
     readings = default_readings()
@@ -483,39 +506,236 @@ def test_effective_k_after_the_robot_stage() -> None:
     # a window of k = 2 readings (08:15:30 and 14:15:30); the robot fails the manipulation of the 14:15 visit
     onset, end = 8 * HOUR, 15 * HOUR
     assert covered(readings, onset, end) == 2
-    out = run([manip(ticks[2]), detached(onset, end - onset)], stream_=base)
-    by_subtype = {r.spec.subtype: r for r in out.records}
-    record = by_subtype["cuff_detached"]
-    assert record.details["n_readings_covered"] == 1
-    [annotated] = annotate_reading_counts([record], base)
-    assert annotated.details["n_readings_drawn"] == 2
-    assert annotated.details["n_readings_covered"] == 1
-    assert annotated.realised == record.realised and annotated.spec == record.spec
-    # the bias and the stuck window count the same way
-    out = run([manip(ticks[2]), bias(onset, end - onset, 8.0)], stream_=base)
-    [record] = [r for r in out.records if r.spec.subtype == "cuff_silent_bias"]
-    [annotated] = annotate_reading_counts([record], base)
-    assert (
-        annotated.details["n_readings_drawn"],
-        annotated.details["n_readings_covered"],
-    ) == (2, 1)
+    cases = {
+        "cuff_detached": detached(onset, end - onset),
+        "cuff_silent_bias": bias(onset, end - onset, 8.0),
+        "stuck_at": stuck(onset, end - onset),
+    }
+    for subtype, window in cases.items():
+        out = run([manip(ticks[2]), window], stream_=base)
+        record = only(out, subtype)
+        assert ledger(record) == (2, 1, 0, 0, 1), subtype
+        assert record.realised, subtype
     # a delayed visit can also bring a reading INTO the window: drawn 1, covered 2
-    window = (8 * HOUR, 9 * HOUR)  # holds the 08:15:30 reading only
-    assert covered(readings, *window) == 1
+    narrow = (8 * HOUR, 9 * HOUR)  # holds the 08:15:30 reading only
+    assert covered(readings, *narrow) == 1
+    for subtype, make in (
+        ("cuff_detached", detached),
+        ("cuff_silent_bias", lambda o, d: bias(o, d, 8.0)),
+        ("stuck_at", stuck),
+    ):
+        out = run(
+            [nav(ticks[0], 110 * MIN, kind="measurement"), make(narrow[0], HOUR)],
+            stream_=base,
+            task_deadline_offset_ms=30 * MIN,
+        )
+        assert ledger(only(out, subtype)) == (1, 0, 1, 0, 2), subtype
+    # a record of another subtype carries no ledger
+    [other] = run([manip(ticks[1])], stream_=base).records
+    assert not set(LEDGER) & set(other.details)
+
+
+def test_a_device_fault_before_the_bias_is_counted_apart_from_the_robot_stage() -> None:
+    ticks = default_ticks()
+    base = fixture_stream(ticks)
+    onset, end = 8 * HOUR, 15 * HOUR  # readings 08:15:30 and 14:15:30
     out = run(
-        [nav(ticks[0], 110 * MIN, kind="measurement"), detached(window[0], HOUR)],
-        stream_=base,
-        task_deadline_offset_ms=30 * MIN,
+        [detached(7 * HOUR, 2 * HOUR), bias(onset, end - onset, 8.0)], stream_=base
     )
-    [record] = [r for r in out.records if r.spec.subtype == "cuff_detached"]
-    [annotated] = annotate_reading_counts([record], base)
+    assert ledger(only(out, "cuff_silent_bias")) == (2, 0, 0, 1, 1)
+    assert ledger(only(out, "cuff_detached")) == (1, 0, 0, 0, 1)
+    # both causes at once: the robot fails 14:15 and the detached window removes 08:15
+    out = run(
+        [manip(ticks[2]), detached(7 * HOUR, 2 * HOUR), stuck(onset, end - onset)],
+        stream_=base,
+    )
+    assert ledger(only(out, "stuck_at")) == (2, 1, 0, 1, 0)
+    assert not only(out, "stuck_at").realised  # nothing left in the window: unrealised
+
+
+def test_a_direct_call_has_nothing_lost() -> None:
+    base = fixture_stream(default_ticks())
+    out = run([bias(8 * HOUR, 7 * HOUR, 8.0)], stream_=base)
+    assert ledger(only(out, "cuff_silent_bias")) == (2, 0, 0, 0, 2)
+
+
+def test_covered_counts_the_bp_readings_for_the_three_subtypes() -> None:
+    """``cuff_detached`` counts ``bp`` samples like the others; ``n_attempts`` counts MEASUREMENT events."""
+    ticks = default_ticks()
+    base = fixture_stream(ticks)
+    onset, end = 8 * HOUR, 15 * HOUR
+    for subtype, window in (
+        ("cuff_detached", detached(onset, end - onset)),
+        ("cuff_silent_bias", bias(onset, end - onset, 8.0)),
+        ("stuck_at", stuck(onset, end - onset)),
+    ):
+        record = only(run([window], stream_=base), subtype)
+        assert record.details["n_readings_covered"] == 2
+    record = only(run([detached(onset, end - onset)], stream_=base), "cuff_detached")
+    assert record.details["n_attempts"] == 2
+    # a MEASUREMENT event whose bp sample is missing is an attempt but not a reading
+    lone = dataclasses.replace(
+        base,
+        samples=tuple(
+            s
+            for s in base.samples
+            if not (s.signal == "bp" and s.t_device_ms == default_readings()[1])
+        ),
+    )
+    record = only(run([detached(onset, end - onset)], stream_=lone), "cuff_detached")
+    assert record.details["n_attempts"] == 2
+    assert record.details["n_readings_covered"] == 1
+
+
+def test_a_fault_that_covers_no_reading_is_unrealised_and_is_no_positive() -> None:
+    ticks = default_ticks()
+    base = fixture_stream(ticks)
+    onset, end = (
+        8 * HOUR,
+        9 * HOUR,
+    )  # the 08:15:30 reading only; the robot fails that visit
+    for subtype, window in (
+        ("cuff_detached", detached(onset, end - onset)),
+        ("cuff_silent_bias", bias(onset, end - onset, 8.0)),
+        ("stuck_at", stuck(onset, end - onset)),
+    ):
+        out = run([manip(ticks[1]), window], stream_=base)
+        record = only(out, subtype)
+        assert record.details["n_readings_covered"] == 0, subtype
+        assert not record.realised and record.n_changed == 0, subtype
+        assert record_to_ground_truth(record) is None, subtype
+        assert ground_truth_events(out.records) == [
+            e for e in ground_truth_events(out.records) if e.subtype != subtype
+        ]
+
+
+def zero_covered_build(tmp_path: Path) -> tuple[Path, Any]:
+    return build(
+        tmp_path,
+        "zero",
+        pairs=0,
+        variants=[],
+        n_patients=10,
+        n_days=4,
+        rates=(0.0, 4.0, 0.0),
+    )
+
+
+def test_unrealised_cuff_faults_are_no_positive_anywhere_and_are_counted(
+    tmp_path: Path,
+) -> None:
+    out, manifest = zero_covered_build(tmp_path)
+    reader = open_benchmark(out)
+    zero: Counter[str] = Counter()
+    for patient in reader.patient_ids(role="patient"):
+        for day in range(manifest.settings["n_scored_days"]):
+            truth = reader.truth(patient, day)
+            positives = Counter(
+                (e.subtype, e.onset_ms, e.end_ms)
+                for e in truth.ground_truth
+                if e.injected
+            )
+            for entry in truth.injection_log:
+                if entry["subtype"] not in ANCHORED_SUBTYPES:
+                    continue
+                key = (entry["subtype"], entry["onset_ms"], entry["end_ms"])
+                if entry["details"]["n_readings_covered"] == 0:
+                    zero[f"c2/{entry['subtype']}/covered_zero"] += 1
+                    assert entry["realised"] is False
+                    assert entry["truth_indices"] == []
+                    assert positives[key] == 0
+                else:
+                    assert (positives[key] > 0) == bool(entry["realised"])
+    assert sum(zero.values()) > 0  # the build is large enough to contain some
+    assert dict(sorted(zero.items())) == manifest.settings["plan_unrealised"]
+
+
+def test_manifest_tallies_the_ledger_by_drawn_k(tmp_path: Path) -> None:
+    out, manifest = zero_covered_build(tmp_path)
+    block = manifest.settings["anchored_cuff_faults"]["by_drawn_k"]
+    reader = open_benchmark(out)
+    expected: dict[str, dict[str, Counter[str]]] = {}
+    for patient in reader.patient_ids(role="patient"):
+        for day in range(manifest.settings["n_scored_days"]):
+            for entry in reader.truth(patient, day).injection_log:
+                if entry["subtype"] not in ANCHORED_SUBTYPES:
+                    continue
+                d = entry["details"]
+                cell = expected.setdefault(entry["subtype"], {}).setdefault(
+                    str(d["n_readings_drawn"]), Counter()
+                )
+                cell["draws"] += 1
+                cell["readings_drawn"] += d["n_readings_drawn"]
+                cell["lost_robot"] += d["n_readings_lost_robot"]
+                cell["gained_robot"] += d["n_readings_gained_robot"]
+                cell["lost_device"] += d["n_readings_lost_device"]
+                cell["covered_differs"] += int(
+                    d["n_readings_covered"] != d["n_readings_drawn"]
+                )
+                cell["covered_zero"] += int(d["n_readings_covered"] == 0)
+    assert block == {
+        s: {k: dict(sorted(c.items())) for k, c in sorted(per.items())}
+        for s, per in sorted(expected.items())
+    }
+    assert sum(c["draws"] for per in expected.values() for c in per.values()) > 20
+
+
+def test_day_zero_wording_is_drawn_and_not_placed() -> None:
+    document = yaml.safe_load(INJECTIONS_FILE.read_text(encoding="utf-8"))
+    for row in document["parameters"]:
+        if row["parameter"].startswith("stuck_at_duration_"):
+            text = " ".join(str(row["rationale"]).split())
+            assert "drawn and not placed" in text
+            assert "excluded from the draw" not in text
+    doc = " ".join(BUILDER_DOC.read_text(encoding="utf-8").split())
+    assert "drawn and not placed" in doc
+    assert "excluded from the draw" not in doc
     assert (
-        annotated.details["n_readings_drawn"],
-        annotated.details["n_readings_covered"],
-    ) == (1, 2)
-    # a record of another subtype is returned untouched
-    [other] = [r for r in run([manip(ticks[1])], stream_=base).records]
-    assert annotate_reading_counts([other], base) == (other,)
+        "5/6" in doc and "6/7" in doc
+    )  # the day-0 C2 rate and the planned count of stuck_at
+    source = (ROOT / "src" / "ralmon" / "benchmark" / "builder.py").read_text(
+        encoding="utf-8"
+    )
+    assert "excluded from the draw" not in source
+
+
+def test_the_documents_state_that_the_truth_interval_does_not_shrink() -> None:
+    doc = " ".join(BUILDER_DOC.read_text(encoding="utf-8").split())
+    assert "does not shrink with the effective k" in doc
+    t12 = (
+        ROOT
+        / "docs"
+        / "plan"
+        / "workstreams"
+        / "WS04-benchmark"
+        / "tasks"
+        / "T12-benchmark-validation.md"
+    ).read_text(encoding="utf-8")
+    assert "does not shrink with the effective k" in " ".join(t12.split())
+
+
+def test_the_table_script_runs_with_plain_python3_or_fails_clearly() -> None:
+    result = subprocess.run(
+        ["python3", str(TABLE_SCRIPT), "--check"],
+        capture_output=True, text=True, cwd="/", check=False,
+    )  # fmt: skip
+    assert "Traceback" not in result.stderr, result.stderr
+    assert result.returncode in (0, 2), result.stderr
+    if result.returncode == 2:
+        assert "cannot" in result.stderr
+
+
+def test_a_design_without_a_reading_duration_is_a_configuration_error(
+    tmp_path: Path,
+) -> None:
+    context = planner_context()
+    entry = context.design.c2["stuck_at"]
+    broken = dataclasses.replace(entry, duration=None)
+    context.design = dataclasses.replace(  # type: ignore[misc]
+        context.design, c2={**context.design.c2, "stuck_at": broken}
+    )
+    with pytest.raises(BenchmarkConfigError, match="stuck_at"):
+        context._check_reading_rows()
 
 
 def cuff_entries(out: Path) -> list[tuple[str, int, dict[str, Any]]]:
