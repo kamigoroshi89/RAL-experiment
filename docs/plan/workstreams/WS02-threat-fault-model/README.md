@@ -70,3 +70,4 @@ Run from the repository root; every command must print nothing (or the stated re
 | WS02-T03 | Evidence channels and EvidenceVector semantics, availability per placement | agent | blocked | WS02-T01, WS02-T02 |
 | WS02-T04 | Attribution rule spec: hierarchy, abstention, cascades, clinician-in-the-loop | agent | blocked | WS02-T03, WS01-T07 |
 | WS02-T05 | Diagnosability matrix (machine-readable) and hazard and standards paragraph | agent | blocked | WS02-T04 |
+| WS02-T06 | Attribution as a likelihood table: specification, cells with their source, sensitivity design (ADR-074) | agent | ready | WS02-T04, WS02-T05 |

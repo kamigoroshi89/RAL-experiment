@@ -100,6 +100,8 @@ class Alert(Detection):
     caused_by: (
         str | None
     )  # instance key of the upstream alert when this one is a cascade effect
+    #: Posterior over C1, C2, C3 (sums to 1; ADR-074); None for the hierarchical rule.
+    p_kappa: Mapping[AttributedCause, float] | None = None
 
 
 def alert_time_and_severity(record: VerdictRecord) -> tuple[TimeMs, float]:

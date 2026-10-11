@@ -4,7 +4,7 @@ title: "Main experiment: B1-B5 versus proposed method"
 workstream: WS08-experiments
 owner: agent
 status: blocked
-depends_on: ["WS08-T01", "WS06-T07", "WS04-T16", "WS08-T08"]
+depends_on: ["WS08-T01", "WS06-T07", "WS04-T16", "WS08-T08", "WS05-T12", "WS08-T09"]
 critical_path: true
 non_negotiable: false
 estimate_pd: 2.5
@@ -131,3 +131,7 @@ The false-alarm figure of the main experiment is measured on windows without inj
 ### Dependency added (gab, 2026-10-11; ADR-071, ADR-072)
 
 WS08-T08 (per-template metrics, equal-weight aggregate without RESP, false alarms outside injection windows) is now a dependency.
+
+### Decision of 2026-10-11 (gab; ADR-074): attribution is a probability per cause
+
+`ours` is the likelihood attributor (WS05-T12), not the exclusion rule; the hierarchical rule is run as `ours-hier`. The metric definitions of this task change as follows (WS08-T09 implements them): (1) on the main population, attribution is scored with the log score and the Brier score of `Alert.p_kappa` per template (equal-weight aggregate, RESP apart, ADR-072) and with calibration curves per template; the accuracy-style `attribution_confusion` stays, computed on `kappa`, with the abstention rate. (2) On the confounder pairs the quantity is the log likelihood ratio between the two causes of the group, not the final probability: indistinguishable stratum = distance of `Lambda` from 0; distinguishable stratum = correct direction, with McNemar between methods on the direction; no precision on pairs. (3) The priors and the within-C2 mixture are declared design choices with a sensitivity analysis (ADR-074 (2)); the main table is reported with the sensitivity range, not with one set. (4) The two device profiles ('driver with diagnostics', 'without') are run; the first is the headline. Add `tests` for the new keys of `metrics.json` and for the profile pair.
