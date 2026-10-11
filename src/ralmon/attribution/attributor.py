@@ -24,6 +24,14 @@ alert already issued is frozen: later evidence for its key is ignored, and the o
 growth of ``root_cause_of`` of a root and the sentence of its text derived from it (rules 7 and 8 of the cascade
 section). ``history`` holds every issued value in issue order.
 
+The rule is the hierarchical rule (``ours-hier``, the default) or the likelihood attributor
+(``ralmon.attribution.likelihood.LikelihoodRule``, ADR-074): a rule whose decision carries a subtype posterior fills
+``Alert.p_kappa`` and ``Alert.cause_set``. The set is the one the decision carries (the cumulative-level set of the rule)
+unless a ``set_selector`` is injected, a callable ``(posteriors, template, instance_key) -> subtype names`` (the
+conformal set of WS05-T14 joins here without this package importing ``ralmon.conformal``). A cascade effect carries the
+attributed cause, the posterior and the set of its root, like its decisive evidence. A predicted violation has kappa
+UNDETERMINED and no posterior (CP13): the rule is not evaluated.
+
 The windows of the cascade table (``sched_window``, ``hold_lookback``, ``delta1``, ``delta2``) come from the plan
 instance when a plan is given and from the registry otherwise (H-10, OP-AR-3).
 """
@@ -33,7 +41,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from ralmon.attribution.alert import (
@@ -65,9 +73,17 @@ from ralmon.spec import (
     rank_alerts,
 )
 
-__all__ = ["Attributor", "RuleAttributor"]
+__all__ = ["Attributor", "RuleAttributor", "SetSelector"]
 
 log = logging.getLogger(__name__)
+
+
+class SetSelector(Protocol):
+    """The injected source of ``Alert.cause_set``: the subtypes of a posterior over the subtypes applicable at a template."""
+
+    def __call__(
+        self, posteriors: Mapping[str, float], template: TemplateId, instance_key: str
+    ) -> Sequence[str]: ...
 
 
 class Attributor(Protocol):
@@ -117,6 +133,7 @@ class RuleAttributor:
         *,
         plan: CarePlan | None = None,
         variant: str | None = None,
+        set_selector: SetSelector | None = None,
     ) -> None:
         self._registry = registry
         self._templates = {t.id: t for t in templates}
@@ -124,6 +141,12 @@ class RuleAttributor:
             rule if rule is not None else HierarchicalRule(registry)
         )
         self._variant = variant
+        self._set_selector = set_selector
+        if set_selector is None and getattr(self._rule, "needs_set_selector", False):
+            raise ValueError(
+                "the rule was built without a cumulative_level (needs_cumulative_level=False) and no set_selector "
+                "is given: Alert.cause_set has no source (give the cumulative level to the rule, or a selector here)"
+            )
         self._plan_params: dict[str, Mapping[str, float]] = {}
         self._plan_anchor: dict[str, TimeMs | None] = {}
         if plan is not None:
@@ -251,8 +274,27 @@ class RuleAttributor:
         if decide is not None:
             result = decide(record, evidence)
             assert isinstance(result, Decision)
-            return result
+            return self._with_set(record, result)
         return Decision(rule.attribute(record, evidence), None, None, (), ())
+
+    def _with_set(self, record: VerdictRecord, decision: Decision) -> Decision:
+        """The decision with the set of the injected selector, if there is one and the decision has a posterior."""
+        posterior = decision.posterior_subtypes
+        if self._set_selector is None or posterior is None:
+            return decision
+        chosen = tuple(
+            self._set_selector(posterior, record.template, record.instance_key)
+        )
+        if (
+            not chosen
+            or len(set(chosen)) != len(chosen)
+            or not set(chosen) <= set(posterior)
+        ):
+            raise ValueError(
+                f"{record.instance_key}: the set selector must return a non-empty list of distinct subtypes "
+                f"applicable at the template, got {chosen!r}"
+            )
+        return replace(decision, cause_set=chosen)
 
     # ---- windows and anchors --------------------------------------------------------------------------------
 

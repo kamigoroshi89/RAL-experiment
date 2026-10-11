@@ -13,6 +13,11 @@ of ``Template.params``, evidence in the precedence order of the decision. A regi
 ``reviewed_by`` null carries the label "unreviewed" (ADR-020). The text states no clinical recommendation: the
 only actions it names are the automatic robot actions of the action policy (stop, retry, call), and it says that
 clinical actions are never automatic.
+
+A decision of the likelihood attributor (``Decision.p_kappa`` is set, ADR-074) is rendered by ``_cause_likelihood``:
+the class posterior, the declared threshold, the evidence fields that favour the leading class with their readings,
+and the set of subtypes; an UNDETERMINED label names every subtype applicable to the constraint. The posterior comes
+from a likelihood table whose numbers are sensitivity values, and the text says that it is not a measured frequency.
 """
 
 from __future__ import annotations
@@ -179,6 +184,10 @@ def _reading_words(path: str, value: object) -> str | None:
             else "the cuff reported no error code"
         )
     if isinstance(value, (int, float)) and math.isfinite(value):
+        if path == "dispenser.interval_since_previous_ms":
+            return f"interval since the previous dispenser opening {_number(float(value))} ms"
+        if path == "dispenser.content_change":
+            return f"dispenser content change {_number(float(value))} at the opening"
         if path == "system.ble_link_quality":
             return f"delivery ratio of the device link {value:.2f}"
         if path == "signal_quality.ecg_sqi":
@@ -234,6 +243,10 @@ _BOOLEAN_WORDS: Final[dict[str, tuple[str, str]]] = {
     "crypto_temporal.authenticated": (
         "message authentication succeeded",
         "message authentication failed",
+    ),
+    "signal_quality.cuff_value_repeated": (
+        "the cuff reading equals the previous reading of the same cuff",
+        "the cuff reading differs from the previous reading of the same cuff",
     ),
     "system.seq_gap": (
         "a missing sequence value was found",
@@ -441,11 +454,80 @@ def _confidence(alert: Alert, predicted: bool) -> str:
     return f"Confidence: {rho.value:.2f} (kind: {kind}; guarantee: {rho.guarantee})."
 
 
+_CLASSES: Final = (
+    AttributedCause.C1_CLINICAL,
+    AttributedCause.C2_SYSTEM,
+    AttributedCause.C3_INTEGRITY,
+)
+
+
+def _cause_likelihood(alert: Alert, decision: Decision) -> str:
+    """The cause of a likelihood decision: probabilities, threshold, favouring evidence, set of subtypes."""
+    posterior = decision.p_kappa
+    subtypes = decision.posterior_subtypes
+    assert posterior is not None and subtypes is not None
+    kappa = alert.kappa
+    tau = decision.abstention_threshold
+    classes = ", ".join(f"{c.value} {posterior[c]:.2f}" for c in _CLASSES)
+    best = max(_CLASSES, key=lambda c: (posterior[c], -_CLASSES.index(c)))
+    head = f"Attributed cause: {_CAUSE_WORDS[kappa]}"
+    if kappa is AttributedCause.UNDETERMINED:
+        if tau is not None and posterior[best] < tau:
+            why = (
+                f"the largest class posterior ({best.value} {posterior[best]:.2f}) is below the declared "
+                f"threshold tau {tau:.2f}"
+            )
+        else:
+            why = "two or more classes share the largest posterior"
+        text = (
+            f"{head}. Reason: {why}. Class posterior: {classes}. No class is attributed, so every one of "
+            f"the {len(subtypes)} subtypes applicable to this constraint remains possible: "
+            + ", ".join(sorted(subtypes))
+            + "."
+        )
+        lead = f"the leading class ({_CAUSE_WORDS[best]})"
+    else:
+        threshold = (
+            f" the declared threshold tau {tau:.2f}"
+            if tau is not None
+            else " the declared threshold"
+        )
+        text = (
+            f"{head}, class posterior {classes}: the most probable class, and its posterior reaches{threshold}. "
+            "The posterior comes from a likelihood table whose numbers are sensitivity values; it is not a "
+            "measured frequency."
+        )
+        lead = "this class"
+    if decision.evidence_used:
+        text += (
+            f" Evidence that favours {lead} over the others, most favourable first: "
+            + _evidence_list(decision.evidence_used, decision.readings)
+            + "."
+        )
+    if kappa is AttributedCause.C1_CLINICAL:
+        text += (
+            " Silent device faults raise none of the channels read, so this does not exclude them: "
+            "see the set of subtypes."
+        )
+    if alert.cause_set:
+        text += (
+            " Most probable subtypes (the set reported): "
+            + ", ".join(
+                f"{name} {subtypes[name]:.2f}" if name in subtypes else name
+                for name in alert.cause_set
+            )
+            + "."
+        )
+    return text
+
+
 def _cause(alert: Alert, decision: Decision, predicted: bool) -> str:
     kappa = alert.kappa
     head = f"Attributed cause: {_CAUSE_WORDS[kappa]}"
     if predicted:
         return head + " (an early warning names no cause)."
+    if decision.p_kappa is not None:
+        return _cause_likelihood(alert, decision)
     if kappa is AttributedCause.C1_CLINICAL:
         return (
             head

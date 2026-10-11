@@ -209,7 +209,9 @@ def test_spec_example_only_authenticated_asserted_gives_0_970732(
     evidence = vector("count", {AUTH: False}, registry)
     cls = rule.posterior(make_record("count"), evidence)
     assert cls[AttributedCause.C3_INTEGRITY] == pytest.approx(0.970732, abs=1e-6)
-    assert cls[AttributedCause.C1] == pytest.approx(cls[AttributedCause.C2])
+    assert cls[AttributedCause.C1_CLINICAL] == pytest.approx(
+        cls[AttributedCause.C2_SYSTEM]
+    )
 
 
 # ---- test 2: None is factor one -------------------------------------------------------------------------------
@@ -462,6 +464,11 @@ def test_reads_only_the_relevance_map_fields(template, registry, rule) -> None: 
     assert dict(again) != {} and set(again) == set(base)
 
 
+def _moved(a: Mapping[str, float], b: Mapping[str, float]) -> bool:
+    """The posteriors differ by more than rounding (a factor common to all components moves the last bit)."""
+    return any(abs(a[k] - b[k]) > 1e-9 for k in a)
+
+
 @pytest.mark.parametrize("template", TEMPLATES)
 def test_dispenser_and_cuff_masks_hold_even_if_the_extractor_fills_them(
     template, registry, rule
@@ -479,18 +486,19 @@ def test_dispenser_and_cuff_masks_hold_even_if_the_extractor_fills_them(
     )
     a = rule.posterior_subtypes(make_record(template), no_extra)
     b = rule.posterior_subtypes(make_record(template), extra)
-    if template in DISPENSER_TEMPLATES or template in CUFF_TEMPLATES:
-        assert dict(a) != dict(b)
-    else:
-        assert dict(a) == dict(b)
+    # where the cuff repeat is read but every component has the same natural cell (sched, sys) it cannot move the
+    # posterior; stuck_at raises it at range, hold and resp
+    moves = template in DISPENSER_TEMPLATES or template in ("range", "hold", "resp")
+    assert _moved(a, b) == moves
     only_dispenser = classes_to_vector(
         template, {AUTH: "D", "dispenser.content_change": "A"}, registry
     )
     c = rule.posterior_subtypes(make_record(template), only_dispenser)
-    assert (dict(c) != dict(a)) == (template in DISPENSER_TEMPLATES)
+    assert _moved(c, a) == (template in DISPENSER_TEMPLATES)
     only_cuff = classes_to_vector(template, {AUTH: "D", CUFF_REPEAT: "A"}, registry)
     d = rule.posterior_subtypes(make_record(template), only_cuff)
-    assert (dict(d) != dict(a)) == (template in CUFF_TEMPLATES)
+    assert _moved(d, a) == (template in ("range", "hold", "resp"))
+    assert template in CUFF_TEMPLATES or dict(d) == dict(a)  # not read: exactly equal
 
 
 def test_i1_nothing_but_the_template_and_the_evidence_is_read(registry, rule) -> None:  # type: ignore[no-untyped-def]
@@ -612,7 +620,7 @@ def test_sensitivity_values_are_recorded_and_labelled(registry, table, rule) -> 
     assert meta["a4"] is False
     assert meta["model_version"] == rule.model_version
     assert meta["config_sha256"] and len(meta["config_sha256"]) == 64
-    assert meta["priors"]["class_priors"]["design"] == "uniform"
+    assert meta["sensitivity_values"]["class_priors"]["value"] == "uniform"
     # JSON-serialisable, so that it can be written next to the output
     import json
 
@@ -815,9 +823,9 @@ def test_class_priors_restricted_to_applicable_classes(registry, table) -> None:
     empty_sys = classes_to_vector("sys", {}, registry)
     cls = heavy.posterior(make_record("sys"), empty_sys)
     # C1 is impossible at sys; the C2 and C3 priors 0.2 and 0.6 are renormalised to 0.25 and 0.75
-    assert cls[AttributedCause.C1] == 0.0
-    assert cls[AttributedCause.C2] == pytest.approx(0.25)
-    assert cls[AttributedCause.C3] == pytest.approx(0.75)
+    assert cls[AttributedCause.C1_CLINICAL] == 0.0
+    assert cls[AttributedCause.C2_SYSTEM] == pytest.approx(0.25)
+    assert cls[AttributedCause.C3_INTEGRITY] == pytest.approx(0.75)
 
 
 # ---- cross-check against the transcription of the specification ----------------------------------------------
@@ -992,7 +1000,13 @@ def test_driver_stale_is_a_conditional_cell(registry, table) -> None:  # type: i
     assert sub["ble_dropout"] > sub["spontaneous_hold"]
     eps, q = PARAMS["eps"], PARAMS["q_stale"]
     ratio = sub["ble_dropout"] / sub["spontaneous_hold"]
-    assert ratio == pytest.approx((eps + (1 - 2 * eps) * q) / eps, rel=1e-9)
+    comps = [c for c in rule.table.components if "hold" in c.templates]
+    n_c1 = sum(1 for c in comps if c.cls == "C1")
+    n_c2 = sum(1 for c in comps if c.cls == "C2")
+    # the likelihood ratio of the stale cell, times the ratio of the within-class weights (uniform)
+    assert ratio == pytest.approx(
+        (eps + (1 - 2 * eps) * q) / eps * n_c1 / n_c2, rel=1e-9
+    )
 
 
 # ---- reading classes of the added fields ---------------------------------------------------------------------------------
