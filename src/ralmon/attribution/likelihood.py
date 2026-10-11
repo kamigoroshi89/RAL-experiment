@@ -32,8 +32,9 @@ uses (``q_stale`` without the driver diagnostics, ``delta`` under A4) is not req
 
 The decision record (``Decision`` of ``rule.py``) carries ``p_kappa``, the subtype posterior, the set, the log
 likelihood contributions per component and per class, and the decisive fields (``evidence_used``): the fields whose
-reading favours the leading class against every other applicable class (single-field log likelihood ratio of the
-pi-weighted class mixtures, larger than numerical zero), most favourable first. They are traceability of the table,
+reading favours the leading class against the rest (single-field log likelihood ratio of the pi-weighted class mixture
+against the mixture of the other classes weighted by their posterior mass, larger than numerical zero), most favourable
+first. They are traceability of the table,
 not an explanation of the cause. The set is the cumulative-level set unless the attributor injects a selector (the
 conformal set of WS05-T14, which this package may not import, see ``tests/test_layering.py``).
 
@@ -1141,15 +1142,24 @@ class LikelihoodRule:
     def _decisive(
         ev: _Evaluation, class_terms: Mapping[str, Mapping[str, float]]
     ) -> tuple[str, ...]:
-        """The fields whose reading favours the leading class against every other applicable class, best first."""
+        """The fields whose reading favours the leading class against the rest, best first.
+
+        The margin of a field is the single-field log likelihood ratio of the leading class against the mixture of
+        the other applicable classes, weighted by their posterior mass; a field is decisive if the margin exceeds
+        numerical zero. It is traceability of the table (which readings pulled towards the class), not a causal claim.
+        """
         order = {c: i for i, c in enumerate(CLASS_ORDER)}
         leading = max(ev.plan.classes, key=lambda c: (ev.classes[_CAUSE[c]], -order[c]))
         others = [c for c in ev.plan.classes if c != leading]
-        if not others:
+        mass = [ev.classes[_CAUSE[c]] for c in others]
+        if not others or math.fsum(mass) <= 0.0:
             return ()
         scored: list[tuple[float, int, str]] = []
         for key, lead in class_terms[leading].items():
-            margin = min(lead - class_terms[o][key] for o in others)
+            rest = _logsumexp([class_terms[o][key] for o in others], mass) - math.log(
+                math.fsum(mass)
+            )
+            margin = lead - rest
             if margin > NUMERICAL_ZERO:
                 for path in key.split("+"):
                     if path in ev.readings and ev.readings[path] is not None:

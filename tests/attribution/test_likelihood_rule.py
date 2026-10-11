@@ -1085,6 +1085,29 @@ def test_decision_record_contributions_and_decisive_fields(registry, rule) -> No
     assert set(class_contrib) == {"C1", "C2", "C3"}
 
 
+def test_decisive_fields_of_a_clinical_attribution_are_the_channels_that_favour_it(
+    registry, table
+) -> None:  # type: ignore[no-untyped-def]
+    rule = build_rule(registry, table, sensitivity_values={**TEST_VALUES, "tau": 0.5})
+    read = {
+        "system.liveliness_ok": "D",
+        "system.node_lifecycle": "D",
+        AUTH: "D",
+        "signal_quality.cuff_error_code": "D",
+        BLE: "D",
+    }
+    evidence = classes_to_vector("range", read, registry)
+    decision = rule.decide(make_record("range"), evidence)
+    assert decision.kappa is AttributedCause.C1_CLINICAL
+    assert (
+        decision.evidence_used
+    )  # not empty: the denied channels pull towards C1 against the C2 mixture
+    assert set(decision.evidence_used) <= set(read) | {GAP}
+    assert "system.liveliness_ok" in decision.evidence_used
+    assert len(decision.evidence_used) == len(set(decision.evidence_used))
+    assert {p for p, _v in decision.readings} == set(decision.evidence_used)
+
+
 def test_the_decision_of_a_provenance_mismatch_abstains_without_raising(
     registry, rule
 ) -> None:  # type: ignore[no-untyped-def]
