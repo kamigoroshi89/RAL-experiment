@@ -27,6 +27,9 @@ from likelihood_attr import Comp, Params, PRIORS, A, D, U, K, _READS_BY_NAME, NO
 from likelihood_attr import INTAKE
 
 XREP = "cuff.identical_repeat"
+SEQREP = "crypto_temporal.seq_repeat"      # ADR-034 (accepted): a received (name, seq) repeats an accepted one
+SEQGAP = "system.seq_gap"                  # ADR-034 (accepted): a sequence value is missing at the cut-off
+from likelihood_attr import SEQ, BLE
 CUFF_TEMPLATES = ("range", "sched", "hold", "resp", "sys")
 CONFIG = "/tmp/research/likelihood/config/subtype_priors.yaml"
 
@@ -71,6 +74,8 @@ class SubParams:
     rep: bool = False            # use the XREP channel
     rep_nat: float = 0.0         # natural probability that two consecutive readings of the cuff are identical (SENSITIVITY value)
     tb_ms: int = 10_000
+    adr32: bool = False          # ADR-032 accepted: dispenser interval and content_change as native cells (content zero is raised by the bounce by construction)
+    adr34: bool = False          # ADR-034 accepted: seq_gap_or_replay split into seq_repeat and seq_gap (derived from the existing field and the delivery ratio)
 
 
 @lru_cache(maxsize=None)
@@ -87,10 +92,27 @@ def applicable(t: str, design: str, family: str) -> tuple:
     return tuple(out)
 
 
+# ADR-034 native cells: R raised by construction, C conditional (qc), Cn the complement (1 - qc): a naive forged number either repeats an
+# accepted one or jumps ahead and leaves a gap (threat model, TM-GAP-SEQ)
+SEQ_RAISES = {
+    "replay_naive": {SEQREP: "R"},
+    "injection_naive": {SEQREP: "C", SEQGAP: "Cn"},
+    "dispense_forgery_naive": {SEQREP: "C", SEQGAP: "Cn"},
+    "ble_dropout": {SEQGAP: "C"},
+    "message_drop": {SEQGAP: "C"},
+}
+
+
 def pa_sub(comp: Comp, f: str, sp: SubParams) -> float:
     p = sp.base
     if f == XREP:
         return 1 - p.eps if comp.name == "stuck_at" else max(sp.rep_nat, p.eps)
+    if f in (SEQREP, SEQGAP):
+        tok = SEQ_RAISES.get(comp.name, {}).get(f)
+        rho = 0.0 if tok is None else {"R": 1.0, "C": p.qc, "Cn": 1 - p.qc}[tok]
+        return p.eps + (1 - 2 * p.eps) * rho
+    if f == L.XZERO and sp.adr32 and comp.name == "dispenser_bounce":
+        return 1 - p.eps
     return L._pa(comp, f, p)
 
 
@@ -102,8 +124,20 @@ def read_classes(readings: Mapping[str, str], t: str, sp: SubParams, ext: Mappin
         c = readings.get(f, U)
         if f in p.mask or c in (U, K):
             continue
+        if sp.adr34 and f == SEQ:
+            continue
         cls[f] = A if c == A else D
-    if p.ext and t in EXT_TEMPLATES and ext:
+    if sp.adr34 and SEQ in reads and SEQ not in p.mask:
+        sq, bl = readings.get(SEQ, U), readings.get(BLE, U)
+        if sq == A and bl == "F":
+            cls[SEQREP] = A
+        elif sq == D:
+            cls[SEQREP] = D
+        if bl in ("A", "G"):
+            cls[SEQGAP] = A
+        elif bl == "F":
+            cls[SEQGAP] = D
+    if (p.ext or sp.adr32) and t in EXT_TEMPLATES and ext:
         for f in EXT_FIELDS:
             c = ext.get(f, U)
             if c in (A, D) and f not in p.mask:
@@ -139,7 +173,10 @@ class SubResult:
 
 
 def posterior(readings: Mapping[str, str], t: str, sp: SubParams, ext: Mapping[str, str] | None = None) -> SubResult:
-    cls = read_classes(readings, t, sp, ext)
+    return posterior_from_cls(read_classes(readings, t, sp, ext), t, sp)
+
+
+def posterior_from_cls(cls: Mapping[str, str], t: str, sp: SubParams) -> SubResult:
     app = applicable(t, sp.design, sp.base.family)
     sup = {c.cause for c, _ in app}
     pri = {c: (PRIORS[sp.base.prior][c] if c in sup else 0.0) for c in L.CAUSES}

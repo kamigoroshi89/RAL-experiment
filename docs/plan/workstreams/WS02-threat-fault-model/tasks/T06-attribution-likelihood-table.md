@@ -3,8 +3,8 @@ id: WS02-T06
 title: "Attribution as a likelihood table: specification, cells with their source, sensitivity design (ADR-074)"
 workstream: WS02-threat-fault-model
 owner: agent
-status: ready
-depends_on: ["WS02-T04", "WS02-T05"]
+status: blocked
+depends_on: ["WS02-T04", "WS02-T05", "WS05-T13"]
 critical_path: true
 non_negotiable: false
 estimate_pd: 2
@@ -58,3 +58,7 @@ Specify the attribution layer of ADR-074: the method returns p(c | e, t) for c i
 ### Amendment of 2026-10-11 (gab; ADR-074, decision 1)
 
 The output is a set of SUBTYPES (cumulative probability level, sensitivity value) and the cells are at subtype level; the table gives pi(subtype | class) as explicit priors with sensitivity; `p_kappa` is the class-level sum. Add a contract field for the set (`Alert.cause_set`, additive) in the same contract bump. Metrics: coverage and mean set size per stratum (WS08-T09).
+
+### Amendment of 2026-10-11 (gab; ADR-074, amendment 3)
+
+The cells use the fields of `#evidencevector` 0.2.0 (WS05-T13): the dispenser group, `crypto_temporal.seq_repeat`, `system.seq_gap`, `signal_quality.cuff_value_repeated`. `system.seq_gap` and `system.ble_link_quality` form ONE grouped cell (they overlap). The contract bump of `#evidencevector` is NOT made here (WS05-T13); this task bumps `#alert` (`cause_set`) and `#attribution`. The truth used for the scoring of cells and metrics is the TIGHT causal labelling (a C2 event is the cause of an alert only if the faulty device is in the data scope of the template and the alert is decided while the event window is active); the looser labelling is reported next to it.

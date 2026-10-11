@@ -4,7 +4,7 @@ title: "Main experiment: B1-B5 versus proposed method"
 workstream: WS08-experiments
 owner: agent
 status: blocked
-depends_on: ["WS08-T01", "WS06-T07", "WS04-T16", "WS08-T08", "WS05-T12", "WS08-T09"]
+depends_on: ["WS08-T01", "WS06-T07", "WS04-T16", "WS08-T08", "WS05-T12", "WS08-T09", "WS04-T18"]
 critical_path: true
 non_negotiable: false
 estimate_pd: 2.5
