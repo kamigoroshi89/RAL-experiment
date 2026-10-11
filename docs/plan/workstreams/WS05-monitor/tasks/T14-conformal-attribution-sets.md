@@ -44,3 +44,7 @@ ADR-074, `docs/benchmark/evidence/likelihood-attribution.md` sections 9 and 10 (
 `pytest -q`, `ruff check src tests`, `ruff format --check src tests`, `mypy src/ralmon` exit 0; `python3 tools/check_plan.py` exits 0.
 
 ## Notes
+
+### Hand-over from WS02-T06 (specification delivered, 2026-10-12)
+
+`Alert.cause_set: Sequence[str] | None = None` is already in `src/ralmon/attribution/alert.py` and in `#alert` 0.3.0. Subtype names are those of `configs/attribution_likelihood.yaml` (`subtypes[*].name`, 35 names); the posterior over them is `posterior_subtypes` of WS05-T12 (document `docs/models/attribution-likelihood.md`, section Sets and conformal calibration): score = 1 - p(true subtype | e, t), threshold = the `ceil((n+1)(1-alpha))`-th smallest calibration score (full set if the rank exceeds `n`), set = subtypes with score at most the threshold, marginal and Mondrian per template, the pairs calibrated separately. An alert whose true subtype is not applicable at the template has p = 0 and score 1. State the guarantee as marginal under patient-level exchangeability, never as a distribution-free coverage statement without that qualification; report coverage per patient with a cluster bootstrap. The cumulative-level set of the table is the fallback (`cumulative_level`, awaiting_human_value, range 0.8, 0.9, 0.95).
