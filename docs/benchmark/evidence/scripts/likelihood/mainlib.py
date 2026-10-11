@@ -84,3 +84,35 @@ def truth_of(comp, mode="strict"):
         if len(inj) == 1:
             c = next(iter(inj)); return c, [g for g in comp if g[0] == c and g[5]][0]
     return "AMB", comp[0]
+
+
+# ---- scope-aware labelling (follow-up item 2): a link fault counts for a template only if its target is in the data scope
+DATA_SCOPE = {"range": ("cuff",), "sched": ("cuff",), "hold": ("cuff", "dispenser"), "count": ("dispenser",),
+              "resp": ("cuff", "dispenser"), "sys": ("cuff",), "int": ("dispenser",)}
+
+
+def label_alerts_scoped(day, window_ms=24 * H, post_end=True):
+    """Like label_alerts, but a ble_dropout event is compatible with an alert only if the dropout target is a BLE device of the
+    template's data scope, and (post_end=False) only while the dropout window (+ window_ms) is open from its onset."""
+    evs = []
+    for g in day["gt"]:
+        tm = event_templates(g, day["log"])
+        tgt = None
+        if g[1] == "ble_dropout":
+            ts = [l["params"].get("target") for l in day["log"] if l["subtype"] == "ble_dropout" and l["onset_ms"] == g[3]]
+            tgt = ts[0] if ts else None
+        evs.append((g, tm, tgt))
+    out = []
+    for a in day["alerts"]:
+        comp = []
+        for g, tm, tgt in evs:
+            if a["template"] not in tm:
+                continue
+            if tgt is not None and tgt not in DATA_SCOPE.get(a["template"], ()):
+                continue
+            ref = first_decidable(g)
+            end = g[4] if g[4] is not None else g[3]
+            if ref <= a["decided"] <= max(ref, end) + window_ms:
+                comp.append(g)
+        out.append((a, comp))
+    return out

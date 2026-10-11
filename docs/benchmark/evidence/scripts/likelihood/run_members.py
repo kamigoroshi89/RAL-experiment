@@ -40,7 +40,7 @@ def member_row(built, reg, tpl, cfg, auth, rule):
         log=[dict(cls=e["cls"], subtype=e["subtype"], realised=e["realised"], onset_ms=e["onset_ms"], end_ms=e["end_ms"],
                   templates=list(e["details"].get("templates", [])), level=e["level"], params=e["params"]) for e in truth.injection_log],
         gt=[(g.cls.value, g.subtype, g.template_id, g.onset_ms, g.end_ms, g.injected) for g in truth.ground_truth],
-        alerts=alerts, dispenses=disp, n_events=len(day.events))
+        alerts=alerts, dispenses=disp, n_events=len(day.events), bp=[(x.t_rx_ms, x.value) for x in day.samples if x.signal == "bp"], bp_prev=[])
 
 def work(args):
     lo, hi = args
