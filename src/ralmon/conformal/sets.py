@@ -14,18 +14,22 @@ in two ways:
   template, the Mondrian variant). The confounder pairs are calibrated by a SEPARATE instance (their
   prevalence is 50% and their template mix differs from the main population).
 
-What the guarantee is, and is not. Split conformal prediction gives, for a fixed posterior model, a
-coverage of the true subtype of at least ``1 - alpha`` for a new alert, marginally over the draw of the
-calibration set and of the test alert, IF the calibration and test alerts are exchangeable. Here the unit
-of exchange is the PATIENT, and the statement holds only if calibration and test patients are disjoint
-(this class refuses the overlap) and are exchangeable draws from the same population. Alerts of one
-patient are correlated, so a patient with many alerts weighs more than a patient with few, and coverage
-per patient (a cluster bootstrap over patients) is a metric of the evaluation (WS08-T09), not part of
-this statement. The Mondrian variant is marginal within each template cell, not conditional on the true
-cause. Nothing here applies to another population (the transfer from the main population to the pairs is
-a measured failure of the research), and nothing says that the posterior is correct: a poor model gives
-large sets, not a broken guarantee. The phrase "distribution-free coverage" is never used here without
-the qualification above.
+What the guarantee is, and is not. The rank argument of split conformal prediction gives, for a fixed
+posterior model, a coverage of the true subtype of at least ``1 - alpha`` for a new alert, marginally
+over the draw of the calibration set and of the test alert, IF the calibration scores and the test score
+are exchangeable. Exchangeability of PATIENTS is not enough for that when a patient contributes several
+alerts: alerts of one patient are correlated, so the alerts are not exchangeable even if the patients
+are. The finite-sample bound is therefore exact only for one designated alert per patient (one score per
+patient in the calibration set and one test alert from a patient not in it); with several alerts per
+patient the coverage is APPROXIMATE and is checked empirically: the role-swap check (calibrate on the
+test patients, evaluate on the calibration patients), the cluster bootstrap over patients and the
+coverage per patient are metrics of the evaluation (WS08-T09), not part of this statement. Calibration
+and test patients must be disjoint (this class refuses the overlap) and drawn from the same population.
+Ties between scores make the coverage conservative. The Mondrian variant is marginal within each
+template cell, not conditional on the true cause. Nothing here applies to another population (the
+transfer from the main population to the pairs is a measured failure of the research), and nothing says
+that the posterior is correct: a poor model gives large sets, not a broken guarantee. The phrase
+"distribution-free coverage" is never used here without the qualification above.
 
 Ground-truth discipline. Only the calibration side takes a truth: ``SubtypeCalibrationAlert.true_subtype``
 and ``nonconformity_score``. The builders of a set (``prediction_set``, ``cumulative_level_set`` and
@@ -74,10 +78,14 @@ SetMode = Literal["marginal", "mondrian"]
 #: Numerical tolerance on the sum of a posterior (floating-point rounding of a softmax), not a modelling value.
 POSTERIOR_SUM_TOLERANCE: Final = 1e-9
 
-GUARANTEE_SETS: Final = "marginal over alerts under exchangeability of calibration and test at the level of the patient"
+GUARANTEE_SETS: Final = (
+    "marginal over alerts; a finite-sample bound only for one designated alert per patient with "
+    "calibration and test patients disjoint and exchangeable, otherwise approximate and checked empirically"
+)
 GUARANTEE_SETS_MONDRIAN: Final = (
-    "marginal within each template cell under exchangeability of calibration and test at the level of "
-    "the patient"
+    "marginal within each template cell; a finite-sample bound only for one designated alert per patient "
+    "with calibration and test patients disjoint and exchangeable, otherwise approximate and checked "
+    "empirically"
 )
 ASSUMPTIONS_SETS: Final[tuple[str, ...]] = (
     (
@@ -85,11 +93,17 @@ ASSUMPTIONS_SETS: Final[tuple[str, ...]] = (
         "nothing is claimed for another population"
     ),
     (
-        "alerts of one patient are correlated: the statement is over alerts, and coverage per patient "
-        "is a separate measurement (cluster bootstrap over patients)"
+        "alerts of one patient are correlated: patient-level exchangeability alone does not make the alerts "
+        "exchangeable, so the rank bound is exact only for one designated alert per patient; with several "
+        "alerts per patient the coverage is approximate and is checked empirically (role-swap check, "
+        "cluster bootstrap over patients, coverage per patient)"
     ),
+    "ties between scores make the coverage conservative",
     "the posterior model is fixed before calibration; the calibrator is fitted on the current model version",
-    "a threshold needs enough calibration alerts for the level; otherwise the set is the full set of the applicable subtypes",
+    (
+        "a threshold needs enough calibration alerts for the level; otherwise the set is the full set of "
+        "the applicable subtypes"
+    ),
 )
 
 
@@ -300,8 +314,9 @@ class SubtypeSetCalibrator:
     without any calibration alert falls back in the same way. ``min_cell_size`` has no default: without it
     the only condition is the rank of the finite-sample correction.
 
-    The guarantee is marginal and holds only if calibration and test are exchangeable at the level of the
-    patient (see the module docstring); alerts of one patient are correlated. Use a SEPARATE instance
+    The statement is marginal; the finite-sample bound is exact only for one designated alert per patient,
+    and with several correlated alerts per patient the coverage is approximate and checked empirically
+    (see the module docstring). Use a SEPARATE instance
     (``population="pairs"``) for the confounder pairs: their prevalence is 50% and their template mix
     differs, so the thresholds of the main population do not transfer. The calibrator is tied to the
     model version given to ``fit`` (``calibrated_for``): ``predict_set`` requires the version of the
@@ -400,6 +415,11 @@ class SubtypeSetCalibrator:
 
     @staticmethod
     def _check_disjoint(calibration: frozenset[str], test: Collection[str]) -> None:
+        if isinstance(test, str):
+            raise TypeError(
+                "test patient ids must be a collection of ids, not a single str "
+                f"(got {test!r}, which would be read as its characters)"
+            )
         shared = sorted(calibration.intersection(test))
         if shared:
             shown = ", ".join(repr(p) for p in shared[:5])
