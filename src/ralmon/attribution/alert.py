@@ -1,4 +1,4 @@
-"""The alert tuple (02-interfaces.md#alert, version 0.1.0): ``AttributedCause``, ``Explanation``, ``Detection``, ``Alert``.
+"""The alert tuple (02-interfaces.md#alert, version 0.3.0): ``AttributedCause``, ``Explanation``, ``Detection``, ``Alert``.
 
 The dataclasses are the contract, verbatim, with one widening that is ahead of the contract (see below). The
 derivation of the fields from a ``VerdictRecord`` is in ``alert_from_record`` and follows
@@ -102,6 +102,8 @@ class Alert(Detection):
     )  # instance key of the upstream alert when this one is a cascade effect
     #: Posterior over C1, C2, C3 (sums to 1; ADR-074); None for the hierarchical rule.
     p_kappa: Mapping[AttributedCause, float] | None = None
+    #: Subtype names reported as the possible causes (ADR-074 amendment 1); None for detectors without sets.
+    cause_set: Sequence[str] | None = None
 
 
 def alert_time_and_severity(record: VerdictRecord) -> tuple[TimeMs, float]:
