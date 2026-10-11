@@ -23,6 +23,10 @@ The semantics used is the merged core: `docs/models/evidence-channels.md` (calle
 4. **Meaning conventions (ADR-033, ADR-040).** The key of the evidence mapping is `VerdictRecord.instance_key`; a scalar `system` field aggregates over the scope of the instance; `system.battery_low` is the robot battery and `witness.robot_present` is the patient presence observed by the robot; the outcome `declined` does not make `system.manip_task_failed` True; `dispenser.content_change` is before minus after. The A4 mask of EC lists the new fields as unchanged (ward-side).
 5. **A combination the old field could not express.** `system.seq_gap` asserted while the ratio is complete cannot be produced by the extractor (the ratio is 1.0 exactly when no value of its span is missing); the table reads it as evidence that no rule accepts (RS-2, reason conflict) and not as a clean stream, so the total function stays conservative.
 
+## The likelihood table is the method of the paper; this table is the reference rule `ours-hier`
+
+ADR-074 replaced the exclusion rule of this document, as the attribution method of the paper, with a likelihood table over the SUBTYPES of the causes: `docs/models/attribution-likelihood.md` (WS02-T06; machine-readable cells in `configs/attribution_likelihood.yaml`). The decision table below stays unchanged as the reference rule and as the comparison method under the name `ours-hier` (`HierarchicalRule`, `posterior` and `posterior_subtypes` return `None` for it). The reading classes and the relevance map of this document are inputs of the likelihood table; it adds the masks by data scope for the three context fields of `#evidencevector` 0.2.0 (the dispenser group and `signal_quality.cuff_value_repeated`), which this rule does not read.
+
 ## Inputs and outputs
 
 **Signatures** (quoted from `#attribution`; the Protocols are not changed by this document).

@@ -491,7 +491,7 @@ Rules of 0.3.0 (ADR-060). (5) **Predictive mode.** `predictive=True` requires `a
 
 ## Alert
 
-Version 0.2.0 (ADR-074: `Alert.p_kappa`, additive, last field; before: 0.1.1, ADR-059: `Alert.rho` may be `None`). Owner WS01. Consumers: WS02, WS05, WS06, WS08, WS09, WS11. Sources: analisi §4.2 (σ̃), §4.4 (ρ), §4.5 (κ), §4.8 (traceability wording), §4.9 item 3 (cascades).
+Version 0.3.0 (ADR-074 amendment 1: `Alert.cause_set`, additive, last field, default `None`; 0.2.0: ADR-074, `Alert.p_kappa`; 0.1.1: ADR-059, `Alert.rho` may be `None`). Owner WS01. Consumers: WS02, WS05, WS06, WS08, WS09, WS11. Sources: analisi §4.2 (σ̃), §4.4 (ρ), §4.5 (κ), §4.8 (traceability wording), §4.9 item 3 (cascades).
 
 The output tuple ⟨τ, κ, σ̃, ρ, ξ⟩ with explicit semantics per field.
 
@@ -531,6 +531,7 @@ class Alert(Detection):
     root_cause_of: Sequence[str]      # instance keys of downstream violations explained by this alert (cascades)
     caused_by: str | None             # instance key of the upstream alert when this one is a cascade effect
     p_kappa: Mapping[AttributedCause, float] | None = None  # posterior over C1, C2, C3 (sums to 1; ADR-074); None for the hierarchical rule and for detectors that do not attribute probabilistically
+    cause_set: Sequence[str] | None = None  # the set of SUBTYPE names that the detector reports as the possible causes (ADR-074 amendment 1); None for the hierarchical rule and for detectors without sets
 ```
 
 Semantics:
@@ -539,6 +540,7 @@ Semantics:
 - κ is produced by the attribution layer, never by the sub-formula alone (analisi §4.5). A value of `UNDETERMINED` is not an error.
 - `rho` is `None` exactly when the `VerdictRecord` has no confidence (the monitor has no error model for a MEASURED value). A violated verdict is always reported, so the alert is still issued; consumers of `Alert.rho` (calibration, ECE, ranking by confidence) filter `None` and never read it as 0 (ADR-059).
 - `kappa` is derived from `p_kappa`: the cause with the largest posterior when it reaches the declared threshold, otherwise `UNDETERMINED` (ADR-074). `UNDETERMINED` is not a key of `p_kappa`.
+- `cause_set` holds subtype names (the vocabularies of `docs/models/fault-model.md`, `docs/models/threat-model.md` and the C1 labels of the benchmark), ordered by decreasing probability with ties by name; for the likelihood attributor it is the most probable subtypes up to the declared cumulative level, or the conformal set of the calibrator; `p_kappa` is the sum of the subtype posteriors by class (`docs/models/attribution-likelihood.md`). `None` means that the detector has no set (`ours-hier`, B1-B5); an empty sequence is never produced. The abstention `UNDETERMINED` of a method without sets is scored as the full set of the subtypes applicable at the template, by the metrics, not stored here.
 - A cascade effect (for example a counter violation caused by a C2 missed measurement) carries `caused_by` and is not shown as a separate top-level alert (analisi §4.9 item 3).
 - Ordering of alerts uses `rank_alerts` from `#template`.
 
@@ -613,12 +615,13 @@ Rules:
 
 ## Attribution
 
-Version 0.2.0 (ADR-074: likelihood table, `posterior`; before: 0.1.0). Owner WS02. Consumers: WS05, WS08. Sources: analisi §4.5 (hierarchical rule, abstention, diagnosability matrix), §3.6, §4.9 item 3, §5.5, §5.6 (A4).
+Version 0.3.0 (ADR-074 amendment 1: `posterior_subtypes`, additive; 0.2.0: ADR-074, `posterior`; 0.1.0). Owner WS02. Consumers: WS05, WS08. Sources: analisi §4.5 (hierarchical rule, abstention, diagnosability matrix), §3.6, §4.9 item 3, §5.5, §5.6 (A4).
 
 ```python
 class AttributionRule(Protocol):
     def attribute(self, violated: VerdictRecord, evidence: EvidenceVector) -> AttributedCause: ...
     def posterior(self, violated: VerdictRecord, evidence: EvidenceVector) -> Mapping[AttributedCause, float] | None: ...  # ADR-074; None for the hierarchical rule
+    def posterior_subtypes(self, violated: VerdictRecord, evidence: EvidenceVector) -> Mapping[str, float] | None: ...  # ADR-074 amendment 1; subtype name -> probability, over the subtypes applicable at the template, summing to 1; None for the hierarchical rule
 
 class Attributor(Protocol):
     def attribute_all(self, violated: Sequence[VerdictRecord], evidence: Mapping[str, EvidenceVector]) -> Sequence[Alert]: ...
@@ -632,7 +635,7 @@ The default rule is hierarchical and auditable (analisi §4.5):
 3. Otherwise a violation with coherent channels → `C1_CLINICAL`.
 4. Otherwise (conflicting or insufficient evidence) → `UNDETERMINED`.
 
-The diagnosability matrix of analisi §4.5 is encoded as a machine-readable table (`configs/diagnosability.yaml`, owned by WS02) and used both to design tests and to declare which event types are distinguishable with which channels. The method of the paper (ADR-074) is the likelihood table: p(c | e, t) proportional to prior_t(c) times the product over the fields read by the template of P(reading class | c), with a `None` reading contributing the factor 1; the hierarchical rule above is kept as the reference rule (`ours-hier`).
+The diagnosability matrix of analisi §4.5 is encoded as a machine-readable table (`configs/diagnosability.yaml`, owned by WS02) and used both to design tests and to declare which event types are distinguishable with which channels. The method of the paper (ADR-074) is the likelihood table: p(c | e, t) proportional to prior_t(c) times the product over the fields read by the template of P(reading class | c), with a `None` reading contributing the factor 1; the hierarchical rule above is kept as the reference rule (`ours-hier`). Since 0.3.0 the table is at the level of SUBTYPES (ADR-074 amendment 1): `posterior_subtypes` returns p(s | e, t), `posterior` is its sum by class (`Alert.p_kappa`), `Alert.cause_set` is the reported set, and the cells, priors and thresholds are specified in `docs/models/attribution-likelihood.md` with the machine-readable table `configs/attribution_likelihood.yaml` (WS02-T06).
 
 ## Detector
 
