@@ -124,3 +124,6 @@ Review round 1 of the audit adds three decisions that this task must record in i
 
 WS04-T16 is now a dependency: the main experiment must not run on a benchmark whose cuff faults are placed uniformly (most injections are not realised) or whose `stuck_at` cannot use the previous evening. The status goes back to `blocked` until WS04-T16 is done.
 
+### Decision of 2026-10-11 (gab; ADR-071)
+
+The false-alarm figure of the main experiment is measured on windows without injections (a metric to be added to `ralmon.eval`, follow-up of WS08-T01); natural truth events are truth; noise alarms are false alarms; the injected C1 subtypes `hypertensive_spike` and `drug_nonresponse` are read as the excess over the natural background; `ecg_noise` is out of this version. The real benchmark is not generated until the RESP ADR and the non-additivity test are closed (ADR-071 (d)).

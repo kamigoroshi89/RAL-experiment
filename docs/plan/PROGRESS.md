@@ -71,3 +71,8 @@ Stato del bootstrap del piano. Una fase alla volta, commit dopo ciascuna (`plan(
 ## Guasti del bracciale ancorati alle letture (ADR-070, 2026-10-10)
 
 - gab ha confermato: finestre di `cuff_detached`, `cuff_silent_bias` e `stuck_at` ancorate alle letture, durate espresse come numero k di letture (1, 2, 3), verità che registra il k effettivo dopo i guasti del robot; ampiezze del bias 1,0 / 1,5 / 2,5 volte 8 mmHg; `stuck_at` con riporto dall'ultima lettura della sera prima e giorno 0 escluso dall'estrazione. Dimensione del benchmark e tasso C2 provvisori (proposta di lavoro 800 pazienti e tasso 0,6), da fissare dopo lo stesso calcolo per gli altri sottotipi C2 e per C1 e C3. Nuovo task WS04-T16 (pronto); WS08-T02 ora dipende da WS04-T16.
+
+## Fondo realistico di eventi naturali (ADR-071, 2026-10-11)
+
+- La diagnostica sul generatore vero ha mostrato che il giorno senza guasti non è pulito (53% di letture fuori banda, B1 allarma sul 95,7% dei giorni, 2,54 `spontaneous_range` e 1,15 `spontaneous_resp` per paziente-giorno): la media trattata, 140,3 mmHg, sta sul bordo alto della banda. gab ha scelto di tenere la popolazione ancorata alla letteratura e di dichiarare il fondo (non tarare per rendere il giorno pulito), di misurare i falsi allarmi sulle finestre senza iniezioni, di escludere `ecg_noise` da questa versione e di non generare il benchmark finché non sono chiuse due condizioni: una ADR su RESP con riformulazioni e il test di non additività.
+
