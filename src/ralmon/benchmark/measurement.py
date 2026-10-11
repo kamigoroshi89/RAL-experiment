@@ -98,6 +98,13 @@ attempt shares it. The counters can start at another number and the next
 ones are recorded in the settings (``next_cuff_seq``, ``next_dispenser_seq``), so that days
 chain without a restart that a replay check would flag.
 
+Dispense interval (WS04-T18). ``assign_dispense_intervals`` adds to the payload of each ``DISPENSE`` of the dispenser
+``interval_since_previous_ms``, the interval since its previous opening in the stream as the DISPENSER reports it
+(an integer of ms, never negative): it is computed on the openings the device made (before the link stage, so a
+lost opening still counts for the next one, and a forged opening never does), it is absent on the first opening of
+the stream, so also across midnight (a stream is one day), and the ``content_change`` of the payload is untouched.
+The injection pipeline calls it after the numbering when the device profile says that the dispenser reports it.
+
 Resource bounds: at most ``MAX_VISITS_PER_DAY`` ticks, ``MAX_VITALS_SAMPLES`` vitals samples per
 signal, ``MAX_LATENT_SAMPLES`` latent samples and ``MAX_LATENT_EVENTS`` latent events, all
 checked from the lengths before any work; a jitter file has at most ``MAX_JITTER_FILE_BYTES``
@@ -138,6 +145,7 @@ from ralmon.benchmark.segments import (
 from ralmon.benchmark.trace import JsonValue, LatentDay
 from ralmon.benchmark.vocab import (
     KEY_CONTENT_CHANGE,
+    KEY_INTERVAL,
     KEY_KIND,
     KEY_OUTCOME,
     KEY_PATIENT_ID,
@@ -174,6 +182,7 @@ __all__ = [
     "ObservedStream",
     "RobotVisit",
     "assign_device_seq",
+    "assign_dispense_intervals",
     "build_observed_base",
     "draw_clean_vitals",
     "jitter_descriptor",
@@ -1144,3 +1153,36 @@ def assign_device_seq(
         events=tuple(events),
         settings=settings,
     )
+
+
+def assign_dispense_intervals(stream_: ObservedStream) -> ObservedStream:
+    """A copy of ``stream_`` whose ``DISPENSE`` events of the dispenser carry ``interval_since_previous_ms``.
+
+    The openings are taken in order of ``t_device_ms`` (a tie keeps the order of the stream); each one but the first
+    gets the integer interval since the previous one, and the first has none (the first opening of a stream, so
+    also across midnight). Other payload keys (``content_change``) are kept. Applying it twice gives the same stream.
+    """
+    if not isinstance(stream_, ObservedStream):
+        raise MeasurementConfigError("stream_ must be an ObservedStream")
+    events = list(stream_.events)
+    openings = sorted(
+        (
+            i
+            for i, e in enumerate(events)
+            if isinstance(e, Event)
+            and e.kind is EventKind.DISPENSE
+            and e.source == SOURCE_DISPENSER
+        ),
+        key=lambda i: (events[i].t_device_ms, i),
+    )
+    previous: int | None = None
+    for i in openings:
+        event = events[i]
+        payload: dict[str, Any] = {
+            k: v for k, v in event.payload.items() if k != KEY_INTERVAL
+        }
+        if previous is not None:
+            payload[KEY_INTERVAL] = int(event.t_device_ms) - previous
+        events[i] = replace(event, payload=payload)
+        previous = int(event.t_device_ms)
+    return replace(stream_, events=tuple(events))

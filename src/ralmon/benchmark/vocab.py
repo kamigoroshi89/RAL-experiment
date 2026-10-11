@@ -37,6 +37,13 @@ dispenser senses its content (``build_observed_base(..., dispenser_content_sensi
 
 WS04-T11 adds the payload key ``colocated`` of a ``NODE_STATE`` report of the robot (a bool; ADR-054 (b),
 ADR-035): the builder writes one report per visit arrival (true) and one per departure (false).
+
+WS04-T18 adds the two keys that the conventions table already lists for the evidence fields of ``#evidencevector``
+0.2.0: ``diagnostics`` of a ``NODE_STATE`` report (``ok``, ``warn``, ``error``, ``stale``: the levels of the ROS 2
+``DiagnosticStatus``, produced by the driver of a device under the liveness contract of
+``docs/models/evidence-channels.md``) and ``interval_since_previous_ms`` of a ``DISPENSE`` (a non-negative integer,
+the interval since the previous opening of the same dispenser stream as the dispenser reports it; absent on the
+first opening of a stream and across midnight).
 """
 
 from __future__ import annotations
@@ -52,10 +59,13 @@ from ralmon.signals import EventKind
 __all__ = [
     "ALL_PAYLOAD_KEYS",
     "BLE_DEVICES",
+    "DIAGNOSTICS_VALUES",
     "KEY_COLOCATED",
     "KEY_COMMANDED",
     "KEY_CONTENT_CHANGE",
+    "KEY_DIAGNOSTICS",
     "KEY_ERROR_CODE",
+    "KEY_INTERVAL",
     "KEY_KIND",
     "KEY_OUTCOME",
     "KEY_PATIENT_ID",
@@ -142,8 +152,10 @@ OUTCOMES: Final = (
 )
 KEY_PATIENT_ID: Final = "patient_id"
 
-# DISPENSE (evidence-channels.md, proposed by EC-GAP-1): after minus before, float.
+# DISPENSE (evidence-channels.md, EC-GAP-1, ADR-032, ADR-040 (2)): content change BEFORE MINUS AFTER, float (a release
+# is positive, a bounce is 0.0), and the interval since the previous opening of the same stream, int >= 0, ms.
 KEY_CONTENT_CHANGE: Final = "content_change"
+KEY_INTERVAL: Final = "interval_since_previous_ms"
 
 # NODE_STATE (evidence-channels.md, Trace evidence conventions and D-4).
 KEY_STATE: Final = "state"
@@ -162,6 +174,9 @@ STATES: Final = (
     STATE_UNREACHABLE,
 )
 KEY_COMMANDED: Final = "commanded"  # bool: the transition was announced as deliberate
+# WS04-T18: the level of a driver report (evidence-channels.md, the levels of the ROS 2 DiagnosticStatus).
+KEY_DIAGNOSTICS: Final = "diagnostics"
+DIAGNOSTICS_VALUES: Final = ("ok", "warn", "error", "stale")
 # WS04-T11 (ADR-054 (b), ADR-035): the robot reports with a bool whether it is co-located with the patient;
 # the monitor turns the report of the source ``robot`` into the availability of ``presence`` and ``intake``.
 KEY_COLOCATED: Final = "colocated"
@@ -182,10 +197,12 @@ PAYLOAD_KEYS: Final[Mapping[EventKind, frozenset[str]]] = MappingProxyType(
     {
         EventKind.SCHEDULE_TICK: frozenset({KEY_KIND}),
         EventKind.MEASUREMENT: frozenset(),
-        EventKind.DISPENSE: frozenset({KEY_CONTENT_CHANGE}),
+        EventKind.DISPENSE: frozenset({KEY_CONTENT_CHANGE, KEY_INTERVAL}),
         EventKind.INTAKE: frozenset(),
         EventKind.ROBOT_TASK: frozenset({KEY_TASK, KEY_OUTCOME, KEY_PATIENT_ID}),
-        EventKind.NODE_STATE: frozenset({KEY_STATE, KEY_COMMANDED, KEY_COLOCATED}),
+        EventKind.NODE_STATE: frozenset(
+            {KEY_STATE, KEY_COMMANDED, KEY_COLOCATED, KEY_DIAGNOSTICS}
+        ),
         EventKind.DEVICE_ERROR: frozenset({KEY_ERROR_CODE}),
         EventKind.VERIFICATION: frozenset({KEY_VERIFICATION, KEY_SUBJECT}),
         EventKind.MEASUREMENT_MISSED: frozenset(),
@@ -212,6 +229,7 @@ _ENUMERATED: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
         KEY_TASK: TASKS,
         KEY_OUTCOME: OUTCOMES,
         KEY_STATE: STATES,
+        KEY_DIAGNOSTICS: DIAGNOSTICS_VALUES,
         KEY_VERIFICATION: VERIFICATIONS,
     }
 )
@@ -244,6 +262,13 @@ def _check_value(key: str, value: object) -> None:
             raise VocabularyError(
                 f"payload {key!r} must be a non-empty string of at most "
                 f"{_MAX_ERROR_CODE} characters, got {value!r}"
+            )
+    elif key == KEY_INTERVAL:
+        if isinstance(value, bool) or not isinstance(value, numbers.Integral):
+            raise VocabularyError(f"payload {key!r} must be an integer, got {value!r}")
+        if value < 0:
+            raise VocabularyError(
+                f"payload {key!r} must not be negative, got {value!r}"
             )
     elif key == KEY_CONTENT_CHANGE:
         if isinstance(value, (bool, str)) or not isinstance(value, numbers.Real):

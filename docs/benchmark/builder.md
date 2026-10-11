@@ -59,7 +59,8 @@ design files), `files`, `event_counts` (scored days, key `<class>/<subtype>`), a
   `monitor` (`step_ms`, `reorder_delay_ms`), `jitter_source`, `segment_source`, `disabled_subtypes` (subtypes that an
   injector could not run, for example `ecg_noise` without a noise segment), `numpy_version`, `python_version`,
   `registry_version`, `registry_sha256`, `registry_fixture_only`, `device_profile` (ADR-036: `dispenser_content_sensing`,
-  `authenticating_devices`), `design_sha256` (the care-plan, generator-design and injection files), `history_days`,
+  `authenticating_devices`; WS04-T18: `cuff_resolution_mmhg`, `pulse_resolution_bpm`, `dispenser_reports_interval`,
+  `diagnostics_profile` and `driver`, see the section on the device profile), `design_sha256` (the care-plan, generator-design and injection files), `history_days`,
   `injection_rates`, `confounder_pairs_per_variant`, `excluded_zero_levels` (per cohort and subtype, the magnitude levels
   the plan does not draw because they resolve to zero, see below), `plan_skipped` (injections that the plan drew and could not place:
   overlap, no position, a replay or a `stuck_at` on the first day, an anchored cuff window on a day with too few readings),
@@ -108,7 +109,88 @@ Each visit of the robot produces a `NODE_STATE` event of the source `robot` with
 presence sample) and `false` where no other visit keeps the robot in the room. WS05-T11 turns them into the availability of
 `presence` and `intake` (ADR-054 (b)); the gate `presence_samples_without_availability_marks == 0` holds on every built day
 (test `test_every_robot_visit_has_an_arrival_report_and_the_gate_is_zero`). A twin whose variant has no robot has no robot
-report and no presence sample.
+report and no presence sample. ADR-040 (3) assigns this owner to the builder; WS04-T18 verified it (it was already so) and pinned it with
+`test_colocated_events_follow_the_robot_visits`: on a day without a robot-stage fault the reports are `true` at the arrival of every
+visit (the instant of its `navigate` task) and `false` at the departure of each run of overlapping visits, and a variant without the robot
+has none.
+
+## Device profile: cuff resolution, driver diagnostics, dispenser interval (ADR-074, WS04-T18)
+
+The `device_profile` section of the build configuration (`ralmon.benchmark.device_profile.GeneratorDeviceProfile`, recorded whole in
+`settings.device_profile` of the manifest) declares how the devices show what they measure. It is declared configuration: nothing is read from
+the environment. Benchmarks built before WS04-T18 differ from the ones built now in the cuff readings (not rounded), the `DISPENSE`
+payload (no interval) and, under the diagnostics profile, the `NODE_STATE` events; they must be regenerated, and the manifest of an old
+benchmark has none of the new keys.
+
+* **Cuff resolution** (`cuff_resolution_mmhg`, `pulse_resolution_bpm`; default 1 mmHg and 1 bpm, the decision of gab in ADR-074 amendment 2; `null`
+  means no rounding, the old behaviour). The readings `bp` and the cuff's `hr_pulse` are rounded to a multiple of the resolution at the
+  device boundary: in `finalize_observed`, AFTER the injectors, so a silent bias is added and a frozen value is repeated before the display
+  rounds it (a `stuck_at` window stays exactly identical after rounding; natural readings are rounded independently). The latent day,
+  the ground truth, the `generator/` sidecar and the care plan are never rounded (test `test_rounding_does_not_change_ground_truth`), and
+  neither is the stream that the next day takes as `previous_day`, so the injectors still see the unrounded readings: the realisation of a
+  `stuck_at` window (a covered reading that differs from the frozen one) is decided before the display, and the share realised of ADR-070
+  is not lowered by the rounding. The reading that a `stuck_at` at the start of the day freezes (the last of the previous evening) is shown as
+  the rounded value of that evening reading, so the repeat is visible only to an extractor that carries the last cuff value across the day
+  boundary (D-16 of `evidence-channels.md` does). **The resolution of the run is the value the extractor must be given**:
+  `DeviceCapabilities.cuff_resolution` = `settings.device_profile.cuff_resolution_mmhg`; nothing else couples them, and a profile without it
+  makes `signal_quality.cuff_value_repeated` `None`. `ralmon.eval.device_capabilities.device_capabilities_from_manifest(manifest)` builds that
+  part of the extractor's `DeviceProfile` (cuff resolution, dispenser content sensing, authenticating devices, the nodes whose driver reports
+  diagnostics) from the manifest, completing the run's own declaration of the other capabilities; a benchmark built with `null` gives
+  `cuff_resolution=None`. The natural repeat probability of the rounded readings (about 0.02 at 1 mmHg in the
+  prototype, 0 without rounding) is a property of this generator and its noise, not of a real cuff.
+* **Dispenser interval** (`dispenser_reports_interval`, default true). Each `DISPENSE` of the dispenser carries `interval_since_previous_ms`,
+  an integer of ms, never negative: the interval since the previous opening of the stream as the DEVICE reports it (computed on the openings
+  the device made, before the link stage, so an opening lost by a dropout still counts for the next one, and a forged opening never
+  does). It is absent on the first opening of a stream and therefore across midnight (a stream is one day). `content_change` stays BEFORE
+  MINUS AFTER (ADR-040 (2)): +1.0 for a release, 0.0 for a bounce. Each `DISPENSE` has its own `seq` (assigned by the pipeline). A forged
+  `DISPENSE` (`dispense_forgery`) carries the interval that the stream gives at its onset: measured from the latest earlier `DISPENSE` that
+  REACHED the gateway (genuine, or forged before it), absent if none, at both attacker levels. So a forgery written after a genuine opening
+  that a dropout lost differs from a real twin (it has no previous opening to measure from), and the informed forger copies the bounce
+  timing by where it places the message (one bounce gap after a real opening it reports the bounce interval, as the forged dispense of the
+  bounce-against-forgery pairs of the research prototype). A forged `DISPENSE` has no `content_change`.
+  **Coherence assumption (review B1).** The genuine opening that FOLLOWS a forged one: for the INFORMED forger it reports the interval since the
+  forged opening (the forged opening counts in the chain, `details["n_rechained"]` of the record), as its twin without the attack would; for
+  the NAIVE forger the genuine chain is left as the device measured it (the device never saw the forged opening), so a naive forgery in
+  place of a first dose leaves the next genuine opening without an interval. The informed attacker has the relay position (H-SUPP) and
+  is coherent on every available channel (threat model: such an attacker is not distinguishable by construction, TM-OP-5); the assumption
+  is that it can rewrite the interval that the device reports for the opening after the forged one, as it renumbers the counter (H-FRESH).
+  Under it the ADR-032 interval channel does NOT break the informed-attacker limit: the pair variants `informed_robot_noauth` and
+  `informed_norobot_noauth` stay indistinguishable by construction in every pair. The alternative, an informed attacker that cannot rewrite
+  the device's own interval, would leave those pairs distinguishable whenever the forged opening replaces the first dose of the day (the
+  genuine second opening is then the first genuine opening of its stream and has no interval, while the non-response twin's has one): 7 of 16
+  pairs of each informed noauth variant at seed 3 in a scratch build. The pair comparison (`compare_observed`) reads the interval of the
+  payload in the dispense-timing field, and `test_computed_flags_equal_the_declared_ones_for_every_committed_variant` pins the flags of all
+  19 variants (see the Notes of WS04-T18 for the table).
+* **Driver diagnostics** (`diagnostics_profile`). Two named profiles are recorded in the manifest: `without_diagnostics` (the default: no `diagnostics`
+  report at all, the sensitivity case) and `driver_with_diagnostics`. The latter emits `NODE_STATE` events (`state` `active`, `diagnostics` `ok` or `stale`)
+  of the source of each device of `devices` (default `cuff` and `dispenser`; `ecg` and `oximeter` may be named) under the liveness contract of
+  `docs/models/evidence-channels.md`: `ok` at the start of every day and at every period; a device with an on-demand activity mode (cuff,
+  dispenser) is `stale` only with an OPEN SESSION silent for MORE than `stale_lease_ms`, an idle one is `ok` at every period and never `stale`; a
+  continuous device is `stale` while silent beyond the lease; one extra report marks the first millisecond beyond the lease and one the
+  recovery. A session is derived from what the device SENT (before the link stage): that of a cuff reading opens when the measurement starts
+  (the reading instant minus its inflation time) and closes when the reading arrives, that of a dispenser opening is instantaneous; a
+  message lost on the link leaves its session open until the gateway reports the link `active` again or the device delivers another
+  message. A refused measurement, a manipulation failure or an omitted dose sends nothing and opens no session, so a C1 event never makes a device `stale`.
+  **This is a modelling choice that departs from the wording of the liveness contract** (item 3 of `evidence-channels.md`: a session is open when
+  "a measurement or opening was requested or announced"): here sessions derive from what the device SENT, so a requested but unanswered
+  measurement (a silent detachment, a refusal, a cuff that never answers) opens no session and is never `stale`. In practice `stale` is a
+  `ble_dropout` signal, and `P(stale | cuff_detached) = 0` is a property of this generator, not of the contract (a real driver that
+  tracks requests would report a cuff that never answers as `stale` after the lease).
+  The reports are ward-side nodes, written after the link stage, and are not removed by a dropout; they are derived from the stream and the
+  node reports only, never from an injection record. `warn` and `error` are not produced: they would come from the status the device itself reports,
+  and the fault model attributes no fault to `system.diagnostics_ok` (OP-4). The manifest records `driver`: `period_ms`, `stale_lease_ms`, `devices` and `activity_modes`.
+  **`driver_period_ms` and `driver_stale_lease_ms` are rows of `generator_design.yaml` with NO default (`awaiting_human_value`)**: a build with the
+  diagnostics profile while they are awaiting is refused with `UnfilledParameterError`, and the library raises `UnsetDriverParameterError` for
+  an unset lease or period. A build with `without_diagnostics` does not read them, so they do not stop it. The lease must exceed the longest
+  time from the start of a measurement to its reading, or every reading shows a short `stale`: the build raises `LeaseTooShortError` unless
+  `driver_stale_lease_ms` is strictly above that time (the registry's `bound_inflation_ms_upper` when it declares one, else the nominal time as a
+  floor), and the generation raises it again for any single reading whose start-to-reading time is not below the lease. No margin is added.
+  The driver state does not carry across midnight: each day is a stream, a session left open at its end is not continued, and the next day's first
+  report is `ok`. On the reading of the fields, a stale cuff in a
+  dropout window makes `system.diagnostics_ok` False for the instances whose window contains it; under the silent faults the driver stays `ok`.
+* **Pairs.** The twins are built with the same profile (`PairBase.device_profile`). The comparison of the two members of a pair for the
+  flag `indistinguishable_by_construction` reads the interval key of the dispenses, so a pair whose members differ only in a reported interval is
+  distinguishable.
 
 ## Care plans
 

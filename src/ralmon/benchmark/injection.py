@@ -18,7 +18,10 @@ Pipeline (fixed order, ``docs/models/fault-model.md`` hypothesis 3)
   with ``register_injector`` and ``_INJECTOR_MODULES``; their traffic is never renumbered by the
   pipeline and a dropout of the genuine device cannot remove it; an attack reads the genuine
   stream through ``InjectionWork.genuine_view``, the snapshot taken when the stage starts, so
-  one attack never sees the traffic of another). Within a stage
+  one attack never sees the traffic of another). With a device profile in the context (WS04-T18) two steps are
+  added, neither of them an injection: the dispenser intervals (``assign_dispense_intervals``) right after the
+  numbering, and the driver ``diagnostics`` reports right after the link stage, before the attacks; the rounding of
+  the cuff readings is ``finalize_observed``'s. Within a stage
   the order is the rank of the injector, then ``canonical_order``: the result does not depend
   on the order of the specs. Specs that overlap on one subtype (or one ``overlap_group``) and one target are refused
   (windows are half open, ``[onset, onset + duration)``; two windows that touch are allowed).
@@ -67,6 +70,16 @@ import numpy as np
 import yaml
 
 from ralmon.benchmark import vocab
+from ralmon.benchmark.device_profile import (
+    ACTIVITY_MODES,
+    GeneratorDeviceProfile,
+    LeaseTooShortError,
+    MessageView,
+    driver_inputs,
+    driver_reports,
+    message_view,
+    round_cuff_samples,
+)
 from ralmon.benchmark.latent import T_DAY_MS
 from ralmon.benchmark.measurement import (
     LatentSbpHold,
@@ -75,6 +88,7 @@ from ralmon.benchmark.measurement import (
     ObservedStream,
     RobotVisit,
     assign_device_seq,
+    assign_dispense_intervals,
 )
 from ralmon.benchmark.priors import PriorError, load_design_file
 from ralmon.benchmark.rng import StreamKeyError, StreamPurpose, stream
@@ -538,6 +552,13 @@ class InjectionContext:
     deployment property, per device: hypothesis H-DEP of the threat model); a forged or rewritten
     message of such a device leaves a failed verification in the trace, the message of a device
     that does not authenticate leaves none (the field is ``None``, never a negative).
+
+    ``device_profile`` (WS04-T18, ``ralmon.benchmark.device_profile``; ``None``: the stream is as before) declares
+    that the dispenser reports the interval since its previous opening in the payload of each ``DISPENSE``
+    (written after the numbering, from the openings the device made, so a lost opening still counts for the next
+    one) and, for the profile 'driver_with_diagnostics', that the drivers of the named devices add ``NODE_STATE``
+    ``diagnostics`` reports after the link stage. The rounding of the cuff readings is NOT done by the pipeline:
+    it is ``finalize_observed``'s, at the device boundary, after the injectors.
     """
 
     patient_index: int
@@ -552,6 +573,7 @@ class InjectionContext:
     bp_bounds_mmhg: tuple[float, float] | None = None
     hr_bounds_bpm: tuple[float, float] | None = None
     authenticating_devices: tuple[str, ...] = ()
+    device_profile: GeneratorDeviceProfile | None = None
 
     def __post_init__(self) -> None:
         error = InjectionContextError
@@ -583,6 +605,10 @@ class InjectionContext:
             "authenticating_devices",
             _devices("authenticating_devices", self.authenticating_devices),
         )
+        if self.device_profile is not None and not isinstance(
+            self.device_profile, GeneratorDeviceProfile
+        ):
+            raise error("device_profile must be a GeneratorDeviceProfile or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1382,6 +1408,66 @@ def _number(work: InjectionWork, context: InjectionContext) -> None:
     work.settings = dict(numbered.settings)
 
 
+def _dispense_intervals(work: InjectionWork) -> None:
+    """The dispenser reports the interval since its previous opening (the openings the device made)."""
+    work.events = list(assign_dispense_intervals(work.as_stream()).events)
+
+
+def _sent_messages(
+    work: InjectionWork, profile: GeneratorDeviceProfile | None
+) -> dict[str, MessageView]:
+    """What each driven device sent, before the link stage (empty when the profile has no driver)."""
+    if profile is None or profile.driver is None:
+        return {}
+    return {
+        device: message_view(device, work.samples, work.events)
+        for device in profile.driver.devices
+    }
+
+
+def _driver_diagnostics(
+    work: InjectionWork,
+    profile: GeneratorDeviceProfile,
+    sent: Mapping[str, MessageView],
+) -> None:
+    """Add the ``diagnostics`` reports of the drivers (``device_profile`` module docstring).
+
+    Read from the messages the device sent and the ones the link delivered, and the node reports of the stream; never
+    from an injection record. They are ward-side reports, written after the link stage: a dropout cannot remove them.
+    """
+    driver = profile.driver
+    assert driver is not None
+    added: list[Event] = []
+    try:
+        for device in driver.devices:
+            delivered = message_view(device, work.samples, work.events)
+            sessions, arrivals = driver_inputs(
+                sent[device],
+                delivered,
+                work.events,
+                stale_lease_ms=driver.stale_lease_ms,
+            )
+            added.extend(
+                driver_reports(
+                    device,
+                    ACTIVITY_MODES[device],
+                    period_ms=driver.period_ms,
+                    stale_lease_ms=driver.stale_lease_ms,
+                    day_start_ms=work.day_start_ms,
+                    day_end_ms=work.day_end_ms,
+                    sessions=sessions,
+                    message_times=arrivals,
+                )
+            )
+    except LeaseTooShortError:
+        raise
+    except ValueError as exc:
+        raise InjectionContextError(str(exc)) from exc
+    work.events.extend(added)
+    work.sort()
+    work.check_bounds()
+
+
 def apply_observation_injections(
     stream_: ObservedStream, specs: Sequence[InjectionSpec], context: InjectionContext
 ) -> InjectionResult:
@@ -1419,7 +1505,13 @@ def apply_observation_injections(
     work.end_robot_stage()
     records.extend(_run_stage(STAGE_DEVICE, ordered, work, ctx))
     _number(work, ctx)
+    profile = ctx.device_profile
+    if profile is not None and profile.dispenser_reports_interval:
+        _dispense_intervals(work)
+    sent = _sent_messages(work, profile)
     records.extend(_run_stage(STAGE_LINK, ordered, work, ctx))
+    if profile is not None and profile.driver is not None:
+        _driver_diagnostics(work, profile, sent)
     work.freeze_genuine()  # what the devices delivered: the view of every attack
     records.extend(_run_stage(STAGE_ATTACK, ordered, work, ctx))
     work.settings["injection_n_records"] = len(records)
@@ -1434,12 +1526,19 @@ def apply_observation_injections(
 # ---------------------------------------------------------------------------
 
 
-def finalize_observed(stream_: ObservedStream) -> ObservedDay:
+def finalize_observed(
+    stream_: ObservedStream, device_profile: GeneratorDeviceProfile | None = None
+) -> ObservedDay:
     """The ``ObservedDay`` of a stream: samples and events only.
 
     ``visits``, ``measurements`` and ``settings`` of the stream carry generator-side and
     latent values (``MeasurementRecord.latent_sbp_mmhg``) and are never written. Every event
     payload is checked against ``vocab`` and the day against ``trace.validate_day``.
+
+    ``device_profile`` (WS04-T18) is the device boundary: the cuff readings (``bp`` and the cuff's ``hr_pulse``) are
+    rounded to its resolution HERE, after the injectors, so a silent bias is added and a frozen value repeated before
+    the display rounds them. ``None`` leaves the values as the injectors left them. The stream's own samples (the
+    ``previous_day`` of the next day, the latent day, the ground truth) are not changed.
     """
     checked = _check_stream(stream_)
     for event in checked.events:
@@ -1447,11 +1546,20 @@ def finalize_observed(stream_: ObservedStream) -> ObservedDay:
             vocab.check_payload(event.kind, event.payload)
         except vocab.VocabularyError as exc:
             raise InjectionContextError(str(exc)) from exc
+    if device_profile is not None and not isinstance(
+        device_profile, GeneratorDeviceProfile
+    ):
+        raise InjectionContextError(
+            "device_profile must be a GeneratorDeviceProfile or None"
+        )
+    samples = tuple(checked.samples)
+    if device_profile is not None:
+        samples = round_cuff_samples(samples, device_profile)
     day = ObservedDay(
         patient_id=checked.patient_id,
         day_index=checked.day_index,
         seed=checked.seed,
-        samples=tuple(checked.samples),
+        samples=samples,
         events=tuple(checked.events),
         care_plan_id=checked.care_plan_id,
     )

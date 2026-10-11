@@ -113,6 +113,9 @@ GENERATOR_VALUES: dict[str, Any] = {  # FIXTURE-ONLY arithmetic
     "pulse_error_sd_bpm": 2.0,
     "robot_dwell_ms": 10 * MIN,
     "vitals_period_ms": MIN,
+    "driver_period_ms": HOUR,  # TEST VALUE of WS04-T18: the real driver period is awaiting_human_value
+    "driver_stale_lease_ms": 10
+    * MIN,  # TEST VALUE of WS04-T18: the real lease is awaiting_human_value
 }
 DURATIONS = {"short": 10 * MIN, "medium": 30 * MIN, "long": HOUR}  # FIXTURE-ONLY
 MULTIPLES = {  # FIXTURE-ONLY multiples of a reference quantity, spanning it
@@ -177,12 +180,32 @@ def write_injections(
     return path
 
 
-def write_generator_design(tmp_path: Path, *, fill: bool = True) -> Path:
+def write_generator_design(
+    tmp_path: Path,
+    *,
+    fill: bool = True,
+    leave_unset: Sequence[str] = (),
+    overrides: Mapping[str, Any] | None = None,
+) -> Path:
+    """The committed design file with every awaiting row filled by a FIXTURE-ONLY value, except ``leave_unset``."""
     document = yaml.safe_load(GENERATOR_DESIGN.read_text(encoding="utf-8"))
     for row in document["parameters"]:
+        if row["parameter"] in leave_unset:
+            continue
         if fill and row["status"] == "awaiting_human_value":
             row.update(
                 value=GENERATOR_VALUES[row["parameter"]],
+                status="filled",
+                source_ref=FIXTURE_REF,
+                rationale="FIXTURE-ONLY: arithmetic",
+                verified_by=None,
+            )
+    for row in document["parameters"]:
+        if (
+            overrides and row["parameter"] in overrides
+        ):  # a TEST VALUE replaces the fixture one
+            row.update(
+                value=overrides[row["parameter"]],
                 status="filled",
                 source_ref=FIXTURE_REF,
                 rationale="FIXTURE-ONLY: arithmetic",
@@ -245,6 +268,10 @@ def config_document(
     variants: list[str] | None = None,
     rates: tuple[float, float, float] = (1.0, 1.0, 1.0),
     split: Mapping[str, float] | None = None,
+    device_profile: Mapping[str, Any] | None = None,
+    leave_unset: Sequence[str] = (),
+    design_overrides: Mapping[str, Any] | None = None,
+    registry: Path | None = None,
 ) -> dict[str, Any]:
     prior_path = prior if prior is not None else make_prior(tmp_path)
     return {
@@ -252,8 +279,12 @@ def config_document(
         "benchmark_version": "fixture-0",
         "pathway_template_id": "hypertension-fixture",
         "paths": {
-            "registry": str(F0_PATH),
-            "generator_design": str(write_generator_design(tmp_path)),
+            "registry": str(registry if registry is not None else F0_PATH),
+            "generator_design": str(
+                write_generator_design(
+                    tmp_path, leave_unset=leave_unset, overrides=design_overrides
+                )
+            ),
             "care_plans": str(CARE_PLANS),
             "injections": str(write_injections(tmp_path, rates=rates, pairs=pairs)),
             "segments": str(write_segments(tmp_path)),
@@ -264,6 +295,7 @@ def config_document(
         "device_profile": {
             "dispenser_content_sensing": False,
             "authenticating_devices": [],
+            **(device_profile or {}),
         },
         "allow_no_segments": False,
         "confounders": {"variants": variants},
@@ -690,9 +722,16 @@ def test_manifest_records_revision_provenance_and_settings(
     assert isinstance(settings["disabled_subtypes"], list)
     assert settings["n_scored_days"] == 2 and settings["tail_day"] is True
     assert settings["registry_version"] == F0.version()
-    assert settings["device_profile"] == {
+    assert settings[
+        "device_profile"
+    ] == {  # WS04-T18: the device profile is recorded whole
         "dispenser_content_sensing": False,
         "authenticating_devices": [],
+        "cuff_resolution_mmhg": 1.0,
+        "pulse_resolution_bpm": 1.0,
+        "dispenser_reports_interval": True,
+        "diagnostics_profile": "without_diagnostics",
+        "driver": None,
     }
     assert read_manifest(out) == manifest or read_manifest(out).files == manifest.files
 
