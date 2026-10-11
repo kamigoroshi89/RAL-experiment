@@ -59,7 +59,8 @@ FIELD_VALUES: dict[str, Any] = {
     "witness.identity_confirmed": st.sampled_from([None, True, False]),
     "witness.intake_observed": st.sampled_from([None, True, False]),
     "crypto_temporal.authenticated": st.sampled_from([None, None, True, False]),
-    "crypto_temporal.seq_gap_or_replay": st.sampled_from([None, False, False, True]),
+    "system.seq_gap": st.sampled_from([None, False, False, True]),
+    "crypto_temporal.seq_repeat": st.sampled_from([None, False, False, True]),
     "crypto_temporal.timestamp_implausible": st.sampled_from(
         [None, False, False, True]
     ),
@@ -157,7 +158,7 @@ def test_invariant_i2_precedence(case, registry_and_rule) -> None:  # type: igno
     template, fields = case
     ie1 = fields.get("crypto_temporal.authenticated") is False
     ie2 = (
-        fields.get("crypto_temporal.seq_gap_or_replay") is True
+        fields.get("crypto_temporal.seq_repeat") is True
         and fields.get("system.ble_link_quality") == 1.0
     )
     ie3 = (
@@ -182,7 +183,7 @@ def test_invariant_i3_provenance_is_never_sufficient(
     template: str, registry_and_rule
 ) -> None:  # type: ignore[no-untyped-def]
     registry, rule = registry_and_rule
-    assert len(NON_PROVENANCE_PATHS) == 18
+    assert len(NON_PROVENANCE_PATHS) == 22
     decision = _decide(rule, registry, template, {})
     assert decision.kappa.value == "UNDETERMINED"
     expected = "provenance_only" if template in {"sys", "int"} else "insufficient"
@@ -236,7 +237,8 @@ EX_CP = (
     "system.liveliness_ok",
     "system.qos_deadline_missed",
     "system.ble_link_quality",
-    "crypto_temporal.seq_gap_or_replay",
+    "system.seq_gap",
+    "crypto_temporal.seq_repeat",
     "crypto_temporal.timestamp_implausible",
 )
 ROBOT_OUTCOMES = ("system.nav_task_failed", "system.manip_task_failed")

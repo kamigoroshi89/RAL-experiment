@@ -127,7 +127,7 @@ W_ROBOT = "witness.robot_present"
 W_IDENT = "witness.identity_confirmed"
 W_INTAKE = "witness.intake_observed"
 C_AUTH = "crypto_temporal.authenticated"
-C_SEQ = "crypto_temporal.seq_gap_or_replay"
+C_SEQ = "crypto_temporal.seq_repeat"
 C_TS = "crypto_temporal.timestamp_implausible"
 
 CUFF_SIGNALS = ("bp", "inflation_ms", "cuff_health", "hr_pulse")
@@ -1662,7 +1662,7 @@ def evidence_fields() -> set[str]:
 
 def test_signature_paths_are_contract_fields() -> None:
     fields = evidence_fields()
-    assert len(fields) == 20  # the contract has twenty fields
+    assert len(fields) == 24  # the contract 0.2.0 has twenty-four fields
     seen: set[str] = set()
     for subtype in C3_SUBTYPES:
         for combo in itertools.product((False, True), repeat=4):

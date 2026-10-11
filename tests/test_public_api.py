@@ -29,6 +29,7 @@ EVIDENCE_PARTS = (
     "CrossDeviceEvidence",
     "EmbodiedWitnessEvidence",
     "CryptoTemporalEvidence",
+    "DispenserEvidence",
 )
 STUB_ATTR = "__ralmon_stub_owner__"
 

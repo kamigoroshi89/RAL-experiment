@@ -1469,7 +1469,7 @@ def test_c2_c3_events_are_realised_records_only() -> None:
             C2, "dispenser_bounce", T(21, 2), None, group="double_take_vs_bounce"
         ),
         other_record(
-            C3, "replay", T(14), T(15), evidence=("crypto_temporal.seq_gap_or_replay",)
+            C3, "replay", T(14), T(15), evidence=("crypto_temporal.seq_repeat",)
         ),
         other_record(
             C3,

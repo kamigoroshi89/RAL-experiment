@@ -203,7 +203,7 @@ def feed(ex: Any, inputs: Inputs) -> Any:
 
 
 def evidence_dict(vec: Any) -> dict[str, Any]:
-    """The twenty fields of an EvidenceVector as ``{group.field: value}``."""
+    """The twenty-four fields of an EvidenceVector as ``{group.field: value}``."""
     import dataclasses
 
     out: dict[str, Any] = {}
