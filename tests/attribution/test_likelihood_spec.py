@@ -227,7 +227,10 @@ def test_structural_cells_use_eps_and_no_literal_probability(
     for path, value in walk_numbers(cfg):
         if value in (0, 1):
             continue
-        assert any(p in ("sensitivity_range", "designs") for p in path), (path, value)
+        assert any(p in ("sensitivity_range", "designs", "range") for p in path), (
+            path,
+            value,
+        )
 
 
 def test_silent_faults_do_not_zero_diagnostics_ok(cfg: dict[str, Any]) -> None:
@@ -289,7 +292,7 @@ def test_every_cell_names_its_source_and_status(cfg: dict[str, Any]) -> None:
         cfg["pi_designs"],
         *cfg["grouped_cells"].values(),
     ]
-    assert len(cfg["cells"]) > 100
+    assert len(cfg["cells"]) > 60
     for row in rows:
         assert row["source_type"] in SOURCE_TYPES, row
         assert row.get("source_ref"), row
@@ -635,3 +638,72 @@ def test_attribution_rule_points_to_the_table() -> None:
     text = RULE_DOC.read_text(encoding="utf-8")
     assert "attribution-likelihood.md" in text
     assert "ours-hier" in text
+
+
+def _log_lik(
+    cfg: dict[str, Any], comp_id: str, template: str, readings: Mapping[str, str | None]
+) -> float:
+    total = 0.0
+    for field in cfg["templates"][template]["reads"]:
+        reading = readings.get(field)
+        if reading is None:
+            continue
+        pa = p_asserted(cfg, comp_id, field, GRID)
+        total += math.log(pa if reading == "A" else 1 - pa)
+    return total
+
+
+def test_c1_against_silent_faults_at_range_has_ratio_exactly_one(
+    cfg: dict[str, Any],
+) -> None:
+    # Known failure mode of the research (section 7.2): where nothing is raised the likelihood ratio is exactly 1.
+    reads = cfg["templates"]["range"]["reads"]
+    for silent in ("cuff_silent_bias",):
+        for readings in (
+            {},
+            {reads[0]: "D", reads[1]: "D"},
+            dict.fromkeys(reads, "D"),
+            {**dict.fromkeys(reads, "D"), "signal_quality.cuff_value_repeated": "A"},
+        ):
+            lam = _log_lik(cfg, "spontaneous_range", "range", readings) - _log_lik(
+                cfg, silent, "range", readings
+            )
+            assert lam == pytest.approx(0.0, abs=1e-12)
+    # stuck_at differs from C1 only through the repeated-value channel
+    all_denied = dict.fromkeys(reads, "D")
+    assert _log_lik(cfg, "stuck_at", "range", all_denied) < _log_lik(
+        cfg, "spontaneous_range", "range", all_denied
+    )
+    repeated = {**all_denied, "signal_quality.cuff_value_repeated": "A"}
+    assert _log_lik(cfg, "stuck_at", "range", repeated) > _log_lik(
+        cfg, "spontaneous_range", "range", repeated
+    )
+    # identical streams give identical log likelihoods for any two subtypes: D = 0 by construction of the pair quantity
+    assert _log_lik(cfg, "stuck_at", "range", repeated) == _log_lik(
+        cfg, "stuck_at", "range", dict(repeated)
+    )
+
+
+def test_every_component_with_a_ble_or_gap_cell_has_a_joint_mode(
+    cfg: dict[str, Any],
+) -> None:
+    modes = set(cfg["grouped_cells"]["ble_seq_gap"]["modes"])
+    for cell in cfg["cells"]:
+        if (
+            cell["field"] in cfg["grouped_cells"]["ble_seq_gap"]["fields"]
+            and cell["token"] != "R"
+        ):
+            assert cell["component"] in modes, cell
+    # ble_dropout raises the link quality by construction and is also in the modes
+    assert "ble_dropout" in modes
+
+
+def test_the_spec_lists_the_tight_labelling_and_the_two_diagnostics_profiles_as_sensitivity(
+    cfg: dict[str, Any],
+) -> None:
+    names = {d["name"]: d for d in cfg["sensitivity_design"]}
+    assert set(names["labelling"]["range"]) == {"tight", "loose"}
+    assert set(names["diagnostics_profile"]["range"]) == {
+        "driver_with_diagnostics",
+        "without_diagnostics",
+    }

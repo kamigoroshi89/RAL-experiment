@@ -1,0 +1,2798 @@
+# Likelihood table of the attribution layer (ADR-074, WS02-T06). Specification: docs/models/attribution-likelihood.md.
+# Machine-readable cells, class priors, pi(subtype | class) designs, parameters and thresholds.
+#
+# NO NUMBER IN THIS FILE IS A PROPOSAL. A structural cell is written 1-eps / eps with eps a PARAMETER. Every other number is a row
+# `awaiting_human_value` (value: null) with a `sensitivity_range` taken from the research report
+# (docs/benchmark/evidence/likelihood-attribution.md, sections 1.5, 6, 9, 10) and labelled 'sensitivity, not a proposal'. The numbers
+# under `sensitivity_range` and `designs` are the values of the sensitivity grid; the designs marked `illustrative` are declared
+# examples. Row schema: that of configs/benchmark/generator_design.yaml (source_type, source_ref, verified_by, status, needs).
+# `verified_by` is null until a human records the check. No row cites a bibliography entry; a `literature` row would need `bib_key`.
+# Validation is technical and pre-clinical: nothing here is a clinical value.
+#
+# Generated once from the catalogue tables of the specification and then maintained by hand.
+schema_version: 0.1.0
+label: 'Likelihood table of ADR-074 (WS02-T06). No non-structural number is chosen here: every row marked awaiting_human_value has a sensitivity range taken from the research report; the range is a sensitivity,
+  not a proposal.'
+contracts:
+  evidencevector: 0.2.0
+  attribution: 0.3.0
+  alert: 0.3.0
+model:
+  document: docs/models/attribution-likelihood.md
+  posterior: p(s | e, t) proportional to prior_t(class(s)) * pi(s | class, t) * product over the read fields of P(class_f | s)
+  independence: 'ASSUMPTION: the read fields are independent given the SUBTYPE component (naive Bayes); two grouped-field variants are sensitivity'
+  unavailable_rule: a None reading contributes the factor 1
+unavailable:
+  reading_class: U
+  factor: 1
+  rule: 'A reading that is None (or out of domain, or of class K) has no cell in the product: it contributes the factor 1 to every subtype, and is never read as a denied reading.'
+reading_classes:
+  defined_in: docs/models/attribution-rule.md, Reading classes (A asserted, D denied, U unavailable; K treated as U; F and G count as D in the independent table)
+  added_by_this_document:
+    signal_quality.cuff_value_repeated:
+      A: 'True'
+      D: 'False'
+      U: None
+    dispenser.interval_since_previous_ms:
+      A: value <= dispense_bounce_interval_ms
+      D: value > dispense_bounce_interval_ms
+      U: None
+    dispenser.content_change:
+      A: 'value == 0 (a bounce: nothing left the dispenser)'
+      D: any other finite value (a release)
+      U: None
+parameters:
+- name: eps
+  symbol: eps
+  unit: '1'
+  value: null
+  status: awaiting_human_value
+  source_type: design_choice
+  source_ref: 'design choice: leak of every structural cell (reading noise, an unmodelled cause); research report section 1.5; the false-alert rate of each channel would have to come from device specification
+    or literature (none collected)'
+  verified_by: null
+  needs: device_specification
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+  sensitivity_label: sensitivity, not a proposal
+  note: 1-eps if a component raises a field by construction, eps if it does not.
+- name: qc
+  symbol: qc
+  unit: '1'
+  value: null
+  status: awaiting_human_value
+  source_type: design_choice
+  source_ref: 'design choice: probability that a conditional raise (LC, SEQ, DSP, D-5, ...) holds; research report section 1.5; the conditions of the real deployment (lease, deadline, sequence provision)
+    come from WS07-T03 / EC-OP-18'
+  verified_by: null
+  needs: gab
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+  note: One value for every conditional cell of the first version; the per-condition split is a later refinement (each cell carries its condition).
+- name: q_stale
+  symbol: q_stale
+  unit: '1'
+  value: null
+  status: awaiting_human_value
+  source_type: design_choice
+  source_ref: 'design choice, WS04-T18 hand-over: P(stale | dropout) is NOT near 1 (a dropout of an idle device reports nothing; a dropout shorter than the lease leaves ok); range taken from the qc grid
+    of the research report; the research cell was R (1-eps)'
+  verified_by: null
+  needs: device_specification
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+  note: Conditional cell of system.diagnostics_ok under the profile driver_with_diagnostics.
+- name: rep_nat
+  symbol: rep_nat
+  unit: '1'
+  value: null
+  status: awaiting_human_value
+  source_type: design_choice
+  source_ref: 'generator property: 0.0197 measured in the research report section 10.1.1 (0.0223 on 4448 pairs in WS04-T18, 0.0204 by the formula E[max(0, 1 - |delta|/r)]), x0.5 and x2 as grid values; not
+    a device constant'
+  verified_by: null
+  needs: device_specification
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+  note: Natural probability that two consecutive cuff readings are identical at the display resolution; depends on the resolution of the profile and on the noise.
+- name: delta
+  symbol: delta
+  unit: '1'
+  value: null
+  status: awaiting_human_value
+  source_type: design_choice
+  source_ref: 'design choice: share of C1 events in which a dispensed dose is not taken (diversion, pocketing); 0 in the benchmark adherence model (declared simplification); adherence literature would have
+    to supply it'
+  verified_by: null
+  needs: literature
+  sensitivity_range:
+  - 0
+  - 0.1
+  - 0.25
+  sensitivity_label: sensitivity, not a proposal
+  note: C1 diversion share; the cell of witness.intake_observed for C1 subtypes at resp.
+- name: dispense_bounce_interval_ms
+  symbol: T_b
+  unit: ms
+  value: null
+  status: awaiting_human_value
+  source_type: design_choice
+  source_ref: 'registry name proposed in ADR-032: interval under which two openings are a bounce; the analisi nominal ''below one second'' is illustrative and unverified; dispenser specification'
+  verified_by: null
+  needs: device_specification
+  sensitivity_range:
+  - 1000
+  - 10000
+  - 30000
+  - 60000
+  - 180000
+  sensitivity_label: sensitivity, not a proposal
+  note: 'Threshold of the reading class of dispenser.interval_since_previous_ms (A: interval at or below T_b).'
+- name: tau
+  symbol: tau
+  unit: '1'
+  value: null
+  status: awaiting_human_value
+  source_type: design_choice
+  source_ref: design choice (cost of a wrong cause against an abstention); research report section 1.5
+  verified_by: null
+  needs: gab
+  sensitivity_range:
+  - 0.5
+  - 0.67
+  - 0.8
+  - 0.9
+  - 0.95
+  - 0.99
+  sensitivity_label: sensitivity, not a proposal
+  note: 'Abstention threshold: kappa = UNDETERMINED if the largest class posterior is below tau.'
+- name: cumulative_level
+  symbol: level
+  unit: '1'
+  value: null
+  status: awaiting_human_value
+  source_type: design_choice
+  source_ref: 'design choice: cumulative probability of the subtype set; research report section 9'
+  verified_by: null
+  needs: gab
+  sensitivity_range:
+  - 0.8
+  - 0.9
+  - 0.95
+  sensitivity_label: sensitivity, not a proposal
+  note: The set is the most probable subtypes up to this level. The conformal set of WS05-T14 replaces it with a calibrated threshold.
+class_priors:
+  name: class_priors
+  value: null
+  status: awaiting_human_value
+  source_type: design_choice
+  source_ref: design choice or literature on the aetiology of ward alerts; never the injection rates of the benchmark (ADR-074 decision 2)
+  verified_by: null
+  needs: gab
+  sensitivity_label: sensitivity, not a proposal
+  sensitivity_range:
+  - uniform
+  - c1_heavy
+  - c2_heavy
+  - c3_rare
+  - c3_heavy
+  note: 'prior_t(c): the same row for every template, restricted to the classes that have an applicable subtype at t and renormalised (a class without an applicable subtype has prior 0).'
+  designs:
+    uniform:
+      status: reference
+      C1: 1/3
+      C2: 1/3
+      C3: 1/3
+    c1_heavy:
+      status: illustrative
+      C1: 0.6
+      C2: 0.3
+      C3: 0.1
+    c2_heavy:
+      status: illustrative
+      C1: 0.3
+      C2: 0.6
+      C3: 0.1
+    c3_rare:
+      status: illustrative
+      C1: 0.45
+      C2: 0.5
+      C3: 0.05
+    c3_heavy:
+      status: illustrative
+      C1: 0.2
+      C2: 0.2
+      C3: 0.6
+pi_designs:
+  name: pi_designs
+  value: null
+  status: awaiting_human_value
+  source_type: design_choice
+  source_ref: design choice; ward incident statistics, device failure data and the attacker prevalence of the threat model would have to supply it (none collected); research report section 9 and subtype_priors.yaml
+  verified_by: null
+  needs: gab
+  sensitivity_label: sensitivity, not a proposal
+  sensitivity_range:
+  - uniform
+  - quiet_rare
+  - quiet_common
+  note: 'pi(component | class, t): relative weights, normalised over the components of the class that can violate t; the knowledge levels of replay, dispense_forgery and presence_spoof are components, so
+    uniform is uniform over COMPONENTS (a subtype with two levels weighs twice a subtype with one).'
+  groups:
+    quiet_c2:
+    - stuck_at
+    - cuff_silent_bias
+    - dispenser_bounce
+    quiet_c3:
+    - replay_informed
+    - injection_informed
+    - dispense_forgery_informed
+    - presence_spoof_informed
+    - dispenser_physical_tamper
+    quiet_c1:
+    - spontaneous_range
+    - spontaneous_sched
+    - spontaneous_hold
+    - spontaneous_count
+    - spontaneous_resp
+  designs:
+    uniform:
+      status: reference
+      default: 1.0
+      weights:
+        quiet_c2: 1.0
+        quiet_c3: 1.0
+        quiet_c1: 1.0
+    quiet_rare:
+      status: illustrative
+      default: 1.0
+      weights:
+        quiet_c2: 0.25
+        quiet_c3: 0.25
+        quiet_c1: 0.25
+    quiet_common:
+      status: illustrative
+      default: 1.0
+      weights:
+        quiet_c2: 4.0
+        quiet_c3: 4.0
+        quiet_c1: 4.0
+templates:
+  range:
+    reads:
+    - system.node_lifecycle
+    - system.diagnostics_ok
+    - system.liveliness_ok
+    - system.qos_deadline_missed
+    - system.ble_link_quality
+    - system.seq_gap
+    - signal_quality.ecg_sqi
+    - signal_quality.ppg_sqi
+    - signal_quality.cuff_error_code
+    - signal_quality.cuff_value_repeated
+    - cross_device.pulse_vs_ecg_hr_diff
+    - crypto_temporal.authenticated
+    - crypto_temporal.seq_repeat
+    - crypto_temporal.timestamp_implausible
+    impossible_classes: []
+  sched:
+    reads:
+    - system.node_lifecycle
+    - system.diagnostics_ok
+    - system.liveliness_ok
+    - system.qos_deadline_missed
+    - system.ble_link_quality
+    - system.nav_task_failed
+    - system.manip_task_failed
+    - system.seq_gap
+    - signal_quality.cuff_error_code
+    - signal_quality.cuff_value_repeated
+    - crypto_temporal.authenticated
+    - crypto_temporal.seq_repeat
+    - crypto_temporal.timestamp_implausible
+    impossible_classes: []
+  hold:
+    reads:
+    - system.node_lifecycle
+    - system.diagnostics_ok
+    - system.liveliness_ok
+    - system.qos_deadline_missed
+    - system.ble_link_quality
+    - system.nav_task_failed
+    - system.manip_task_failed
+    - system.seq_gap
+    - signal_quality.ecg_sqi
+    - signal_quality.ppg_sqi
+    - signal_quality.cuff_error_code
+    - signal_quality.cuff_value_repeated
+    - cross_device.pulse_vs_ecg_hr_diff
+    - crypto_temporal.authenticated
+    - crypto_temporal.seq_repeat
+    - crypto_temporal.timestamp_implausible
+    - dispenser.interval_since_previous_ms
+    - dispenser.content_change
+    impossible_classes: []
+  count:
+    reads:
+    - system.node_lifecycle
+    - system.diagnostics_ok
+    - system.liveliness_ok
+    - system.qos_deadline_missed
+    - system.ble_link_quality
+    - system.seq_gap
+    - crypto_temporal.authenticated
+    - crypto_temporal.seq_repeat
+    - crypto_temporal.timestamp_implausible
+    - dispenser.interval_since_previous_ms
+    - dispenser.content_change
+    impossible_classes: []
+  resp:
+    reads:
+    - system.node_lifecycle
+    - system.diagnostics_ok
+    - system.liveliness_ok
+    - system.qos_deadline_missed
+    - system.ble_link_quality
+    - system.nav_task_failed
+    - system.manip_task_failed
+    - system.seq_gap
+    - signal_quality.ecg_sqi
+    - signal_quality.ppg_sqi
+    - signal_quality.cuff_error_code
+    - signal_quality.cuff_value_repeated
+    - cross_device.pulse_vs_ecg_hr_diff
+    - witness.identity_confirmed
+    - witness.intake_observed
+    - crypto_temporal.authenticated
+    - crypto_temporal.seq_repeat
+    - crypto_temporal.timestamp_implausible
+    - dispenser.interval_since_previous_ms
+    - dispenser.content_change
+    impossible_classes: []
+  sys:
+    reads:
+    - system.node_lifecycle
+    - system.diagnostics_ok
+    - system.liveliness_ok
+    - system.qos_deadline_missed
+    - system.ble_link_quality
+    - system.seq_gap
+    - signal_quality.ecg_sqi
+    - signal_quality.ppg_sqi
+    - signal_quality.cuff_error_code
+    - signal_quality.cuff_value_repeated
+    - cross_device.pulse_vs_ecg_hr_diff
+    - crypto_temporal.authenticated
+    - crypto_temporal.seq_repeat
+    - crypto_temporal.timestamp_implausible
+    impossible_classes:
+    - C1
+  int:
+    reads:
+    - system.node_lifecycle
+    - system.diagnostics_ok
+    - system.liveliness_ok
+    - system.qos_deadline_missed
+    - system.ble_link_quality
+    - system.nav_task_failed
+    - system.manip_task_failed
+    - system.seq_gap
+    - crypto_temporal.authenticated
+    - crypto_temporal.seq_repeat
+    - crypto_temporal.timestamp_implausible
+    - dispenser.interval_since_previous_ms
+    - dispenser.content_change
+    impossible_classes:
+    - C1
+masks:
+  data_scope:
+    dispenser:
+      fields:
+      - dispenser.interval_since_previous_ms
+      - dispenser.content_change
+      read_for:
+      - hold
+      - count
+      - resp
+      - int
+      note: the extractor computes the group for every template; the table reads it only where the dispenser is in the data scope
+    cuff_value_repeated:
+      field: signal_quality.cuff_value_repeated
+      read_for:
+      - range
+      - sched
+      - hold
+      - resp
+      - sys
+      unavailable_when:
+      - the device profile declares no cuff_resolution
+      - fewer than two readings of the cuff stream
+      - the latest accepted reading lies outside the evidence window
+      note: the extractor computes the field for every template; for count and int the cell is not read
+  a4:
+    cells_removed:
+    - witness.identity_confirmed
+    - witness.intake_observed
+    - system.nav_task_failed
+    - system.manip_task_failed
+    cells_kept:
+    - system.node_lifecycle
+    - system.diagnostics_ok
+    - system.liveliness_ok
+    - system.qos_deadline_missed
+    - system.ble_link_quality
+    - system.seq_gap
+    - signal_quality.ecg_sqi
+    - signal_quality.ppg_sqi
+    - signal_quality.cuff_error_code
+    - signal_quality.cuff_value_repeated
+    - cross_device.pulse_vs_ecg_hr_diff
+    - crypto_temporal.authenticated
+    - crypto_temporal.seq_repeat
+    - crypto_temporal.timestamp_implausible
+    - dispenser.interval_since_previous_ms
+    - dispenser.content_change
+    recompute_not_masked:
+    - system.node_lifecycle
+    - system.diagnostics_ok
+    - system.liveliness_ok
+    - system.qos_deadline_missed
+    rule: A4 (embodied channel removed) = the same table with the cells of the fields that become None removed (factor 1); the four aggregate system fields are recomputed by the extractor and keep their
+      cells; the set of applicable subtypes does not change (the robot-side subtypes become less distinguishable and the sets larger)
+    source_ref: docs/models/evidence-channels.md, Ablation A4 mask; ADR-074 consequences
+subtypes:
+- name: hypertensive_spike
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: injected C1 subtype of the benchmark (inject_c1.C1_SUBTYPES)
+- name: drug_nonresponse
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: injected C1 subtype of the benchmark (inject_c1.C1_SUBTYPES)
+- name: hypotension_below_hold
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: injected C1 subtype of the benchmark (inject_c1.C1_SUBTYPES)
+- name: measurement_refusal
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: injected C1 subtype of the benchmark (inject_c1.C1_SUBTYPES)
+- name: double_take
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: injected C1 subtype of the benchmark; also a natural label of the labeller
+- name: dose_omission
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: natural label of the labeller (adherence state OMITTED); not injected
+- name: spontaneous_range
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: natural label spontaneous_<template> of the labeller (no injection behind the violation)
+- name: spontaneous_sched
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: natural label spontaneous_<template> of the labeller
+- name: spontaneous_hold
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: natural label spontaneous_<template> of the labeller
+- name: spontaneous_count
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: natural label spontaneous_<template> of the labeller
+- name: spontaneous_resp
+  class: C1
+  in_benchmark_v1: true
+  levels: []
+  note: natural label spontaneous_<template> of the labeller
+- name: ble_dropout
+  class: C2
+  in_benchmark_v1: true
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: stuck_at
+  class: C2
+  in_benchmark_v1: true
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: cuff_silent_bias
+  class: C2
+  in_benchmark_v1: true
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: ecg_noise
+  class: C2
+  in_benchmark_v1: true
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: nav_delay
+  class: C2
+  in_benchmark_v1: true
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: manipulation_failure
+  class: C2
+  in_benchmark_v1: true
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: dispenser_bounce
+  class: C2
+  in_benchmark_v1: true
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: cuff_detached
+  class: C2
+  in_benchmark_v1: true
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: process_kill
+  class: C2
+  in_benchmark_v1: false
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: message_drop
+  class: C2
+  in_benchmark_v1: false
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: localisation_noise
+  class: C2
+  in_benchmark_v1: false
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: impossible_goal
+  class: C2
+  in_benchmark_v1: false
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: link_delay
+  class: C2
+  in_benchmark_v1: false
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: out_of_order
+  class: C2
+  in_benchmark_v1: false
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: clock_skew
+  class: C2
+  in_benchmark_v1: false
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: battery_depleted
+  class: C2
+  in_benchmark_v1: false
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: uncommanded_lifecycle_transition
+  class: C2
+  in_benchmark_v1: false
+  levels: []
+  note: fault-model.md, Subtype vocabulary
+- name: replay
+  class: C3
+  in_benchmark_v1: true
+  levels:
+  - naive
+  - informed
+  note: threat-model.md, Subtype vocabulary
+- name: injection_naive
+  class: C3
+  in_benchmark_v1: true
+  levels: []
+  note: threat-model.md, Subtype vocabulary
+- name: injection_informed
+  class: C3
+  in_benchmark_v1: true
+  levels: []
+  note: threat-model.md, Subtype vocabulary
+- name: dispense_forgery
+  class: C3
+  in_benchmark_v1: true
+  levels:
+  - naive
+  - informed
+  note: threat-model.md, Subtype vocabulary
+- name: presence_spoof
+  class: C3
+  in_benchmark_v1: true
+  levels:
+  - naive
+  - informed
+  note: threat-model.md, Subtype vocabulary
+- name: dispenser_physical_tamper
+  class: C3
+  in_benchmark_v1: false
+  levels: []
+  note: threat-model.md, Subtype vocabulary
+- name: timestamp_manipulation
+  class: C3
+  in_benchmark_v1: false
+  levels: []
+  note: threat-model.md, Subtype vocabulary
+components:
+- id: hypertensive_spike
+  subtype: hypertensive_spike
+  level: null
+  class: C1
+  templates:
+  - range
+- id: drug_nonresponse
+  subtype: drug_nonresponse
+  level: null
+  class: C1
+  templates:
+  - resp
+- id: hypotension_below_hold
+  subtype: hypotension_below_hold
+  level: null
+  class: C1
+  templates:
+  - hold
+- id: measurement_refusal
+  subtype: measurement_refusal
+  level: null
+  class: C1
+  templates:
+  - sched
+- id: double_take
+  subtype: double_take
+  level: null
+  class: C1
+  templates:
+  - count
+- id: dose_omission
+  subtype: dose_omission
+  level: null
+  class: C1
+  templates:
+  - count
+- id: spontaneous_range
+  subtype: spontaneous_range
+  level: null
+  class: C1
+  templates:
+  - range
+- id: spontaneous_sched
+  subtype: spontaneous_sched
+  level: null
+  class: C1
+  templates:
+  - sched
+- id: spontaneous_hold
+  subtype: spontaneous_hold
+  level: null
+  class: C1
+  templates:
+  - hold
+- id: spontaneous_count
+  subtype: spontaneous_count
+  level: null
+  class: C1
+  templates:
+  - count
+- id: spontaneous_resp
+  subtype: spontaneous_resp
+  level: null
+  class: C1
+  templates:
+  - resp
+- id: ble_dropout
+  subtype: ble_dropout
+  level: null
+  class: C2
+  templates:
+  - sched
+  - resp
+  - hold
+  - count
+- id: stuck_at
+  subtype: stuck_at
+  level: null
+  class: C2
+  templates:
+  - range
+  - hold
+  - resp
+- id: cuff_silent_bias
+  subtype: cuff_silent_bias
+  level: null
+  class: C2
+  templates:
+  - range
+  - hold
+  - resp
+- id: ecg_noise
+  subtype: ecg_noise
+  level: null
+  class: C2
+  templates: []
+- id: nav_delay
+  subtype: nav_delay
+  level: null
+  class: C2
+  templates:
+  - sched
+  - resp
+  - hold
+- id: manipulation_failure
+  subtype: manipulation_failure
+  level: null
+  class: C2
+  templates:
+  - sched
+  - resp
+  - hold
+- id: dispenser_bounce
+  subtype: dispenser_bounce
+  level: null
+  class: C2
+  templates:
+  - hold
+  - count
+  - resp
+  - int
+- id: cuff_detached
+  subtype: cuff_detached
+  level: null
+  class: C2
+  templates:
+  - sched
+  - resp
+  - hold
+  - sys
+- id: process_kill
+  subtype: process_kill
+  level: null
+  class: C2
+  templates:
+  - sched
+  - hold
+  - resp
+  - count
+- id: message_drop
+  subtype: message_drop
+  level: null
+  class: C2
+  templates:
+  - sched
+  - hold
+  - resp
+  - count
+  - int
+  - range
+- id: localisation_noise
+  subtype: localisation_noise
+  level: null
+  class: C2
+  templates:
+  - sched
+  - resp
+  - hold
+- id: impossible_goal
+  subtype: impossible_goal
+  level: null
+  class: C2
+  templates:
+  - sched
+  - resp
+  - hold
+- id: link_delay
+  subtype: link_delay
+  level: null
+  class: C2
+  templates:
+  - sched
+  - hold
+  - resp
+  - int
+- id: out_of_order
+  subtype: out_of_order
+  level: null
+  class: C2
+  templates: []
+- id: clock_skew
+  subtype: clock_skew
+  level: null
+  class: C2
+  templates:
+  - sched
+  - hold
+- id: battery_depleted
+  subtype: battery_depleted
+  level: null
+  class: C2
+  templates:
+  - sched
+  - hold
+  - resp
+- id: uncommanded_lifecycle_transition
+  subtype: uncommanded_lifecycle_transition
+  level: null
+  class: C2
+  templates:
+  - sched
+  - hold
+  - resp
+  - count
+- id: replay_naive
+  subtype: replay
+  level: naive
+  class: C3
+  templates:
+  - sched
+  - hold
+  - resp
+- id: replay_informed
+  subtype: replay
+  level: informed
+  class: C3
+  templates:
+  - range
+  - hold
+  - resp
+  - sys
+- id: injection_naive
+  subtype: injection_naive
+  level: null
+  class: C3
+  templates:
+  - range
+  - hold
+  - resp
+  - sched
+  - sys
+- id: injection_informed
+  subtype: injection_informed
+  level: null
+  class: C3
+  templates:
+  - range
+  - hold
+  - resp
+  - sys
+- id: dispense_forgery_naive
+  subtype: dispense_forgery
+  level: naive
+  class: C3
+  templates:
+  - count
+  - hold
+  - resp
+  - int
+- id: dispense_forgery_informed
+  subtype: dispense_forgery
+  level: informed
+  class: C3
+  templates:
+  - count
+  - hold
+  - resp
+  - int
+- id: presence_spoof_naive
+  subtype: presence_spoof
+  level: naive
+  class: C3
+  templates:
+  - int
+- id: presence_spoof_informed
+  subtype: presence_spoof
+  level: informed
+  class: C3
+  templates:
+  - int
+- id: dispenser_physical_tamper
+  subtype: dispenser_physical_tamper
+  level: null
+  class: C3
+  templates:
+  - count
+  - hold
+  - resp
+  - int
+- id: timestamp_manipulation
+  subtype: timestamp_manipulation
+  level: null
+  class: C3
+  templates:
+  - sched
+  - hold
+  - range
+  - resp
+cell_tokens:
+  Z:
+    form: eps
+    meaning: 'structural zero: the field is in neither the raised nor the conditional column of the row of the component'
+    param: eps
+  R:
+    form: 1-eps
+    meaning: raised by construction (column raised of the row)
+    param: eps
+  C:
+    form: eps+(1-2*eps)*qc
+    meaning: 'conditional raise (column conditional of the row): the condition holds with probability qc'
+    param: qc
+  Cn:
+    form: eps+(1-2*eps)*(1-qc)
+    meaning: 'complement of a conditional raise (the other branch of an either-or, naive forger: repeat or gap)'
+    param: qc
+  S:
+    form: eps+(1-2*eps)*q_stale
+    meaning: stale report of the driver, conditional on the profile and on the length of the silence (liveness contract)
+    param: q_stale
+  N:
+    form: max(rep_nat, eps)
+    meaning: natural coincidence of two consecutive cuff readings at the display resolution
+    param: rep_nat
+  V:
+    form: eps+(1-2*eps)*delta
+    meaning: 'diverted dose: C1 event in which the witness reads intake False'
+    param: delta
+default_cell:
+  token: Z
+  A: eps
+  D: 1-eps
+  status: structural
+  source_type: fault_model_row
+  source_ref: 'a field in neither the raised nor the conditional column of the row of a component (fault-model.md Fault-to-evidence table; threat-model.md Attack-to-evidence table; C1 raises no system or
+    integrity evidence, analisi 4.5) is structural zero: eps'
+  verified_by: null
+  needs: none
+  applies_to: every (component, field) pair that has no entry in `cells`
+cells:
+- component: hypertensive_spike
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: C1 raises no system or integrity evidence (analisi 4.5); ADR-074 amendment 2 (the diversion share delta)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: drug_nonresponse
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: C1 raises no system or integrity evidence (analisi 4.5); ADR-074 amendment 2 (the diversion share delta)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: drug_nonresponse
+  field: witness.intake_observed
+  token: V
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*delta
+  param: delta
+  status: awaiting_human_value
+  value: null
+  condition: DIVERT
+  condition_note: share of C1 events in which a dispensed dose is not taken (diversion); 0 in the benchmark adherence model (declared simplification)
+  needs: literature
+  source_type: design_choice
+  source_ref: 'design choice: C1 raises no system or integrity evidence (analisi 4.5); ADR-074 amendment 2 (the diversion share delta)'
+  verified_by: null
+  sensitivity_range:
+  - 0
+  - 0.1
+  - 0.25
+  sensitivity_label: sensitivity, not a proposal
+- component: hypotension_below_hold
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: C1 raises no system or integrity evidence (analisi 4.5); ADR-074 amendment 2 (the diversion share delta)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: measurement_refusal
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: C1 raises no system or integrity evidence (analisi 4.5); ADR-074 amendment 2 (the diversion share delta)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: spontaneous_range
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: C1 raises no system or integrity evidence (analisi 4.5); ADR-074 amendment 2 (the diversion share delta)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: spontaneous_sched
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: C1 raises no system or integrity evidence (analisi 4.5); ADR-074 amendment 2 (the diversion share delta)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: spontaneous_hold
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: C1 raises no system or integrity evidence (analisi 4.5); ADR-074 amendment 2 (the diversion share delta)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: spontaneous_resp
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: C1 raises no system or integrity evidence (analisi 4.5); ADR-074 amendment 2 (the diversion share delta)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: spontaneous_resp
+  field: witness.intake_observed
+  token: V
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*delta
+  param: delta
+  status: awaiting_human_value
+  value: null
+  condition: DIVERT
+  condition_note: share of C1 events in which a dispensed dose is not taken (diversion); 0 in the benchmark adherence model (declared simplification)
+  needs: literature
+  source_type: design_choice
+  source_ref: 'design choice: C1 raises no system or integrity evidence (analisi 4.5); ADR-074 amendment 2 (the diversion share delta)'
+  verified_by: null
+  sensitivity_range:
+  - 0
+  - 0.1
+  - 0.25
+  sensitivity_label: sensitivity, not a proposal
+- component: ble_dropout
+  field: system.node_lifecycle
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `ble_dropout`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: ble_dropout
+  field: system.diagnostics_ok
+  token: S
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*q_stale
+  param: q_stale
+  status: awaiting_human_value
+  value: null
+  condition: STALE
+  condition_note: 'liveness contract (evidence-channels.md, Bridge node): stale only for a device with an open session that stays silent beyond stale_lease_ms; a dropout shorter than the lease, or of an
+    idle device, leaves ok (WS04-T18)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: 'docs/models/fault-model.md, Fault-to-evidence table, row `ble_dropout`, condition STALE; ADR-074 amendment 2 (5), WS04-T18 hand-over: stale after a dropout is conditional on the profile'
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: ble_dropout
+  field: system.liveliness_ok
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: LC
+  condition_note: 'lease or deadline condition LC of the fault-model table: raised only when the silent interval exceeds the liveliness lease or the QoS deadline of the stream (run parameters, no default)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `ble_dropout`, condition LC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: ble_dropout
+  field: system.qos_deadline_missed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: LC
+  condition_note: 'lease or deadline condition LC of the fault-model table: raised only when the silent interval exceeds the liveliness lease or the QoS deadline of the stream (run parameters, no default)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `ble_dropout`, condition LC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: ble_dropout
+  field: system.ble_link_quality
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `ble_dropout`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: ble_dropout
+  field: system.seq_gap
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: SEQ
+  condition_note: 'sequence condition SEQ: a gap is seen only when the device provides seq and a later message is delivered; for a naive forger the number either repeats an accepted one (seq_repeat) or
+    jumps ahead (seq_gap), TM-GAP-SEQ'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `ble_dropout`, condition SEQ
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: ble_dropout
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: stuck_at
+  field: signal_quality.cuff_value_repeated
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  condition: REP
+  condition_note: 'REP conditions the AVAILABILITY of the reading (profile declares a resolution; a previous reading exists), not its value: given a reading, a frozen window repeats it by construction'
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `stuck_at`, condition REP
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: cuff_silent_bias
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: ecg_noise
+  field: signal_quality.ecg_sqi
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: SQI
+  condition_note: the ECG device reports a quality index
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `ecg_noise`, condition SQI
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: ecg_noise
+  field: cross_device.pulse_vs_ecg_hr_diff
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `ecg_noise`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: nav_delay
+  field: system.nav_task_failed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: D5
+  condition_note: 'proposal D-5 of evidence-channels.md: the task layer reports a late arrival as a failed task; a decision of the project, not a device property'
+  needs: gab
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `nav_delay`, condition D5
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: nav_delay
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: manipulation_failure
+  field: system.manip_task_failed
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `manipulation_failure`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: manipulation_failure
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: dispenser_bounce
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: dispenser_bounce
+  field: dispenser.interval_since_previous_ms
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: DSP
+  condition_note: 'dispenser condition DSP: the dispenser reports the interval key and, for the content, has content sensing; the interval reading also depends on which opening is the latest one in the
+    window (D-15)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `dispenser_bounce`, condition DSP
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: dispenser_bounce
+  field: dispenser.content_change
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  condition: DSP
+  condition_note: 'dispenser condition DSP: the dispenser reports the interval key and, for the content, has content sensing; the interval reading also depends on which opening is the latest one in the
+    window (D-15)'
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `dispenser_bounce`, condition DSP
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: cuff_detached
+  field: system.node_lifecycle
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `cuff_detached`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: cuff_detached
+  field: signal_quality.cuff_error_code
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `cuff_detached`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: cuff_detached
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: process_kill
+  field: system.node_lifecycle
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: TARGET
+  condition_note: 'device target only: the gateway writes a link-lost state; a robot target reports no transition'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `process_kill`, condition TARGET
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: process_kill
+  field: system.diagnostics_ok
+  token: S
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*q_stale
+  param: q_stale
+  status: awaiting_human_value
+  value: null
+  condition: STALE
+  condition_note: 'liveness contract (evidence-channels.md, Bridge node): stale only for a device with an open session that stays silent beyond stale_lease_ms; a dropout shorter than the lease, or of an
+    idle device, leaves ok (WS04-T18)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: 'docs/models/fault-model.md, Fault-to-evidence table, row `process_kill`, condition STALE; ADR-074 amendment 2 (5), WS04-T18 hand-over: stale after a dropout is conditional on the profile'
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: process_kill
+  field: system.liveliness_ok
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: LC
+  condition_note: 'lease or deadline condition LC of the fault-model table: raised only when the silent interval exceeds the liveliness lease or the QoS deadline of the stream (run parameters, no default)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `process_kill`, condition LC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: process_kill
+  field: system.qos_deadline_missed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: LC
+  condition_note: 'lease or deadline condition LC of the fault-model table: raised only when the silent interval exceeds the liveliness lease or the QoS deadline of the stream (run parameters, no default)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `process_kill`, condition LC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: process_kill
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: message_drop
+  field: system.diagnostics_ok
+  token: S
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*q_stale
+  param: q_stale
+  status: awaiting_human_value
+  value: null
+  condition: STALE
+  condition_note: 'liveness contract (evidence-channels.md, Bridge node): stale only for a device with an open session that stays silent beyond stale_lease_ms; a dropout shorter than the lease, or of an
+    idle device, leaves ok (WS04-T18)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: 'docs/models/fault-model.md, Fault-to-evidence table, row `message_drop`, condition STALE; ADR-074 amendment 2 (5), WS04-T18 hand-over: stale after a dropout is conditional on the profile'
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: message_drop
+  field: system.liveliness_ok
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: LC
+  condition_note: 'lease or deadline condition LC of the fault-model table: raised only when the silent interval exceeds the liveliness lease or the QoS deadline of the stream (run parameters, no default)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `message_drop`, condition LC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: message_drop
+  field: system.qos_deadline_missed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: LC
+  condition_note: 'lease or deadline condition LC of the fault-model table: raised only when the silent interval exceeds the liveliness lease or the QoS deadline of the stream (run parameters, no default)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `message_drop`, condition LC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: message_drop
+  field: system.ble_link_quality
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: DEGRADE
+  condition_note: the losses degrade the link metric below the floor only for a long run of losses
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `message_drop`, condition DEGRADE
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: message_drop
+  field: system.seq_gap
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: SEQ
+  condition_note: 'sequence condition SEQ: a gap is seen only when the device provides seq and a later message is delivered; for a naive forger the number either repeats an accepted one (seq_repeat) or
+    jumps ahead (seq_gap), TM-GAP-SEQ'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `message_drop`, condition SEQ
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: message_drop
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: localisation_noise
+  field: system.nav_task_failed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: D5
+  condition_note: 'proposal D-5 of evidence-channels.md: the task layer reports a late arrival as a failed task; a decision of the project, not a device property'
+  needs: gab
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `localisation_noise`, condition D5
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: localisation_noise
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: impossible_goal
+  field: system.nav_task_failed
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `impossible_goal`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: impossible_goal
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: link_delay
+  field: system.qos_deadline_missed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: LC
+  condition_note: 'lease or deadline condition LC of the fault-model table: raised only when the silent interval exceeds the liveliness lease or the QoS deadline of the stream (run parameters, no default)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `link_delay`, condition LC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: link_delay
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: link_delay
+  field: crypto_temporal.timestamp_implausible
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `link_delay`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: out_of_order
+  field: crypto_temporal.timestamp_implausible
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `out_of_order`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: clock_skew
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: clock_skew
+  field: crypto_temporal.timestamp_implausible
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `clock_skew`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: battery_depleted
+  field: system.liveliness_ok
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: LC
+  condition_note: 'lease or deadline condition LC of the fault-model table: raised only when the silent interval exceeds the liveliness lease or the QoS deadline of the stream (run parameters, no default)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `battery_depleted`, condition LC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: battery_depleted
+  field: system.qos_deadline_missed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: LC
+  condition_note: 'lease or deadline condition LC of the fault-model table: raised only when the silent interval exceeds the liveliness lease or the QoS deadline of the stream (run parameters, no default)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `battery_depleted`, condition LC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: battery_depleted
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: uncommanded_lifecycle_transition
+  field: system.node_lifecycle
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: fault_model_row
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `uncommanded_lifecycle_transition`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: uncommanded_lifecycle_transition
+  field: system.diagnostics_ok
+  token: S
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*q_stale
+  param: q_stale
+  status: awaiting_human_value
+  value: null
+  condition: STALE
+  condition_note: 'liveness contract (evidence-channels.md, Bridge node): stale only for a device with an open session that stays silent beyond stale_lease_ms; a dropout shorter than the lease, or of an
+    idle device, leaves ok (WS04-T18)'
+  needs: device_specification
+  source_type: fault_model_row
+  source_ref: 'docs/models/fault-model.md, Fault-to-evidence table, row `uncommanded_lifecycle_transition`, condition STALE; ADR-074 amendment 2 (5), WS04-T18 hand-over: stale after a dropout is conditional
+    on the profile'
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: uncommanded_lifecycle_transition
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: replay_naive
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: replay_naive
+  field: crypto_temporal.seq_repeat
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `replay (naive)`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: replay_naive
+  field: crypto_temporal.timestamp_implausible
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `replay (naive)`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: replay_informed
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: replay_informed
+  field: cross_device.pulse_vs_ecg_hr_diff
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: PULSE
+  condition_note: 'informed attacker with coherent_pulse false: the pulse rate is not patched (threat model)'
+  needs: gab
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `replay (informed)`, condition PULSE
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: replay_informed
+  field: crypto_temporal.authenticated
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  condition: AUTHDEP
+  condition_note: 'deployment property: crypto_temporal.authenticated is None for a device that does not authenticate (factor 1)'
+  needs: none
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `replay (informed)`, condition AUTHDEP
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: injection_naive
+  field: system.seq_gap
+  token: Cn
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*(1-qc)
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: SEQ
+  condition_note: 'sequence condition SEQ: a gap is seen only when the device provides seq and a later message is delivered; for a naive forger the number either repeats an accepted one (seq_repeat) or
+    jumps ahead (seq_gap), TM-GAP-SEQ'
+  needs: device_specification
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `injection_naive`, condition SEQ
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: injection_naive
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: injection_naive
+  field: cross_device.pulse_vs_ecg_hr_diff
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: PULSE
+  condition_note: 'informed attacker with coherent_pulse false: the pulse rate is not patched (threat model)'
+  needs: gab
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `injection_naive`, condition PULSE
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: injection_naive
+  field: crypto_temporal.authenticated
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  condition: AUTHDEP
+  condition_note: 'deployment property: crypto_temporal.authenticated is None for a device that does not authenticate (factor 1)'
+  needs: none
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `injection_naive`, condition AUTHDEP
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: injection_naive
+  field: crypto_temporal.seq_repeat
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: SEQ
+  condition_note: 'sequence condition SEQ: a gap is seen only when the device provides seq and a later message is delivered; for a naive forger the number either repeats an accepted one (seq_repeat) or
+    jumps ahead (seq_gap), TM-GAP-SEQ'
+  needs: device_specification
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `injection_naive`, condition SEQ
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: injection_naive
+  field: crypto_temporal.timestamp_implausible
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: LATE
+  condition_note: a naive injected message carries a stale or future stamp (threat model)
+  needs: gab
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `injection_naive`, condition LATE
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: injection_informed
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: injection_informed
+  field: crypto_temporal.authenticated
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  condition: AUTHDEP
+  condition_note: 'deployment property: crypto_temporal.authenticated is None for a device that does not authenticate (factor 1)'
+  needs: none
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `injection_informed`, condition AUTHDEP
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: dispense_forgery_naive
+  field: system.seq_gap
+  token: Cn
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*(1-qc)
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: SEQ
+  condition_note: 'sequence condition SEQ: a gap is seen only when the device provides seq and a later message is delivered; for a naive forger the number either repeats an accepted one (seq_repeat) or
+    jumps ahead (seq_gap), TM-GAP-SEQ'
+  needs: device_specification
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `dispense_forgery (naive)`, condition SEQ
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: dispense_forgery_naive
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: dispense_forgery_naive
+  field: witness.intake_observed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: COLOC
+  condition_note: the witness reads False only when the robot is co-located and saw nothing (threat model, TX-4); also a patient who diverted the dose or a perception false negative
+  needs: gab
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `dispense_forgery (naive)`, condition COLOC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: dispense_forgery_naive
+  field: crypto_temporal.authenticated
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  condition: AUTHDEP
+  condition_note: 'deployment property: crypto_temporal.authenticated is None for a device that does not authenticate (factor 1)'
+  needs: none
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `dispense_forgery (naive)`, condition AUTHDEP
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: dispense_forgery_naive
+  field: crypto_temporal.seq_repeat
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: SEQ
+  condition_note: 'sequence condition SEQ: a gap is seen only when the device provides seq and a later message is delivered; for a naive forger the number either repeats an accepted one (seq_repeat) or
+    jumps ahead (seq_gap), TM-GAP-SEQ'
+  needs: device_specification
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `dispense_forgery (naive)`, condition SEQ
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: dispense_forgery_informed
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: dispense_forgery_informed
+  field: witness.intake_observed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: COLOC
+  condition_note: the witness reads False only when the robot is co-located and saw nothing (threat model, TX-4); also a patient who diverted the dose or a perception false negative
+  needs: gab
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `dispense_forgery (informed)`, condition COLOC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: dispense_forgery_informed
+  field: crypto_temporal.authenticated
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  condition: AUTHDEP
+  condition_note: 'deployment property: crypto_temporal.authenticated is None for a device that does not authenticate (factor 1)'
+  needs: none
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `dispense_forgery (informed)`, condition AUTHDEP
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: presence_spoof_naive
+  field: witness.identity_confirmed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: IDCHECK
+  condition_note: the robot checks identity and encodes the result (D-6 of evidence-channels.md)
+  needs: gab
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `presence_spoof (naive)`, condition IDCHECK
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: dispenser_physical_tamper
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: dispenser_physical_tamper
+  field: witness.intake_observed
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: COLOC
+  condition_note: the witness reads False only when the robot is co-located and saw nothing (threat model, TX-4); also a patient who diverted the dose or a perception false negative
+  needs: gab
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `dispenser_physical_tamper`, condition COLOC
+  verified_by: null
+  sensitivity_range:
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
+- component: timestamp_manipulation
+  field: signal_quality.cuff_value_repeated
+  token: N
+  A: awaiting_human_value
+  D: 1-A
+  form: max(rep_nat, eps)
+  param: rep_nat
+  status: awaiting_human_value
+  value: null
+  condition: NATREP
+  condition_note: natural repeat probability of consecutive cuff readings at the display resolution of the device; a property of the generator and its noise, not a device constant
+  needs: device_specification
+  source_type: design_choice
+  source_ref: 'design choice: a reading repeats by chance at the display resolution; generator property measured by the research report section 10.1 and WS04-T18 (not a device constant)'
+  verified_by: null
+  sensitivity_range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  sensitivity_label: sensitivity, not a proposal
+- component: timestamp_manipulation
+  field: crypto_temporal.authenticated
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  condition: AUTHDEP
+  condition_note: 'deployment property: crypto_temporal.authenticated is None for a device that does not authenticate (factor 1)'
+  needs: none
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `timestamp_manipulation`, condition AUTHDEP
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+- component: timestamp_manipulation
+  field: crypto_temporal.timestamp_implausible
+  token: R
+  A: 1-eps
+  D: eps
+  status: structural
+  needs: none
+  source_type: threat_model_row
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `timestamp_manipulation`
+  verified_by: null
+  sensitivity_range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+grouped_cells:
+  ble_seq_gap:
+    fields:
+    - system.ble_link_quality
+    - system.seq_gap
+    templates: all
+    joint_classes:
+    - clean
+    - gap
+    - degraded
+    - gap_degraded
+    joint_definition:
+      clean: ble_link_quality denied (at or above the floor) and seq_gap denied
+      gap: 'ble_link_quality denied and seq_gap asserted (class G: a sequence value is missing, link not degraded)'
+      degraded: ble_link_quality asserted (below the floor) and seq_gap denied
+      gap_degraded: both asserted
+    leak: eps/(K-1) on each joint class other than the mode, K = 4
+    default_mode:
+      clean: '1'
+    modes:
+      ble_dropout:
+        gap_degraded: qc
+        degraded: 1-qc
+      message_drop:
+        gap: qc
+        clean: 1-qc
+      injection_naive:
+        gap: 1-qc
+        clean: qc
+      dispense_forgery_naive:
+        gap: 1-qc
+        clean: qc
+    none_rule: if one coordinate is None the joint probability is summed over it; if both are None the factor is 1
+    status: awaiting_human_value
+    value: null
+    source_type: design_choice
+    source_ref: 'ADR-074 amendment 3: system.seq_gap and system.ble_link_quality overlap (the ratio is 1.0 exactly when no value is missing) and are ONE grouped cell; modes inherited from the research prototype
+      (variant G1) and re-expressed on the split fields'
+    verified_by: null
+    needs: gab
+    sensitivity_label: sensitivity, not a proposal
+    sensitivity_range:
+    - independent
+    - grouped
+  cross_device_signal_quality:
+    fields:
+    - cross_device.pulse_vs_ecg_hr_diff
+    - signal_quality.ecg_sqi
+    - signal_quality.ppg_sqi
+    templates:
+    - range
+    - hold
+    - resp
+    - sys
+    joint_classes: 2^3 combinations of (diff, ecg_sqi, ppg_sqi), each A or D
+    default_mode: product of the marginals given the component
+    modes:
+      ecg_noise:
+        A,A,D: qc
+        A,D,D: 1-qc
+    common_cause:
+      component: ecg_noise
+      role: 'co-occurrence component: under this variant ecg_noise is applicable at range, hold, resp and sys (it violates no template by itself, fault-model Effects on templates), as a nuisance that raises
+        the cross-device difference during a clinical violation'
+      mode_order: (pulse_vs_ecg_hr_diff, ecg_sqi, ppg_sqi)
+    status: awaiting_human_value
+    value: null
+    source_type: design_choice
+    source_ref: ADR-074 decision 1 (independence given the cause is an ASSUMPTION; one grouped-field variant as sensitivity); research prototype variant G1 (common cause ecg_noise); fault-model.md, Non-faults
+      and boundaries (evidence confound of ecg_noise)
+    verified_by: null
+    needs: gab
+    sensitivity_label: sensitivity, not a proposal
+    sensitivity_range:
+    - independent
+    - grouped
+diagnostics_profiles:
+  driver_with_diagnostics:
+    reads_diagnostics_ok: true
+    contract: 'liveness contract for stale (evidence-channels.md, Bridge node): an idle on-demand device reports ok and is never stale; stale means expected to publish and silent beyond stale_lease_ms'
+    stale_components:
+    - ble_dropout
+    - message_drop
+    - process_kill
+    - uncommanded_lifecycle_transition
+    stale_cell: 'token S, condition STALE: eps+(1-2*eps)*q_stale; every other component, silent faults and C1 included, has the structural zero eps (P(ok) = 1-eps)'
+    requires_rows:
+    - driver_stale_lease_ms
+    - driver_period_ms
+    requires_rows_where: configs/benchmark/generator_design.yaml (awaiting_human_value); a build with this profile is refused while they are
+    note: 'The cell of ble_dropout is conditional: a dropout shorter than the lease raises nothing, and a dropout of an idle device loses nothing and reports nothing. P(stale | cuff_detached) = 0 is a property
+      of the generator (sessions derive from what the device SENT), not of the contract.'
+  without_diagnostics:
+    reads_diagnostics_ok: false
+    reading: null
+    factor: 1
+    note: 'No driver report: system.diagnostics_ok is None for every instance (capability false), so the field is not read and the cells of the profile above are not used; it is never a default ok.'
+sensitivity_design:
+- name: eps
+  range:
+  - 0.001
+  - 0.01
+  - 0.05
+  - 0.1
+  applies_to: all structural cells
+- name: qc
+  range:
+  - 0.25
+  - 0.5
+  - 0.75
+  applies_to: conditional cells (tokens C and Cn)
+- name: q_stale
+  range:
+  - 0.25
+  - 0.5
+  - 0.75
+  applies_to: stale cells of system.diagnostics_ok
+- name: rep_nat
+  range:
+  - 0.0098
+  - 0.0197
+  - 0.0393
+  applies_to: natural repeat of the cuff reading
+- name: delta
+  range:
+  - 0
+  - 0.1
+  - 0.25
+  applies_to: C1 diversion share
+- name: dispense_bounce_interval_ms
+  range:
+  - 1000
+  - 10000
+  - 30000
+  - 60000
+  - 180000
+  applies_to: threshold of the interval reading
+- name: class_priors
+  range:
+  - uniform
+  - c1_heavy
+  - c2_heavy
+  - c3_rare
+  - c3_heavy
+  applies_to: prior_t(c)
+- name: pi_designs
+  range:
+  - uniform
+  - quiet_rare
+  - quiet_common
+  applies_to: pi(component | class, t)
+- name: cumulative_level
+  range:
+  - 0.8
+  - 0.9
+  - 0.95
+  applies_to: level of the subtype set
+- name: tau
+  range:
+  - 0.5
+  - 0.67
+  - 0.8
+  - 0.9
+  - 0.95
+  - 0.99
+  applies_to: abstention threshold of kappa
+- name: grouped_variant
+  range:
+  - independent
+  - ble_seq_gap
+  - cross_device_signal_quality
+  - both
+  applies_to: independence assumption
+- name: diagnostics_profile
+  range:
+  - driver_with_diagnostics
+  - without_diagnostics
+  applies_to: profile of system.diagnostics_ok
+- name: cell_scope
+  range:
+  - template
+  - all
+  applies_to: 'components of a cell: those that can violate t (reference) or every component of the class'
+- name: family
+  range:
+  - catalogue
+  - benchmark_v1
+  applies_to: all subtypes of the catalogue or only those the benchmark injects
+- name: labelling
+  range:
+  - tight
+  - loose
+  applies_to: truth used to score; tight is primary (decided after seeing the result, ADR-074 amendment 2)
