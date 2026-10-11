@@ -1,0 +1,826 @@
+"""Cuff faults anchored to the readings of the day (WS04-T16, ADR-070 (a), (b), (d)).
+
+FIXTURE-ONLY where it builds anything: the fixture prior and registry F0 of ``test_builder``, hand-built
+observed days (``test_inject_c2.fixture_stream``) and arithmetic values. The committed
+``configs/benchmark/injections.yaml`` and the real registry 0.2.1 are only read: the readings of the default
+day are derived from them, never typed here. None of the numbers is a clinical value.
+
+What is under test
+------------------
+* the rule of ADR-070 (a): the first covered reading is drawn uniformly among the ``n - k + 1`` feasible ones, the
+  onset uniformly on the grid in (previous reading, first covered reading], the end uniformly on the grid in
+  (last covered reading, next reading] (up to the day end after the last one); exact enumeration, not sampling;
+* the real injectors realise every anchored window of ``cuff_detached`` and ``cuff_silent_bias`` on a fault-free
+  day, and ``stuck_at`` freezes the last reading of the previous evening (``InjectionContext.previous_day``);
+  the first scored day of a patient is excluded from the draw of ``stuck_at`` and the manifest says so;
+* the truth records the EFFECTIVE number of readings (after the robot stage) next to the drawn one;
+* the nine duration rows are in readings (1, 2, 3); the loader refuses ms for these three subtypes only;
+* determinism, and the committed observability table of ``docs/benchmark/builder.md`` is the generator's output.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import itertools
+import re
+import subprocess
+import sys
+from bisect import bisect_left
+from collections import Counter
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import numpy as np
+import pytest
+import yaml
+from ralmon.benchmark.anchoring import (
+    ANCHORED_SUBTYPES,
+    anchored_choices,
+    annotate_reading_counts,
+    draw_anchored_window,
+    observability_table,
+)
+
+from ralmon.benchmark.builder import (
+    BenchmarkConfigError,
+    BuildContext,
+    load_config,
+    open_benchmark,
+)
+from ralmon.benchmark.injection import (
+    InjectionContext,
+    InjectionDesignError,
+    apply_observation_injections,
+    load_injection_design,
+)
+from ralmon.benchmark.latent import T_DAY_MS
+from ralmon.benchmark.priors import LiteraturePriorSource
+from ralmon.benchmark.schedule import load_filled_rows, load_schedule
+from ralmon.spec.registry import load_registry
+
+from .test_builder import (
+    CARE_PLANS,
+    GENERATOR_DESIGN,
+    INJECTIONS_FILE,
+    ROOT,
+    build,
+    config_document,
+    make_prior,
+    write_config,
+    write_injections,
+)
+from .test_inject_c2 import (
+    bias,
+    detached,
+    fixture_stream,
+    manip,
+    nav,
+    run,
+    stuck,
+)
+
+DAY = T_DAY_MS
+HOUR = 3_600_000
+MIN = 60_000
+STEP = MIN
+REGISTRY = ROOT / "configs" / "registry" / "hypertension.yaml"
+BUILDER_DOC = ROOT / "docs" / "benchmark" / "builder.md"
+
+# The enumeration of the research file (docs/benchmark/evidence/group1-design-options.md, section 1) on the
+# default day: per k, the number of onsets and of ends for each feasible first reading.
+EXPECTED_SHAPES = {
+    1: [(376, 120), (120, 360), (360, 360), (360, 120), (120, 105)],
+    2: [(376, 360), (120, 360), (360, 120), (360, 105)],
+    3: [(376, 360), (120, 120), (360, 105)],
+}
+
+
+def default_ticks() -> tuple[int, ...]:
+    """The measurement ticks of the committed schedule under the real registry 0.2.1 (read, not typed)."""
+    registry = load_registry(REGISTRY, step_ms=STEP)
+    windows = {
+        f"{name}_ms": int(registry.get(name).value)
+        for name in ("hold_lookback", "delta1", "delta2", "sched_window")
+    }
+    return tuple(load_schedule(CARE_PLANS, **windows).measurement_ticks_ms)
+
+
+def default_readings() -> list[int]:
+    """The reading instants of a fault-free default day: tick plus the nominal inflation, no jitter."""
+    rows = load_filled_rows(GENERATOR_DESIGN, ("inflation_ms_nominal",))
+    inflation = int(rows["inflation_ms_nominal"])
+    return [t + inflation for t in default_ticks()]
+
+
+def covered(readings: Sequence[int], onset: int, end: int) -> int:
+    """Independent count of the readings in the window ``[onset, end)``."""
+    return bisect_left(readings, end) - bisect_left(readings, onset)
+
+
+# ---------------------------------------------------------------------------------------------------
+# 1. The rule, by exact enumeration
+# ---------------------------------------------------------------------------------------------------
+
+
+def test_the_default_day_has_five_readings_at_the_documented_instants() -> None:
+    readings = default_readings()
+    assert len(readings) == 5
+    assert [r // MIN for r in readings] == [
+        6 * 60 + 15,
+        8 * 60 + 15,
+        14 * 60 + 15,
+        20 * 60 + 15,
+        22 * 60 + 15,
+    ]
+    assert all(r % MIN == 30_000 for r in readings)
+
+
+@pytest.mark.parametrize("k", [1, 2, 3])
+def test_a_window_covers_exactly_k_readings(k: int) -> None:
+    readings = default_readings()
+    choices = anchored_choices(
+        readings, k, step_ms=STEP, day_start_ms=0, day_end_ms=DAY
+    )
+    assert len(choices) == len(readings) - k + 1 == {1: 5, 2: 4, 3: 3}[k]
+    assert [c.first for c in choices] == list(range(len(choices)))
+    assert [(len(c.onsets), len(c.ends)) for c in choices] == EXPECTED_SHAPES[k]
+    pairs = 0
+    for choice in choices:
+        for onset, end in itertools.product(choice.onsets, choice.ends):
+            pairs += 1
+            assert onset % STEP == 0 and end % STEP == 0  # on the grid
+            assert (
+                0 <= onset < end <= DAY
+            )  # inside the day, ends before (or at) the day end
+            assert covered(readings, onset, end) == k, (choice.first, onset, end)
+            # the covered readings are exactly the ones the choice names
+            assert bisect_left(readings, onset) == choice.first
+    assert pairs == sum(a * b for a, b in EXPECTED_SHAPES[k])
+
+
+def test_the_rule_with_fewer_readings_than_k_has_no_choice() -> None:
+    readings = default_readings()
+    assert (
+        anchored_choices(readings[:2], 3, step_ms=STEP, day_start_ms=0, day_end_ms=DAY)
+        == ()
+    )
+    assert anchored_choices([], 1, step_ms=STEP, day_start_ms=0, day_end_ms=DAY) == ()
+    two = anchored_choices(
+        readings[:2], 2, step_ms=STEP, day_start_ms=0, day_end_ms=DAY
+    )
+    assert len(two) == 1 and two[0].first == 0
+
+
+def test_the_rule_on_a_later_day_and_with_readings_off_the_grid() -> None:
+    day = 3
+    start, end = day * DAY, (day + 1) * DAY
+    readings = [start + 7 * HOUR + 17, start + 9 * HOUR + 59_999, start + 15 * HOUR]
+    for k in (1, 2, 3):
+        for choice in anchored_choices(
+            readings, k, step_ms=STEP, day_start_ms=start, day_end_ms=end
+        ):
+            for onset, stop in itertools.product(choice.onsets, choice.ends):
+                assert (onset - start) % STEP == 0 and (stop - start) % STEP == 0
+                assert start <= onset < stop <= end
+                assert covered(readings, onset, stop) == k
+
+
+def test_two_readings_in_one_grid_cell_leave_no_choice_for_the_second() -> None:
+    start = 0
+    readings = [10 * HOUR + 5_000, 10 * HOUR + 20_000, 12 * HOUR]
+    choices = anchored_choices(
+        readings, 1, step_ms=STEP, day_start_ms=start, day_end_ms=DAY
+    )
+    # no grid instant lies in (10:00:05, 10:00:20]: the window of reading 1 cannot start between them
+    assert [c.first for c in choices] == [0, 2]
+
+
+def test_the_draw_covers_every_first_reading_and_stays_inside_the_choice() -> None:
+    readings = default_readings()
+    choices = anchored_choices(
+        readings, 2, step_ms=STEP, day_start_ms=0, day_end_ms=DAY
+    )
+    firsts: Counter[int] = Counter()
+    for seed in range(400):
+        onset, end, first = draw_anchored_window(np.random.default_rng(seed), choices)
+        firsts[first] += 1
+        choice = choices[first]
+        assert onset in choice.onsets and end in choice.ends
+        assert covered(readings, onset, end) == 2
+    assert set(firsts) == {0, 1, 2, 3}
+    assert (
+        min(firsts.values()) > 60
+    )  # uniform over the four choices (100 expected), not over (onset, end) pairs
+
+
+# ---------------------------------------------------------------------------------------------------
+# 2. The real injectors realise every anchored window of cuff_detached and cuff_silent_bias
+# ---------------------------------------------------------------------------------------------------
+
+
+def sample_pairs(choices: Sequence[Any], seed: int) -> list[tuple[int, int, int]]:
+    """The four corners of every choice and 20 seeded random pairs: ``(first, onset, end)``."""
+    rng = np.random.default_rng(seed)
+    out: list[tuple[int, int, int]] = []
+    for choice in choices:
+        corners = itertools.product(
+            (choice.onsets[0], choice.onsets[-1]), (choice.ends[0], choice.ends[-1])
+        )
+        out += [(choice.first, o, e) for o, e in corners]
+        for _ in range(20):
+            out.append(
+                (
+                    choice.first,
+                    choice.onsets[int(rng.integers(0, len(choice.onsets)))],
+                    choice.ends[int(rng.integers(0, len(choice.ends)))],
+                )
+            )
+    return out
+
+
+@pytest.mark.parametrize("k", [1, 2, 3])
+def test_realised_share_is_one_for_detached_and_bias(k: int) -> None:
+    ticks = default_ticks()
+    readings = default_readings()
+    base = fixture_stream(ticks)
+    assert sorted(s.t_device_ms for s in base.samples if s.signal == "bp") == readings
+    choices = anchored_choices(
+        readings, k, step_ms=STEP, day_start_ms=0, day_end_ms=DAY
+    )
+    pairs = sample_pairs(choices, seed=k)
+    assert len(pairs) >= 24 * len(choices)
+    for first, onset, end in pairs:
+        for make in (detached, lambda o, d: bias(o, d, 8.0)):
+            [record] = run([make(onset, end - onset)], stream_=base).records
+            assert record.realised, (record.spec.subtype, first, onset, end)
+            assert record.details["n_readings_covered"] == k
+    # the planner of the builder produces such windows: every cuff_detached and cuff_silent_bias it draws on a
+    # fault-free day is realised (a 40 patient x 6 day seeded loop through plan_observation)
+    context = planner_context(rates=(0.0, 3.0, 0.0))
+    cohort = context.cohorts["main"]
+    latent: Any = SimpleNamespace(latent=SimpleNamespace(events=[]))
+    seen: Counter[str] = Counter()
+    for patient_index in range(40):
+        for day in range(6):
+            stream_ = fixture_stream(ticks, day_index=day)
+            specs = context.plan_observation(
+                cohort, patient_index, day, latent, stream_, Counter()
+            )
+            for spec in specs:
+                if spec.subtype not in ("cuff_detached", "cuff_silent_bias"):
+                    continue
+                [record] = apply_observation_injections(
+                    stream_,
+                    [spec],
+                    InjectionContext(patient_index, task_deadline_offset_ms=MIN),
+                ).records
+                seen[spec.subtype] += 1
+                assert record.realised, spec
+                assert 1 <= record.details["n_readings_covered"] <= 3
+    assert seen["cuff_detached"] > 20 and seen["cuff_silent_bias"] > 20
+
+
+# ---------------------------------------------------------------------------------------------------
+# 3. stuck_at: the previous evening, and the first scored day is excluded
+# ---------------------------------------------------------------------------------------------------
+
+PREVIOUS_VALUES = [131.0, 126.0, 138.0, 129.0, 143.0]
+TODAY_VALUES = [120.0, 121.0, 122.0, 123.0, 124.0]
+
+
+def two_days() -> tuple[Any, Any]:
+    ticks = default_ticks()
+    previous = fixture_stream(ticks, PREVIOUS_VALUES, day_index=0)
+    today = fixture_stream(ticks, TODAY_VALUES, day_index=1)
+    return previous, today
+
+
+def bp_values(result: Any) -> list[float]:
+    return [s.value for s in result.stream.samples if s.signal == "bp"]
+
+
+def test_stuck_at_uses_the_previous_evening() -> None:
+    previous, today = two_days()
+    readings = default_readings()
+    onset = (
+        DAY + 2 * HOUR
+    )  # before the first reading of the day: nothing earlier in the day's stream
+    window = stuck(
+        onset, 5 * HOUR
+    )  # 02:00 to 07:00: covers the reading at 06:15:30 only
+    assert covered([DAY + r for r in readings], onset, onset + 5 * HOUR) == 1
+    # day 1 with its previous day: the frozen value is the last reading of the previous evening
+    out = run([window], stream_=today, previous_day=previous)
+    [record] = out.records
+    assert record.realised and record.n_changed == 1
+    assert record.details["frozen_value"] == PREVIOUS_VALUES[-1]
+    assert record.details["frozen_from"] == "previous_day"
+    assert record.details["n_readings_covered"] == 1
+    assert bp_values(out)[0] == PREVIOUS_VALUES[-1]
+    assert bp_values(out)[1:] == TODAY_VALUES[1:]
+    # without a previous day (the first scored day) there is nothing to freeze: unrealised, as before
+    bare = fixture_stream(default_ticks(), TODAY_VALUES, day_index=0)
+    [record] = run([stuck(2 * HOUR, 5 * HOUR)], stream_=bare).records
+    assert not record.realised
+    assert record.details["reason"] == "no earlier reading to freeze"
+    assert record.details["n_readings_covered"] == 1
+    # an earlier reading of the same day wins over the previous evening
+    later = stuck(
+        DAY + 9 * HOUR, 7 * HOUR
+    )  # first covered reading 14:15:30, earlier one 08:15:30
+    [record] = run([later], stream_=today, previous_day=previous).records
+    assert record.details["frozen_value"] == TODAY_VALUES[1]
+    assert record.details["frozen_from"] == "same_day"
+    # a previous day with no reading leaves nothing to freeze
+    empty = fixture_stream(default_ticks(), PREVIOUS_VALUES, day_index=0)
+    no_bp = dataclasses.replace(
+        empty, samples=tuple(s for s in empty.samples if s.signal != "bp")
+    )
+    [record] = run([window], stream_=today, previous_day=no_bp).records
+    assert not record.realised
+    assert record.details["reason"] == "no earlier reading to freeze"
+
+
+def planner_context(
+    rates: tuple[float, float, float] = (0.0, 3.0, 0.0),
+) -> BuildContext:
+    tmp = _scratch()
+    prior_path = make_prior(tmp)
+    doc = config_document(
+        tmp, prior=prior_path, pairs=0, variants=[], n_patients=1, n_days=1, rates=rates
+    )
+    config = load_config(write_config(tmp, doc))
+    prior = LiteraturePriorSource(prior_path, strict=False, allow_fixture_only=True)
+    return BuildContext.create(config, prior, allow_fixture_only=True)
+
+
+_SCRATCH: list[Path] = []
+
+
+def _scratch() -> Path:
+    import tempfile
+
+    path = Path(tempfile.mkdtemp(prefix="anchored-faults-"))
+    _SCRATCH.append(path)
+    return path
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _cleanup_scratch():  # type: ignore[no-untyped-def]
+    yield
+    import shutil
+
+    for path in _SCRATCH:
+        shutil.rmtree(path, ignore_errors=True)
+    _SCRATCH.clear()
+
+
+def test_the_planner_never_draws_stuck_at_on_the_first_day_and_realises_it_afterwards() -> (
+    None
+):
+    context = planner_context()
+    cohort = context.cohorts["main"]
+    ticks = default_ticks()
+    latent: Any = SimpleNamespace(latent=SimpleNamespace(events=[]))
+    first_day_skipped = 0
+    by_day: Counter[int] = Counter()
+    realised: Counter[int] = Counter()
+    for patient_index in range(60):
+        for day in range(7):
+            skipped: Counter[str] = Counter()
+            stream_ = fixture_stream(ticks, day_index=day, seed=patient_index)
+            specs = context.plan_observation(
+                cohort, patient_index, day, latent, stream_, skipped
+            )
+            if day == 0:
+                assert all(s.subtype != "stuck_at" for s in specs)
+                first_day_skipped += skipped["c2/stuck_at/first_day"]
+            previous = (
+                fixture_stream(ticks, day_index=day - 1, seed=patient_index)
+                if day > 0
+                else None
+            )
+            for spec in specs:
+                if spec.subtype != "stuck_at":
+                    continue
+                by_day[day] += 1
+                [record] = apply_observation_injections(
+                    stream_,
+                    [spec],
+                    InjectionContext(
+                        patient_index,
+                        task_deadline_offset_ms=MIN,
+                        previous_day=previous,
+                    ),
+                ).records
+                realised[day] += int(record.realised)
+    assert (
+        first_day_skipped > 0
+    )  # the draws that fell on day 0 are counted, not silently lost
+    assert 0 not in by_day
+    assert set(by_day) == {1, 2, 3, 4, 5, 6}
+    assert sum(by_day.values()) > 40
+    # the realised share is 1 on days 1 to 6: every anchored window holds a reading and has a value to freeze
+    # (a reading equal to the frozen value would not count as changed: the fixture values differ by construction)
+    assert realised == by_day
+
+
+@pytest.fixture(scope="module")
+def built(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Any]:
+    tmp = tmp_path_factory.mktemp("anchored_build")
+    return build(
+        tmp,
+        "bench",
+        pairs=0,
+        variants=[],
+        n_patients=6,
+        n_days=3,
+        rates=(0.0, 3.0, 0.0),
+    )
+
+
+def test_the_manifest_records_the_day_zero_exclusion_and_the_unit(
+    built: tuple[Path, Any],
+) -> None:
+    _, manifest = built
+    block = manifest.settings["anchored_cuff_faults"]
+    assert block["subtypes"] == sorted(ANCHORED_SUBTYPES)
+    assert block["duration_unit"] == "readings"
+    assert block["stuck_at_excluded_day_indices"] == [0]
+    out, _ = built
+    reader = open_benchmark(out)
+    for patient in reader.patient_ids(role="patient"):
+        entries = reader.truth(patient, 0).injection_log
+        assert all(e["subtype"] != "stuck_at" for e in entries)
+
+
+# ---------------------------------------------------------------------------------------------------
+# 4. The effective k, after the robot stage
+# ---------------------------------------------------------------------------------------------------
+
+
+def test_effective_k_after_the_robot_stage() -> None:
+    ticks = default_ticks()
+    readings = default_readings()
+    base = fixture_stream(ticks)
+    # a window of k = 2 readings (08:15:30 and 14:15:30); the robot fails the manipulation of the 14:15 visit
+    onset, end = 8 * HOUR, 15 * HOUR
+    assert covered(readings, onset, end) == 2
+    out = run([manip(ticks[2]), detached(onset, end - onset)], stream_=base)
+    by_subtype = {r.spec.subtype: r for r in out.records}
+    record = by_subtype["cuff_detached"]
+    assert record.details["n_readings_covered"] == 1
+    [annotated] = annotate_reading_counts([record], base)
+    assert annotated.details["n_readings_drawn"] == 2
+    assert annotated.details["n_readings_covered"] == 1
+    assert annotated.realised == record.realised and annotated.spec == record.spec
+    # the bias and the stuck window count the same way
+    out = run([manip(ticks[2]), bias(onset, end - onset, 8.0)], stream_=base)
+    [record] = [r for r in out.records if r.spec.subtype == "cuff_silent_bias"]
+    [annotated] = annotate_reading_counts([record], base)
+    assert (
+        annotated.details["n_readings_drawn"],
+        annotated.details["n_readings_covered"],
+    ) == (2, 1)
+    # a delayed visit can also bring a reading INTO the window: drawn 1, covered 2
+    window = (8 * HOUR, 9 * HOUR)  # holds the 08:15:30 reading only
+    assert covered(readings, *window) == 1
+    out = run(
+        [nav(ticks[0], 110 * MIN, kind="measurement"), detached(window[0], HOUR)],
+        stream_=base,
+        task_deadline_offset_ms=30 * MIN,
+    )
+    [record] = [r for r in out.records if r.spec.subtype == "cuff_detached"]
+    [annotated] = annotate_reading_counts([record], base)
+    assert (
+        annotated.details["n_readings_drawn"],
+        annotated.details["n_readings_covered"],
+    ) == (1, 2)
+    # a record of another subtype is returned untouched
+    [other] = [r for r in run([manip(ticks[1])], stream_=base).records]
+    assert annotate_reading_counts([other], base) == (other,)
+
+
+def cuff_entries(out: Path) -> list[tuple[str, int, dict[str, Any]]]:
+    reader = open_benchmark(out)
+    entries: list[tuple[str, int, dict[str, Any]]] = []
+    for patient in reader.patient_ids(role="patient"):
+        for day in range(reader.manifest.settings["n_scored_days"]):
+            for entry in reader.truth(patient, day).injection_log:
+                if entry["subtype"] in ANCHORED_SUBTYPES:
+                    entries.append((patient, day, entry))
+    return entries
+
+
+def test_the_truth_log_and_the_manifest_carry_the_effective_k(
+    built: tuple[Path, Any],
+) -> None:
+    out, manifest = built
+    entries = cuff_entries(out)
+    assert len(entries) > 10
+    tally: dict[str, Counter[str]] = {}
+    for _, _, entry in entries:
+        details = entry["details"]
+        drawn, got = details["n_readings_drawn"], details["n_readings_covered"]
+        assert isinstance(drawn, int) and isinstance(got, int)
+        assert 1 <= drawn <= 3 and got >= 0
+        if entry["subtype"] != "stuck_at":
+            assert entry["realised"] == (got > 0)  # the truth follows the effective k
+        tally.setdefault(entry["subtype"], Counter())[f"{drawn}->{got}"] += 1
+    block = manifest.settings["anchored_cuff_faults"]["readings_drawn_to_covered"]
+    assert {k: dict(sorted(v.items())) for k, v in tally.items()} == block
+    realised = manifest.settings["anchored_cuff_faults"]["realised"]
+    for subtype in ANCHORED_SUBTYPES:
+        mine = [e for _, _, e in entries if e["subtype"] == subtype]
+        assert realised.get(subtype, {"realised": 0, "placed": 0}) == {
+            "realised": sum(1 for e in mine if e["realised"]),
+            "placed": len(mine),
+        }
+
+
+# ---------------------------------------------------------------------------------------------------
+# 5. The duration rows are in readings
+# ---------------------------------------------------------------------------------------------------
+
+
+def committed_design() -> dict[str, Any]:
+    return load_injection_design(INJECTIONS_FILE, section="c2")
+
+
+@pytest.mark.parametrize("subtype", sorted(ANCHORED_SUBTYPES))
+def test_duration_rows_are_in_readings(subtype: str) -> None:
+    entry = committed_design()[subtype]
+    assert entry.duration is not None
+    assert entry.duration.unit == "readings" and entry.duration.key == "n_readings"
+    levels = entry.duration.levels
+    assert [lv.level for lv in levels] == ["short", "medium", "long"]
+    assert [lv.name for lv in levels] == [
+        f"{subtype}_duration_{n}" for n in ("short", "medium", "long")
+    ]
+    assert [lv.value for lv in levels] == [1.0, 2.0, 3.0]
+    assert all(lv.unit == "readings" and lv.filled for lv in levels)
+    assert all(lv.source_type == "design_choice" for lv in levels)
+    n_readings = len(default_ticks())
+    assert all(1 <= lv.value <= n_readings for lv in levels)
+    # the other duration blocks of the same file are still in ms
+    for other in ("ble_dropout", "ecg_noise"):
+        block = committed_design()[other].duration
+        assert block is not None and block.unit == "ms"
+        assert all(lv.unit == "ms" for lv in block.levels)
+
+
+def test_the_nine_rows_carry_the_provenance_adr_070_asks_for() -> None:
+    document = yaml.safe_load(INJECTIONS_FILE.read_text(encoding="utf-8"))
+    rows = {r["parameter"]: r for r in document["parameters"]}
+    for subtype in ANCHORED_SUBTYPES:
+        for level, value in (("short", 1), ("medium", 2), ("long", 3)):
+            row = rows[f"{subtype}_duration_{level}"]
+            assert row["unit"] == "readings" and row["value"] == value
+            assert type(row["value"]) is int
+            assert row["status"] == "filled" and row["source_type"] == "design_choice"
+            assert row["verified_by"] is None
+            assert "proposal accepted by gab 2026-10-10, not reviewed" in " ".join(
+                str(row["rationale"]).split()
+            )
+            assert "ADR-070 (a)" in " ".join(str(row["source_ref"]).split())
+
+
+def mutated(tmp_path: Path, mutate: Callable[[dict[str, Any]], None]) -> Path:
+    document = yaml.safe_load(INJECTIONS_FILE.read_text(encoding="utf-8"))
+    mutate(document)
+    path = tmp_path / "injections.yaml"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def set_row(document: dict[str, Any], name: str, **fields: Any) -> None:
+    [row] = [r for r in document["parameters"] if r["parameter"] == name]
+    row.update(fields)
+
+
+def test_a_duration_in_ms_is_refused_for_the_three_subtypes_with_a_named_error(
+    tmp_path: Path,
+) -> None:
+    def block_in_ms(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["cuff_detached"]["duration"]["unit"] = "ms"
+
+    def row_in_ms(document: dict[str, Any]) -> None:
+        set_row(document, "stuck_at_duration_short", unit="ms", value=60_000)
+
+    for edit in (block_in_ms, row_in_ms):
+        with pytest.raises(InjectionDesignError, match="readings"):
+            load_injection_design(mutated(tmp_path, edit), section="c2")
+
+
+def test_the_other_subtypes_still_require_ms(tmp_path: Path) -> None:
+    def readings_for_ble(document: dict[str, Any]) -> None:
+        document["injections"]["c2"]["ble_dropout"]["duration"]["unit"] = "readings"
+
+    with pytest.raises(InjectionDesignError, match="ms"):
+        load_injection_design(mutated(tmp_path, readings_for_ble), section="c2")
+
+
+@pytest.mark.parametrize(
+    ("fields", "match"),
+    [
+        ({"cuff_silent_bias_duration_short": 1.5}, "integer"),
+        ({"cuff_silent_bias_duration_short": 0}, "at least 1"),
+        (
+            {"cuff_silent_bias_duration_short": 3, "cuff_silent_bias_duration_long": 1},
+            "ordered",
+        ),
+        ({"cuff_silent_bias_duration_medium": 1}, "ordered"),
+    ],
+)
+def test_reading_counts_must_be_integers_of_at_least_one_and_ordered(
+    tmp_path: Path, fields: dict[str, float], match: str
+) -> None:
+    def edit(document: dict[str, Any]) -> None:
+        for name, value in fields.items():
+            set_row(document, name, value=value)
+
+    with pytest.raises(InjectionDesignError, match=match):
+        load_injection_design(mutated(tmp_path, edit), section="c2")
+
+
+def test_a_count_above_the_readings_of_the_day_is_a_configuration_error(
+    tmp_path: Path,
+) -> None:
+    n_readings = len(default_ticks())
+
+    def too_long(document: dict[str, Any]) -> None:
+        set_row(document, "stuck_at_duration_long", value=n_readings + 1)
+
+    doc = config_document(tmp_path, pairs=0, variants=[], n_patients=1, n_days=1)
+    path = write_injections(tmp_path, mutate=too_long)
+    doc["paths"]["injections"] = str(path)
+    config = load_config(write_config(tmp_path, doc))
+    prior = LiteraturePriorSource(
+        Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True
+    )
+    with pytest.raises(BenchmarkConfigError, match="readings"):
+        BuildContext.create(config, prior, allow_fixture_only=True)
+
+
+# ---------------------------------------------------------------------------------------------------
+# 6. Determinism, and a change of k changes only the affected injection
+# ---------------------------------------------------------------------------------------------------
+
+
+def test_the_plan_is_deterministic(tmp_path: Path) -> None:
+    kwargs: dict[str, Any] = {
+        "pairs": 0,
+        "variants": [],
+        "n_patients": 3,
+        "n_days": 2,
+        "rates": (0.0, 3.0, 0.0),
+    }
+    a, manifest_a = build(tmp_path, "a", **kwargs)
+    b, manifest_b = build(tmp_path, "b", **kwargs)
+    assert manifest_a.files == manifest_b.files
+    assert (a / "manifest.json").read_bytes() == (b / "manifest.json").read_bytes()
+    files = sorted(p.relative_to(a) for p in a.rglob("*.json"))
+    assert files and all((a / f).read_bytes() == (b / f).read_bytes() for f in files)
+    # another generation seed draws another plan
+    _, other = build(tmp_path, "c", seed=12, **kwargs)
+    assert other.files != manifest_a.files
+
+
+def test_a_change_of_the_drawn_k_changes_only_the_affected_injection(
+    tmp_path: Path,
+) -> None:
+    ticks = default_ticks()
+    readings = default_readings()
+
+    def context_with(long_value: int, name: str) -> BuildContext:
+        folder = tmp_path / name
+        folder.mkdir()
+        prior_path = make_prior(folder)
+        doc = config_document(
+            folder, prior=prior_path, pairs=0, variants=[], n_patients=1, n_days=1,
+            rates=(0.0, 3.0, 0.0),
+        )  # fmt: skip
+
+        def edit(document: dict[str, Any]) -> None:
+            set_row(document, "cuff_detached_duration_long", value=long_value)
+
+        doc["paths"]["injections"] = str(
+            write_injections(folder, rates=(0.0, 3.0, 0.0), mutate=edit)
+        )
+        config = load_config(write_config(folder, doc))
+        prior = LiteraturePriorSource(prior_path, strict=False, allow_fixture_only=True)
+        return BuildContext.create(config, prior, allow_fixture_only=True)
+
+    original, changed = context_with(3, "a"), context_with(4, "b")
+    latent: Any = SimpleNamespace(latent=SimpleNamespace(events=[]))
+    differing = 0
+    for patient_index in range(30):
+        for day in range(6):
+            stream_ = fixture_stream(ticks, day_index=day)
+            plans = []
+            for context in (original, changed):
+                plans.append(
+                    context.plan_observation(
+                        context.cohorts["main"],
+                        patient_index,
+                        day,
+                        latent,
+                        stream_,
+                        Counter(),
+                    )
+                )
+            before, after = plans
+            # every injection that is not a cuff_detached window of level long is the same spec
+            keep = [
+                s
+                for s in before
+                if not (s.subtype == "cuff_detached" and s.level == "long")
+            ]
+            same_subtypes = [s for s in after if s.subtype != "cuff_detached"]
+            assert [s for s in keep if s.subtype != "cuff_detached"] == same_subtypes
+            longs_before = [
+                s for s in before if s.subtype == "cuff_detached" and s.level == "long"
+            ]
+            longs_after = [
+                s for s in after if s.subtype == "cuff_detached" and s.level == "long"
+            ]
+            for spec in longs_before:
+                assert (
+                    covered(
+                        [DAY * day + r for r in readings],
+                        spec.onset_ms,
+                        spec.onset_ms + (spec.duration_ms or 0),
+                    )
+                    == 3
+                )
+            for spec in longs_after:
+                assert (
+                    covered(
+                        [DAY * day + r for r in readings],
+                        spec.onset_ms,
+                        spec.onset_ms + (spec.duration_ms or 0),
+                    )
+                    == 4
+                )
+            differing += len(longs_before)
+    assert differing > 5  # the comparison is not vacuous
+
+
+# ---------------------------------------------------------------------------------------------------
+# 7. The observability table of docs/benchmark/builder.md is the generator's output
+# ---------------------------------------------------------------------------------------------------
+
+BEGIN = "<!-- observability-table:begin"
+END = "<!-- observability-table:end -->"
+
+
+def committed_table() -> str:
+    text = BUILDER_DOC.read_text(encoding="utf-8")
+    match = re.search(
+        re.escape(BEGIN) + r"[^\n]*\n(.*?)" + re.escape(END), text, re.DOTALL
+    )
+    assert match, "docs/benchmark/builder.md has no observability table block"
+    return match.group(1).strip("\n")
+
+
+def test_observability_table_matches_the_generator() -> None:
+    generated = observability_table(
+        default_readings(), step_ms=STEP, day_start_ms=0, day_end_ms=DAY
+    )
+    assert committed_table() == generated.strip("\n")
+
+
+def test_the_generated_table_states_the_exact_distribution() -> None:
+    readings = default_readings()
+    table = observability_table(readings, step_ms=STEP, day_start_ms=0, day_end_ms=DAY)
+    rows = [line for line in table.splitlines() if re.match(r"\| [123] \|", line)]
+    assert len(rows) == 3
+    for k, row in zip((1, 2, 3), rows, strict=True):
+        cells = [c.strip() for c in row.strip("|").split("|")]
+        assert cells[0] == str(k)
+        assert cells[1] == f"{k}: 100%"  # every window covers exactly k readings
+        assert cells[2] == str(len(readings) - k + 1)
+        shapes = ", ".join(f"{a}x{b}" for a, b in EXPECTED_SHAPES[k])
+        assert cells[3] == shapes
+    # the readings and the number of pairs behind it are stated, so a reader can recompute
+    assert "06:15:30" in table and "22:15:30" in table
+
+
+def test_the_generator_script_checks_the_committed_table() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "ralmon.benchmark.anchoring", "--check"],
+        capture_output=True, text=True, cwd=ROOT, check=False,
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    stale = subprocess.run(
+        [sys.executable, "-m", "ralmon.benchmark.anchoring", "--check", "--doc", "/nonexistent.md"],
+        capture_output=True, text=True, cwd=ROOT, check=False,
+    )  # fmt: skip
+    assert stale.returncode != 0
+
+
+def test_anchored_subtypes_are_exactly_the_three_of_adr_070() -> None:
+    assert set(ANCHORED_SUBTYPES) == {"cuff_detached", "cuff_silent_bias", "stuck_at"}
+    assert list(ANCHORED_SUBTYPES) == sorted(ANCHORED_SUBTYPES)
