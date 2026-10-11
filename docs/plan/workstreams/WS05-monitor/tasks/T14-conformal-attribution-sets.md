@@ -3,7 +3,7 @@ id: WS05-T14
 title: "Conformal calibration of attribution sets (patient-level split, Mondrian per template)"
 workstream: WS05-monitor
 owner: agent
-status: blocked
+status: ready
 depends_on: ["WS05-T06", "WS02-T06"]
 critical_path: true
 non_negotiable: false
