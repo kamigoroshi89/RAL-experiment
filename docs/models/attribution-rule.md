@@ -1,6 +1,6 @@
 # Attribution rule: hierarchy, abstention, cascades and the clinician in the loop
 
-Document WS02-T04. It is the normative specification of `HierarchicalRule.attribute` and of `Attributor.attribute_all` of the `Attribution` contract (`docs/plan/02-interfaces.md#attribution`, version 0.1.0, not edited here). It defines, in terms of the twenty fields of the `EvidenceVector` (`#evidencevector`), the evidence predicates, the hierarchical decision table (integrity evidence gives C3, otherwise system evidence gives C2, otherwise a violation with coherent channels gives C1, otherwise UNDETERMINED), the per-template conditions for claiming C1 by exclusion, the abstention reasons, the propagation of a root cause over cascades (analisi §4.9 item 3), the treatment of predicted violations, and the action policy with autonomy limited to robot actions (analisi §4.9 item 4). It ends with test-ready invariants and the worked cases that WS05-T07 lifts into pytest fixtures. It closes R2 weakness 7 (the attributed cause is not derived from low confidence) and, with the hazard paper of WS02-T05, R3 weakness 4 (taxonomy and safety actions). Validation in this project is technical and pre-clinical: nothing here is a clinical claim, no number in this document is a clinical, probabilistic or device value, and no statement says that a rule or an action is clinically validated.
+Document WS02-T04. It is the normative specification of `HierarchicalRule.attribute` and of `Attributor.attribute_all` of the `Attribution` contract (`docs/plan/02-interfaces.md#attribution`, not edited here). It defines, in terms of the twenty-four fields of the `EvidenceVector` (`#evidencevector` 0.2.0; the section Contract 0.2.0 below records the migration from the twenty fields of 0.1.0), the evidence predicates, the hierarchical decision table (integrity evidence gives C3, otherwise system evidence gives C2, otherwise a violation with coherent channels gives C1, otherwise UNDETERMINED), the per-template conditions for claiming C1 by exclusion, the abstention reasons, the propagation of a root cause over cascades (analisi §4.9 item 3), the treatment of predicted violations, and the action policy with autonomy limited to robot actions (analisi §4.9 item 4). It ends with test-ready invariants and the worked cases that WS05-T07 lifts into pytest fixtures. It closes R2 weakness 7 (the attributed cause is not derived from low confidence) and, with the hazard paper of WS02-T05, R3 weakness 4 (taxonomy and safety actions). Validation in this project is technical and pre-clinical: nothing here is a clinical claim, no number in this document is a clinical, probabilistic or device value, and no statement says that a rule or an action is clinically validated.
 
 The semantics used is the merged core: `docs/models/evidence-channels.md` (called EC below: field semantics, reading states, the A4 mask, decisions D-1 to D-14, gaps EC-GAP-1 to EC-GAP-12, open points EC-OP-1 to EC-OP-21), `docs/models/fault-model.md` (FM), `docs/models/threat-model.md` (TM), `docs/formal/07-alert-tuple-mapping.md` (F07: the alert tuple, CP13, the open points OP-T07-1 to OP-T07-17), `docs/formal/02-templates.md` (T02) and `docs/formal/05-three-valued-semantics.md` (T05). The glossary of `docs/plan/01-conventions.md` section 7 is binding: an **alert** is the output tuple, a **violation** is a violated sub-formula and names its conjunct, the **attributed cause** κ is a value of the alert (C1, C2, C3, UNDETERMINED); C3 means integrity violation (ADR-002); DISPENSE (the dispenser opened) is not INTAKE (verified only by the robot witness, ADR-004); a robot that is unavailable is not a robot that reports a denial.
 
@@ -12,6 +12,16 @@ The semantics used is the merged core: `docs/models/evidence-channels.md` (calle
 4. The decision table was checked by an exhaustive enumeration of the relevant fields of each template and by two independent implementations (a scalar one that follows the table row by row and a vectorised one written from the predicates), which agree on every combination (scalar against vectorised: exhaustively for `range`, `sched`, `count`, `sys` and `int`, on a seeded random sample of four hundred thousand combinations each for `hold` and `resp`). The decisive-field lists were also compared with an independent reading written from the prose of this document (2,921,136 combinations: exhaustive for `range`, `sched`, `count`, `sys` and `int`, 300,000 random combinations each for `hold` and `resp`): no difference. The scripts are scratch files and are not committed; the counts are in the section Decision table and in the notes of the task file. The worked cases were computed with the scalar implementation and, for the cases marked in them, by hand.
 5. Times are `hh:mm` labels of a fixture day. A fixture value written FIXTURE-ONLY or a name of a registry parameter has no clinical meaning.
 6. Quotations from `docs/source/analisi.md` and `docs/source/review.md` are translations from the Italian source; quotations from the other project documents are verbatim.
+
+## Contract 0.2.0 (WS05-T13)
+
+`#evidencevector` went from 0.1.0 (twenty fields in six groups) to 0.2.0 (twenty-four fields in seven groups) by ADR-074 amendment 3. This section records what that does to the rule; the sections below are written for 0.2.0 and the numbers of the enumeration are recomputed.
+
+1. **The split of the sequence field (ADR-034).** `crypto_temporal.seq_gap_or_replay` is removed; `crypto_temporal.seq_repeat` (a received `(name, seq)` repeats an accepted one) and `system.seq_gap` (a sequence value is missing at the cut-off) replace it, both with the `None` conditions of the old field. The rule reads `crypto_temporal.seq_repeat` where it read the repeat (IE-2, with a complete delivery ratio) and `system.seq_gap` where it read the loss (the exclusion set, RS-2, AM-2); it gains no C2 predicate (AD-19).
+2. **Mapping of the old field, used to re-derive the worked cases.** Old `True` with a complete ratio is `seq_repeat` True and `seq_gap` False (a missing value would make the ratio smaller than one); old `True` with a ratio below one (class A or G) is `seq_gap` True and `seq_repeat` False; old `True` with an unavailable ratio is `seq_repeat` True and `seq_gap` `None` (ambiguous either way); old `False` is both False; old `None` is both `None`. The 0.2.0 table agrees with the 0.1.0 table on all 87,351,696 combinations of the old space under this mapping: the same row for every one, so no verdict of the 0.1.0 table changes. Cases that used the old field and were re-derived: W-01, W-02 and its variants, W-03, W-04, W-05 and its variants, W-06, W-07, W-08, W-09 and its variants, W-10, W-12, W-13, W-14, W-15 and W-11 (old `False`: both new fields False, or both `None` in the cases that list it `None`: W-05-silent, W-05-silent-040, W-08-U-noseq); W-08-U and W-15-repeat (old `True` with ratio 1.0: `seq_repeat` True, `seq_gap` False; decisive fields `system.ble_link_quality`, `crypto_temporal.seq_repeat`); W-09-jump, W-15 and W-15-jump (old `True` with a ratio below the floor: `seq_gap` True, `seq_repeat` False; row 4 through SE-5, unchanged); W-15-alone (old `True` with a ratio below one and at or above the floor: `seq_gap` True, `seq_repeat` False; row 6, reason conflict, decisive fields `system.ble_link_quality`, `system.seq_gap`). The decisive-field lists of the C1 cases (W-01, W-02, W-02-auth, W-02-auth-witness, W-04, W-05-late-traffic, W-10) gain `system.seq_gap` and name `crypto_temporal.seq_repeat` instead of the old field, because the exclusion set requires both denied.
+3. **Context fields (AD-20).** `signal_quality.cuff_value_repeated`, `dispenser.interval_since_previous_ms` and `dispenser.content_change` are not read by any row. The table keeps its eight rows and gains no `count` row (OP-AR-10 stays open); the likelihood attributor of WS05-T12 reads the new fields.
+4. **Meaning conventions (ADR-033, ADR-040).** The key of the evidence mapping is `VerdictRecord.instance_key`; a scalar `system` field aggregates over the scope of the instance; `system.battery_low` is the robot battery and `witness.robot_present` is the patient presence observed by the robot; the outcome `declined` does not make `system.manip_task_failed` True; `dispenser.content_change` is before minus after. The A4 mask of EC lists the new fields as unchanged (ward-side).
+5. **A combination the old field could not express.** `system.seq_gap` asserted while the ratio is complete cannot be produced by the extractor (the ratio is 1.0 exactly when no value of its span is missing); the table reads it as evidence that no rule accepts (RS-2, reason conflict) and not as a clean stream, so the total function stays conservative.
 
 ## Inputs and outputs
 
@@ -28,9 +38,9 @@ class Attributor(Protocol):
 
 `HierarchicalRule.attribute` is the decision table of this document. `RuleAttributor.attribute_all` (WS05-T07) is the alert builder: it applies the rule to each record, applies the state check of the section Predicted violations, folds cascades by the section Cascades and root-cause propagation and returns the alerts ordered by `rank_alerts` (`#template`: template priority first, then σ̃ ascending, then `t_ms` and `xi.instance_key`: F07 section 1.3, T04 section 4.2; the order is a function of the alerts, so folded effects are in the list). `attribute_all` is stateless and returns the **current set**, one alert per `xi.instance_key`: if its input holds both the PREDICTED_VIOLATION record and the VIOLATED record of one instance key, only the alert of the VIOLATED record is returned (it supersedes the predicted alert: F07 section 1.4 item 3 and AH-19), and a predicted alert is returned only when no VIOLATED record of that key is in the input; the history, with the superseded predicted alerts, belongs to `update` and to the log. The table produces a **decision record** ⟨κ, row, reason, decisive fields⟩ from the same two inputs; WS05-T07 exposes it through a method outside the Protocol (the Protocol is unchanged), and `Explanation.evidence_used` and the abstention text are rendered from it.
 
-**The evidence key.** The mapping `evidence` is keyed by `VerdictRecord.instance_key` of the violated record (EC decision D-1, which ADR-033 proposes to put in the contract), per care plan. An absent key means a vector with `provenance` taken from the record and every other field `None`; the result is UNDETERMINED, with no exception (WS05-T07 test 13, invariant I3).
+**The evidence key.** The mapping `evidence` is keyed by `VerdictRecord.instance_key` of the violated record (EC decision D-1, which ADR-033, accepted, puts in the contract), per care plan. An absent key means a vector with `provenance` taken from the record and every other field `None`; the result is UNDETERMINED, with no exception (WS05-T07 test 13, invariant I3).
 
-**What κ is a function of.** κ is a function of `provenance.violated_template`, `provenance.template_kind` and the other 18 fields, and of nothing else; the table reads fewer than the 18 for every template (the relevance map in the section Evidence predicates), so this is an upper bound. `provenance.template_kind` is determined by the template (T02 section 3.1: SYSTEM and INTEGRITY only for `sys` and `int`); it selects the abstention reason of row 7. If `provenance.template_kind` does not match the kind of `provenance.violated_template` (T02 section 3.1) the input is invalid: rows 1 to 7 are not evaluated and row 8 applies (UNDETERMINED, reason insufficient, `evidence_used` empty), the builder logs the defect, and no exception is raised on the alert path (AD-18; the contract defines no error value, and an abstention is the output that asserts no cause: I3 and I4). Two of the 18 fields are never read: `system.battery_low` and `witness.robot_present` are context (AD-11).
+**What κ is a function of.** κ is a function of `provenance.violated_template`, `provenance.template_kind` and the other 22 fields, and of nothing else; the table reads at most seventeen of the 22 for every template (the relevance map in the section Evidence predicates), so this is an upper bound. `provenance.template_kind` is determined by the template (T02 section 3.1: SYSTEM and INTEGRITY only for `sys` and `int`); it selects the abstention reason of row 7. If `provenance.template_kind` does not match the kind of `provenance.violated_template` (T02 section 3.1) the input is invalid: rows 1 to 7 are not evaluated and row 8 applies (UNDETERMINED, reason insufficient, `evidence_used` empty), the builder logs the defect, and no exception is raised on the alert path (AD-18; the contract defines no error value, and an abstention is the output that asserts no cause: I3 and I4). Five of the 22 fields are never read: `system.battery_low` and `witness.robot_present` are context (AD-11), and so are `signal_quality.cuff_value_repeated` and the two `dispenser` fields, which `#evidencevector` 0.2.0 adds for the likelihood attributor of WS05-T12 (AD-20).
 
 **What κ is not a function of.** ρ is not an input: neither `VerdictRecord.rho` nor `Alert.rho` is read by the rule, and a low ρ is not evidence of an integrity violation (R2 weakness 7: noise, distribution shift and faults also lower ρ, which therefore does not identify a cause). σ̃, the raw interval `sigma_interval` and `sigma_norm_interval` are not inputs. `VerdictRecord.state`, `t_eval_ms`, `decided_at_ms` and `pending_until_ms` are not inputs of the rule (time and verdict state enter `attribute_all` only, as stated in the sections Cascades and root-cause propagation and Predicted violations). The registry values other than the four thresholds, the care plan, the forecaster, the conformal calibrator, `LatentDay` and `GroundTruthEvent` are not inputs either; the attribution layer reads only the observed trace through the evidence vector (FM hypothesis 8).
 
@@ -58,8 +68,9 @@ The classes of a reading, per field, are those of EC (section Reading states and
 | `cross_device.pulse_vs_ecg_hr_diff` | above `hr_coherence_tolerance` | at or below it | `None` | none |
 | `witness.identity_confirmed`, `witness.intake_observed` | False (the adverse reading in a dispense context, EC Field semantics) | True (positive backing) | `None` | none |
 | `crypto_temporal.authenticated` | False | True | `None` | none |
-| `crypto_temporal.seq_gap_or_replay`, `crypto_temporal.timestamp_implausible` | True | False | `None` | none |
+| `system.seq_gap`, `crypto_temporal.seq_repeat`, `crypto_temporal.timestamp_implausible` | True | False | `None` | none |
 | `system.battery_low`, `witness.robot_present`, `provenance.*` | not read | not read | not read | context (AD-11) |
+| `signal_quality.cuff_value_repeated`, `dispenser.interval_since_previous_ms`, `dispenser.content_change` | not read | not read | not read | context (AD-20): read by the likelihood attributor only |
 
 `None` is never converted to a negative observation (`#evidencevector` rule, EC section Reading states): every predicate below that needs a denied reading is not satisfied by `None`. **Out-of-domain readings (AD-18, H-16).** A float that is not a number, `system.ble_link_quality` outside the closed unit interval (a delivery ratio above one cannot occur) and a negative `cross_device.pulse_vs_ecg_hr_diff` (a largest absolute difference) are defects of the extractor, not readings: they are read as unavailable (U), never as asserted or denied, so they can only lead to an abstention (I4), and the builder logs them.
 
@@ -68,13 +79,13 @@ The classes of a reading, per field, are those of EC (section Reading states and
 Integrity evidence is evidence that an input is not backed by an authentic origin or that the trace contradicts itself (TM section Scope and claim). Three predicates count, in this order.
 
 - **IE-1.** `crypto_temporal.authenticated` is asserted: a message of a device of the scope failed verification in the window. Source: TM attack-to-evidence table (the A column of the forging classes) and TM hypothesis H-AUTHCAUSE (no C2 fault makes the verification of a genuine message fail; FM lists no fault that raises it). Not explained away by anything in the vector (H-5).
-- **IE-2.** `crypto_temporal.seq_gap_or_replay` is asserted and `system.ble_link_quality` is complete (F): a repeated sequence value without a missing one. Source: EC D-3: "may treat a True field with ratio 1.0 as integrity evidence, and must not treat a True field with a ratio below 1.0 as integrity evidence alone". A gap, that is any asserted sequence field with a ratio below 1.0 (class A or G), is **not** integrity evidence, and a sequence field with an unavailable ratio is not either (AD-4).
+- **IE-2.** `crypto_temporal.seq_repeat` is asserted and `system.ble_link_quality` is complete (F): a repeated sequence value without a missing one. Source: EC D-3 (ADR-034, accepted): the repeat is integrity evidence, the gap is system evidence, and a repeat read together with a delivery ratio below 1.0 (class A or G) is **not** integrity evidence alone (a replay together with a loss is read as a loss, declared limit), and neither is a repeat with an unavailable ratio (AD-4). `system.seq_gap` is never integrity evidence.
 - **IE-3** (templates that read the cross-device pair, see the relevance map). `cross_device.pulse_vs_ecg_hr_diff` is asserted and both `signal_quality.ecg_sqi` and `signal_quality.ppg_sqi` are denied (good quality). Source: the explained-away rule of the task and FM section Non-faults and boundaries (the evidence confound of `ecg_noise`: "`signal_quality.ecg_sqi` is the field that marks the noise; whether the rule uses it first is WS02-T04's decision"). H-7 records that `signal_quality.ppg_sqi` reads `SPO2` (EC D-13) and is included because the task names both quality fields; the choice is the conservative one.
 
 Explained-away rules (AD-4, AD-5, AD-6).
 
 1. **Cross-device incoherence.** With both quality fields denied it is integrity evidence (IE-3). With a quality problem asserted (either field) it counts as system evidence (SE-9): the incoherence is attributed to a signal-quality problem of the measurement system. With the quality unavailable (and neither field asserted) it is neither: the table abstains (AM-1, reason insufficient). A quality field that is asserted while the incoherence is denied or unavailable decides nothing.
-2. **Sequence gap.** A missing sequence value is read as a message loss (H-15): the gap of a naive forged message whose number jumps ahead is read the same way (EC D-3, EX-1 (m): "the signature of a loss, not of a replay"). A gap is explained by asserted link evidence (SE-1 to SE-5 of the list below, in particular the degraded link of SE-5) and is then not integrity evidence: the link fields decide (C2). The table does not check which system evidence explains the gap: any asserted system evidence decides C2 (row 4) and the gap is then not integrity evidence either. A gap of class G with no other system evidence is evidence of a loss that neither rule accepts (RS-2, abstention, reason conflict). An asserted sequence field with an unavailable ratio cannot be told from a repeat or a gap (EC D-3, EX-10 check P4) and is ambiguous (AM-2, reason insufficient).
+2. **Sequence gap.** A missing sequence value (`system.seq_gap`) is read as a message loss (H-15): the gap of a naive forged message whose number jumps ahead is read the same way (EC D-3, EX-1 (m): "the signature of a loss, not of a replay"). A gap is explained by asserted link evidence (SE-1 to SE-5 of the list below, in particular the degraded link of SE-5) and is then not integrity evidence: the link fields decide (C2). The table does not check which system evidence explains the gap: any asserted system evidence decides C2 (row 4) and the gap is then not integrity evidence either. A gap of class G with no other system evidence is evidence of a loss that neither rule accepts (RS-2, abstention, reason conflict). An asserted sequence field (`crypto_temporal.seq_repeat` or `system.seq_gap`) with an unavailable ratio cannot be told from a loss or a repeat on the evidence of the ratio (EC D-3, EX-10 check P4) and is ambiguous (AM-2, reason insufficient). `system.seq_gap` is read where the single field of 0.1.0 was read as a loss (it blocks C1, RS-2 names it, AM-2 counts it) and is **not** a system-evidence predicate of its own: the delivery ratio, which covers the same span, decides C2 (SE-5), and making the gap decisive would turn W-15-alone from UNDETERMINED into C2 (AD-19). The overlap of the two fields is declared, not resolved (EC-OP-22).
 3. **Late or future-stamped input.** `crypto_temporal.timestamp_implausible` mixes late arrival, future stamp and replay-related inconsistency in one Boolean (EC-GAP-6, CG-10 of T01, TM-GAP-TIME): a link delay and a clock skew (C2) and a replay or a delayed relay (C3) give the same reading (TM section Time as an attack vector, "no field separates them"). It is therefore never decisive alone (RS-3: abstention, reason conflict); it is decisive only through IE-1 or IE-2 when those hold.
 4. **Deliberate transition.** A node entry `<state>+commanded` is not a failure (analisi §4.6, row 15:00; EC section Reading rules: "what to do with it is WS02-T04's"). It is not system evidence and it does not allow C1 either: the datum may have been withheld by an operator, which is neither a failure nor a clinical cause (RS-1, abstention, reason conflict).
 
@@ -94,7 +105,7 @@ System evidence is evidence that a device, a link or the robot failed. The field
 | SE-8 | `signal_quality.cuff_error_code` asserted | `range`, `sched`, `hold`, `resp`, `sys` |
 | SE-9 | `cross_device.pulse_vs_ecg_hr_diff` asserted and at least one of `signal_quality.ecg_sqi`, `signal_quality.ppg_sqi` asserted | `range`, `hold`, `resp`, `sys` |
 
-The scalar `system` fields are aggregates over the scope of the instance (EC section Scope of an instance and aggregation rule, decision D-10, which ADR-033 proposes to put in the contract): the scope table of EC says which nodes a field aggregates for each template, and that scope is what makes the relevance map below meaningful. A fault on a node outside the scope of the violated template is not in the vector, so it cannot turn a clinical violation into C2 (EC D-10: "A global reading (c) lets a fault on an unrelated node make C2 the attributed cause of a violation of φ_CP"). **Provenance is context and never sufficient**: no predicate reads `provenance.violated_template` or `provenance.template_kind` as evidence, and C2 and C3 require at least one asserted field outside the `provenance` group (analisi §4.5: recognising C2 only because φ_SYS is violated is circular, and the same holds for C3 and φ_INT; TM Non-claims 6).
+The scalar `system` fields are aggregates over the scope of the instance (EC section Scope of an instance and aggregation rule, decision D-10, which ADR-033, accepted, puts in the contract): the scope table of EC says which nodes a field aggregates for each template, and that scope is what makes the relevance map below meaningful. A fault on a node outside the scope of the violated template is not in the vector, so it cannot turn a clinical violation into C2 (EC D-10: "A global reading (c) lets a fault on an unrelated node make C2 the attributed cause of a violation of φ_CP"). **Provenance is context and never sufficient**: no predicate reads `provenance.violated_template` or `provenance.template_kind` as evidence, and C2 and C3 require at least one asserted field outside the `provenance` group (analisi §4.5: recognising C2 only because φ_SYS is violated is circular, and the same holds for C3 and φ_INT; TM Non-claims 6).
 
 ### Evidence that no rule accepts, and ambiguity
 
@@ -103,11 +114,11 @@ These asserted readings are neither integrity nor system evidence. They block C1
 | id | condition | fields it names (`evidence_used` when it holds) | reason |
 |---|---|---|---|
 | RS-1 | `system.node_lifecycle` of class K (a deliberate transition) | `system.node_lifecycle` | conflict |
-| RS-2 | `system.ble_link_quality` of class G (a missing sequence value, link not degraded) | `system.ble_link_quality`, and `crypto_temporal.seq_gap_or_replay` when it is asserted | conflict |
+| RS-2 | `system.ble_link_quality` of class G (a missing sequence value, link not degraded), or `system.seq_gap` asserted while the ratio is complete (class F: the two fields contradict each other, an extractor defect read as a conflict) | `system.ble_link_quality`, and `system.seq_gap` and `crypto_temporal.seq_repeat` when asserted | conflict |
 | RS-3 | `crypto_temporal.timestamp_implausible` asserted | `crypto_temporal.timestamp_implausible` | conflict |
 | RS-4 (`resp` only) | `crypto_temporal.authenticated` unavailable, the witness backing of the section C1 exclusion conditions not satisfied, and `witness.intake_observed` or `witness.identity_confirmed` asserted | the one or two of `witness.identity_confirmed`, `witness.intake_observed` that are asserted | conflict |
 | AM-1 | `cross_device.pulse_vs_ecg_hr_diff` asserted, neither quality field asserted, and not both denied | none (`evidence_used` empty) | insufficient |
-| AM-2 | `crypto_temporal.seq_gap_or_replay` asserted and `system.ble_link_quality` unavailable | none (`evidence_used` empty) | insufficient |
+| AM-2 | `crypto_temporal.seq_repeat` or `system.seq_gap` asserted and `system.ble_link_quality` unavailable | none (`evidence_used` empty) | insufficient |
 
 ### Coherent channels
 
@@ -129,16 +140,20 @@ Which fields the table reads for which template, derived from the scope table of
 | `system.battery_low` | ctx | ctx | ctx | ctx | ctx | ctx | ctx |
 | `system.nav_task_failed` | - | E | E | - | E | - | r |
 | `system.manip_task_failed` | - | E | E | - | E | - | r |
+| `system.seq_gap` | E | E | E | r | E | r | r |
 | `signal_quality.ecg_sqi` | q | - | q | - | q | q | - |
 | `signal_quality.ppg_sqi` | q | - | q | - | q | q | - |
 | `signal_quality.cuff_error_code` | E | E | E | - | E | r | - |
+| `signal_quality.cuff_value_repeated` | ctx | ctx | ctx | ctx | ctx | ctx | ctx |
 | `cross_device.pulse_vs_ecg_hr_diff` | E | - | E | - | E | r | - |
 | `witness.robot_present` | ctx | ctx | ctx | ctx | ctx | ctx | ctx |
 | `witness.identity_confirmed` | ctx | ctx | ctx | ctx | b | ctx | ctx |
 | `witness.intake_observed` | ctx | ctx | ctx | ctx | b | ctx | ctx |
 | `crypto_temporal.authenticated` | s | s | s | r | b | r | r |
-| `crypto_temporal.seq_gap_or_replay` | E | E | E | r | E | r | r |
+| `crypto_temporal.seq_repeat` | E | E | E | r | E | r | r |
 | `crypto_temporal.timestamp_implausible` | E | E | E | r | E | r | r |
+| `dispenser.interval_since_previous_ms` | ctx | ctx | ctx | ctx | ctx | ctx | ctx |
+| `dispenser.content_change` | ctx | ctx | ctx | ctx | ctx | ctx | ctx |
 
 Notes on the map.
 
@@ -155,31 +170,31 @@ Notes on the map.
 | precedence | condition on the fields | resulting κ | decisive fields (`Explanation.evidence_used`, precedence order) | templates |
 |---|---|---|---|---|
 | 1 | IE-1: `crypto_temporal.authenticated` asserted | C3 | `crypto_temporal.authenticated`, followed by the fields of IE-2 and IE-3 if those also hold | all |
-| 2 | IE-2: `crypto_temporal.seq_gap_or_replay` asserted and `system.ble_link_quality` complete | C3 | `system.ble_link_quality`, `crypto_temporal.seq_gap_or_replay`, followed by the fields of IE-3 if it also holds | all |
+| 2 | IE-2: `crypto_temporal.seq_repeat` asserted and `system.ble_link_quality` complete | C3 | `system.ble_link_quality`, `crypto_temporal.seq_repeat`, followed by the fields of IE-3 if it also holds | all |
 | 3 | IE-3: `cross_device.pulse_vs_ecg_hr_diff` asserted, `signal_quality.ecg_sqi` and `signal_quality.ppg_sqi` denied | C3 | `signal_quality.ecg_sqi`, `signal_quality.ppg_sqi`, `cross_device.pulse_vs_ecg_hr_diff` | `range`, `hold`, `resp`, `sys` |
 | 4 | at least one of SE-1 to SE-9 holds | C2 | the fields of every SE predicate that holds, in the order SE-1 to SE-9 (SE-9: the asserted quality fields, then `cross_device.pulse_vs_ecg_hr_diff`) | all |
 | 5 | EX(t): the exclusion set of the template is satisfied (section C1 exclusion conditions) | C1 | the fields of EX(t) whose reading is denied, in contract order (for `resp` the backing actually used: when `crypto_temporal.authenticated` is denied only it is listed, even if both witness fields are denied too) | `range`, `sched`, `hold`, `resp` |
-| 6 | at least one of RS-1 to RS-4 holds | UNDETERMINED, reason conflict | the fields that the RS predicates that hold name (table of the section Evidence predicates: for RS-2 `system.ble_link_quality` and, when asserted, `crypto_temporal.seq_gap_or_replay`), in contract order | all |
+| 6 | at least one of RS-1 to RS-4 holds | UNDETERMINED, reason conflict | the fields that the RS predicates that hold name (table of the section Evidence predicates: for RS-2 `system.ble_link_quality` and, when asserted, `system.seq_gap` and `crypto_temporal.seq_repeat`), in contract order | all |
 | 7 | `provenance.template_kind` is SYSTEM or INTEGRITY, and neither AM-1 nor AM-2 holds | UNDETERMINED, reason provenance-only | none | `sys`, `int` |
 | 8 | otherwise | UNDETERMINED, reason insufficient | none | all |
 
-**Decidability and totality.** Every field the table reads has a finite set of reading classes (three, or four for `system.node_lifecycle` and `system.ble_link_quality`), a template reads at most sixteen fields, and row 8 is the "otherwise" branch, so the table is a total function of the reading classes of the relevant fields: exactly one row, hence exactly one κ and, for UNDETERMINED, exactly one reason (rows 6, 7 and 8 are the three reasons), is selected for every combination. The twenty fields give no other source of variation: the fields a template does not read cannot change the result, because no row reads them.
+**Decidability and totality.** Every field the table reads has a finite set of reading classes (three, or four for `system.node_lifecycle` and `system.ble_link_quality`), a template reads at most seventeen fields, and row 8 is the "otherwise" branch, so the table is a total function of the reading classes of the relevant fields: exactly one row, hence exactly one κ and, for UNDETERMINED, exactly one reason (rows 6, 7 and 8 are the three reasons), is selected for every combination. The twenty-four fields give no other source of variation: the fields a template does not read cannot change the result, because no row reads them.
 
-**Enumeration check.** For each template every combination of the reading classes of the fields it reads was enumerated (87,351,696 combinations in all). The table below gives the number of combinations that each row decides and the number of combinations per outcome. Results: (i) the first matching row of the conditions written independently of the precedence (non-exclusive) is the row selected, for every combination; (ii) exactly one row fires in the exclusive form for every combination, with no combination left over; (iii) precedence is needed and exercised, since the conditions of rows 1 to 7 written without the precedence (with AM-1 and AM-2 as defined in the section Evidence predicates) overlap, that is at least two of them hold, in 62,979,376 of the 76,527,504 combinations of `resp` (697,616 of `range`, 236,496 of `sched`, 6,503,504 of `hold`, 8,016 of `count`, 879,388 of `sys`, 100,588 of `int`; for `sys` and `int` the figure includes row 7, without it 697,616 and 77,424), and integrity evidence together with system evidence (C3 against C2) occurs in 30,155,328 combinations of `resp`; no combination satisfies both integrity evidence and the exclusion set; (iv) every row that applies to a template is reached by some combination (no unreachable row; "n/a" marks a row that does not apply to the template, which is not an unreachable row); (v) the outcome set of each template is exactly the one in the last four columns, including the design-unreachable cases: C1 does not exist for `count` (AD-10), `sys` and `int` (T02: a φ_SYS or φ_INT violation never yields C1). The scripts are not committed.
+**Enumeration check.** For each template every combination of the reading classes of the fields it reads was enumerated (262,055,088 combinations in all; 87,351,696 for the twenty fields of contract 0.1.0, each combination of which gives three in 0.2.0 because every template reads the new `system.seq_gap`). The table below gives the number of combinations that each row decides and the number of combinations per outcome. Results: (i) the rows are the first-match cascade of the section Decision table, written from the predicates of this document (a vectorised implementation, not the code of `HierarchicalRule`), and exactly one row fires for every combination with none left over; (ii) the cascade was compared with `HierarchicalRule.decide` on 40,000 seeded random combinations per template in the scratch run, and by the committed test `tests/attribution/test_rule_enumeration.py` on 3,000 per template (the whole space for `count`: 34,992 combinations), and on none was the row different; (iii) the 0.1.0 table was reproduced first by the same implementation in its single-field mode (every number of the 0.1.0 version of this section, including the 62,979,376 overlapping combinations of `resp`), and then the 0.2.0 table was compared with the 0.1.0 table on all 87,351,696 combinations of the old space through the mapping of the section Contract 0.2.0: the row is the same in every one (0 differences), so the migration changes no verdict of the old space; (iv) precedence is needed and exercised, since the conditions of rows 1 to 7 written without the precedence (with AM-1 and AM-2 as defined in the section Evidence predicates) overlap, that is at least two of them hold, in 191,928,488 of the 229,582,512 combinations of `resp` (2,143,648 of `range`, 726,984 of `sched`, 19,966,432 of `hold`, 24,696 of `count`, 2,600,180 of `sys`, 296,060 of `int`; for `sys` and `int` the figure includes row 7, without it 2,143,648 and 238,104), and integrity evidence together with system evidence (C3 against C2) occurs in 90,465,984 combinations of `resp`; no combination satisfies both integrity evidence and the exclusion set; (v) every row that applies to a template is reached by some combination (no unreachable row; "n/a" marks a row that does not apply to the template, which is not an unreachable row); (vi) the outcome set of each template is exactly the one in the last four columns, including the design-unreachable cases: C1 does not exist for `count` (AD-10), `sys` and `int` (T02: a φ_SYS or φ_INT violation never yields C1). The number of combinations that reach C1 is the same as in 0.1.0 (18, 2, 18 and 90 for `range`, `sched`, `hold` and `resp`): `system.seq_gap` must be denied, a single class, so it multiplies the count by one. The enumeration is committed as `tests/attribution/test_rule_enumeration.py`, which parses the table below and fails if a number differs; the other scratch scripts are not committed.
 
 | template | fields read | combinations | row 1 | row 2 | row 3 | row 4 | row 5 | row 6 | row 7 | row 8 | C3 | C2 | C1 | UNDETERMINED |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `range` | 12 | 944,784 | 314,928 | 52,488 | 21,384 | 507,600 | 18 | 34,944 | n/a | 13,422 | 388,800 | 507,600 | 18 | 48,366 |
-| `sched` | 11 | 314,928 | 104,976 | 17,496 | n/a | 183,240 | 2 | 6,656 | n/a | 2,558 | 122,472 | 183,240 | 2 | 9,214 |
-| `hold` | 14 | 8,503,056 | 2,834,352 | 472,392 | 192,456 | 4,810,320 | 18 | 139,776 | n/a | 53,742 | 3,499,200 | 4,810,320 | 18 | 193,518 |
-| `count` | 8 | 11,664 | 3,888 | 648 | n/a | 5,976 | n/a | 832 | n/a | 320 | 4,536 | 5,976 | 0 | 1,152 |
-| `resp` | 16 | 76,527,504 | 25,509,168 | 4,251,528 | 1,732,104 | 43,292,880 | 90 | 1,392,384 | n/a | 349,350 | 31,492,800 | 43,292,880 | 90 | 1,741,734 |
-| `sys` | 12 | 944,784 | 314,928 | 52,488 | 21,384 | 507,600 | n/a | 34,944 | 9,216 | 4,224 | 388,800 | 507,600 | 0 | 48,384 |
-| `int` | 10 | 104,976 | 34,992 | 5,832 | n/a | 59,544 | n/a | 3,328 | 1,024 | 256 | 40,824 | 59,544 | 0 | 4,608 |
+| `range` | 13 | 2,834,352 | 944,784 | 157,464 | 64,152 | 1,522,800 | 18 | 110,208 | n/a | 34,926 | 1,166,400 | 1,522,800 | 18 | 145,134 |
+| `sched` | 12 | 944,784 | 314,928 | 52,488 | n/a | 549,720 | 2 | 20,992 | n/a | 6,654 | 367,416 | 549,720 | 2 | 27,646 |
+| `hold` | 15 | 25,509,168 | 8,503,056 | 1,417,176 | 577,368 | 14,430,960 | 18 | 440,832 | n/a | 139,758 | 10,497,600 | 14,430,960 | 18 | 580,590 |
+| `count` | 9 | 34,992 | 11,664 | 1,944 | n/a | 17,928 | n/a | 2,624 | n/a | 832 | 13,608 | 17,928 | 0 | 3,456 |
+| `resp` | 17 | 229,582,512 | 76,527,504 | 12,754,584 | 5,196,312 | 129,878,640 | 90 | 4,316,928 | n/a | 908,454 | 94,478,400 | 129,878,640 | 90 | 5,225,382 |
+| `sys` | 13 | 2,834,352 | 944,784 | 157,464 | 64,152 | 1,522,800 | n/a | 110,208 | 18,432 | 16,512 | 1,166,400 | 1,522,800 | 0 | 145,152 |
+| `int` | 11 | 314,928 | 104,976 | 17,496 | n/a | 178,632 | n/a | 10,496 | 2,048 | 1,280 | 122,472 | 178,632 | 0 | 13,824 |
 
 **Combinations the extractor cannot produce.** The table is total over all classes, including combinations that are inconsistent by construction (for example a sequence field denied with a ratio below 1.0: the ratio of class A is system evidence, class G is evidence that no rule accepts). It does not rely on the extractor being consistent.
 
-**Cost of the integrity-first order, stated.** The rows 1 and 2 give C3 even when system evidence is asserted too (ADR-010: integrity first; invariant I2). A benign repeated sequence value (a device restart, a counter reset, an application-layer re-send, a bounce that repeats the real number: TM hypothesis H-SEQMONO) is therefore read as integrity evidence when the delivery ratio is complete (H-6, OP-AR-6). ADR-034 (proposed) splits the field into a repeat and a gap; until it is accepted the pair of D-3 is the reading.
+**Cost of the integrity-first order, stated.** The rows 1 and 2 give C3 even when system evidence is asserted too (ADR-010: integrity first; invariant I2). A benign repeated sequence value (a device restart, a counter reset, an application-layer re-send, a bounce that repeats the real number: TM hypothesis H-SEQMONO) is therefore read as integrity evidence when the delivery ratio is complete (H-6, OP-AR-6). ADR-034 (accepted) splits the field into a repeat (`crypto_temporal.seq_repeat`) and a gap (`system.seq_gap`) in contract 0.2.0: a pure loss no longer sets the integrity field, but a benign repeat with a complete ratio is still integrity evidence for this rule.
 
 **Cost of reading a missing sequence value as a loss (H-15, OP-AR-19).** EC D-3 and check EX-1 (m) say that a naive forged message **whose number jumps ahead** leaves a gap, "the signature of a loss, not of a replay", and that the interim reading does not use the sequence evidence of those rows as integrity evidence. The rule therefore gives a confident wrong class where the forged number jumps ahead and the gap is large: with the delivery ratio below `ble_link_quality_floor` it gives C2 (SE-5; W-15-jump, W-09-jump); with the ratio at or above the floor it abstains (RS-2). A naive forged message whose number **repeats** an accepted one leaves a repeat without gap and is integrity evidence (IE-2, row 2): TM says that the forged number "leaves a gap or repeats one" (`dispense_forgery`, evidence U), and the naive forger of WS04-T08 numbers its forged dispense from `FORGED_SEQ_START`, which repeats a number the genuine dispenser already used; the delivery ratio must then be complete (W-15-repeat, W-08-U). A naive forged dispense whose number jumps ahead (no pulse rate, no verification failure) cannot reach C3 in the unauthenticated deployment through the sequence evidence; a naive injection whose number jumps ahead reaches C3 only through IE-3 (an incoherent pulse rate with good signal quality: TM attack-to-evidence table) or IE-1. A replay together with a loss is read as a loss too (D-3, declared limit).
 
@@ -208,11 +223,11 @@ C1 is claimed by exclusion: no integrity evidence, no system evidence, and **eve
 | `range` | EX-CP, `signal_quality.cuff_error_code` denied, `cross_device.pulse_vs_ecg_hr_diff` denied, `crypto_temporal.authenticated` not asserted | none | no | `system.diagnostics_ok`, `system.qos_deadline_missed`, `crypto_temporal.timestamp_implausible` |
 | `sched` | EX-CP, `system.nav_task_failed` denied, `system.manip_task_failed` denied, `signal_quality.cuff_error_code` denied, `crypto_temporal.authenticated` not asserted | `system.nav_task_failed`, `system.manip_task_failed` (the aggregates of EX-CP lose their robot component, see below) | no | as `range` |
 | `hold` | EX-CP, `system.nav_task_failed` denied, `system.manip_task_failed` denied, `signal_quality.cuff_error_code` denied, `cross_device.pulse_vs_ecg_hr_diff` denied, `crypto_temporal.authenticated` not asserted | `system.nav_task_failed`, `system.manip_task_failed` | no | as `range` |
-| `count` | none can be satisfied: the exclusion of a bounce and of a double take needs the dispenser interval and content change (`dispenser/interval_since_previous_ms`, `dispenser/content_change`), which have no field in contract 0.1.0 | none | yes (EC-GAP-1, ADR-032 proposed) | not applicable |
+| `count` | none can be satisfied: the exclusion of a bounce and of a double take needs the dispenser interval and content change (`dispenser.interval_since_previous_ms`, `dispenser.content_change`), which are fields of contract 0.2.0 that this rule treats as context (OP-AR-10), so the table has no C1 row for `count` | none | yes (EC-GAP-1 is closed by contract 0.2.0, but the rule does not read the fields) | not applicable |
 | `resp` | the conditions of `hold` with the backing below in place of `crypto_temporal.authenticated` not asserted | `system.nav_task_failed`, `system.manip_task_failed`, `witness.identity_confirmed`, `witness.intake_observed` (the backing alternative) | no | as `range` |
 | `sys`, `int` | never: C1 is not defined for a φ_SYS or φ_INT violation | not applicable | not applicable | not applicable |
 
-EX-CP, the cuff-path conditions of the exclusion set: `system.node_lifecycle` denied with every entry `active` (class D, not K), `system.diagnostics_ok` denied, `system.liveliness_ok` denied, `system.qos_deadline_missed` denied, `system.ble_link_quality` complete (class F), `crypto_temporal.seq_gap_or_replay` denied, `crypto_temporal.timestamp_implausible` denied. The signal-quality fields are not part of the exclusion set: they only qualify the cross-device pair (the starting expectation of the task, "cross-device coherence with signal quality available", is narrowed to "cross-device coherence", because a denied incoherence needs no explanation, AD-5).
+EX-CP, the cuff-path conditions of the exclusion set: `system.node_lifecycle` denied with every entry `active` (class D, not K), `system.diagnostics_ok` denied, `system.liveliness_ok` denied, `system.qos_deadline_missed` denied, `system.ble_link_quality` complete (class F), `system.seq_gap` denied, `crypto_temporal.seq_repeat` denied, `crypto_temporal.timestamp_implausible` denied. The signal-quality fields are not part of the exclusion set: they only qualify the cross-device pair (the starting expectation of the task, "cross-device coherence with signal quality available", is narrowed to "cross-device coherence", because a denied incoherence needs no explanation, AD-5).
 
 **Backing for `resp`** (analisi §4.5 row 2: "intake seen by the robot or authenticated by the dispenser; only if there is a witness"; step 4 of the task). `resp` is anchored on a dispense, and a pressure that does not fall after a dispense is C1 only if the dispense is backed. The backing is satisfied by `crypto_temporal.authenticated` denied, or by `crypto_temporal.authenticated` unavailable together with `witness.intake_observed` denied (True: an `INTAKE` event of the robot) and `witness.identity_confirmed` denied (True) (EC D-6: three tiers of backing; an observed intake with a confirmed identity is the strongest reading the contract carries, and presence alone proves only that someone was perceived: R3 weakness 5). A robot that watched and saw no intake (`witness.intake_observed` asserted) or whose identity check failed is not backing and, with the authentication unavailable, is evidence that no rule accepts (RS-4): whether the dose was taken or not, and whether the dispense was forged or not, is not told apart, which is the abstention of the matrix. When `crypto_temporal.authenticated` is denied the backing is the authentication and only it is listed in `evidence_used`, even if `witness.intake_observed` and `witness.identity_confirmed` are denied too (W-02-auth-witness); the witness fields are listed only when the authentication is unavailable (W-02). DISPENSE is not INTAKE: the dispense event never backs an intake.
 
@@ -226,7 +241,7 @@ EX-CP, the cuff-path conditions of the exclusion set: `system.node_lifecycle` de
 | `sched`, `hold`, `int` | `system.nav_task_failed`, `system.manip_task_failed` | C3 stays C3; C2 stays C2 or becomes UNDETERMINED (when only a robot outcome was asserted); C1 becomes UNDETERMINED; UNDETERMINED stays UNDETERMINED |
 | `resp` | the two outcomes and `witness.identity_confirmed`, `witness.intake_observed` | as above |
 
-The mask never creates a definite class and never turns C2 into C1 (invariant I4 for these fields). **Refusal against robot-missed and ADR-040 (resolution (f)).** The confounder group `refusal_vs_robot_missed` (WS04-T09) separates a refused measurement (C1) from a missed robot task (C2) only by the outcome `declined` against `failed`. Without ADR-040 `declined` has no evidence field: the manipulation field is `None` for a refusal (the robot did not report a manipulation outcome that the conventions of EC define), the missed robot task gives `system.manip_task_failed` asserted and C2 (W-05 for navigation; the manipulation variant is the same row), and the refusal gives UNDETERMINED, reason insufficient (W-05-silent). With ADR-040 accepted the outcome `declined` makes `system.manip_task_failed` denied for the window and the robot-derived part of the exclusion is met; **the refusal still does not reach C1**, because a refusal leaves the cuff silent and `signal_quality.cuff_error_code`, `system.ble_link_quality` and the `crypto_temporal.*` fields are `None` (EC Aggregation rule, EX-3 (f)): UNDETERMINED, reason insufficient (W-05-silent-040). ADR-040 is therefore necessary but not sufficient for C1 on a refusal under this rule; what it changes is the list of unavailable fields in the text, and it keeps the C2 side of the pair (a failed manipulation) separated. A patient who delays the measurement is attributed C1 only if the measurement or other cuff traffic reaches the evidence window before the cut-off and every channel is clean (W-05-late-traffic and the reachability paragraph above). The rule depends on ADR-040 only for this pair, and every statement about `declined` in this document is conditional on it.
+The mask never creates a definite class and never turns C2 into C1 (invariant I4 for these fields). **Refusal against robot-missed and ADR-040 (resolution (f)).** The confounder group `refusal_vs_robot_missed` (WS04-T09) separates a refused measurement (C1) from a missed robot task (C2) only by the outcome `declined` against `failed`. Before ADR-040 (accepted, contract 0.2.0) `declined` had no evidence field: the manipulation field is `None` for a refusal (the robot did not report a manipulation outcome that the conventions of EC define), the missed robot task gives `system.manip_task_failed` asserted and C2 (W-05 for navigation; the manipulation variant is the same row), and the refusal gives UNDETERMINED, reason insufficient (W-05-silent). Since ADR-040 is accepted the outcome `declined` makes `system.manip_task_failed` denied for the window and the robot-derived part of the exclusion is met; **the refusal still does not reach C1**, because a refusal leaves the cuff silent and `signal_quality.cuff_error_code`, `system.ble_link_quality` and the `crypto_temporal.*` fields are `None` (EC Aggregation rule, EX-3 (f)): UNDETERMINED, reason insufficient (W-05-silent-040). ADR-040 is therefore necessary but not sufficient for C1 on a refusal under this rule; what it changes is the list of unavailable fields in the text, and it keeps the C2 side of the pair (a failed manipulation) separated. A patient who delays the measurement is attributed C1 only if the measurement or other cuff traffic reaches the evidence window before the cut-off and every channel is clean (W-05-late-traffic and the reachability paragraph above). The rule depends on ADR-040 only for this pair; the extractor implements it (`declined` is a task that did not fail).
 
 **Profile coverage and what it means for the experiments (OP-AR-1).** The exclusion set needs the fields to be available, which is a property of the device profile (EC D-8, ADR-036 proposed). In the reference profile S6 of EC (EX-7: no diagnostics reports, no declared deadline, no independent clocks) `system.diagnostics_ok`, `system.qos_deadline_missed` and `crypto_temporal.timestamp_implausible` are `None` (EC-OP-19: "in a benchmark without a transport-delay model the field is True or `None`, never False, so a rule that needs it denied cannot be satisfied there"). **C1 is then unreachable for every template in that profile.** For the experiments this means: the C1 recall of the rule is zero and the abstention rate on matched clinical events is one; in the attribution evaluation (WS08 README, E4) UNDETERMINED is a false negative of the true class and never a false positive, so the C1 row of the confusion matrix falls entirely in the UNDETERMINED column and the F1 of C1 is zero, while the rows of C2 and C3, which do not need the exclusion set, are not touched by this limit (the rows of C2 need asserted evidence; IE-2 needs a complete delivery ratio and IE-3 denied quality fields, which are readings that the profile must provide too). This is a limitation of the rule on that profile, produced by what the profile declares and not by the clinical events; it must be reported as such and not as a finding about the care plan. There are two ways out, both a decision of the human. (A) The benchmark and simulation profiles declare the capabilities and the generators emit the corresponding reports (WS04-T06, WS04-T07, WS04-T11, WS07-T03; EC-OP-19 asks for a transport-delay model for the time field). (B) The rule receives the set of declared channels at construction, like its four thresholds (H-1), and treats a channel the profile does not declare as not applicable instead of unavailable when it checks the exclusion set. Variant B changes neither the signature of `attribute` nor any contract text; it changes the meaning of `None` for an undeclared channel and amends ADR-036, so it is proposed in ADR-044 (proposed) and is not the rule of this document. It was checked exhaustively on three spaces of vectors (hypothesis H-18). (P0) The undeclared fields (the three fields of S6 above) are always `None`: the combinations that reach C1 are 0 with the rule of this document and 18 for `range`, 2 for `sched`, 18 for `hold` and 90 for `resp` with variant B, and the checks I4a and I4b give the same results as for the rule of this document (I4b only for `crypto_temporal.authenticated`). (P1) `crypto_temporal.timestamp_implausible` may also be asserted, never denied, because a device without independent clocks asserts it from a late or future-stamped message but cannot deny it (EC section Field semantics and EC-OP-19; W-08-U-noseq): then I4a and I4b are violated for that field, in 18, 2, 18 and 90 combinations of `range`, `sched`, `hold` and `resp`, because masking the asserted reading turns an abstention (reason conflict) into C1. This is the exception of variant B; the fields `system.diagnostics_ok` and `system.qos_deadline_missed` cannot be asserted without a declared capability. (FULL) On the full space, which includes values of an undeclared channel that the profile makes impossible, the violations also involve those fields; this is not claimed. Neither way out helps the cases of the reachability paragraph above: in the benchmark as generated a refusal leaves the cuff silent whatever the profile declares. `system.battery_low` is not in the exclusion set for the same practical reason and for the reason of AD-11.
 
@@ -298,10 +313,10 @@ Notes. (1) The automatic actions are exactly `stop`, `retry` and `call`; any oth
 The six invariants are stated for the rule and for `attribute_all` where they say so; WS05-T07 lifts them into property tests (Hypothesis-style) and the worked cases into fixtures. They were verified by the scratch scripts of the section Decision table on every combination of the relevant fields (and, for I6, on random sets of records).
 
 - I1 purity: for a fixed template and a fixed `EvidenceVector`, `HierarchicalRule.attribute` returns the same κ, row, reason and `evidence_used` whatever the other fields of the `VerdictRecord` hold (σ̃ and the raw interval, `state`, `t_eval_ms`, `decided_at_ms`, `pending_until_ms`, and ρ, which is not an input and whose field is never read); the test varies those fields with Hypothesis (WS05-T07 test 5 is scoped to the rule; the PREDICTED_VIOLATION state check sits in `attribute_all`); verified by construction, since the scratch function takes only the template and the readings of the relevant fields.
-- I2 precedence: if IE-1, IE-2 or IE-3 holds (integrity evidence asserted and not explained away), κ is C3 whatever the other fields say; verified exhaustively, with no violation in 87,351,696 combinations, and with the overlap of integrity and system evidence exercised (30,155,328 combinations of `resp` alone).
-- I3 provenance is never sufficient: with all 18 non-provenance fields `None`, κ is UNDETERMINED for every `TemplateId` (reason insufficient for `range`, `sched`, `hold`, `count`, `resp`, provenance-only for `sys` and `int`), and so is an absent evidence key; C2 and C3 need an asserted field outside `provenance`; verified for the seven templates (W-12).
-- I4 no certainty from missing data: (a) setting any field to `None` never turns UNDETERMINED into a definite class; (b) setting any field to `None` never turns a non-C1 result into C1, except for the field `crypto_temporal.authenticated`, whose `None` is the unauthenticated deployment (AD-8); verified exhaustively: (a) no violation in any template; (b) violations only for that field, 9 combinations in `range`, 1 in `sched`, 9 in `hold` and 9 in `resp`, each a result C3 from a failed verification with every other required channel clean; the unrestricted form of (b) would make C1 unreachable in the unauthenticated deployment, against the matrix row 10 and TM-OP-11, so it is restated here and not enforced; the test runs over all fields but that one and checks W-08 and W-10-A explicitly.
-- I5 locality: masking (setting to `None`) a field that is neither decisive for the result (`evidence_used`) nor in the exclusion set of the template leaves κ unchanged; verified exhaustively, with no violation (for `count`, `sys` and `int`, which have no exclusion set, every field outside `evidence_used` was masked); the abstention reason, not κ, can change: when the masked field is the asserted field of AM-1 or AM-2 (which name no field in `evidence_used`) the result moves between reason insufficient and reason provenance-only, in 3,840 states of `sys` and 256 of `int` and in none of the other templates; it is what makes the A4 mask analysable: the path mask changes κ only through `system.nav_task_failed`, `system.manip_task_failed` and the witness backing of `resp` (section C1 exclusion conditions).
+- I2 precedence: if IE-1, IE-2 or IE-3 holds (integrity evidence asserted and not explained away), κ is C3 whatever the other fields say; verified exhaustively, with no violation in 262,055,088 combinations (the first-match cascade selects an integrity row whenever IE-1, IE-2 or IE-3 holds), and with the overlap of integrity and system evidence exercised (90,465,984 combinations of `resp` alone).
+- I3 provenance is never sufficient: with all 22 non-provenance fields `None`, κ is UNDETERMINED for every `TemplateId` (reason insufficient for `range`, `sched`, `hold`, `count`, `resp`, provenance-only for `sys` and `int`), and so is an absent evidence key; C2 and C3 need an asserted field outside `provenance`; verified for the seven templates (W-12).
+- I4 no certainty from missing data: (a) setting any field to `None` never turns UNDETERMINED into a definite class; (b) setting any field to `None` never turns a non-C1 result into C1, except for the field `crypto_temporal.authenticated`, whose `None` is the unauthenticated deployment (AD-8); verified exhaustively over the 262,055,088 combinations of 0.2.0 (masking each field in turn): (a) no violation in any template; (b) violations only for that field, 9 combinations in `range`, 1 in `sched`, 9 in `hold` and 9 in `resp` (the same as in 0.1.0), each a result C3 from a failed verification with every other required channel clean; the unrestricted form of (b) would make C1 unreachable in the unauthenticated deployment, against the matrix row 10 and TM-OP-11, so it is restated here and not enforced; the test runs over all fields but that one and checks W-08 and W-10-A explicitly.
+- I5 locality: masking (setting to `None`) a field that is neither decisive for the result (`evidence_used`) nor in the exclusion set of the template leaves κ unchanged; verified exhaustively in 0.1.0 and, in 0.2.0, by the property test `test_invariant_i5_locality` on random combinations (for `count`, `sys` and `int`, which have no exclusion set, every field outside `evidence_used` is masked); the abstention reason, not κ, can change: when the masked field is the asserted field of AM-1 or AM-2 (which name no field in `evidence_used`) the result moves between reason insufficient and reason provenance-only, in 12,288 states of `sys` and 1,024 of `int` (counted exhaustively in 0.2.0; 3,840 and 256 in 0.1.0) and in none of the other templates; it is what makes the A4 mask analysable: the path mask changes κ only through `system.nav_task_failed`, `system.manip_task_failed` and the witness backing of `resp` (section C1 exclusion conditions).
 - I6 cascade consistency: the relation `caused_by` over the alerts of `attribute_all` is acyclic, `caused_by` and `root_cause_of` are mutual inverses, an effect never has a κ different from its root's, only VIOLATED alerts take part, a root is decided strictly earlier than its effect, an effect with independent evidence stays top-level, and the output is independent of the order of the input; processing the records in the order of their decision times (ties in any order) never changes κ, `evidence_used` or `caused_by` of an alert already issued, `root_cause_of` only grows, and the final set equals the batch result; verified on 200,000 random sets of records (10,511 links made, the independent-evidence rule tested against the chosen root) with no violation, and a mutant without the strictly-earlier condition fails the incremental check in 191 of 20,000 sets.
 
 The statements about missing data are the ones the A4 ablation depends on: with the embodied channel removed the rule can lose C1 and C2 but never gains a definite class (the transition table in the section C1 exclusion conditions).
@@ -321,7 +336,7 @@ Real hypertension: every channel the table reads is available and denied. `crypt
 | `provenance.violated_template` | `range` |
 | `provenance.template_kind` | phi_cp (`TemplateKind.CARE_PLAN`) |
 | expected κ | C1 |
-| decisive fields, precedence order | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `crypto_temporal.authenticated`, `crypto_temporal.seq_gap_or_replay`, `crypto_temporal.timestamp_implausible` |
+| decisive fields, precedence order | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.seq_gap`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `crypto_temporal.authenticated`, `crypto_temporal.seq_repeat`, `crypto_temporal.timestamp_implausible` |
 | reason (UNDETERMINED only) | not applicable |
 | table row | 5 |
 | matrix verdict | yes, by exclusion |
@@ -335,12 +350,13 @@ Real hypertension: every channel the table reads is available and denied. `crypt
 | `system.liveliness_ok` | `True` | denied |
 | `system.qos_deadline_missed` | `False` | denied |
 | `system.ble_link_quality` | `1.0` | denied (complete) |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.ecg_sqi` | at or above `ecg_sqi_floor` | denied |
 | `signal_quality.ppg_sqi` | at or above `ppg_sqi_floor` | denied |
 | `signal_quality.cuff_error_code` | `"" (empty string)` | denied |
 | `cross_device.pulse_vs_ecg_hr_diff` | within `hr_coherence_tolerance` | denied |
 | `crypto_temporal.authenticated` | `True` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -355,7 +371,7 @@ Drug non-response, unauthenticated deployment, backing by the robot witness: the
 | `provenance.violated_template` | `resp` |
 | `provenance.template_kind` | phi_cp (`TemplateKind.CARE_PLAN`) |
 | expected κ | C1 |
-| decisive fields, precedence order | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.nav_task_failed`, `system.manip_task_failed`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `witness.identity_confirmed`, `witness.intake_observed`, `crypto_temporal.seq_gap_or_replay`, `crypto_temporal.timestamp_implausible` |
+| decisive fields, precedence order | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.nav_task_failed`, `system.manip_task_failed`, `system.seq_gap`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `witness.identity_confirmed`, `witness.intake_observed`, `crypto_temporal.seq_repeat`, `crypto_temporal.timestamp_implausible` |
 | reason (UNDETERMINED only) | not applicable |
 | table row | 5 |
 | matrix verdict | conditional: only if there is a witness |
@@ -371,6 +387,7 @@ Drug non-response, unauthenticated deployment, backing by the robot witness: the
 | `system.ble_link_quality` | `1.0` | denied (complete) |
 | `system.nav_task_failed` | `False` | denied |
 | `system.manip_task_failed` | `False` | denied |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.ecg_sqi` | at or above `ecg_sqi_floor` | denied |
 | `signal_quality.ppg_sqi` | at or above `ppg_sqi_floor` | denied |
 | `signal_quality.cuff_error_code` | `"" (empty string)` | denied |
@@ -378,7 +395,7 @@ Drug non-response, unauthenticated deployment, backing by the robot witness: the
 | `witness.robot_present` | `True` | denied, context, not read |
 | `witness.identity_confirmed` | `True` | denied |
 | `witness.intake_observed` | `True` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -386,10 +403,10 @@ Every other field is `None`.
 | variant | change from the base case | expected κ | decisive fields | reason | row |
 |---|---|---|---|---|---|
 | W-02-A4 | the embodied channel removed (the None class of the A4 mask); the aggregates are recomputed from the device nodes and stay denied (`system.nav_task_failed` None; `system.manip_task_failed` None; `witness.identity_confirmed` None; `witness.intake_observed` None; `witness.robot_present` None) | UNDETERMINED | none (`evidence_used` empty) | insufficient | 8 |
-| W-02-auth | authenticated deployment, robot channel not co-located: no witness (`crypto_temporal.authenticated` `True`; `witness.identity_confirmed` None; `witness.intake_observed` None; `witness.robot_present` None) | C1 | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.nav_task_failed`, `system.manip_task_failed`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `crypto_temporal.authenticated`, `crypto_temporal.seq_gap_or_replay`, `crypto_temporal.timestamp_implausible` | not applicable | 5 |
+| W-02-auth | authenticated deployment, robot channel not co-located: no witness (`crypto_temporal.authenticated` `True`; `witness.identity_confirmed` None; `witness.intake_observed` None; `witness.robot_present` None) | C1 | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.nav_task_failed`, `system.manip_task_failed`, `system.seq_gap`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `crypto_temporal.authenticated`, `crypto_temporal.seq_repeat`, `crypto_temporal.timestamp_implausible` | not applicable | 5 |
 | W-02-nowit | unauthenticated deployment and no witness (`witness.identity_confirmed` None; `witness.intake_observed` None; `witness.robot_present` None) | UNDETERMINED | none (`evidence_used` empty) | insufficient | 8 |
 | W-02-witness-only | only the witness fields removed (the variant `EMBODIED_MASK_WITNESS` of EC) (`witness.identity_confirmed` None; `witness.intake_observed` None; `witness.robot_present` None) | UNDETERMINED | none (`evidence_used` empty) | insufficient | 8 |
-| W-02-auth-witness | authenticated deployment and the robot witness also backs the dose: only the authentication is listed as decisive (the witness fields are not needed, I5) (`crypto_temporal.authenticated` `True`) | C1 | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.nav_task_failed`, `system.manip_task_failed`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `crypto_temporal.authenticated`, `crypto_temporal.seq_gap_or_replay`, `crypto_temporal.timestamp_implausible` | not applicable | 5 |
+| W-02-auth-witness | authenticated deployment and the robot witness also backs the dose: only the authentication is listed as decisive (the witness fields are not needed, I5) (`crypto_temporal.authenticated` `True`) | C1 | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.nav_task_failed`, `system.manip_task_failed`, `system.seq_gap`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `crypto_temporal.authenticated`, `crypto_temporal.seq_repeat`, `crypto_temporal.timestamp_implausible` | not applicable | 5 |
 | W-02-auth-A4 | authenticated deployment, no witness, the embodied channel removed: the robot task outcomes are None as well (`crypto_temporal.authenticated` `True`; `witness.identity_confirmed` None; `witness.intake_observed` None; `system.nav_task_failed` None; `system.manip_task_failed` None; `witness.robot_present` None) | UNDETERMINED | none (`evidence_used` empty) | insufficient | 8 |
 
 ### W-03
@@ -416,12 +433,13 @@ Cuff detached, variant that still reports a measurement (G-SYS-3): the violated 
 | `system.liveliness_ok` | `True` | denied |
 | `system.qos_deadline_missed` | `False` | denied |
 | `system.ble_link_quality` | `1.0` | denied (complete) |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.ecg_sqi` | at or above `ecg_sqi_floor` | denied |
 | `signal_quality.ppg_sqi` | at or above `ppg_sqi_floor` | denied |
 | `signal_quality.cuff_error_code` | `"E1" (device label)` | asserted |
 | `cross_device.pulse_vs_ecg_hr_diff` | within `hr_coherence_tolerance` | denied |
 | `crypto_temporal.authenticated` | `True` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -446,9 +464,10 @@ Variant W-03-sched: the injected form of `cuff_detached`: a `sched` instance wit
 | `system.ble_link_quality` | `1.0` | denied (complete) |
 | `system.nav_task_failed` | `False` | denied |
 | `system.manip_task_failed` | `False` | denied |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.cuff_error_code` | `"E1" (device label)` | asserted |
 | `crypto_temporal.authenticated` | `True` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -463,7 +482,7 @@ Silent cuff bias or stuck value: no field is raised, the pulse rate stays cohere
 | `provenance.violated_template` | `range` |
 | `provenance.template_kind` | phi_cp (`TemplateKind.CARE_PLAN`) |
 | expected κ | C1 |
-| decisive fields, precedence order | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `crypto_temporal.authenticated`, `crypto_temporal.seq_gap_or_replay`, `crypto_temporal.timestamp_implausible` |
+| decisive fields, precedence order | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.seq_gap`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `crypto_temporal.authenticated`, `crypto_temporal.seq_repeat`, `crypto_temporal.timestamp_implausible` |
 | reason (UNDETERMINED only) | not applicable |
 | table row | 5 |
 | matrix verdict | no (declared limit) |
@@ -477,12 +496,13 @@ Silent cuff bias or stuck value: no field is raised, the pulse rate stays cohere
 | `system.liveliness_ok` | `True` | denied |
 | `system.qos_deadline_missed` | `False` | denied |
 | `system.ble_link_quality` | `1.0` | denied (complete) |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.ecg_sqi` | at or above `ecg_sqi_floor` | denied |
 | `signal_quality.ppg_sqi` | at or above `ppg_sqi_floor` | denied |
 | `signal_quality.cuff_error_code` | `"" (empty string)` | denied |
 | `cross_device.pulse_vs_ecg_hr_diff` | within `hr_coherence_tolerance` | denied |
 | `crypto_temporal.authenticated` | `True` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -511,8 +531,9 @@ Robot late to the window: the navigation outcome `late`, stamped at the deadline
 | `system.ble_link_quality` | `1.0` | denied (complete) |
 | `system.nav_task_failed` | `True` | asserted |
 | `system.manip_task_failed` | `False` | denied |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.cuff_error_code` | `"" (empty string)` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 
 Every other field is `None`.
 
@@ -521,9 +542,9 @@ Every other field is `None`.
 | W-05-A4 | the embodied channel removed (None class of the A4 mask) (`system.nav_task_failed` None; `system.manip_task_failed` None) | UNDETERMINED | none (`evidence_used` empty) | insufficient | 8 |
 | W-05-live | robot crash instead of a late arrival (EC-OP-17): the aggregate is False because of the robot node, and a crash leaves no task outcome (`system.nav_task_failed` None; `system.manip_task_failed` None; `system.liveliness_ok` `False`) | C2 | `system.liveliness_ok` | not applicable | 4 |
 | W-05-live-A4 | the same crash under A4: the aggregate is recomputed over the device nodes and is True (`system.nav_task_failed` None; `system.manip_task_failed` None) | UNDETERMINED | none (`evidence_used` empty) | insufficient | 8 |
-| W-05-silent | patient refusal pattern, cuff silent, without ADR-040 (decision AD-12): navigation succeeded, no manipulation outcome, every message-derived field None (`system.nav_task_failed` `False`; `system.manip_task_failed` None; `signal_quality.cuff_error_code` None; `crypto_temporal.seq_gap_or_replay` None; `system.ble_link_quality` None) | UNDETERMINED | none (`evidence_used` empty) | insufficient | 8 |
-| W-05-silent-040 | the same with ADR-040 accepted: the `declined` outcome makes the manipulation field False (`system.nav_task_failed` `False`; `system.manip_task_failed` `False`; `signal_quality.cuff_error_code` None; `crypto_temporal.seq_gap_or_replay` None; `system.ble_link_quality` None) | UNDETERMINED | none (`evidence_used` empty) | insufficient | 8 |
-| W-05-late-traffic | the patient delayed the measurement, or other cuff traffic lies in the evidence window (from `evidence_margin_ms` before the tick to the cut-off), and every channel is clean; reachable only in that case (section C1 exclusion conditions) (`system.diagnostics_ok` `True`; `system.qos_deadline_missed` `False`; `crypto_temporal.timestamp_implausible` `False`; `system.nav_task_failed` `False`; `system.manip_task_failed` `False`) | C1 | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.nav_task_failed`, `system.manip_task_failed`, `signal_quality.cuff_error_code`, `crypto_temporal.seq_gap_or_replay`, `crypto_temporal.timestamp_implausible` | not applicable | 5 |
+| W-05-silent | patient refusal pattern, cuff silent, without ADR-040 (decision AD-12): navigation succeeded, no manipulation outcome, every message-derived field None (`system.nav_task_failed` `False`; `system.manip_task_failed` None; `signal_quality.cuff_error_code` None; `system.seq_gap` None; `crypto_temporal.seq_repeat` None; `system.ble_link_quality` None) | UNDETERMINED | none (`evidence_used` empty) | insufficient | 8 |
+| W-05-silent-040 | the same with ADR-040 accepted: the `declined` outcome makes the manipulation field False (`system.nav_task_failed` `False`; `system.manip_task_failed` `False`; `signal_quality.cuff_error_code` None; `system.seq_gap` None; `crypto_temporal.seq_repeat` None; `system.ble_link_quality` None) | UNDETERMINED | none (`evidence_used` empty) | insufficient | 8 |
+| W-05-late-traffic | the patient delayed the measurement, or other cuff traffic lies in the evidence window (from `evidence_margin_ms` before the tick to the cut-off), and every channel is clean; reachable only in that case (section C1 exclusion conditions) (`system.diagnostics_ok` `True`; `system.qos_deadline_missed` `False`; `crypto_temporal.timestamp_implausible` `False`; `system.nav_task_failed` `False`; `system.manip_task_failed` `False`) | C1 | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.nav_task_failed`, `system.manip_task_failed`, `system.seq_gap`, `signal_quality.cuff_error_code`, `crypto_temporal.seq_repeat`, `crypto_temporal.timestamp_implausible` | not applicable | 5 |
 | W-05-deliberate | the cuff node deactivated by a command before the tick (analisi §4.6, row 15:00) (`system.node_lifecycle` `{"cuff": "inactive+commanded", "robot": "active"}`; `system.nav_task_failed` `False`; `system.manip_task_failed` `False`) | UNDETERMINED | `system.node_lifecycle` | conflict | 6 |
 
 ### W-06
@@ -540,7 +561,7 @@ Double take by the patient: the dispenser-link channels are clean, nothing separ
 | reason (UNDETERMINED only) | insufficient |
 | table row | 8 |
 | matrix verdict | yes, if the dispenser measures content |
-| table against matrix | DIFFERS: the table gives UNDETERMINED (insufficient); the content evidence has no field in contract 0.1.0 (G-1, ADR-032 proposed) |
+| table against matrix | DIFFERS: the table gives UNDETERMINED (insufficient); the dispenser evidence is a field group of contract 0.2.0 (ADR-032, accepted) that this rule treats as context (OP-AR-10) |
 | checked by hand | no (scratch implementation) |
 
 | field | value | reading |
@@ -550,8 +571,9 @@ Double take by the patient: the dispenser-link channels are clean, nothing separ
 | `system.liveliness_ok` | `True` | denied |
 | `system.qos_deadline_missed` | `False` | denied |
 | `system.ble_link_quality` | `1.0` | denied (complete) |
+| `system.seq_gap` | `False` | denied |
 | `crypto_temporal.authenticated` | `True` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -570,7 +592,7 @@ Dispenser sensor bounce: the evidence that separates it (interval and content ch
 | reason (UNDETERMINED only) | insufficient |
 | table row | 8 |
 | matrix verdict | yes (interval and content change) |
-| table against matrix | DIFFERS: same vector as W-06, same result (G-1, ADR-032 proposed) |
+| table against matrix | DIFFERS: same vector as W-06, same result (the dispenser group is context for this rule, OP-AR-10) |
 | checked by hand | no (scratch implementation) |
 
 | field | value | reading |
@@ -580,8 +602,9 @@ Dispenser sensor bounce: the evidence that separates it (interval and content ch
 | `system.liveliness_ok` | `True` | denied |
 | `system.qos_deadline_missed` | `False` | denied |
 | `system.ble_link_quality` | `1.0` | denied (complete) |
+| `system.seq_gap` | `False` | denied |
 | `crypto_temporal.authenticated` | `True` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -610,20 +633,21 @@ Replay with rewritten metadata in an authenticated deployment: the verification 
 | `system.liveliness_ok` | `True` | denied |
 | `system.qos_deadline_missed` | `False` | denied |
 | `system.ble_link_quality` | `1.0` | denied (complete) |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.ecg_sqi` | at or above `ecg_sqi_floor` | denied |
 | `signal_quality.ppg_sqi` | at or above `ppg_sqi_floor` | denied |
 | `signal_quality.cuff_error_code` | `"" (empty string)` | denied |
 | `cross_device.pulse_vs_ecg_hr_diff` | within `hr_coherence_tolerance` | denied |
 | `crypto_temporal.authenticated` | `False` | asserted |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
 
 | variant | change from the base case | expected κ | decisive fields | reason | row |
 |---|---|---|---|---|---|
-| W-08-U | unauthenticated deployment, naive replay of the previous day from a device that provides `seq` (`crypto_temporal.authenticated` None; `crypto_temporal.seq_gap_or_replay` `True`; `crypto_temporal.timestamp_implausible` `True`) | C3 | `system.ble_link_quality`, `crypto_temporal.seq_gap_or_replay` | not applicable | 2 |
-| W-08-U-noseq | the same replay from a device that provides no `seq` (`crypto_temporal.authenticated` None; `crypto_temporal.seq_gap_or_replay` None; `system.ble_link_quality` None; `crypto_temporal.timestamp_implausible` `True`) | UNDETERMINED | `crypto_temporal.timestamp_implausible` | conflict | 6 |
+| W-08-U | unauthenticated deployment, naive replay of the previous day from a device that provides `seq` (`crypto_temporal.authenticated` None; `crypto_temporal.seq_repeat` `True`; `system.seq_gap` `False`; `crypto_temporal.timestamp_implausible` `True`) | C3 | `system.ble_link_quality`, `crypto_temporal.seq_repeat` | not applicable | 2 |
+| W-08-U-noseq | the same replay from a device that provides no `seq` (`crypto_temporal.authenticated` None; `system.seq_gap` None; `crypto_temporal.seq_repeat` None; `system.ble_link_quality` None; `crypto_temporal.timestamp_implausible` `True`) | UNDETERMINED | `crypto_temporal.timestamp_implausible` | conflict | 6 |
 
 ### W-09
 
@@ -651,9 +675,10 @@ Forged dispense, robot co-located, nobody perceived, unauthenticated: the witnes
 | `system.ble_link_quality` | `1.0` | denied (complete) |
 | `system.nav_task_failed` | `False` | denied |
 | `system.manip_task_failed` | `False` | denied |
+| `system.seq_gap` | `False` | denied |
 | `witness.robot_present` | `False` | asserted, context, not read |
 | `witness.intake_observed` | `False` | asserted, context, not read |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -664,7 +689,7 @@ Every other field is `None`.
 | W-09-A | synthesised forgery in an authenticated deployment (`crypto_temporal.authenticated` `False`) | C3 | `crypto_temporal.authenticated` | not applicable | 1 |
 | W-09-lag | robot outage whose availability mask lags (FM hypothesis 9), the watchdog lapse lies before the cut-off (`system.liveliness_ok` `False`) | C2 | `system.liveliness_ok` | not applicable | 4 |
 | W-09-lag-late | the same outage, the lapse is detected after the last admissible evidence time (no field changes) | UNDETERMINED | none (`evidence_used` empty) | provenance-only | 7 |
-| W-09-jump | naive forged dispense whose sequence number jumps ahead, unauthenticated (EC D-3, EX-1 (m)): read as a loss (H-15) (`crypto_temporal.seq_gap_or_replay` `True`; `system.ble_link_quality` below `ble_link_quality_floor`) | C2 | `system.ble_link_quality` | not applicable | 4 |
+| W-09-jump | naive forged dispense whose sequence number jumps ahead, unauthenticated (EC D-3, EX-1 (m)): read as a loss (H-15) (`system.seq_gap` `True`; `crypto_temporal.seq_repeat` `False`; `system.ble_link_quality` below `ble_link_quality_floor`) | C2 | `system.ble_link_quality` | not applicable | 4 |
 
 Variant W-09-resp: the response part of row 9: a `resp` instance violated at the end of its window, the robot co-located throughout and no intake observed, unauthenticated.
 
@@ -686,13 +711,14 @@ Variant W-09-resp: the response part of row 9: a `resp` instance violated at the
 | `system.ble_link_quality` | `1.0` | denied (complete) |
 | `system.nav_task_failed` | `False` | denied |
 | `system.manip_task_failed` | `False` | denied |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.ecg_sqi` | at or above `ecg_sqi_floor` | denied |
 | `signal_quality.ppg_sqi` | at or above `ppg_sqi_floor` | denied |
 | `signal_quality.cuff_error_code` | `"" (empty string)` | denied |
 | `cross_device.pulse_vs_ecg_hr_diff` | within `hr_coherence_tolerance` | denied |
 | `witness.robot_present` | `True` | denied, context, not read |
 | `witness.intake_observed` | `False` | asserted |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -707,7 +733,7 @@ Informed injection coherent on every channel, unauthenticated deployment (`crypt
 | `provenance.violated_template` | `range` |
 | `provenance.template_kind` | phi_cp (`TemplateKind.CARE_PLAN`) |
 | expected κ | C1 |
-| decisive fields, precedence order | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `crypto_temporal.seq_gap_or_replay`, `crypto_temporal.timestamp_implausible` |
+| decisive fields, precedence order | `system.node_lifecycle`, `system.diagnostics_ok`, `system.liveliness_ok`, `system.qos_deadline_missed`, `system.ble_link_quality`, `system.seq_gap`, `signal_quality.cuff_error_code`, `cross_device.pulse_vs_ecg_hr_diff`, `crypto_temporal.seq_repeat`, `crypto_temporal.timestamp_implausible` |
 | reason (UNDETERMINED only) | not applicable |
 | table row | 5 |
 | matrix verdict | no, by construction |
@@ -721,11 +747,12 @@ Informed injection coherent on every channel, unauthenticated deployment (`crypt
 | `system.liveliness_ok` | `True` | denied |
 | `system.qos_deadline_missed` | `False` | denied |
 | `system.ble_link_quality` | `1.0` | denied (complete) |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.ecg_sqi` | at or above `ecg_sqi_floor` | denied |
 | `signal_quality.ppg_sqi` | at or above `ppg_sqi_floor` | denied |
 | `signal_quality.cuff_error_code` | `"" (empty string)` | denied |
 | `cross_device.pulse_vs_ecg_hr_diff` | within `hr_coherence_tolerance` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -790,12 +817,13 @@ Cuff pulse rate against ECG rate beyond the tolerance, the ECG signal quality lo
 | `system.liveliness_ok` | `True` | denied |
 | `system.qos_deadline_missed` | `False` | denied |
 | `system.ble_link_quality` | `1.0` | denied (complete) |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.ecg_sqi` | below `ecg_sqi_floor` | asserted |
 | `signal_quality.ppg_sqi` | at or above `ppg_sqi_floor` | denied |
 | `signal_quality.cuff_error_code` | `"" (empty string)` | denied |
 | `cross_device.pulse_vs_ecg_hr_diff` | above `hr_coherence_tolerance` | asserted |
 | `crypto_temporal.authenticated` | `True` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -827,12 +855,13 @@ Every channel is clean or unavailable: the violation of the system predicate is 
 | `system.liveliness_ok` | `True` | denied |
 | `system.qos_deadline_missed` | `False` | denied |
 | `system.ble_link_quality` | `1.0` | denied (complete) |
+| `system.seq_gap` | `False` | denied |
 | `signal_quality.ecg_sqi` | at or above `ecg_sqi_floor` | denied |
 | `signal_quality.ppg_sqi` | at or above `ppg_sqi_floor` | denied |
 | `signal_quality.cuff_error_code` | `"" (empty string)` | denied |
 | `cross_device.pulse_vs_ecg_hr_diff` | within `hr_coherence_tolerance` | denied |
 | `crypto_temporal.authenticated` | `True` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `False` | denied |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
@@ -863,21 +892,22 @@ Missing sequence values with the link degraded and the node reported as link dow
 | `system.liveliness_ok` | `True` | denied |
 | `system.qos_deadline_missed` | `False` | denied |
 | `system.ble_link_quality` | below `ble_link_quality_floor` | asserted |
+| `system.seq_gap` | `True` | asserted |
 | `signal_quality.ecg_sqi` | at or above `ecg_sqi_floor` | denied |
 | `signal_quality.ppg_sqi` | at or above `ppg_sqi_floor` | denied |
 | `signal_quality.cuff_error_code` | `"" (empty string)` | denied |
 | `cross_device.pulse_vs_ecg_hr_diff` | within `hr_coherence_tolerance` | denied |
 | `crypto_temporal.authenticated` | `True` | denied |
-| `crypto_temporal.seq_gap_or_replay` | `True` | asserted |
+| `crypto_temporal.seq_repeat` | `False` | denied |
 | `crypto_temporal.timestamp_implausible` | `False` | denied |
 
 Every other field is `None`.
 
 | variant | change from the base case | expected κ | decisive fields | reason | row |
 |---|---|---|---|---|---|
-| W-15-alone | the gap with no other link evidence (loss not below the floor) (`crypto_temporal.seq_gap_or_replay` `True`; `system.ble_link_quality` below 1.0, at or above `ble_link_quality_floor`; `system.node_lifecycle` `{"cuff": "active"}`) | UNDETERMINED | `system.ble_link_quality`, `crypto_temporal.seq_gap_or_replay` | conflict | 6 |
-| W-15-repeat | a repeated sequence value without gap (`crypto_temporal.seq_gap_or_replay` `True`; `system.ble_link_quality` `1.0`; `system.node_lifecycle` `{"cuff": "active"}`) | C3 | `system.ble_link_quality`, `crypto_temporal.seq_gap_or_replay` | not applicable | 2 |
-| W-15-jump | naive forged message whose sequence number jumps ahead, unauthenticated (EC D-3, EX-1 (m)): read as a loss (H-15) (`crypto_temporal.seq_gap_or_replay` `True`; `system.ble_link_quality` below `ble_link_quality_floor`; `system.node_lifecycle` `{"cuff": "active"}`; `crypto_temporal.authenticated` None) | C2 | `system.ble_link_quality` | not applicable | 4 |
+| W-15-alone | the gap with no other link evidence (loss not below the floor) (`system.seq_gap` `True`; `crypto_temporal.seq_repeat` `False`; `system.ble_link_quality` below 1.0, at or above `ble_link_quality_floor`; `system.node_lifecycle` `{"cuff": "active"}`) | UNDETERMINED | `system.ble_link_quality`, `system.seq_gap` | conflict | 6 |
+| W-15-repeat | a repeated sequence value without gap (`crypto_temporal.seq_repeat` `True`; `system.seq_gap` `False`; `system.ble_link_quality` `1.0`; `system.node_lifecycle` `{"cuff": "active"}`) | C3 | `system.ble_link_quality`, `crypto_temporal.seq_repeat` | not applicable | 2 |
+| W-15-jump | naive forged message whose sequence number jumps ahead, unauthenticated (EC D-3, EX-1 (m)): read as a loss (H-15) (`system.seq_gap` `True`; `crypto_temporal.seq_repeat` `False`; `system.ble_link_quality` below `ble_link_quality_floor`; `system.node_lifecycle` `{"cuff": "active"}`; `crypto_temporal.authenticated` None) | C2 | `system.ble_link_quality` | not applicable | 4 |
 
 
 **Hand derivations** (seven of the cases marked "checked by hand: yes"). W-01: no field is asserted, so rows 1 to 4 fail; every field of the exclusion set of `range` is denied (all four cuff-path system fields, the ratio complete, the error code empty, the cross-device difference within the tolerance, sequence and time denied) and authentication is not asserted: row 5, C1. W-03: no integrity predicate; SE-1 (the node entry `inactive`, uncommanded) and SE-8 (the error code) hold: row 4, C2, decisive fields in the order SE-1, SE-8. W-05: no integrity predicate; SE-6 (navigation outcome asserted) holds: row 4, C2, decisive `system.nav_task_failed`; under A4 SE-6 cannot hold and the exclusion set needs both outcomes, which are `None`: row 8. W-09: no integrity or system predicate; `provenance.template_kind` is INTEGRITY; no RS and no AM predicate holds (ratio complete, node entries `active`, time denied); the witness pair is not read: row 7. W-10: authentication is `None` and tolerated, every other required channel is denied: row 5, C1. W-13: IE-3 fails (the ECG quality is asserted, not denied); SE-9 holds: row 4, C2, decisive `signal_quality.ecg_sqi` then `cross_device.pulse_vs_ecg_hr_diff`. W-15: IE-2 fails (the ratio is below the floor, not complete); SE-1 and SE-5 hold: row 4, C2, decisive `system.node_lifecycle`, `system.ble_link_quality`; W-15-repeat has the complete ratio: IE-2 holds, row 2, C3.
@@ -894,21 +924,23 @@ Sources used: analisi §4.5 (the six evidence groups, the hierarchical rule, the
 | AD-1 | The rule is the four-step hierarchy of the contract, split into eight rows (three integrity rows, one system row, one C1 row, three abstention rows) | `#attribution`; ADR-010; analisi §4.5 |
 | AD-2 | Two fields get finer reading classes than the three states of EC: `system.node_lifecycle` (class K) and `system.ble_link_quality` (classes G and F) | EC D-3, D-4; EC section Reading rules ("deliberate is not failed") |
 | AD-3 | The witness fields are not integrity evidence; for `int` they are context (resolution (a), and (c)) | EC EX-9, D-12, EX-12, EC-OP-6; TM section The C1, C2 and C3 boundary ("Provenance is not an attack indicator"), Non-claims 6; analisi §4.5 row 9 |
-| AD-4 | Integrity evidence from the sequence field only for a repeat without gap; a gap is link evidence or abstention; an unavailable ratio is ambiguous | EC D-3; EX-1; EX-10 |
+| AD-4 | Integrity evidence from the sequence evidence only for a repeat (`crypto_temporal.seq_repeat`) without gap; a gap (`system.seq_gap`) is link evidence or abstention; an unavailable ratio is ambiguous | EC D-3; EX-1; EX-10; ADR-034 |
 | AD-5 | Cross-device incoherence: C3 with both quality fields denied, C2 with a quality field asserted, abstention if the quality is unavailable; the quality fields are not in the exclusion set | task check 3; FM section Non-faults and boundaries |
 | AD-6 | `crypto_temporal.timestamp_implausible` is never decisive alone; asserted it blocks C1 and abstains | EC-GAP-6; TM section Time as an attack vector |
 | AD-7 | A deliberate (commanded) transition is neither C2 nor allows C1: abstention, reason conflict | analisi §4.6 row 15:00; EC section Reading rules |
 | AD-8 | C1 by exclusion needs every channel of the exclusion set available and denied; the only exception is `crypto_temporal.authenticated`, tolerated as `None` (the unauthenticated deployment) | EC (Reading states, Conventions Aggregation rule, EX-3 (f)); TM H-DEP, TM-OP-11; analisi §4.5 rows 1 and 10 |
 | AD-9 | `hold` is in the robot scope and its exclusion set contains the robot task outcomes; `sched` contains both outcomes | EC scope table; H-VISIT; FM effect rows on `hold` |
-| AD-10 | `count` has no C1 branch in contract 0.1.0 | EC-GAP-1; F07 section 3.5 example 3 |
+| AD-10 | `count` has no C1 branch: the dispenser group of contract 0.2.0 is context for this rule | EC-GAP-1; F07 section 3.5 example 3; AD-20 |
 | AD-11 | `system.battery_low` and `witness.robot_present` are context, never read; a robot that skips a visit for a low battery without an outcome gives UNDETERMINED | FM `battery_depleted` row; EC D-2, D-6; AD-3; H-9 |
-| AD-12 | Refusal against robot-missed: the C2 side is separated, the refusal abstains, with or without ADR-040 | ADR-040 (proposed); EC D-5, Aggregation rule, EX-3 (f) |
+| AD-12 | Refusal against robot-missed: the C2 side is separated, the refusal abstains, with or without ADR-040 | ADR-040 (accepted); EC D-5, Aggregation rule, EX-3 (f) |
 | AD-13 | Predicted violations: κ UNDETERMINED without evaluating the rule; replaced, not duplicated | F07 section 1.7 (CP13); ADR-041 (proposed) |
 | AD-14 | Cascades: roots are `sched` alerts with a definite κ, decided strictly earlier than the effect; the root is chosen first and the independent-evidence rule is tested against it only; effects are `resp` and `hold` alerts whose decisive sub-formula is a failed guard and whose own result is not a different definite class than that root's; fan-out members are folded although FM CAS-1 says they do not cause one another (the link is a shared cause through the missing datum) | analisi §4.9 item 3; F07 section 1.8 item 6 and OP-T07-15 (the decision is handed to this task); FM CAS-1; F07 section 1.4 item 3 |
 | AD-15 | The abstention reason has a priority: conflict, then provenance-only (kinds SYSTEM and INTEGRITY), then insufficient | task check 6 |
 | AD-16 | The action policy is a proposal: three robot actions, clinical actions never automatic | analisi §4.9 item 4; ADR-003 |
 | AD-17 | `evidence_used`: rows in precedence order, predicates in table order, fields in contract order | task check 2; F07 section 1.3 |
 | AD-18 | Invalid input is read as unavailable and never raises on the alert path: a float that is not a number, a delivery ratio outside the closed unit interval, a negative cross-device difference, and a `template_kind` that does not match the template (row 8 applies, reason insufficient) | `#evidencevector` rule (`None` is never negative); I3 and I4 |
+| AD-19 | Contract 0.2.0 split of the sequence evidence: `crypto_temporal.seq_repeat` takes the place of the old field in IE-2 (integrity, complete ratio); `system.seq_gap` takes its place in the exclusion set, in RS-2 and in AM-2 (the loss), and is not a C2 predicate of its own, so that every verdict of the 0.1.0 worked cases is kept (W-15-alone stays UNDETERMINED); a gap reported with a complete ratio is a conflict (RS-2) | ADR-034 (accepted); EC D-3; WS05-T13 |
+| AD-20 | The new fields of contract 0.2.0 other than the split (`signal_quality.cuff_value_repeated`, `dispenser.interval_since_previous_ms`, `dispenser.content_change`) are context for this rule: never read, so changing them alone never changes κ, the row, the reason or `evidence_used` (WS05-T13 test 7); the likelihood attributor of WS05-T12 reads them | ADR-032, ADR-074 amendment 2 and 3; OP-AR-10 |
 
 ### Hypotheses
 
@@ -921,7 +953,7 @@ Each is verified where stated or is open and says why.
 | H-3 | An empty `system.node_lifecycle` mapping is read as `None` | EC: `None` when no node of the scope has an entry. Verified by reading |
 | H-4 | The witness pair of a violated INT instance restates the violation (EX-9, 6000 seeded draws, one availability mask for both robot channels) | Holds for the reference form of INT (decided at the dispense step, backward window; ADR-026 proposed) and the single mask of H-MASK; open if ADR-026 changes the form or the two channels are masked separately |
 | H-5 | A failed verification has no benign cause | TM H-AUTHCAUSE; open (TM-OP-15: a payload corruption, a key mismatch or a firmware error would raise it) |
-| H-6 | A repeated sequence value with a complete delivery ratio is a replay symptom, and benign repeats (restart, counter reset, re-send, a bounce that repeats the number) are rare | TM H-SEQMONO, H-SEQSTATE; open until ADR-034 splits the field (OP-AR-6) |
+| H-6 | A repeated sequence value with a complete delivery ratio is a replay symptom, and benign repeats (restart, counter reset, re-send, a bounce that repeats the number) are rare | TM H-SEQMONO, H-SEQSTATE; ADR-034 split the field in contract 0.2.0; the benign repeat with a complete ratio is still read as integrity evidence (OP-AR-6) |
 | H-7 | A cross-device difference with a quality field asserted is a device-quality problem and counts as system evidence; `signal_quality.ppg_sqi` is included although it reads `SPO2` (EC D-13) because check 3 names both quality fields; a healthy cuff pulse is within the tolerance | TM H-TOL. Open (OP-AR-5): a real clinical deviation during an ECG noise episode is read as C2 |
 | H-8 | The scalar `system` fields aggregate over the scope table of EC, and the measurements of `sched`, `hold` and `resp` are carried out through the robot visit | EC D-10 (ADR-033 proposed), FM hypothesis 7. A deployment where the cuff measures on its own schedule edits the scope table and the relevance map |
 | H-9 | A low battery report without a lapse or a failed task does not explain a violated template, and the stop that depletion causes is visible in `system.liveliness_ok` and the task outcomes | FM `battery_depleted` row; the simulation has no battery model (EC D-2). Open for a deployment where the robot reports its battery and stops without a lapse, and for a robot that skips a visit for a low battery without a failed or late outcome: the instance is UNDETERMINED (insufficient) |
@@ -942,11 +974,11 @@ Each is verified where stated or is open and says why.
 - **OP-AR-3 Window values at the attributor** (H-10).
 - **OP-AR-4 Carrier of the guard marker** (F07 OP-T07-6, WS05-T04 step 8).
 - **OP-AR-5 Cross-device difference with a quality problem** (H-7): the choice of reading it as system evidence, and the inclusion of the pulse-oximeter quality, are for engineering review; the alternative is neutral (abstention).
-- **OP-AR-6 Benign repeats read as C3** until ADR-034 (H-6), and the case of a replay together with a loss, which D-3 declares not told from a loss.
+- **OP-AR-6 Benign repeats read as C3** (H-6): the split of ADR-034 does not remove it, because `crypto_temporal.seq_repeat` with a complete ratio is integrity evidence by IE-2; and the case of a replay together with a loss, which D-3 declares not told from a loss.
 - **OP-AR-7 The time Boolean.** `crypto_temporal.timestamp_implausible` has no clock-health companion (EC-GAP-6, ADR not proposed); the table never lets it decide alone.
 - **OP-AR-8 The action policy**, and which clinical action is offered for which κ: "WS02 proposal for clinician review (WS00-T07)", with the lab safety review (WS10-T01). ADR-043 (accepted) decouples the freeze from the clinician review, which stays a pre-submission item; the policy is an open point, not a gate, and the parameter work of WS01-T09 does not set any action.
 - **OP-AR-9 The exclusion conditions of C1** (which channels must be available and denied for each template): also for the clinician review and carried as an open point under ADR-043. The four thresholds are registry names whose values WS01-T09 may propose; none is given here.
-- **OP-AR-10 `count` rows with ADR-032.** If `dispenser/interval_since_previous_ms` and `dispenser/content_change` are adopted, the table gains rows for the double take (C1) and the bounce (C2) of analisi §4.5 rows 6 and 7; the sign convention of `content_change` is the one of ADR-040 (2). They are not part of the enumeration.
+- **OP-AR-10 `count` rows with ADR-032 (still open).** `dispenser.interval_since_previous_ms` and `dispenser.content_change` are fields of contract 0.2.0 and this rule treats them as context (AD-20): the table gains no row for the double take (C1) and the bounce (C2) of analisi §4.5 rows 6 and 7, `count` has no C1 branch, and `ours-hier` ignores the accepted evidence; the likelihood attributor of WS05-T12 is what reads it. The sign convention of `content_change` is the one of ADR-040 (2), before minus after: a release is positive, a bounce is zero. If the rows were added they would not be part of the enumeration of this document.
 - **OP-AR-11 Refusal reaching C1.** Under AD-8 and AD-12 a refusal never reaches C1 because the cuff is silent; a relaxation would let the robot's `declined` report stand for the cuff-path fields. Not adopted; it would weaken invariant I4.
 - **OP-AR-12 Cascades.** Roots whose attributed cause is C1 fold and roots with an UNDETERMINED result do not (AD-14); whether roots with κ C1 should fold, the cost of not folding under an UNDETERMINED root, the cost of not folding an effect decided before its root (W-11-late-root), and the reading of a fan-out member as a cascade effect against FM CAS-1 are for review.
 - **OP-AR-13 The exception of I4 for `crypto_temporal.authenticated`** and the strict alternative (C1 unreachable without authentication); a verification channel that is down is read as clean (AD-8).
@@ -956,7 +988,8 @@ Each is verified where stated or is open and says why.
 - **OP-AR-17 Node status across the day boundary** (EC-OP-21) changes the readings of `system.node_lifecycle` at the start of a day.
 - **OP-AR-18 A PENDING INT instance after its deadline with an `undecidable` marker** (TM-OP-15, F07 OP-T07-14) has no alert path in contract 0.1.0; the rule does not attribute it. How the nurse learns that the dispense could not be checked (a review item, or the subscription to the verdict stream) is not decided here.
 - **OP-AR-20 The derived sentence of a root's text.** `Explanation.text` is a deterministic function of the alert (F07 TR-4), so the count sentence of a root (F07 section 3.4 item 11) changes when its `root_cause_of` changes; F07 section 1.4 item 3 says that a re-issue for a link changes only the link field and that the other fields are those of the first issue. This document reads the second as "the fields that are not derived from the link fields" (cascade rules 7 and 8); WS01-T08 is asked to confirm or amend the wording of F07 section 1.4 item 3.
-- **OP-AR-19 A forged message whose number jumps ahead is read as a loss** (H-15): C2 where the delivery ratio is below the floor, abstention above it, and no C3 for a naive forged dispense whose number jumps ahead in the unauthenticated deployment through the sequence evidence. A forged number that repeats an accepted one is integrity evidence (IE-2) when the delivery ratio is complete; the naive forger of WS04-T08 numbers from `FORGED_SEQ_START`, which repeats, so its forgeries can reach C3 that way. ADR-034 (a split into a repeat and a gap) does not change the jump-ahead case, because a jump ahead is a gap under both definitions (EC D-3). Mitigation outside the rule: authentication (IE-1) in the deployment.
+- **OP-AR-21 The overlap of `system.seq_gap` and `system.ble_link_quality`** (EC-OP-22): the extractor computes the gap over the span of the delivery ratio, so the ratio is 1.0 exactly when the gap is False for the same devices; the table reads both, and a gap with a complete ratio, which the extractor cannot produce, is a conflict (RS-2). The span (cut-off against top value of the window) and the grouping of the two fields in the likelihood table are not decided here.
+- **OP-AR-19 A forged message whose number jumps ahead is read as a loss** (H-15): C2 where the delivery ratio is below the floor, abstention above it, and no C3 for a naive forged dispense whose number jumps ahead in the unauthenticated deployment through the sequence evidence. A forged number that repeats an accepted one is integrity evidence (IE-2) when the delivery ratio is complete; the naive forger of WS04-T08 numbers from `FORGED_SEQ_START`, which repeats, so its forgeries can reach C3 that way. The split of ADR-034 (contract 0.2.0) does not change the jump-ahead case, because a jump ahead is a gap under both definitions (EC D-3). Mitigation outside the rule: authentication (IE-1) in the deployment.
 
 ### Deviations from the task text
 
@@ -973,9 +1006,9 @@ Each is verified where stated or is open and says why.
 - **T02 (WS01-T02) states no evaluability condition for φ_INT** (a witness channel or authentication must be available): the table of section 3.1 and section 4.7 do not say it; it is in T01 section 2.4 and T05 section 3.5 (V-INT-1, V-INT-3). For the plan lead and WS01-T08.
 - **WS08-T04 test 6** (a forged-DISPENSE fixture with robot present, no identity, no intake observed and no authentication evidence expects C3, and `ours-A4` something else) does not hold under AD-3: the fixture gives UNDETERMINED for both (W-09, W-09-A4); a fixture with `crypto_temporal.authenticated` asserted gives C3 for both (W-09-A). The A4 effect appears on the robot task outcomes (W-05, W-05-A4) and on the backing of `resp` (W-02, W-02-A4); with the `EMBODIED_MASK_WITNESS` variant only the backing of `resp` is lost (W-02), and W-02-auth is unchanged. In an authenticated deployment the robot task outcomes still remove C1 from `resp` under A4 (W-02-auth under A4 is UNDETERMINED).
 - **WS05-T07 tests 5, 18, 20, 25** assume a provisional κ for predicted alerts or a purity test over the verdict state; they follow F07 (CP13), with test 5 scoped to the rule. **Test 14** names a day-end measurement-count effect (deviation 4). **Tests 8 and 9** (I4, I5) take the restated I4. **Tests 11 and 31** need the delivery ratio: a sequence field asserted with a complete ratio gives C3 and with a ratio below 1.0 never gives C3 by itself (W-08-U, W-15, W-15-alone, W-15-repeat).
-- **WS05-T07 tests 14 to 19 (cascade and `update`)** must check what the cascade section lists under "What WS05-T07 must check"; **WS08 / WS05-T07 reporting of C1** must take the reachability of OP-AR-1 into account: `measurement_refusal` (`sched`) does not reach C1 in the benchmark as generated (for an `evidence_margin_ms` that admits no earlier cuff traffic), `double_take` and `dose_omission` (`count`) cannot reach C1 under contract 0.1.0, and no C1 is reachable in the reference profile S6, so C1 recall is to be reported per subtype and per profile.
+- **WS05-T07 tests 14 to 19 (cascade and `update`)** must check what the cascade section lists under "What WS05-T07 must check"; **WS08 / WS05-T07 reporting of C1** must take the reachability of OP-AR-1 into account: `measurement_refusal` (`sched`) does not reach C1 in the benchmark as generated (for an `evidence_margin_ms` that admits no earlier cuff traffic), `double_take` and `dose_omission` (`count`) cannot reach C1 under this rule (the dispenser fields of contract 0.2.0 are context, OP-AR-10), and no C1 is reachable in the reference profile S6, so C1 recall is to be reported per subtype and per profile.
 - **F07 section 3.5 example 1** gives κ C1 "because no system or integrity evidence was found in the channels that were available"; under AD-8 C1 needs the channels of the exclusion set to be available. F07 section 1.9 column A lists `xi.evidence_used` as "none asserted" for an alert with κ C1; here it lists the denied fields of the exclusion set. For the renderer (WS05-T07, WS11-T02).
-- **WS02-T05** (the matrix): DX-06 and DX-07 expect "yes" and get UNDETERMINED (insufficient) with the current contract (W-06, W-07; EC-GAP-1); DX-08 in an unauthenticated deployment with a device that provides `seq` gets C3 where the matrix says partial (W-08-U), and partial (UNDETERMINED) without `seq` (W-08-U-noseq); DX-09 is partial in an unauthenticated deployment (W-09, W-09-resp) and C3 for a synthesised forgery in an authenticated one (W-09-A); DX-10 is C1 in the unauthenticated deployment (W-10) and C3 for a BLE injection in an authenticated one (W-10-A); DX-05 under A4 is UNDETERMINED (W-05-A4); DX-02 is C1 with a witness without authentication (W-02) and with authentication without a witness (W-02-auth), and UNDETERMINED under A4 in both because of the task outcomes. DX-03 is C2 on `sys` (W-03) and on `sched` (W-03-sched).
+- **WS02-T05** (the matrix): DX-06 and DX-07 expect "yes" and get UNDETERMINED (insufficient) from this rule (W-06, W-07; the dispenser fields exist since contract 0.2.0 but are context, OP-AR-10); DX-08 in an unauthenticated deployment with a device that provides `seq` gets C3 where the matrix says partial (W-08-U), and partial (UNDETERMINED) without `seq` (W-08-U-noseq); DX-09 is partial in an unauthenticated deployment (W-09, W-09-resp) and C3 for a synthesised forgery in an authenticated one (W-09-A); DX-10 is C1 in the unauthenticated deployment (W-10) and C3 for a BLE injection in an authenticated one (W-10-A); DX-05 under A4 is UNDETERMINED (W-05-A4); DX-02 is C1 with a witness without authentication (W-02) and with authentication without a witness (W-02-auth), and UNDETERMINED under A4 in both because of the task outcomes. DX-03 is C2 on `sys` (W-03) and on `sched` (W-03-sched).
 - **WS04-T09 and ADR-040:** AD-12.
 - **FM OP-12 and CAS-5** are listed as hazards by WS02-T05; under AD-3 they give UNDETERMINED (provenance-only), not C3.
 
@@ -983,13 +1016,13 @@ Each is verified where stated or is open and says why.
 
 | ADR (status) | what in this document depends on it |
 |---|---|
-| ADR-032 (proposed) | the `count` rows for the double take and the bounce (OP-AR-10); until accepted `count` has no C1 |
-| ADR-033 (proposed) | the evidence key (EC D-1) and the scope table behind the relevance map (EC D-10) |
-| ADR-034 (proposed) | the sequence pair of AD-4; accepting it removes the ratio qualifier and the explained-away rule of the gap |
+| ADR-032 (accepted) | the `count` rows for the double take and the bounce (OP-AR-10): not added, the fields are context |
+| ADR-033 (accepted) | the evidence key (EC D-1) and the scope table behind the relevance map (EC D-10) |
+| ADR-034 (accepted) | the sequence pair of AD-4: the repeat and the gap are separate fields in contract 0.2.0; the ratio qualifier of IE-2 and the explained-away rule of the gap are kept (AD-19) |
 | ADR-035 (proposed) | the payload conventions from which the readings are derived |
 | ADR-036 (proposed) | the device profile behind the profile coverage (OP-AR-1) |
 | ADR-044 (proposed) | the profile-aware rule (variant B of the section C1 exclusion conditions) and the scope of the sequence and time evidence to the robot's presence stream (OP-AR-1, OP-AR-2); nothing in this document depends on it being accepted |
-| ADR-040 (proposed) | the `declined` outcome (AD-12) |
+| ADR-040 (accepted) | the `declined` outcome (AD-12) |
 | ADR-041 (proposed) | the κ of predicted alerts (AD-13) and the alert fields |
 | ADR-026 (proposed) | the form of INT behind H-4 |
 | ADR-043 (accepted) | the action policy and the exclusion conditions are open points, not a gate of the freeze |

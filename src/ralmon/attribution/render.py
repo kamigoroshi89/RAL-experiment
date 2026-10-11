@@ -58,16 +58,20 @@ FIELD_WORDS: Final[dict[str, str]] = {
     "system.battery_low": "robot battery",
     "system.nav_task_failed": "robot navigation outcome",
     "system.manip_task_failed": "robot manipulation outcome",
+    "system.seq_gap": "missing message sequence values",
     "signal_quality.ecg_sqi": "ECG signal quality",
     "signal_quality.ppg_sqi": "pulse-oximeter signal quality",
     "signal_quality.cuff_error_code": "cuff error code",
+    "signal_quality.cuff_value_repeated": "repeat of the previous cuff reading",
     "cross_device.pulse_vs_ecg_hr_diff": "agreement between the cuff pulse rate and the ECG heart rate",
     "witness.robot_present": "patient presence perceived by the robot",
     "witness.identity_confirmed": "patient identity check by the robot",
     "witness.intake_observed": "intake observed by the robot",
     "crypto_temporal.authenticated": "message authentication",
-    "crypto_temporal.seq_gap_or_replay": "message sequence numbers",
+    "crypto_temporal.seq_repeat": "repeated message sequence numbers",
     "crypto_temporal.timestamp_implausible": "message timestamps",
+    "dispenser.interval_since_previous_ms": "interval since the previous dispenser opening",
+    "dispenser.content_change": "dispenser content change at the opening",
 }
 
 #: What anchors an instance (docs/formal/02-templates.md section 3.1): DISPENSE is the dispenser opened, not INTAKE.
@@ -84,7 +88,8 @@ _ANCHOR_KIND: Final[dict[TemplateId, str]] = {
 _CONFLICT_WHY: Final[dict[str, str]] = {
     "system.node_lifecycle": "a deliberate transition is not a failure and does not allow a clinical cause",
     "system.ble_link_quality": "a loss that does not degrade the link is not an explanation",
-    "crypto_temporal.seq_gap_or_replay": "a loss that does not degrade the link is not an explanation",
+    "system.seq_gap": "a loss that does not degrade the link is not an explanation",
+    "crypto_temporal.seq_repeat": "a loss that does not degrade the link is not an explanation",
     "crypto_temporal.timestamp_implausible": "a late or future-stamped input has several causes",
     "witness.identity_confirmed": "a witness reading is not backing",
     "witness.intake_observed": "a witness reading is not backing",
@@ -230,9 +235,13 @@ _BOOLEAN_WORDS: Final[dict[str, tuple[str, str]]] = {
         "message authentication succeeded",
         "message authentication failed",
     ),
-    "crypto_temporal.seq_gap_or_replay": (
-        "a repeated or missing sequence value was found",
-        "no repeated or missing sequence value was found",
+    "system.seq_gap": (
+        "a missing sequence value was found",
+        "no missing sequence value was found",
+    ),
+    "crypto_temporal.seq_repeat": (
+        "a repeated sequence value was found",
+        "no repeated sequence value was found",
     ),
     "crypto_temporal.timestamp_implausible": (
         "a late or future-stamped message was received",

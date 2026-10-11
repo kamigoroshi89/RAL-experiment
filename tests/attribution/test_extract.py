@@ -1345,6 +1345,7 @@ def snapshot_parts(**kwargs: Any) -> tuple[Any, Any]:
         battery_low=kwargs.get("battery_low"),
         nav_task_failed=kwargs.get("nav_task_failed"),
         manip_task_failed=kwargs.get("manip_task_failed"),
+        seq_gap=None,  # ward-side (BLE devices only): the robot does not publish it
     )
     return witness, system
 

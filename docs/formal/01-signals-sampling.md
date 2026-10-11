@@ -165,7 +165,7 @@ The ceiling rule, not rounding and not floor, is the causal choice. With floor a
 
 Impulse coalescing must not lose multiplicity. Several events in one step give one impulse `u_k = 1`, but the number of events `n_k = |{e : k_up(t_e) = k}|` is kept. Counters are computed from the event stream, not from the binned impulse: two `dispense` events inside one step give `dose_count` an increment of 2, not 1 (example W3). The same holds for `meas_count`. Anchors of obligation instances are also taken from the event stream (or the plan schedule), not from the impulse (section 3.7).
 
-When a `seq` is present, an event that repeats an already accepted `(source, seq)` is a duplicate and is not counted again; it is evidence for `seq_gap_or_replay` (section 4.5). When `seq` is `None`, duplicates cannot be told from genuine repeated events, both are counted, and the exposure to replay is stated in section 4.5.
+When a `seq` is present, an event that repeats an already accepted `(source, seq)` is a duplicate and is not counted again; it is evidence for `crypto_temporal.seq_repeat` (section 4.5; named `seq_gap_or_replay` in contract 0.1.0, split by ADR-034 into `crypto_temporal.seq_repeat` and `system.seq_gap` in `#evidencevector` 0.2.0, WS05-T13). When `seq` is `None`, duplicates cannot be told from genuine repeated events, both are counted, and the exposure to replay is stated in section 4.5.
 
 ### 3.5 Undefined values, no sample and unavailable channels
 

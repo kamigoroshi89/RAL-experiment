@@ -1,8 +1,8 @@
-"""``EvidenceVector`` and its six parts (02-interfaces.md#evidencevector, version 0.1.0), verbatim.
+"""``EvidenceVector`` and its seven parts (02-interfaces.md#evidencevector, version 0.2.0), verbatim.
 
 ``None`` in a field always means "channel unavailable or not applicable", never "negative" (the rule of the
 contract and of docs/models/evidence-channels.md, section Reading states). A field is addressed by its canonical
-path ``group.field`` (evidence-channels.md, section Conventions); ``EVIDENCE_PATHS`` lists the twenty paths in
+path ``group.field`` (evidence-channels.md, section Conventions); ``EVIDENCE_PATHS`` lists the twenty-four paths in
 contract order, and ``get_evidence`` reads one.
 
 Helpers outside the contract: ``empty_evidence`` (the vector of an absent evidence key: provenance from the
@@ -24,6 +24,7 @@ __all__ = [
     "NON_PROVENANCE_PATHS",
     "CrossDeviceEvidence",
     "CryptoTemporalEvidence",
+    "DispenserEvidence",
     "EmbodiedWitnessEvidence",
     "EvidenceVector",
     "ProvenanceEvidence",
@@ -55,6 +56,9 @@ class SystemHealthEvidence:
     battery_low: bool | None
     nav_task_failed: bool | None
     manip_task_failed: bool | None
+    seq_gap: (
+        bool | None
+    )  # a sequence value is missing at the cut-off (BLE sources only; system evidence)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +66,9 @@ class SignalQualityEvidence:
     ecg_sqi: float | None
     ppg_sqi: float | None
     cuff_error_code: str | None
+    cuff_value_repeated: (
+        bool | None
+    )  # the reading equals the previous reading of the same cuff stream
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,8 +88,18 @@ class EmbodiedWitnessEvidence:
 @dataclass(frozen=True, slots=True)
 class CryptoTemporalEvidence:
     authenticated: bool | None
-    seq_gap_or_replay: bool | None
+    seq_repeat: (
+        bool | None
+    )  # a received (name, seq) repeats an accepted one (integrity evidence)
     timestamp_implausible: bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class DispenserEvidence:
+    interval_since_previous_ms: int | None = None  # never negative
+    content_change: float | None = (
+        None  # before minus after: a release is positive, a bounce is zero (ADR-040 (2))
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +110,7 @@ class EvidenceVector:
     cross_device: CrossDeviceEvidence
     witness: EmbodiedWitnessEvidence
     crypto_temporal: CryptoTemporalEvidence
+    dispenser: DispenserEvidence = DispenserEvidence()
 
 
 def _paths() -> tuple[str, ...]:
@@ -105,14 +123,15 @@ def _paths() -> tuple[str, ...]:
             "cross_device": CrossDeviceEvidence,
             "witness": EmbodiedWitnessEvidence,
             "crypto_temporal": CryptoTemporalEvidence,
+            "dispenser": DispenserEvidence,
         }[group.name]
         out.extend(f"{group.name}.{leaf.name}" for leaf in dataclasses.fields(part))
     return tuple(out)
 
 
-#: The twenty canonical paths ``group.field`` in contract order (evidence-channels.md, section Conventions).
+#: The twenty-four canonical paths ``group.field`` in contract order (evidence-channels.md, section Conventions).
 EVIDENCE_PATHS: Final[tuple[str, ...]] = _paths()
-#: The eighteen fields other than the two ``provenance`` fields.
+#: The twenty-two fields other than the two ``provenance`` fields.
 NON_PROVENANCE_PATHS: Final[tuple[str, ...]] = tuple(
     p for p in EVIDENCE_PATHS if not p.startswith("provenance.")
 )
@@ -146,11 +165,14 @@ def empty_evidence(template: TemplateId) -> EvidenceVector:
     """The vector of an absent evidence key: provenance from the record, every other field ``None`` (D-1)."""
     return EvidenceVector(
         provenance=ProvenanceEvidence(template, template_kind_of(template)),
-        system=SystemHealthEvidence(None, None, None, None, None, None, None, None),
-        signal_quality=SignalQualityEvidence(None, None, None),
+        system=SystemHealthEvidence(
+            None, None, None, None, None, None, None, None, None
+        ),
+        signal_quality=SignalQualityEvidence(None, None, None, None),
         cross_device=CrossDeviceEvidence(None),
         witness=EmbodiedWitnessEvidence(None, None, None),
         crypto_temporal=CryptoTemporalEvidence(None, None, None),
+        dispenser=DispenserEvidence(None, None),
     )
 
 

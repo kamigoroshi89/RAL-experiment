@@ -288,7 +288,7 @@ The claim of row 1 is allowed only to the extent that these properties hold for 
 
 - **TR-1 (resolvable instance).** `xi.instance_key` identifies exactly one template instance of the care plan, and `xi.template` equals `tau`.
 - **TR-2 (parameters).** Every name in `xi.param_values` is a name in `Template.params` of `tau`, and its value is the value that the monitor used for the instance.
-- **TR-3 (evidence).** Every path in `xi.evidence_used` is one of the twenty fields of the `EvidenceVector` (EC canonical `group.field` path), and the field was available and decided kappa; for a predicted alert and for an abstention without a decisive field the list is empty.
+- **TR-3 (evidence).** Every path in `xi.evidence_used` is one of the twenty-four fields of the `EvidenceVector` (twenty in contract 0.1.0, which this document was frozen against; `#evidencevector` 0.2.0, WS05-T13) (EC canonical `group.field` path), and the field was available and decided kappa; for a predicted alert and for an abstention without a decisive field the list is empty.
 - **TR-4 (rendering).** `xi.text` is a deterministic function of the alert, its record and its template (no clock, no locale, no dictionary order), so it can be regenerated from the log.
 
 Traceability is not an explanation of the cause (kappa is inferred by a rule over evidence), not a proof that the rule is correct, and not evidence that a nurse understands the text.

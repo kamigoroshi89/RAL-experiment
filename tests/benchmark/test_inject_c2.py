@@ -599,7 +599,9 @@ def test_stuck_at_repeats_last_value_before_onset() -> None:
     out = run([stuck(9 * HOUR, 6 * HOUR)])
     assert values_of(out, "bp") == [128.0, 128.0, 128.0, 128.0]
     (record,) = out.records
-    assert record.evidence_paths == ()
+    assert record.evidence_paths == (
+        "signal_quality.cuff_value_repeated",
+    )  # conditional on a declared display resolution
     assert record.n_changed == 3 and record.realised
     assert not events_of(out, EventKind.DEVICE_ERROR)
     assert values_of(out, "hr_pulse") == [70.0] * 4  # the pulse is not frozen
@@ -893,7 +895,10 @@ def test_dispenser_bounce_adds_extra_dispense_within_gap() -> None:
     (record,) = out.records
     assert record.realised and record.n_changed == 1
     assert record.realised_end_ms is None and record.spec.duration_ms is None
-    assert record.evidence_paths == ()
+    assert record.evidence_paths == (
+        "dispenser.interval_since_previous_ms",
+        "dispenser.content_change",
+    )  # conditional on what the dispenser reports
     assert record.realised_onset_ms == DOSE_TICKS[0]
 
 

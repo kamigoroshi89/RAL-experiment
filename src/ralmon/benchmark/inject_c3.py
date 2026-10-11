@@ -200,7 +200,7 @@ _W_ROBOT: Final = "witness.robot_present"
 _W_IDENT: Final = "witness.identity_confirmed"
 _W_INTAKE: Final = "witness.intake_observed"
 _C_AUTH: Final = "crypto_temporal.authenticated"
-_C_SEQ: Final = "crypto_temporal.seq_gap_or_replay"
+_C_SEQ: Final = "crypto_temporal.seq_repeat"
 _C_TS: Final = "crypto_temporal.timestamp_implausible"
 # The paths in the order of the EvidenceVector contract (group, then field).
 _PATH_ORDER: Final = (_X_DIFF, _W_ROBOT, _W_IDENT, _W_INTAKE, _C_AUTH, _C_SEQ, _C_TS)

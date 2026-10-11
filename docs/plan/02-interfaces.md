@@ -544,7 +544,7 @@ Semantics:
 
 ## EvidenceVector
 
-Version 0.1.0. Owner WS02. Consumers: WS04, WS05, WS07, WS10. Sources: analisi §4.5 (six evidence groups), §4.9 item 5.
+Version 0.2.0 (ADR-074 amendment 3, bundling ADR-032, ADR-033, ADR-034 and ADR-040 and the new field `signal_quality.cuff_value_repeated`; before: 0.1.0, twenty fields in six groups, with `crypto_temporal.seq_gap_or_replay`). Owner WS02. Consumers: WS04, WS05, WS07, WS10. Sources: analisi §4.5 (six evidence groups), §4.9 item 5. Twenty-four fields in seven groups (the two `provenance` fields and twenty-two evidence fields). Migration from 0.1.0: `crypto_temporal.seq_gap_or_replay` is removed (a breaking rename into `crypto_temporal.seq_repeat` and `system.seq_gap`); every other 0.1.0 field keeps its name, type and position within its group; the group `dispenser` is appended last with a default of `None` for both fields, so a constructor that omits it keeps working.
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -559,15 +559,17 @@ class SystemHealthEvidence:
     liveliness_ok: bool | None
     qos_deadline_missed: bool | None
     ble_link_quality: float | None
-    battery_low: bool | None
+    battery_low: bool | None                    # the robot battery (ADR-033)
     nav_task_failed: bool | None
-    manip_task_failed: bool | None
+    manip_task_failed: bool | None              # not set by the outcome `declined` (ADR-040)
+    seq_gap: bool | None                        # a sequence value is missing at the cut-off; BLE sources only; system evidence
 
 @dataclass(frozen=True, slots=True)
 class SignalQualityEvidence:
     ecg_sqi: float | None
     ppg_sqi: float | None
     cuff_error_code: str | None
+    cuff_value_repeated: bool | None            # True: the reading equals the previous reading of the same cuff stream; None without a previous reading or when the device profile declares no display resolution
 
 @dataclass(frozen=True, slots=True)
 class CrossDeviceEvidence:
@@ -575,15 +577,20 @@ class CrossDeviceEvidence:
 
 @dataclass(frozen=True, slots=True)
 class EmbodiedWitnessEvidence:
-    robot_present: bool | None             # None if the robot was not co-located
+    robot_present: bool | None             # the patient's presence as observed by the robot (ADR-033); None if the robot was not co-located
     identity_confirmed: bool | None
     intake_observed: bool | None
 
 @dataclass(frozen=True, slots=True)
 class CryptoTemporalEvidence:
     authenticated: bool | None
-    seq_gap_or_replay: bool | None
+    seq_repeat: bool | None                # a received (name, seq) repeats an accepted one; integrity evidence
     timestamp_implausible: bool | None
+
+@dataclass(frozen=True, slots=True)
+class DispenserEvidence:
+    interval_since_previous_ms: int | None = None   # never negative; None when the dispenser reports none
+    content_change: float | None = None             # before minus after (ADR-040): a release is positive, a bounce is zero; None without content sensing
 
 @dataclass(frozen=True, slots=True)
 class EvidenceVector:
@@ -593,9 +600,16 @@ class EvidenceVector:
     cross_device: CrossDeviceEvidence
     witness: EmbodiedWitnessEvidence
     crypto_temporal: CryptoTemporalEvidence
+    dispenser: DispenserEvidence = DispenserEvidence()
 ```
 
-Rule: `None` (channel unavailable) is never converted to a negative observation. This is what makes the embodied-channel ablation A4 meaningful: with the channel removed, all `witness` fields and robot-derived `system` fields become `None`.
+Rules:
+
+- `None` (channel unavailable) is never converted to a negative observation. This is what makes the embodied-channel ablation A4 meaningful: with the channel removed, the six wholly robot-derived fields (the three `witness` fields, `system.nav_task_failed`, `system.manip_task_failed`, `system.battery_low`) become `None`, and the four aggregate `system` fields (`node_lifecycle`, `diagnostics_ok`, `liveliness_ok`, `qos_deadline_missed`) are recomputed over the device nodes (`None` only if no device node remains); the other fourteen fields are ward-side and unchanged (ADR-049 (n); `docs/models/evidence-channels.md`, section Ablation A4 mask).
+- Meaning (ADR-033, no signature change): the key of the evidence mapping is `VerdictRecord.instance_key`, per care plan; a scalar `system` field aggregates over the scope of the instance (asserted when one component asserts, denied only when every capable component denies, `None` otherwise); `system.battery_low` is the state of the robot battery; `witness.robot_present` is the presence of the patient as observed by the robot (the name is kept).
+- Meaning (ADR-040): the outcome `declined` of a robot task does not make `system.manip_task_failed` (or `system.nav_task_failed`) True, it counts as a task that did not fail; `dispenser.content_change` is before minus after, so a release is positive and a bounce is zero.
+- The sequence evidence is split (ADR-034): `crypto_temporal.seq_repeat` is True when a received `(name, seq)` repeats an accepted one; `system.seq_gap` is True when a sequence value is missing at the cut-off. Both are `None` when no capable device has a basis (the `None` conditions of the old single field); both can be True together (a loss and a repeat); `system.seq_gap` and `system.ble_link_quality` carry overlapping information (the ratio is 1.0 exactly when no value of the observed span is missing) and a consumer must not count them as independent evidence.
+- `signal_quality.cuff_value_repeated` is derived from the two latest readings of the cuff stream and needs the display resolution declared by the device profile; the contract fixes no default resolution.
 
 ## Attribution
 
@@ -697,7 +711,7 @@ Topics (names are stable; message fields map one to one to the Python types abov
 |---|---|---|---|
 | `/ralmon/samples` | `Sample` | device nodes, gateway | RSM |
 | `/ralmon/events` | `Event` | device nodes, robot | RSM |
-| `/ralmon/robot_evidence` | witness and system fields of `EvidenceVector` | robot | ward node |
+| `/ralmon/robot_evidence` | witness fields and robot-derived `system` fields of `EvidenceVector` (not `system.seq_gap` and not the `dispenser` group: ward-side) | robot | ward node |
 | `/ralmon/verdicts` | `VerdictRecord` | RSM | attribution |
 | `/ralmon/alerts` | `Alert` | attribution | event manager, nurse interface |
 | `/ralmon/heartbeat` | node id, sequence number, t_ms | robot, ward node | watchdogs |

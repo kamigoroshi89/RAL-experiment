@@ -42,8 +42,10 @@ All twelve contracts that the formalization reads are at version 0.1.0 and are u
 | `#conformal-calibrator` | 0.1.0 | `06` |
 | `#monitor` | 0.1.0 | `01`, `05`, `07` |
 | `#alert` | 0.1.0 | `07` |
-| `#evidencevector` | 0.1.0 | `08`, `09` (as read by the worked day) |
+| `#evidencevector` | 0.1.0 (amended to 0.2.0 by WS05-T13, see below) | `08`, `09` (as read by the worked day) |
 | `#attribution` | 0.1.0 | `07`, `08`, `09` |
+
+**Amendment after the freeze (WS05-T13, ADR-074 amendment 3).** `#evidencevector` went to 0.2.0 (twenty-four fields in seven groups; `crypto_temporal.seq_gap_or_replay` split into `crypto_temporal.seq_repeat` and `system.seq_gap`). The documents `01`, `07` and `09` and the golden `golden/patient-day.yaml` quote the field by name or by count: those places were renamed in place, each marked with the old name, and the C1 decisive-field list of the worked day gained `system.seq_gap` (eleven denied fields instead of ten). No verdict, no kappa and no number of the freeze changed. The golden's `evidence` block is documentation of the worked cases and no test reads it.
 
 ## Registry
 

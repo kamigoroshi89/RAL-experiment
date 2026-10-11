@@ -1,13 +1,13 @@
 """The hierarchical attribution rule (``AttributionRule``, ``HierarchicalRule``).
 
 Specification: docs/models/attribution-rule.md (WS02-T04), which this module implements without adding to it. The
-rule is a total function of the template and the reading classes of the eighteen non-provenance fields of the
-``EvidenceVector``; it reads nothing else (invariant I1: neither rho, nor the interval, nor the verdict state, nor a
+rule is a total function of the template and the reading classes of the twenty-two non-provenance fields of the
+``EvidenceVector`` (``#evidencevector`` 0.2.0; it reads at most seventeen of them for a template); it reads nothing else (invariant I1: neither rho, nor the interval, nor the verdict state, nor a
 time of the record). The hierarchy of ADR-010 and of the four steps of ``#attribution``, as eight rows of the decision
 table (section Decision table), tried in order:
 
 1. ``crypto_temporal.authenticated`` asserted (IE-1) gives C3;
-2. a repeated sequence value with a complete delivery ratio (IE-2) gives C3;
+2. a repeated sequence value (``crypto_temporal.seq_repeat``) with a complete delivery ratio (IE-2) gives C3;
 3. a cross-device incoherence with both signal-quality fields denied (IE-3) gives C3;
 4. any system evidence (SE-1 to SE-9) gives C2;
 5. the exclusion set of the template available and denied gives C1 (``range``, ``sched``, ``hold``, ``resp``);
@@ -15,6 +15,11 @@ table (section Decision table), tried in order:
 7. a system or integrity template with nothing asserted outside provenance gives UNDETERMINED, reason
    ``provenance_only``;
 8. otherwise UNDETERMINED, reason ``insufficient``.
+
+The new fields of 0.2.0 other than the split of the sequence field (``signal_quality.cuff_value_repeated`` and the
+``dispenser`` group) are context for this rule: it never reads them (they are read by the likelihood attributor). The gap
+(``system.seq_gap``) is read where the old field was read as a loss: it blocks C1, it is named by RS-2 and it makes the
+ratio ambiguous (AM-2), and it is not decisive for C2 on its own (the delivery ratio decides that, SE-5).
 
 ``None`` is never a negative reading: a predicate that needs a denied reading is not satisfied by ``None``. A reading
 that is out of its domain (a delivery ratio outside the closed unit interval, a NaN, a negative cross-device
@@ -143,11 +148,12 @@ DIFF: Final = "cross_device.pulse_vs_ecg_hr_diff"
 IDENT: Final = "witness.identity_confirmed"
 INTAKE: Final = "witness.intake_observed"
 AUTH: Final = "crypto_temporal.authenticated"
-SEQ: Final = "crypto_temporal.seq_gap_or_replay"
+GAP: Final = "system.seq_gap"
+SEQ: Final = "crypto_temporal.seq_repeat"
 TIME: Final = "crypto_temporal.timestamp_implausible"
 
 _CP = (LIFE, DIAG, LIVE, QOS, BLE)  # the five fields every template reads
-_REST = (AUTH, SEQ, TIME)
+_REST = (AUTH, GAP, SEQ, TIME)
 
 # Relevance map (section Relevance map): the fields that the table reads for each template. A field outside the set
 # is context or "-" and is read as unavailable whatever the vector holds.
@@ -164,7 +170,7 @@ _READS: Final[dict[TemplateId, frozenset[str]]] = {
 }
 # The exclusion set EX(t) of C1 (section C1 exclusion conditions): the cuff-path conditions EX-CP plus, per template,
 # the readings that must be available and denied. ``authenticated`` and the backing of ``resp`` are handled apart.
-_EX_CP: Final = (LIFE, DIAG, LIVE, QOS, BLE, SEQ, TIME)
+_EX_CP: Final = (LIFE, DIAG, LIVE, QOS, BLE, GAP, SEQ, TIME)
 _EX: Final[dict[TemplateId, tuple[str, ...]]] = {
     TemplateId.RANGE: (*_EX_CP, CUFF, DIFF),
     TemplateId.SCHED: (*_EX_CP, NAV, MANIP, CUFF),
@@ -400,10 +406,11 @@ class HierarchicalRule:
         rs: list[str] = []
         if r[LIFE] == K:
             rs.append(LIFE)
-        if r[BLE] == G:
+        # RS-2: a missing sequence value with a link that is not degraded; or a gap reported while the delivery
+        # ratio is complete (the two fields contradict each other: an extractor defect, read as a conflict)
+        if r[BLE] == G or (r[BLE] == F and r[GAP] == A):
             rs.append(BLE)
-            if r[SEQ] == A:
-                rs.append(SEQ)
+            rs.extend(p for p in (GAP, SEQ) if r[p] == A)
         if r[TIME] == A:
             rs.append(TIME)
         if template is TemplateId.RESP and r[AUTH] == U:
@@ -427,7 +434,7 @@ class HierarchicalRule:
             and r[PPG] != A
             and not (r[ECG] == D and r[PPG] == D)
         )
-        am2 = r[SEQ] == A and r[BLE] == U
+        am2 = (r[SEQ] == A or r[GAP] == A) and r[BLE] == U
         if kind in (TemplateKind.SYSTEM, TemplateKind.INTEGRITY) and not (am1 or am2):
             return Decision(
                 AttributedCause.UNDETERMINED,

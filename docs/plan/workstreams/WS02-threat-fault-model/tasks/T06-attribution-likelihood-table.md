@@ -20,7 +20,7 @@ Specify the attribution layer of ADR-074: the method returns p(c | e, t) for c i
 
 - `docs/plan/03-decisions.md` ADR-074 (read in full) and ADR-010; `docs/models/attribution-rule.md` (reading classes, relevance map, exclusion conditions, worked cases W-01 to W-15), `docs/models/fault-model.md` (coverage table around lines 395-418: which fields each fault raises; the silent faults raise none), `docs/models/evidence-channels.md`, `docs/models/threat-model.md`.
 - The research prototype and its report: `docs/benchmark/evidence/likelihood-attribution.md` (written by the research run of 2026-10-11 from `/tmp/research/likelihood-attribution.md`; copy it to the repository first, with its scripts under `docs/benchmark/evidence/scripts/likelihood/`, if the copy is not there yet).
-- Sensitivity design in the report: eps grid, priors (uniform and declared alternatives), within-C2 subtype mixture (share of silent faults), abstention threshold, one grouped-field variant for the channels that are not independent given the cause (`ble_link_quality` with `seq_gap_or_replay`; `cross_device` with the signal-quality fields).
+- Sensitivity design in the report: eps grid, priors (uniform and declared alternatives), within-C2 subtype mixture (share of silent faults), abstention threshold, one grouped-field variant for the channels that are not independent given the cause (`ble_link_quality` with `system.seq_gap` (contract 0.2.0 split of `seq_gap_or_replay`, WS05-T13); `cross_device` with the signal-quality fields).
 
 ## File toccati
 

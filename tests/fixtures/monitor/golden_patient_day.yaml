@@ -217,13 +217,14 @@ evidence:
     signal_quality.cuff_error_code: ""
     cross_device.pulse_vs_ecg_hr_diff: "within hr_coherence_tolerance"
     crypto_temporal.authenticated: true
-    crypto_temporal.seq_gap_or_replay: false
+    system.seq_gap: false
+    crypto_temporal.seq_repeat: false
     crypto_temporal.timestamp_implausible: false
     expected:
       kappa: C1
       table_row: 5
       reason: null
-      evidence_used: ["system.node_lifecycle", "system.diagnostics_ok", "system.liveliness_ok", "system.qos_deadline_missed", "system.ble_link_quality", "signal_quality.cuff_error_code", "cross_device.pulse_vs_ecg_hr_diff", "crypto_temporal.authenticated", "crypto_temporal.seq_gap_or_replay", "crypto_temporal.timestamp_implausible"]
+      evidence_used: ["system.node_lifecycle", "system.diagnostics_ok", "system.liveliness_ok", "system.qos_deadline_missed", "system.ble_link_quality", "system.seq_gap", "signal_quality.cuff_error_code", "cross_device.pulse_vs_ecg_hr_diff", "crypto_temporal.authenticated", "crypto_temporal.seq_repeat", "crypto_temporal.timestamp_implausible"]
   "range@73920000":
     source_case: "W-08 (replay with rewritten metadata, authenticated deployment)"
     system.node_lifecycle: {cuff: active}
@@ -236,7 +237,8 @@ evidence:
     signal_quality.cuff_error_code: ""
     cross_device.pulse_vs_ecg_hr_diff: "within hr_coherence_tolerance"
     crypto_temporal.authenticated: false
-    crypto_temporal.seq_gap_or_replay: false
+    system.seq_gap: false
+    crypto_temporal.seq_repeat: false
     crypto_temporal.timestamp_implausible: false
     expected: {kappa: C3, table_row: 1, reason: null, evidence_used: ["crypto_temporal.authenticated"]}
   "count@75720000":
@@ -247,7 +249,8 @@ evidence:
     system.qos_deadline_missed: false
     system.ble_link_quality: 1.0
     crypto_temporal.authenticated: true
-    crypto_temporal.seq_gap_or_replay: false
+    system.seq_gap: false
+    crypto_temporal.seq_repeat: false
     crypto_temporal.timestamp_implausible: false
     expected: {kappa: UNDETERMINED, table_row: 8, reason: insufficient, evidence_used: []}
 
@@ -923,7 +926,7 @@ alerts:
         instance_key: "range@44640000"
         subformula_path: "range/body/bp <= bp_band_high"
         param_values: {bp_band_low: 110.0, bp_band_high: 140.0}
-        evidence_used: ["system.node_lifecycle", "system.diagnostics_ok", "system.liveliness_ok", "system.qos_deadline_missed", "system.ble_link_quality", "signal_quality.cuff_error_code", "cross_device.pulse_vs_ecg_hr_diff", "crypto_temporal.authenticated", "crypto_temporal.seq_gap_or_replay", "crypto_temporal.timestamp_implausible"]
+        evidence_used: ["system.node_lifecycle", "system.diagnostics_ok", "system.liveliness_ok", "system.qos_deadline_missed", "system.ble_link_quality", "system.seq_gap", "signal_quality.cuff_error_code", "cross_device.pulse_vs_ecg_hr_diff", "crypto_temporal.authenticated", "crypto_temporal.seq_repeat", "crypto_temporal.timestamp_implausible"]
         text_must_contain: ["the measured blood pressure inside the prescribed band", "152 mmHg", "above the prescribed upper limit of 140 mmHg", "12 mmHg beyond the limit", "0.60 of the registry scale of 20 mmHg (unreviewed)", "clinical or adherence deviation", "every channel required for the exclusion was available and showed no problem", "0.98", "conditional on the adequacy of the declared device error model"]
       verdict: violated
       priority: 2

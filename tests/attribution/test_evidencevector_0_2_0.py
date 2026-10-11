@@ -681,7 +681,7 @@ def test_new_fields_do_not_depend_on_the_robot(registry) -> None:  # type: ignor
     )
     items = I(
         *[cuff_frame(t, s) for t, s in FRAMES if s != 2],
-        bp(at(20, 10), 120.0),
+        bp(at(20, 14), 120.0),
         bp(at(20, 40), 120.0),
         dispense(at(20, 50), interval_since_previous_ms=8_000, content_change=1.0),
         robot_state(at(20, 0), colocated=True),
@@ -781,3 +781,11 @@ def test_evidence_signatures_use_the_split_fields() -> None:
     assert "crypto_temporal.seq_repeat" not in attack_signature(
         "replay", INFORMED, False
     )
+
+
+def test_every_evidence_field_has_words_in_the_renderer() -> None:
+    """The text of an alert names a decisive field in words; no field of the contract is left without them."""
+    from ralmon.attribution.render import FIELD_WORDS
+
+    assert set(NON_PROVENANCE_PATHS) <= set(FIELD_WORDS)
+    assert "crypto_temporal.seq_gap_or_replay" not in FIELD_WORDS
