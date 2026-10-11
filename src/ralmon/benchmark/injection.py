@@ -102,6 +102,8 @@ __all__ = [
     "MAX_TIME_MS",
     "MIN_MAGNITUDE_LEVELS",
     "PIPELINE_STAGES",
+    "READINGS_UNIT",
+    "READING_DURATION_SUBTYPES",
     "SHAPE_POINT",
     "SHAPE_TICK",
     "SHAPE_WINDOW",
@@ -168,6 +170,13 @@ MAGNITUDE_REAL: Final = "real"  # any finite signed number
 MAGNITUDE_POSITIVE: Final = "positive"  # a finite number above zero
 MAGNITUDE_MS: Final = "ms"  # a positive integral number of ms, at most one day
 _MAGNITUDES: Final = (MAGNITUDE_NONE, MAGNITUDE_REAL, MAGNITUDE_POSITIVE, MAGNITUDE_MS)
+# The window faults whose duration is a number of consecutive cuff readings of the day, not a time
+# (ADR-070 (a), WS04-T16): the rows of their duration levels are in this unit, integers of at least 1,
+# strictly increasing from the first level to the last. Every other duration is in ms.
+READINGS_UNIT: Final = "readings"
+READING_DURATION_SUBTYPES: Final = frozenset(
+    {"cuff_detached", "cuff_silent_bias", "stuck_at"}
+)
 
 # Resource guards of the generator.
 MAX_INJECTIONS_PER_DAY: Final[int] = 1_000  # algorithmic: specs applied to one day
@@ -1633,6 +1642,43 @@ def _quantity(
     return QuantityDesign(key, unit, reference, tuple(made))
 
 
+def _check_duration_unit(
+    where: str, cls: InjectedClass, subtype: str, duration: QuantityDesign
+) -> None:
+    """A duration is in ms, except for the three cuff faults of ADR-070, whose rows are readings (WS04-T16)."""
+    if cls is not InjectedClass.C2 or subtype not in READING_DURATION_SUBTYPES:
+        if duration.unit != "ms":
+            raise InjectionDesignError(f"{where}: a duration is in ms")
+        return
+    if duration.unit != READINGS_UNIT:
+        raise InjectionDesignError(
+            f"{where}: the duration of {subtype} is a number of consecutive readings "
+            f"(unit {READINGS_UNIT!r}, ADR-070), not {duration.unit!r}"
+        )
+    previous: float | None = None
+    for level in duration.levels:
+        if level.unit != READINGS_UNIT:
+            raise InjectionDesignError(
+                f"{where}: row {level.name!r} is in {level.unit!r}; the duration rows of {subtype} are in {READINGS_UNIT!r}"
+            )
+        if level.value is None:
+            continue
+        if not float(level.value).is_integer():
+            raise InjectionDesignError(
+                f"row {level.name!r} must be an integer number of readings, got {level.value}"
+            )
+        if level.value < 1:
+            raise InjectionDesignError(
+                f"row {level.name!r} must be at least 1 reading, got {level.value}"
+            )
+        if previous is not None and not level.value > previous:
+            raise InjectionDesignError(
+                f"the duration rows of {subtype} must be ordered (strictly increasing from the first level to the last): "
+                f"{level.name!r} is {level.value:g} after {previous:g}"
+            )
+        previous = level.value
+
+
 def load_injection_design(
     path: str | os.PathLike[str], *, section: str = "c2"
 ) -> Mapping[str, SubtypeDesign]:
@@ -1726,8 +1772,11 @@ def load_injection_design(
                 raise InjectionDesignError(
                     f"{where}: magnitude unit disagrees with the injector"
                 )
-            if duration is not None and duration.unit != "ms":
-                raise InjectionDesignError(f"{where}: a duration is in ms")
+            if duration is not None:
+                assert (
+                    cls is not None
+                )  # an injector was found, so the section names a class
+                _check_duration_unit(where, cls, str(subtype), duration)
             if tuple(targets) != injector.targets and injector.targets:
                 raise InjectionDesignError(
                     f"{where}: targets disagree with the injector"

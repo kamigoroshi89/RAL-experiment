@@ -59,6 +59,12 @@
 # `injection_rate_c3` and `confounder_pairs_per_variant` are the only numbers of the plan; they are design choices
 # of WS04-T11 with no source (source_type design_choice, verified_by null), written so that the benchmark of
 # analisi 5.1 contains every subtype in a count that a table can report; a human confirms or replaces them (H3).
+#
+# WS04-T16 (cuff faults anchored to readings, ADR-070 (a), (b), (d)). The duration of `cuff_detached`, `cuff_silent_bias`
+# and `stuck_at` is the number k of consecutive cuff readings of the day that the window covers: the nine rows
+# `<subtype>_duration_short/medium/long` are in the unit `readings` with the values 1, 2, 3 (design choices accepted by
+# gab on 2026-10-10 as proposals, not reviewed), and the loader refuses ms for these three subtypes (every other
+# duration is still in ms). The builder anchors the window to the readings (src/ralmon/benchmark/anchoring.py).
 schema_version: "0.1.0"
 injections:
   c2:
@@ -76,19 +82,19 @@ injections:
     stuck_at:
       family: device
       target: [cuff]
-      onset: "window start drawn by the injection plan over the day (WS04-T11); at least one earlier reading is needed to freeze"
+      onset: "window anchored to k consecutive readings of the day by the injection plan (WS04-T16, ADR-070 (a)); freezes the last earlier reading (the previous evening's on a first reading); day 0 is excluded (ADR-070 (d))"
       duration:
-        key: duration_ms
-        unit: ms
+        key: n_readings
+        unit: readings
         levels: {short: stuck_at_duration_short, medium: stuck_at_duration_medium, long: stuck_at_duration_long}
       magnitude: null
     cuff_silent_bias:
       family: device
       target: [cuff]
-      onset: "window start drawn by the injection plan over the day (WS04-T11)"
+      onset: "window anchored to k consecutive readings of the day by the injection plan (WS04-T16, ADR-070 (a))"
       duration:
-        key: duration_ms
-        unit: ms
+        key: n_readings
+        unit: readings
         levels: {short: cuff_silent_bias_duration_short, medium: cuff_silent_bias_duration_medium, long: cuff_silent_bias_duration_long}
       magnitude:
         key: bias_mmhg
@@ -121,10 +127,10 @@ injections:
     cuff_detached:
       family: device
       target: [cuff]
-      onset: "window start drawn by the injection plan over the day (WS04-T11); the error code is a generator-defined label, not a parameter"
+      onset: "window anchored to k consecutive readings of the day by the injection plan (WS04-T16, ADR-070 (a)); the error code is a generator-defined label, not a parameter"
       duration:
-        key: duration_ms
-        unit: ms
+        key: n_readings
+        unit: readings
         levels: {short: cuff_detached_duration_short, medium: cuff_detached_duration_medium, long: cuff_detached_duration_long}
       magnitude: null
     nav_delay:
@@ -457,104 +463,104 @@ parameters:
     rationale: "Design choice (scenario grid, no measured distribution of dropout durations); proposal accepted by gab 2026-10-10, not reviewed. 3600000 ms is 1 h, the third gap threshold of Breteler et al. 2018 and two sched_windows of 30 min (registry 0.2.1, ADR-068), so a long window always spans a scheduled measurement window. Anchors: Bluetooth Core Specification 5.4 Vol 6 Part B 4.5.2, 'connSupervisionTimeout shall be a multiple of 10 ms in the range 100 ms to 32.0 s', so a link is declared lost after at most 32 s; Breteler et al. 2018 gap thresholds of 2 min, 15 min, 1 hour. Registry 0.2.1 sched_window is 30 min (ADR-068) and the monitor step is 1 min. Not clinically reviewed."
     note: "Level long of the window duration of ble_dropout, integer ms of at least 1 and at most one day, a design-choice grid point (the level labels are ordered short < medium < long). Duration of one BLE dropout window of the link of one device (the BLE connection is lost for the whole window; nothing the device sends arrives). The count of windows per day comes from DeviceErrorModel.ble_dropout_rate_per_h; the duration is a design level. When WS07-T03 sets the liveliness lease of the device profile the human may restate the levels against it (a window shorter than the lease raises neither liveliness nor deadline evidence, condition LC of docs/models/fault-model.md). The value is a proposal accepted by gab on 2026-10-10 and not reviewed."
   - parameter: stuck_at_duration_short
-    unit: "ms"
-    value: null
+    unit: "readings"
+    value: 1
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed (ADR-070 (a)); the unit changed from ms to readings and the placement is anchored to the readings of the day by WS04-T16"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
-    note: "Level short of the window duration of stuck_at, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which the cuff keeps reporting the last value it reported before the onset (the measurements still complete). The effect needs at least one reading inside the window. No value has been chosen by an agent."
+    rationale: "Design choice (scenario grid, no measured distribution of cuff-fault durations); proposal accepted by gab 2026-10-10, not reviewed (ADR-070 (a)). The value is the number k of consecutive cuff readings of the day that the window covers, not a time: k = 1 (level short). Placement (builder, WS04-T16): the first covered reading is drawn uniformly among the 6 - k feasible ones of the default five-reading schedule, the onset uniformly on the 60 s grid in (previous reading, first covered reading] and the end uniformly in (last covered reading, next reading] (up to the day end after the last reading); by exact enumeration no window covers a number of readings different from k and none passes the day end (observability table of docs/benchmark/builder.md, generated by python tools/anchored_observability_table.py). A stuck_at window freezes the last reading before its onset: the last reading of the previous evening when the window precedes the first reading of the day (ADR-070 (d)). The first scored day of a patient has no previous evening and is excluded from the draw, so the share realised is 1 on days 1 to 6. The robot-stage faults run first, so the effective number of readings can be k - 1 or k + 1; the truth records both n_readings_drawn and n_readings_covered. Not clinically reviewed."
+    note: "Level short of the window duration of stuck_at, the number of consecutive cuff readings covered by the window (an integer of at least 1 and at most the number of readings of the day; the level labels are ordered short < medium < long). Duration of one window in which the cuff keeps reporting the last value it reported before the onset (the measurements still complete). The value is a proposal accepted by gab on 2026-10-10 and not reviewed."
   - parameter: stuck_at_duration_medium
-    unit: "ms"
-    value: null
+    unit: "readings"
+    value: 2
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed (ADR-070 (a)); the unit changed from ms to readings and the placement is anchored to the readings of the day by WS04-T16"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
-    note: "Level medium of the window duration of stuck_at, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which the cuff keeps reporting the last value it reported before the onset (the measurements still complete). The effect needs at least one reading inside the window. No value has been chosen by an agent."
+    rationale: "Design choice (scenario grid, no measured distribution of cuff-fault durations); proposal accepted by gab 2026-10-10, not reviewed (ADR-070 (a)). The value is the number k of consecutive cuff readings of the day that the window covers, not a time: k = 2 (level medium). Placement (builder, WS04-T16): the first covered reading is drawn uniformly among the 6 - k feasible ones of the default five-reading schedule, the onset uniformly on the 60 s grid in (previous reading, first covered reading] and the end uniformly in (last covered reading, next reading] (up to the day end after the last reading); by exact enumeration no window covers a number of readings different from k and none passes the day end (observability table of docs/benchmark/builder.md, generated by python tools/anchored_observability_table.py). A stuck_at window freezes the last reading before its onset: the last reading of the previous evening when the window precedes the first reading of the day (ADR-070 (d)). The first scored day of a patient has no previous evening and is excluded from the draw, so the share realised is 1 on days 1 to 6. The robot-stage faults run first, so the effective number of readings can be k - 1 or k + 1; the truth records both n_readings_drawn and n_readings_covered. Not clinically reviewed."
+    note: "Level medium of the window duration of stuck_at, the number of consecutive cuff readings covered by the window (an integer of at least 1 and at most the number of readings of the day; the level labels are ordered short < medium < long). Duration of one window in which the cuff keeps reporting the last value it reported before the onset (the measurements still complete). The value is a proposal accepted by gab on 2026-10-10 and not reviewed."
   - parameter: stuck_at_duration_long
-    unit: "ms"
-    value: null
+    unit: "readings"
+    value: 3
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed (ADR-070 (a)); the unit changed from ms to readings and the placement is anchored to the readings of the day by WS04-T16"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
-    note: "Level long of the window duration of stuck_at, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which the cuff keeps reporting the last value it reported before the onset (the measurements still complete). The effect needs at least one reading inside the window. No value has been chosen by an agent."
+    rationale: "Design choice (scenario grid, no measured distribution of cuff-fault durations); proposal accepted by gab 2026-10-10, not reviewed (ADR-070 (a)). The value is the number k of consecutive cuff readings of the day that the window covers, not a time: k = 3 (level long). Placement (builder, WS04-T16): the first covered reading is drawn uniformly among the 6 - k feasible ones of the default five-reading schedule, the onset uniformly on the 60 s grid in (previous reading, first covered reading] and the end uniformly in (last covered reading, next reading] (up to the day end after the last reading); by exact enumeration no window covers a number of readings different from k and none passes the day end (observability table of docs/benchmark/builder.md, generated by python tools/anchored_observability_table.py). A stuck_at window freezes the last reading before its onset: the last reading of the previous evening when the window precedes the first reading of the day (ADR-070 (d)). The first scored day of a patient has no previous evening and is excluded from the draw, so the share realised is 1 on days 1 to 6. The robot-stage faults run first, so the effective number of readings can be k - 1 or k + 1; the truth records both n_readings_drawn and n_readings_covered. Not clinically reviewed."
+    note: "Level long of the window duration of stuck_at, the number of consecutive cuff readings covered by the window (an integer of at least 1 and at most the number of readings of the day; the level labels are ordered short < medium < long). Duration of one window in which the cuff keeps reporting the last value it reported before the onset (the measurements still complete). The value is a proposal accepted by gab on 2026-10-10 and not reviewed."
   - parameter: cuff_silent_bias_duration_short
-    unit: "ms"
-    value: null
+    unit: "readings"
+    value: 1
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed (ADR-070 (a)); the unit changed from ms to readings and the placement is anchored to the readings of the day by WS04-T16"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
-    note: "Level short of the window duration of cuff_silent_bias, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which a constant offset is added to the systolic value the cuff reports. The effect needs at least one reading inside the window. No value has been chosen by an agent."
+    rationale: "Design choice (scenario grid, no measured distribution of cuff-fault durations); proposal accepted by gab 2026-10-10, not reviewed (ADR-070 (a)). The value is the number k of consecutive cuff readings of the day that the window covers, not a time: k = 1 (level short). Placement (builder, WS04-T16): the first covered reading is drawn uniformly among the 6 - k feasible ones of the default five-reading schedule, the onset uniformly on the 60 s grid in (previous reading, first covered reading] and the end uniformly in (last covered reading, next reading] (up to the day end after the last reading); by exact enumeration no window covers a number of readings different from k and none passes the day end (observability table of docs/benchmark/builder.md, generated by python tools/anchored_observability_table.py). On a fault-free day every such window is realised (share 1). With the magnitudes 1.0 / 1.5 / 2.5 times cuff_error_sd_mmhg the statistic z = m*sqrt(k) of ADR-070 depends on k, so this row sets the sensitivity of a cell of the grid; z >= 2 is a convention, not a requirement. The robot-stage faults run first, so the effective number of readings can be k - 1 or k + 1; the truth records both n_readings_drawn and n_readings_covered. Not clinically reviewed."
+    note: "Level short of the window duration of cuff_silent_bias, the number of consecutive cuff readings covered by the window (an integer of at least 1 and at most the number of readings of the day; the level labels are ordered short < medium < long). Duration of one window in which a constant offset is added to the systolic value the cuff reports. The value is a proposal accepted by gab on 2026-10-10 and not reviewed."
   - parameter: cuff_silent_bias_duration_medium
-    unit: "ms"
-    value: null
+    unit: "readings"
+    value: 2
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed (ADR-070 (a)); the unit changed from ms to readings and the placement is anchored to the readings of the day by WS04-T16"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
-    note: "Level medium of the window duration of cuff_silent_bias, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which a constant offset is added to the systolic value the cuff reports. The effect needs at least one reading inside the window. No value has been chosen by an agent."
+    rationale: "Design choice (scenario grid, no measured distribution of cuff-fault durations); proposal accepted by gab 2026-10-10, not reviewed (ADR-070 (a)). The value is the number k of consecutive cuff readings of the day that the window covers, not a time: k = 2 (level medium). Placement (builder, WS04-T16): the first covered reading is drawn uniformly among the 6 - k feasible ones of the default five-reading schedule, the onset uniformly on the 60 s grid in (previous reading, first covered reading] and the end uniformly in (last covered reading, next reading] (up to the day end after the last reading); by exact enumeration no window covers a number of readings different from k and none passes the day end (observability table of docs/benchmark/builder.md, generated by python tools/anchored_observability_table.py). On a fault-free day every such window is realised (share 1). With the magnitudes 1.0 / 1.5 / 2.5 times cuff_error_sd_mmhg the statistic z = m*sqrt(k) of ADR-070 depends on k, so this row sets the sensitivity of a cell of the grid; z >= 2 is a convention, not a requirement. The robot-stage faults run first, so the effective number of readings can be k - 1 or k + 1; the truth records both n_readings_drawn and n_readings_covered. Not clinically reviewed."
+    note: "Level medium of the window duration of cuff_silent_bias, the number of consecutive cuff readings covered by the window (an integer of at least 1 and at most the number of readings of the day; the level labels are ordered short < medium < long). Duration of one window in which a constant offset is added to the systolic value the cuff reports. The value is a proposal accepted by gab on 2026-10-10 and not reviewed."
   - parameter: cuff_silent_bias_duration_long
-    unit: "ms"
-    value: null
+    unit: "readings"
+    value: 3
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed (ADR-070 (a)); the unit changed from ms to readings and the placement is anchored to the readings of the day by WS04-T16"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
-    note: "Level long of the window duration of cuff_silent_bias, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which a constant offset is added to the systolic value the cuff reports. The effect needs at least one reading inside the window. No value has been chosen by an agent."
+    rationale: "Design choice (scenario grid, no measured distribution of cuff-fault durations); proposal accepted by gab 2026-10-10, not reviewed (ADR-070 (a)). The value is the number k of consecutive cuff readings of the day that the window covers, not a time: k = 3 (level long). Placement (builder, WS04-T16): the first covered reading is drawn uniformly among the 6 - k feasible ones of the default five-reading schedule, the onset uniformly on the 60 s grid in (previous reading, first covered reading] and the end uniformly in (last covered reading, next reading] (up to the day end after the last reading); by exact enumeration no window covers a number of readings different from k and none passes the day end (observability table of docs/benchmark/builder.md, generated by python tools/anchored_observability_table.py). On a fault-free day every such window is realised (share 1). With the magnitudes 1.0 / 1.5 / 2.5 times cuff_error_sd_mmhg the statistic z = m*sqrt(k) of ADR-070 depends on k, so this row sets the sensitivity of a cell of the grid; z >= 2 is a convention, not a requirement. The robot-stage faults run first, so the effective number of readings can be k - 1 or k + 1; the truth records both n_readings_drawn and n_readings_covered. Not clinically reviewed."
+    note: "Level long of the window duration of cuff_silent_bias, the number of consecutive cuff readings covered by the window (an integer of at least 1 and at most the number of readings of the day; the level labels are ordered short < medium < long). Duration of one window in which a constant offset is added to the systolic value the cuff reports. The value is a proposal accepted by gab on 2026-10-10 and not reviewed."
   - parameter: cuff_detached_duration_short
-    unit: "ms"
-    value: null
+    unit: "readings"
+    value: 1
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed (ADR-070 (a)); the unit changed from ms to readings and the placement is anchored to the readings of the day by WS04-T16"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
-    note: "Level short of the window duration of cuff_detached, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which the cuff cannot complete a measurement (detached or faulty cuff): every attempt of the window ends in a MEASUREMENT_MISSED event with a device error. No value has been chosen by an agent."
+    rationale: "Design choice (scenario grid, no measured distribution of cuff-fault durations); proposal accepted by gab 2026-10-10, not reviewed (ADR-070 (a)). The value is the number k of consecutive cuff readings of the day that the window covers, not a time: k = 1 (level short). Placement (builder, WS04-T16): the first covered reading is drawn uniformly among the 6 - k feasible ones of the default five-reading schedule, the onset uniformly on the 60 s grid in (previous reading, first covered reading] and the end uniformly in (last covered reading, next reading] (up to the day end after the last reading); by exact enumeration no window covers a number of readings different from k and none passes the day end (observability table of docs/benchmark/builder.md, generated by python tools/anchored_observability_table.py). On a fault-free day every such window is realised (share 1). The robot-stage faults run first, so the effective number of readings can be k - 1 or k + 1; the truth records both n_readings_drawn and n_readings_covered. Not clinically reviewed."
+    note: "Level short of the window duration of cuff_detached, the number of consecutive cuff readings covered by the window (an integer of at least 1 and at most the number of readings of the day; the level labels are ordered short < medium < long). Duration of one window in which the cuff cannot complete a measurement (detached or faulty cuff): every attempt of the window ends in a MEASUREMENT_MISSED event with a device error. The value is a proposal accepted by gab on 2026-10-10 and not reviewed."
   - parameter: cuff_detached_duration_medium
-    unit: "ms"
-    value: null
+    unit: "readings"
+    value: 2
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed (ADR-070 (a)); the unit changed from ms to readings and the placement is anchored to the readings of the day by WS04-T16"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
-    note: "Level medium of the window duration of cuff_detached, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which the cuff cannot complete a measurement (detached or faulty cuff): every attempt of the window ends in a MEASUREMENT_MISSED event with a device error. No value has been chosen by an agent."
+    rationale: "Design choice (scenario grid, no measured distribution of cuff-fault durations); proposal accepted by gab 2026-10-10, not reviewed (ADR-070 (a)). The value is the number k of consecutive cuff readings of the day that the window covers, not a time: k = 2 (level medium). Placement (builder, WS04-T16): the first covered reading is drawn uniformly among the 6 - k feasible ones of the default five-reading schedule, the onset uniformly on the 60 s grid in (previous reading, first covered reading] and the end uniformly in (last covered reading, next reading] (up to the day end after the last reading); by exact enumeration no window covers a number of readings different from k and none passes the day end (observability table of docs/benchmark/builder.md, generated by python tools/anchored_observability_table.py). On a fault-free day every such window is realised (share 1). The robot-stage faults run first, so the effective number of readings can be k - 1 or k + 1; the truth records both n_readings_drawn and n_readings_covered. Not clinically reviewed."
+    note: "Level medium of the window duration of cuff_detached, the number of consecutive cuff readings covered by the window (an integer of at least 1 and at most the number of readings of the day; the level labels are ordered short < medium < long). Duration of one window in which the cuff cannot complete a measurement (detached or faulty cuff): every attempt of the window ends in a MEASUREMENT_MISSED event with a device error. The value is a proposal accepted by gab on 2026-10-10 and not reviewed."
   - parameter: cuff_detached_duration_long
-    unit: "ms"
-    value: null
+    unit: "readings"
+    value: 3
     dist: null
-    source_ref: "design choice (policy class 2 of the WS04 README), proposed by WS04-T07; no value chosen by an agent"
+    source_ref: "design choice (policy class 2 of the WS04 README): gab, 2026-10-10, accepted as a proposal, not reviewed (ADR-070 (a)); the unit changed from ms to readings and the placement is anchored to the readings of the day by WS04-T16"
     source_type: design_choice
     verified_by: null
-    status: awaiting_human_value
+    status: filled
     consumer_task: WS04-T07
-    rationale: null
-    note: "Level long of the window duration of cuff_detached, integer ms of at least 1 and at most one day, an agent-proposed grid point for confirmation by H3 (the level labels are ordered short < medium < long). Duration of one window in which the cuff cannot complete a measurement (detached or faulty cuff): every attempt of the window ends in a MEASUREMENT_MISSED event with a device error. No value has been chosen by an agent."
+    rationale: "Design choice (scenario grid, no measured distribution of cuff-fault durations); proposal accepted by gab 2026-10-10, not reviewed (ADR-070 (a)). The value is the number k of consecutive cuff readings of the day that the window covers, not a time: k = 3 (level long). Placement (builder, WS04-T16): the first covered reading is drawn uniformly among the 6 - k feasible ones of the default five-reading schedule, the onset uniformly on the 60 s grid in (previous reading, first covered reading] and the end uniformly in (last covered reading, next reading] (up to the day end after the last reading); by exact enumeration no window covers a number of readings different from k and none passes the day end (observability table of docs/benchmark/builder.md, generated by python tools/anchored_observability_table.py). On a fault-free day every such window is realised (share 1). The robot-stage faults run first, so the effective number of readings can be k - 1 or k + 1; the truth records both n_readings_drawn and n_readings_covered. Not clinically reviewed."
+    note: "Level long of the window duration of cuff_detached, the number of consecutive cuff readings covered by the window (an integer of at least 1 and at most the number of readings of the day; the level labels are ordered short < medium < long). Duration of one window in which the cuff cannot complete a measurement (detached or faulty cuff): every attempt of the window ends in a MEASUREMENT_MISSED event with a device error. The value is a proposal accepted by gab on 2026-10-10 and not reviewed."
   - parameter: ecg_noise_duration_short
     unit: "ms"
     value: null

@@ -35,6 +35,7 @@ from typing import Any
 import numpy as np
 import pytest
 import yaml
+
 from ralmon.benchmark.anchoring import (
     ANCHORED_SUBTYPES,
     anchored_choices,
@@ -42,7 +43,6 @@ from ralmon.benchmark.anchoring import (
     draw_anchored_window,
     observability_table,
 )
-
 from ralmon.benchmark.builder import (
     BenchmarkConfigError,
     BuildContext,
@@ -87,6 +87,7 @@ MIN = 60_000
 STEP = MIN
 REGISTRY = ROOT / "configs" / "registry" / "hypertension.yaml"
 BUILDER_DOC = ROOT / "docs" / "benchmark" / "builder.md"
+TABLE_SCRIPT = ROOT / "tools" / "anchored_observability_table.py"
 
 # The enumeration of the research file (docs/benchmark/evidence/group1-design-options.md, section 1) on the
 # default day: per k, the number of onsets and of ends for each feasible first reading.
@@ -112,6 +113,17 @@ def default_readings() -> list[int]:
     rows = load_filled_rows(GENERATOR_DESIGN, ("inflation_ms_nominal",))
     inflation = int(rows["inflation_ms_nominal"])
     return [t + inflation for t in default_ticks()]
+
+
+def design_ks() -> tuple[int, ...]:
+    """The numbers of readings of the duration rows of the three subtypes (read from the design)."""
+    design = load_injection_design(INJECTIONS_FILE, section="c2")
+    values = {
+        int(level.value)
+        for subtype in ANCHORED_SUBTYPES
+        for level in design[subtype].duration.levels
+    }
+    return tuple(sorted(values))
 
 
 def covered(readings: Sequence[int], onset: int, end: int) -> int:
@@ -187,14 +199,17 @@ def test_the_rule_on_a_later_day_and_with_readings_off_the_grid() -> None:
                 assert covered(readings, onset, stop) == k
 
 
-def test_two_readings_in_one_grid_cell_leave_no_choice_for_the_second() -> None:
-    start = 0
+def test_two_readings_in_one_grid_cell_cannot_be_isolated() -> None:
     readings = [10 * HOUR + 5_000, 10 * HOUR + 20_000, 12 * HOUR]
     choices = anchored_choices(
-        readings, 1, step_ms=STEP, day_start_ms=start, day_end_ms=DAY
+        readings, 1, step_ms=STEP, day_start_ms=0, day_end_ms=DAY
     )
-    # no grid instant lies in (10:00:05, 10:00:20]: the window of reading 1 cannot start between them
-    assert [c.first for c in choices] == [0, 2]
+    # no grid instant lies in (10:00:05, 10:00:20]: a window can neither end between the two readings
+    # (reading 0 alone) nor start between them (reading 1 alone), so only the third reading is a choice
+    assert [c.first for c in choices] == [2]
+    for choice in choices:
+        for onset, end in itertools.product(choice.onsets, choice.ends):
+            assert covered(readings, onset, end) == 1
 
 
 def test_the_draw_covers_every_first_reading_and_stays_inside_the_choice() -> None:
@@ -787,20 +802,28 @@ def committed_table() -> str:
 
 def test_observability_table_matches_the_generator() -> None:
     generated = observability_table(
-        default_readings(), step_ms=STEP, day_start_ms=0, day_end_ms=DAY
+        default_readings(),
+        step_ms=STEP,
+        ks=design_ks(),
+        day_start_ms=0,
+        day_end_ms=DAY,
     )
     assert committed_table() == generated.strip("\n")
 
 
 def test_the_generated_table_states_the_exact_distribution() -> None:
     readings = default_readings()
-    table = observability_table(readings, step_ms=STEP, day_start_ms=0, day_end_ms=DAY)
+    table = observability_table(
+        readings, step_ms=STEP, ks=design_ks(), day_start_ms=0, day_end_ms=DAY
+    )
     rows = [line for line in table.splitlines() if re.match(r"\| [123] \|", line)]
     assert len(rows) == 3
     for k, row in zip((1, 2, 3), rows, strict=True):
         cells = [c.strip() for c in row.strip("|").split("|")]
         assert cells[0] == str(k)
-        assert cells[1] == f"{k}: 100%"  # every window covers exactly k readings
+        assert (
+            cells[1] == f"{k}: 1"
+        )  # probability 1: every window covers exactly k readings
         assert cells[2] == str(len(readings) - k + 1)
         shapes = ", ".join(f"{a}x{b}" for a, b in EXPECTED_SHAPES[k])
         assert cells[3] == shapes
@@ -810,12 +833,12 @@ def test_the_generated_table_states_the_exact_distribution() -> None:
 
 def test_the_generator_script_checks_the_committed_table() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "ralmon.benchmark.anchoring", "--check"],
+        [sys.executable, str(TABLE_SCRIPT), "--check"],
         capture_output=True, text=True, cwd=ROOT, check=False,
     )  # fmt: skip
     assert result.returncode == 0, result.stdout + result.stderr
     stale = subprocess.run(
-        [sys.executable, "-m", "ralmon.benchmark.anchoring", "--check", "--doc", "/nonexistent.md"],
+        [sys.executable, str(TABLE_SCRIPT), "--check", "--doc", "/nonexistent.md"],
         capture_output=True, text=True, cwd=ROOT, check=False,
     )  # fmt: skip
     assert stale.returncode != 0

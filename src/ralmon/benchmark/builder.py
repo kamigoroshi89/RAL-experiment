@@ -69,6 +69,14 @@ from ralmon.benchmark.adherence import (
     AdherenceModel,
     load_adherence_config,
 )
+from ralmon.benchmark.anchoring import (
+    ANCHORED_SUBTYPES,
+    READINGS_UNIT,
+    anchored_choices,
+    annotate_reading_counts,
+    draw_anchored_window,
+    stream_readings,
+)
 from ralmon.benchmark.confounders import (
     GROUPS,
     PairBase,
@@ -1046,6 +1054,7 @@ class BuildContext:
         )
         self.response_model = OneCompartmentEmax()
         self.design = self._load_design()
+        self._check_reading_rows()
         self.excluded_zero_levels()  # refuses a magnitude block with no drawable level, before any draw
         self.sched_window_ms = windows["sched_window_ms"]
         bounds = self.registry.bounds("bp")
@@ -1107,6 +1116,19 @@ class BuildContext:
             except (RegistryError, KeyError):
                 continue
         return max(1, -(-longest // T_DAY_MS))
+
+    def _check_reading_rows(self) -> None:
+        """A duration in readings cannot exceed the readings of the day (the schedule's measurement ticks)."""
+        n_readings = len(self.schedule.measurement_ticks_ms)
+        for subtype in ANCHORED_SUBTYPES:
+            entry = self.design.c2[subtype]
+            assert entry.duration is not None and entry.duration.unit == READINGS_UNIT
+            for level in entry.duration.levels:
+                if level.value is not None and level.value > n_readings:
+                    raise BenchmarkConfigError(
+                        f"row {level.name!r} asks for {level.value:g} consecutive readings but the schedule "
+                        f"has {n_readings} readings a day: a window of {subtype} cannot cover more"
+                    )
 
     def excluded_zero_levels(self) -> dict[str, dict[str, list[str]]]:
         """Per cohort and C2 subtype, the magnitude levels the plan does not draw because they resolve to zero."""
@@ -1299,6 +1321,32 @@ class BuildContext:
         onset = day * T_DAY_MS + step * int(rng.integers(0, positions))
         return onset, duration, level
 
+    def _anchored_window(
+        self,
+        rng: np.random.Generator,
+        day: int,
+        levels: Sequence[LevelRow],
+        readings: Sequence[int],
+    ) -> tuple[int, int, LevelRow] | None:
+        """``(onset, duration, level)`` of a window of ``k`` consecutive readings of the day (ADR-070 (a)).
+
+        The level of the duration block gives ``k`` (rows in the unit ``readings``). None when the day has
+        fewer than ``k`` readings (a C1 refusal removed some) or no grid instant fits.
+        """
+        level = self._pick(rng, levels)
+        assert level.value is not None
+        choices = anchored_choices(
+            readings,
+            int(level.value),
+            step_ms=self.config.latent_step_ms,
+            day_start_ms=day * T_DAY_MS,
+            day_end_ms=(day + 1) * T_DAY_MS,
+        )
+        if not choices:
+            return None
+        onset, end, _ = draw_anchored_window(rng, choices)
+        return onset, end - onset, level
+
     def plan_c1(
         self,
         patient: PatientParams,
@@ -1431,6 +1479,8 @@ class BuildContext:
             seed=self.config.generation_seed, patient_index=patient_index, day_index=day,
         )  # fmt: skip
         robot_used: set[tuple[str, int]] = set()
+        day_start, day_end = day * T_DAY_MS, (day + 1) * T_DAY_MS
+        readings = [t for t in stream_readings(stream_) if day_start <= t < day_end]
         # the class rates
         for cls_name, rate, subtypes, section in (
             ("c2", design.rate_c2, _C2_DRIVEN, design.c2),
@@ -1442,18 +1492,30 @@ class BuildContext:
             for k in range(count):
                 rng = self._plan_rng(patient_index, day, cls_name, k)
                 subtype = self._pick(rng, subtypes)
+                if cls_name == "c2" and subtype == "stuck_at" and day == 0:
+                    # the first scored day has no previous evening whose last reading a stuck cuff could
+                    # repeat (ADR-070 (d)): excluded from the draw, counted, not left to be unrealised
+                    skipped["c2/stuck_at/first_day"] += 1
+                    continue
                 if cls_name == "c2":
                     spec = self._c2_spec(
-                        subtype, rng, day, section[subtype], cohort, robot_used
+                        subtype,
+                        rng,
+                        day,
+                        section[subtype],
+                        cohort,
+                        robot_used,
+                        readings,
                     )
                 else:
                     spec = self._c3_spec(subtype, rng, day, section[subtype], stream_)
                 if spec is None:
-                    reason = (
-                        "first_day"
-                        if subtype == "replay" and day == 0
-                        else "no_position"
-                    )
+                    if subtype == "replay" and day == 0:
+                        reason = "first_day"
+                    elif subtype in ANCHORED_SUBTYPES and cls_name == "c2":
+                        reason = "too_few_readings"
+                    else:
+                        reason = "no_position"
                     skipped[f"{cls_name}/{subtype}/{reason}"] += 1
                     continue
                 if spec.duration_ms is not None:
@@ -1490,9 +1552,13 @@ class BuildContext:
         entry: SubtypeDesign,
         cohort: _Cohort,
         robot_used: set[tuple[str, int]],
+        readings: Sequence[int] = (),
     ) -> InjectionSpec | None:
         if entry.duration is not None:
-            drawn = self._window(rng, day, entry.duration.levels)
+            if subtype in ANCHORED_SUBTYPES:
+                drawn = self._anchored_window(rng, day, entry.duration.levels, readings)
+            else:
+                drawn = self._window(rng, day, entry.duration.levels)
             if drawn is None:
                 return None
             onset, duration, level = drawn
@@ -1673,7 +1739,9 @@ class BuildContext:
         observed = _withhold(observed, robot_present, task_outcomes)
         if robot_present:
             observed = self._with_reports(observed, result.stream.visits)
-        return observed, result.stream, result.records, result.disabled_subtypes
+        # the readings the plan drew next to the ones the injector found after the robot stage (ADR-070 (b))
+        records = annotate_reading_counts(result.records, stream_)
+        return observed, result.stream, records, result.disabled_subtypes
 
     # -- patients --------------------------------------------------------------------------------
 
@@ -2051,6 +2119,8 @@ class _Writer:
         self.n_days: dict[bool, int] = {False: 0, True: 0}
         self.disabled: set[str] = set()
         self.skipped: Counter[str] = Counter()
+        self.cuff_readings: dict[str, Counter[str]] = {}
+        self.cuff_realised: dict[str, Counter[str]] = {}
 
     def abort(self) -> None:
         """Remove what this build wrote: the directory if it created it, else only its contents."""
@@ -2099,6 +2169,8 @@ class _Writer:
             ):
                 self._record(rel)
             twin = built.role == ROLE_PAIR
+            if not twin and not day.tail:
+                self._count_cuff_faults(truth.injection_log)
             counts = self.tail_counts[twin] if day.tail else self.counts[twin]
             start = index * T_DAY_MS
             for event in truth.ground_truth:
@@ -2123,6 +2195,19 @@ class _Writer:
         }
         entry.update(built.extra)
         self.patients[built.patient_id] = entry
+
+    def _count_cuff_faults(self, log: Any) -> None:
+        """Tally the anchored cuff faults of a scored day of a virtual patient: drawn -> covered, and realised."""
+        for entry in log:
+            subtype = entry["subtype"]
+            if subtype not in ANCHORED_SUBTYPES:
+                continue
+            details = entry["details"]
+            key = f"{details['n_readings_drawn']}->{details['n_readings_covered']}"
+            self.cuff_readings.setdefault(subtype, Counter())[key] += 1
+            self.cuff_realised.setdefault(subtype, Counter())["placed"] += 1
+            if entry["realised"]:
+                self.cuff_realised[subtype]["realised"] += 1
 
     def finish(self, git_rev: str | None) -> Manifest:
         context = self.context
@@ -2197,6 +2282,19 @@ class _Writer:
                 for cohort_id, per_subtype in context.excluded_zero_levels().items()
             },
             "plan_skipped": dict(sorted(self.skipped.items())),
+            "anchored_cuff_faults": {
+                "subtypes": list(ANCHORED_SUBTYPES),
+                "duration_unit": READINGS_UNIT,
+                "stuck_at_excluded_day_indices": [0],
+                "readings_drawn_to_covered": {
+                    s: dict(sorted(c.items()))
+                    for s, c in sorted(self.cuff_readings.items())
+                },
+                "realised": {
+                    s: {"placed": c["placed"], "realised": c["realised"]}
+                    for s, c in sorted(self.cuff_realised.items())
+                },
+            },
             "n_unverified_prior": context.n_unverified_prior,
             "n_unverified_design": context.n_unverified_design,
             "schedule": {

@@ -30,9 +30,17 @@ Subtypes
     ``system.liveliness_ok`` and ``system.qos_deadline_missed`` of the signature are the
     conditional paths of condition LC and are only listed.
   ``stuck_at`` (cuff): from the onset every ``bp`` sample of the window repeats the last value
-    the cuff reported strictly before the onset. With no earlier reading in the stream there is
-    nothing to freeze and the injection is not realised. The pulse and the events are not
-    frozen; the signature is empty (a declared diagnosability limit).
+    the cuff reported strictly before the onset: the last earlier reading of the day's stream, or,
+    when the day has none, the last reading of the previous day (``InjectionContext.previous_day``,
+    ADR-070 (d): a stuck cuff repeats what it last reported, which at 06:15 is the reading of the
+    previous evening; ``details["frozen_from"]`` says which). With neither there is nothing to
+    freeze and the injection is not realised. The pulse and the events are not frozen; the
+    signature is empty (a declared diagnosability limit).
+  ``n_readings_covered`` (``details`` of ``cuff_detached``, ``cuff_silent_bias`` and ``stuck_at``): the
+    number of cuff readings of the stream inside the window at the time the injector runs, that is
+    after the robot stage (``nav_delay`` and ``manipulation_failure`` can move or remove a reading).
+    It is the effective ``k`` of ADR-070 (b); the number the plan drew is added by the builder as
+    ``n_readings_drawn`` (``ralmon.benchmark.anchoring.annotate_reading_counts``).
   ``cuff_silent_bias`` (cuff): ``bp`` samples of the window plus ``magnitude`` mmHg (signed);
     nothing else changes; empty signature (declared limit, analisi section 4.8).
   ``cuff_detached`` (cuff): each ``MEASUREMENT`` event of the window becomes a failed attempt: no
@@ -114,6 +122,7 @@ from ralmon.benchmark.injection import (
     InjectionWork,
     Injector,
     check_call,
+    check_previous_day,
     injection_rng,
     register_injector,
     stable_index,
@@ -329,10 +338,17 @@ def ble_dropout(
     return tuple(records)
 
 
+def _readings_in(work: InjectionWork, onset: int, end: int) -> int:
+    """The cuff readings (``bp`` samples) of the working stream inside ``[onset, end)``."""
+    return sum(
+        1 for s in work.samples if s.signal == _BP and onset <= s.t_device_ms < end
+    )
+
+
 def stuck_at(
     work: InjectionWork, specs: Sequence[InjectionSpec], context: InjectionContext
 ) -> tuple[InjectionRecord, ...]:
-    """Freeze the cuff pressure at the last value reported strictly before the onset."""
+    """Freeze the cuff pressure at the last value reported strictly before the onset (module docstring)."""
     specs = check_call(work, specs, context, "stuck_at")
     records: list[InjectionRecord] = []
     for spec in specs:
@@ -346,12 +362,24 @@ def stuck_at(
                 and (last_t is None or s.t_device_ms >= last_t)
             ):
                 frozen, last_t = s.value, s.t_device_ms
+        source = "same_day"
+        previous = check_previous_day(work, context) if frozen is None else None
+        if previous is not None:
+            # the first reading of the day: the cuff repeats the last value it reported the evening before
+            source = "previous_day"
+            for s in previous.samples:
+                if s.signal == _BP and (last_t is None or s.t_device_ms >= last_t):
+                    frozen, last_t = s.value, s.t_device_ms
         n = 0
-        details: dict[str, Any] = {"target": vocab.SOURCE_CUFF}
+        details: dict[str, Any] = {
+            "target": vocab.SOURCE_CUFF,
+            "n_readings_covered": _readings_in(work, onset, end),
+        }
         if frozen is None:
             details["reason"] = "no earlier reading to freeze"
         else:
             details["frozen_value"] = frozen
+            details["frozen_from"] = source
             for i, s in enumerate(work.samples):
                 if (
                     s.signal == _BP
@@ -381,7 +409,15 @@ def cuff_silent_bias(
                     work.samples[i] = replace(s, value=shifted)
                     n += 1
         records.append(
-            _record(spec, n, {"target": vocab.SOURCE_CUFF, "bias_mmhg": offset})
+            _record(
+                spec,
+                n,
+                {
+                    "target": vocab.SOURCE_CUFF,
+                    "bias_mmhg": offset,
+                    "n_readings_covered": _readings_in(work, onset, end),
+                },
+            )
         )
     return tuple(records)
 
@@ -462,6 +498,7 @@ def cuff_detached(
                 {
                     "target": source,
                     "n_attempts": len(attempts),
+                    "n_readings_covered": len(attempts),
                     "error_code": DETACHED_ERROR_CODE,
                 },
             )

@@ -2522,6 +2522,13 @@ def test_rate_sources_are_device_error_model_fields() -> None:
     assert section["cuff_silent_bias"]["magnitude"]["reference"] in fields
 
 
+def _filled_value(row: dict[str, Any]) -> float:
+    """FIXTURE-ONLY arithmetic: a duration in readings is 1, 2, 3 (WS04-T16), a magnitude 1, any other row 1 minute."""
+    if row["unit"] == "readings":
+        return {"short": 1, "medium": 2, "long": 3}[row["parameter"].rsplit("_", 1)[-1]]
+    return 1.0 if "magnitude" in row["parameter"] else 60_000
+
+
 def edited_injections(
     tmp_path: Path, fill: bool, mutate: Callable[[dict[str, Any]], None] | None = None
 ) -> Path:
@@ -2529,7 +2536,7 @@ def edited_injections(
     for row in document["parameters"]:
         if fill:
             row.update(
-                value=1.0 if "magnitude" in row["parameter"] else 60_000,
+                value=_filled_value(row),
                 status="filled",
                 source_ref="FIXTURE-ONLY: exercises the filled state of the row",
                 rationale="FIXTURE-ONLY: arithmetic",
