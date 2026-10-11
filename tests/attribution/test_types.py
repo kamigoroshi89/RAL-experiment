@@ -116,6 +116,7 @@ def test_alert_extends_detection_and_matches_contract() -> None:
         "priority",
         "root_cause_of",
         "caused_by",
+        "p_kappa",
     ]
     assert expected["Alert"] == [
         "tau",
@@ -127,6 +128,7 @@ def test_alert_extends_detection_and_matches_contract() -> None:
         "priority",
         "root_cause_of",
         "caused_by",
+        "p_kappa",
     ]
     assert [c.value for c in attribution.AttributedCause] == [
         "C1",

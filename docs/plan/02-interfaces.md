@@ -491,7 +491,7 @@ Rules of 0.3.0 (ADR-060). (5) **Predictive mode.** `predictive=True` requires `a
 
 ## Alert
 
-Version 0.1.1 (ADR-059: `Alert.rho` may be `None`). Owner WS01. Consumers: WS02, WS05, WS06, WS08, WS09, WS11. Sources: analisi §4.2 (σ̃), §4.4 (ρ), §4.5 (κ), §4.8 (traceability wording), §4.9 item 3 (cascades).
+Version 0.2.0 (ADR-074: `Alert.p_kappa`, additive, last field; before: 0.1.1, ADR-059: `Alert.rho` may be `None`). Owner WS01. Consumers: WS02, WS05, WS06, WS08, WS09, WS11. Sources: analisi §4.2 (σ̃), §4.4 (ρ), §4.5 (κ), §4.8 (traceability wording), §4.9 item 3 (cascades).
 
 The output tuple ⟨τ, κ, σ̃, ρ, ξ⟩ with explicit semantics per field.
 
@@ -530,6 +530,7 @@ class Alert(Detection):
     priority: int                     # clinician-assigned template priority
     root_cause_of: Sequence[str]      # instance keys of downstream violations explained by this alert (cascades)
     caused_by: str | None             # instance key of the upstream alert when this one is a cascade effect
+    p_kappa: Mapping[AttributedCause, float] | None = None  # posterior over C1, C2, C3 (sums to 1; ADR-074); None for the hierarchical rule and for detectors that do not attribute probabilistically
 ```
 
 Semantics:
@@ -537,6 +538,7 @@ Semantics:
 - σ̃ answers "how badly is the prescribed care violated" in clinical scale units; ρ answers "how confidently can the violation be claimed", with its `kind` telling which guarantee applies. They are complementary, not orthogonal (analisi §4.8).
 - κ is produced by the attribution layer, never by the sub-formula alone (analisi §4.5). A value of `UNDETERMINED` is not an error.
 - `rho` is `None` exactly when the `VerdictRecord` has no confidence (the monitor has no error model for a MEASURED value). A violated verdict is always reported, so the alert is still issued; consumers of `Alert.rho` (calibration, ECE, ranking by confidence) filter `None` and never read it as 0 (ADR-059).
+- `kappa` is derived from `p_kappa`: the cause with the largest posterior when it reaches the declared threshold, otherwise `UNDETERMINED` (ADR-074). `UNDETERMINED` is not a key of `p_kappa`.
 - A cascade effect (for example a counter violation caused by a C2 missed measurement) carries `caused_by` and is not shown as a separate top-level alert (analisi §4.9 item 3).
 - Ordering of alerts uses `rank_alerts` from `#template`.
 
@@ -597,11 +599,12 @@ Rule: `None` (channel unavailable) is never converted to a negative observation.
 
 ## Attribution
 
-Version 0.1.0. Owner WS02. Consumers: WS05, WS08. Sources: analisi §4.5 (hierarchical rule, abstention, diagnosability matrix), §3.6, §4.9 item 3, §5.5, §5.6 (A4).
+Version 0.2.0 (ADR-074: likelihood table, `posterior`; before: 0.1.0). Owner WS02. Consumers: WS05, WS08. Sources: analisi §4.5 (hierarchical rule, abstention, diagnosability matrix), §3.6, §4.9 item 3, §5.5, §5.6 (A4).
 
 ```python
 class AttributionRule(Protocol):
     def attribute(self, violated: VerdictRecord, evidence: EvidenceVector) -> AttributedCause: ...
+    def posterior(self, violated: VerdictRecord, evidence: EvidenceVector) -> Mapping[AttributedCause, float] | None: ...  # ADR-074; None for the hierarchical rule
 
 class Attributor(Protocol):
     def attribute_all(self, violated: Sequence[VerdictRecord], evidence: Mapping[str, EvidenceVector]) -> Sequence[Alert]: ...
@@ -615,7 +618,7 @@ The default rule is hierarchical and auditable (analisi §4.5):
 3. Otherwise a violation with coherent channels → `C1_CLINICAL`.
 4. Otherwise (conflicting or insufficient evidence) → `UNDETERMINED`.
 
-The diagnosability matrix of analisi §4.5 is encoded as a machine-readable table (`configs/diagnosability.yaml`, owned by WS02) and used both to design tests and to declare which event types are distinguishable with which channels. A probabilistic variant producing `p_kappa` is optional.
+The diagnosability matrix of analisi §4.5 is encoded as a machine-readable table (`configs/diagnosability.yaml`, owned by WS02) and used both to design tests and to declare which event types are distinguishable with which channels. The method of the paper (ADR-074) is the likelihood table: p(c | e, t) proportional to prior_t(c) times the product over the fields read by the template of P(reading class | c), with a `None` reading contributing the factor 1; the hierarchical rule above is kept as the reference rule (`ours-hier`).
 
 ## Detector
 
@@ -634,7 +637,7 @@ Rules: baselines receive the same clinical knowledge as the proposed method (ban
 
 ## Metrics
 
-Version 0.1.0. Owner WS08. Consumers: WS06, WS09. Sources: analisi §5.5, §5.6, §10.
+Version 0.2.0 (ADR-074: probabilistic-attribution metrics; before: 0.1.0). Owner WS08. Consumers: WS06, WS09. Sources: analisi §5.5, §5.6, §10.
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -651,6 +654,11 @@ def empirical_coverage(pred: Sequence[PredictedViolation], truth_sigma: Sequence
 def mean_interval_width(intervals: Sequence[tuple[float, float]]) -> float: ...
 def expected_calibration_error(rho: Sequence[float], outcome: Sequence[bool], bins: int) -> float: ...
 def attribution_confusion(matching: "Matching") -> Mapping[tuple[str, str], int]: ...   # includes UNDETERMINED
+def attribution_log_score(matching: "Matching") -> Mapping[str, float | None]: ...        # per template, from Alert.p_kappa; ADR-074 (4); None without p_kappa
+def attribution_brier(matching: "Matching") -> Mapping[str, float | None]: ...           # per template
+def attribution_calibration_curve(matching: "Matching", bins: int) -> Mapping[str, Sequence[tuple[float, float, int]]]: ...  # per template: (mean p, observed frequency, count)
+def pair_llr(members: Sequence["PairMember"]) -> Sequence[float]: ...                     # Lambda = log P(e|c_A) - log P(e|c_B), prior-free; ADR-074 (3)
+def pair_direction_mcnemar(x: Sequence[bool], y: Sequence[bool]) -> Mapping[str, float]: ...  # b, c, exact two-sided p on the discordant pairs
 def accuracy_vs_coverage(matching: "Matching") -> Sequence[tuple[float, float]]: ...
 def latency_percentiles(latencies_ms: Sequence[float]) -> Mapping[str, float]: ...       # p50, p95, p99
 def severity_rank_agreement(auto: Sequence[float], clinician: Sequence[float]) -> float: ... # Kendall tau or Spearman

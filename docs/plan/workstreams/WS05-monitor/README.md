@@ -107,5 +107,6 @@ From the repository root, inside `.venv`; ROS 2 commands in the workspace of WS0
 | WS05-T09 | ROS 2 wrapper packages: RSM, attribution, event manager, watchdog, heartbeat, ward-node placement | agent | blocked | WS05-T08, WS07-T01 |
 | WS05-T10 | Monitor history input: run_offline replays the earlier days of the patient (ADR-046) | agent | ready | WS05-T04 |
 | WS05-T11 | Robot-channel availability from NODE_STATE colocated reports (ADR-054 (b)) | agent | blocked | WS05-T10 |
+| WS05-T12 | Likelihood attributor: posterior over C1, C2, C3 and Alert.p_kappa (ADR-074) | agent | blocked | WS02-T06, WS05-T07 |
 
 Total estimate: 25.5 person-days (analisi §9 item 5: 4 to 5 person-weeks; WS05-T10 added by ADR-046, 2 pd; WS05-T11 added by ADR-054, 1.5 pd).
