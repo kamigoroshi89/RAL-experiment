@@ -3,7 +3,7 @@ id: WS02-T06
 title: "Attribution as a likelihood table: specification, cells with their source, sensitivity design (ADR-074)"
 workstream: WS02-threat-fault-model
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS02-T04", "WS02-T05", "WS05-T13"]
 critical_path: true
 non_negotiable: false
