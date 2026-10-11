@@ -72,7 +72,7 @@ contract_gaps:
     adr: ADR-033
   - id: G-3
     ec_id: EC-GAP-3
-    text: "Closed by ADR-034 and contract 0.2.0: the single sequence field of 0.1.0 (was crypto_temporal.seq_gap_or_replay) is split into system.seq_gap (a loss, a C2 symptom, channel CH-SYS-WARD) and crypto_temporal.seq_repeat (a replay, a C3 symptom, channel CH-CRYPTO). Residual: system.seq_gap and system.ble_link_quality carry overlapping information (declared, not resolved); a forged number that jumps ahead leaves a gap and is read as a loss."
+    text: "Closed by ADR-034 and contract 0.2.0: the single sequence field of 0.1.0 (was seq_gap_or_replay) is split into system.seq_gap (a loss, a C2 symptom, channel CH-SYS-WARD) and crypto_temporal.seq_repeat (a replay, a C3 symptom, channel CH-CRYPTO). Residual: system.seq_gap and system.ble_link_quality carry overlapping information (declared, not resolved); a forged number that jumps ahead leaves a gap and is read as a loss."
     rows: [DX-08, DX-09, DX-13, DX-14, DX-23]
     adr: ADR-034
   - id: G-4
@@ -1045,7 +1045,7 @@ rows:
       Declared limit, derived: analisi lists perception spoofing as an attacker capability and 'simulated
       presence' as an injection but has no matrix row. The robot reports what its sensors were made to
       perceive, and no field says how the observation was obtained (threat-model.md, presence_spoof;
-      Non-claims 3: presence is not identity). At the informed level nothing in the twenty fields
+      Non-claims 3: presence is not identity). At the informed level nothing in the twenty-two evidence fields
       contradicts the spoof; at the naive level only witness.identity_confirmed can read False, and only
       if the robot checks identity. Alone, a spoof can raise no violation (it can only move int upward),
       so there is no alert (NO_ALERT); its effect is to change the evidence of violations that others

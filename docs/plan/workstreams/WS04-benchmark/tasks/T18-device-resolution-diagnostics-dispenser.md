@@ -46,3 +46,9 @@ Make the generator emit what the evidence fields of `#evidencevector` 0.2.0 read
 `pytest -q`, `ruff check src tests`, `ruff format --check src tests`, `mypy src/ralmon` exit 0; `python3 tools/check_plan.py` exits 0.
 
 ## Notes
+
+### Hand-over from WS05-T13 (`#evidencevector` 0.2.0, 2026-10-11)
+
+- The `dispenser_bounce` sidecar declares the paths `dispenser.interval_since_previous_ms` and `dispenser.content_change`, and `stuck_at` declares `signal_quality.cuff_value_repeated`. The declaration is conditional by design (the fault-model union of raised and conditional fields). The generator does not raise `interval_since_previous_ms` until this task emits the key, so a sidecar generated before this task declares a path that the trace cannot show; benchmarks generated before WS05-T13 also carry the old empty signatures and `seq_gap_or_replay` and must be regenerated.
+- The cuff resolution parameter that the generator rounds to must be the same value that the run's `DeviceProfile` gives the extractor as `cuff_resolution`; nothing else couples them, and a profile without it makes `cuff_value_repeated` `None`.
+- Emit `interval_since_previous_ms` as an `int` >= 0, omit it for the first opening of a stream and across midnight, and keep `content_change` before minus after (+1.0 for a release, 0.0 for a bounce). Give each DISPENSE its own `seq`: a re-sent copy with the same `seq` is skipped by the extractor.

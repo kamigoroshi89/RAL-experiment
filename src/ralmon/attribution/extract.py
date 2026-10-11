@@ -665,26 +665,51 @@ class EvidenceExtractor:
             best = diff if best is None else max(best, diff)
         return best
 
+    def _duplicate_orders(self, w: _Window) -> set[int]:
+        """The arrival orders of the second and later arrivals of an accepted ``(node, name, seq)`` by the cut-off.
+
+        A message that repeats an accepted ``(name, seq)`` is a duplicate and is not counted again
+        (docs/formal/01-signals-sampling.md section 3.4); a first arrival that was late is not accepted, so a copy
+        that follows it is not a duplicate. Same rule as the repeat of ``_device_sequence``.
+        """
+        accepted: set[tuple[str, str, int]] = set()
+        duplicates: set[int] = set()
+        for m in sorted(
+            (m for m in self._msgs if m.seq is not None and m.t_rx <= w.cutoff),
+            key=lambda m: (m.t_rx, m.order),
+        ):
+            assert m.seq is not None
+            ident = (m.node, m.name, m.seq)
+            if ident in accepted:
+                duplicates.add(m.order)
+            elif m.status == "ok":
+                accepted.add(ident)
+        return duplicates
+
     def _cuff_value_repeated(self, w: _Window) -> bool | None:
         """True when the latest cuff reading equals the previous one of the same stream (ADR-074 amendment 2).
 
         The two latest accepted ``bp`` readings by device time received by the cut-off and visible by the last
-        admissible step, whatever the day (a reading of the day before is a previous reading of the stream). ``None``
-        with fewer than two readings, and ``None`` when the profile declares no display resolution: without it the
+        admissible step, whatever the day (a reading of the day before is a previous reading of the stream); a
+        re-sent copy of a frame is not a reading. The latest reading must lie in the evidence window (the previous
+        one may precede it): two equal readings of earlier days say nothing about this instance. ``None`` with
+        fewer than two readings, and ``None`` when the profile declares no display resolution: without it the
         equality of two readings is not evidence of a frozen value, and no default resolution is assumed.
         """
         if self._profile.caps(CUFF).cuff_resolution is None:
             return None
+        duplicates = self._duplicate_orders(w)
         readings = sorted(
             (s.t_device_ms, order, s.value)
             for s, status, order in self._samples
             if s.signal == SignalId.BP.value
             and status == "ok"
+            and order not in duplicates
             and s.t_rx_ms <= w.cutoff
             and self._vis(s.t_device_ms) <= w.hi_step
             and math.isfinite(s.value)
         )
-        if len(readings) < 2:
+        if len(readings) < 2 or self._vis(readings[-1][0]) < w.lo_step:
             return None
         return readings[-1][2] == readings[-2][2]
 
@@ -692,14 +717,17 @@ class EvidenceExtractor:
         """The payload keys of the latest accepted DISPENSE of the window (ADR-032, ADR-040 (2)).
 
         One opening describes the instance: the latest opening whose visible step lies in the evidence window and
-        that was received by the cut-off, both keys read from that same event. A key that is absent, of the wrong
+        that was received by the cut-off, both keys read from that same event; a re-sent copy of an earlier opening
+        (the same ``seq``) is a duplicate and is skipped. A key that is absent, of the wrong
         type, not finite or (for the interval) negative is ``None``; ``content_change`` is read only where the
         profile declares ``content_sensing`` for the dispenser. The interval is the one the dispenser reports.
         """
+        duplicates = self._duplicate_orders(w)
         openings = sorted(
             (e.t_device_ms, order, e)
             for e, status, order in self._dispenses
             if status == "ok"
+            and order not in duplicates
             and e.t_rx_ms <= w.cutoff
             and w.lo_step <= self._vis(e.t_device_ms) <= w.hi_step
         )
