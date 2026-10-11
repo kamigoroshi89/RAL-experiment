@@ -4,7 +4,7 @@ title: "Likelihood attributor: posterior over C1, C2, C3 and Alert.p_kappa (ADR-
 workstream: WS05-monitor
 owner: agent
 status: blocked
-depends_on: ["WS02-T06", "WS05-T07"]
+depends_on: ["WS02-T06", "WS05-T07", "WS05-T13", "WS05-T14"]
 critical_path: true
 non_negotiable: false
 estimate_pd: 3
@@ -48,3 +48,7 @@ Implement the attribution of ADR-074 in `ralmon.attribution`: a `LikelihoodRule`
 - `python3 tools/check_plan.py` exits 0.
 
 ## Notes
+
+### Amendment of 2026-10-11 (gab; ADR-074, amendments 1 to 3)
+
+The rule works at the level of SUBTYPES: it returns the posterior over the subtypes (explicit pi(subtype | class) priors with sensitivity), the class posterior as their sum (`p_kappa`), and the prediction SET of subtypes (cumulative level or the conformal threshold of WS05-T14); `kappa` is the derived label; UNDETERMINED is the full set of the subtypes applicable at the template. It reads the fields of `#evidencevector` 0.2.0. Add tests: `test_class_posterior_is_the_sum_of_subtype_posteriors`, `test_set_is_full_set_when_evidence_is_empty`, `test_prior_weights_inside_class_are_explicit_parameters`.

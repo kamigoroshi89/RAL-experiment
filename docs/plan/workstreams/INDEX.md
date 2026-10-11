@@ -46,7 +46,7 @@ Total estimate: 19 person-days.
 | WS02-T03 | evidence-channels | Evidence channels and EvidenceVector semantics, availability per placement | agent | WS02-T01, WS02-T02 | yes | no | 1.5 | analisi §4.5, §4.9 (1, 2) | #evidencevector | R1-W7 |
 | WS02-T04 | attribution-rule | Attribution rule spec: hierarchy, abstention, cascades, clinician-in-the-loop | agent | WS02-T03, WS01-T07 | yes | no | 2 | analisi §4.5, §4.9 (3, 4) | #attribution | R2-W7 R3-W4 |
 | WS02-T05 | diagnosability-hazards | Diagnosability matrix (machine-readable) and hazard and standards paragraph | agent | WS02-T04 | no | no | 2 | analisi §4.5, §3.5, §2 R3 weakness 5 | #attribution | R3-W4 R3-W5 AE-5 |
-| WS02-T06 | attribution-likelihood-table | Attribution as a likelihood table: specification, cells with their source, sensitivity design (ADR-074) | agent | WS02-T04, WS02-T05 | yes | no | 2 | ADR-074, analisi §4.5 | #attribution #alert | - |
+| WS02-T06 | attribution-likelihood-table | Attribution as a likelihood table: specification, cells with their source, sensitivity design (ADR-074) | agent | WS02-T04, WS02-T05, WS05-T13 | yes | no | 2 | ADR-074, analisi §4.5 | #attribution #alert | - |
 
 Total estimate: 8.5 person-days.
 
@@ -83,6 +83,7 @@ Total estimate: 8.0 person-days.
 | WS04-T14 | second-pathology-optional | OPTIONAL: second pathology (diabetes, simglucose) | agent | WS04-T11, WS08-T02 | no | no | 4 | analisi §5.8, §9 | #priorsource | - |
 | WS04-T15 | multi-day-labelling | Multi-day ground-truth labelling with history (ADR-046, ADR-055 (b)) | agent | WS04-T10, WS05-T10 | yes | no | 1.5 | ADR-046, ADR-055 (b), analisi §5.1 | #trace-schema #monitor | - |
 | WS04-T16 | anchored-cuff-faults | Cuff faults anchored to readings (durations in readings), stuck_at carry-over, effective k in the truth (ADR-070) | agent | WS04-T11, WS04-T15 | yes | no | 2.5 | ADR-070, ADR-066, analisi §5.1 | #trace-schema | - |
+| WS04-T18 | device-resolution-diagnostics-dispenser | Generator: cuff resolution (rounding), driver diagnostics reports under two device profiles, dispenser interval, ADR-040 conventions (ADR-074) | agent | WS05-T13, WS04-T16 | yes | no | 3 | ADR-032, ADR-040, ADR-074 | #trace-schema #evidencevector | - |
 
 Total estimate: 34.0 person-days.
 
@@ -101,7 +102,9 @@ Total estimate: 34.0 person-days.
 | WS05-T09 | ros2-wrappers | ROS 2 wrapper packages: RSM, attribution, event manager, watchdog, heartbeat, ward-node placement | agent | WS05-T08, WS07-T01 | yes | no | 3 | analisi §4.9 (1), §9 (5) | #ros-2-interfaces | R3-W2 AE-4 |
 | WS05-T10 | monitor-history-input | Monitor history input: run_offline replays the earlier days of the patient (ADR-046) | agent | WS05-T04 | yes | no | 2 | ADR-046, ADR-053 (h), docs/formal/01 §5.5 | #monitor #time-and-units #trace-schema | - |
 | WS05-T11 | robot-channel-availability | Robot-channel availability from NODE_STATE colocated reports (ADR-054 (b)) | agent | WS05-T10 | yes | no | 1.5 | ADR-054, docs/models/evidence-channels.md | #monitor #signals | - |
-| WS05-T12 | likelihood-attributor | Likelihood attributor: posterior over C1, C2, C3 and Alert.p_kappa (ADR-074) | agent | WS02-T06, WS05-T07 | yes | no | 3 | ADR-074, analisi §4.5, analisi §4.9 (3) | #attribution #alert #evidencevector | - |
+| WS05-T12 | likelihood-attributor | Likelihood attributor: posterior over C1, C2, C3 and Alert.p_kappa (ADR-074) | agent | WS02-T06, WS05-T07, WS05-T13, WS05-T14 | yes | no | 3 | ADR-074, analisi §4.5, analisi §4.9 (3) | #attribution #alert #evidencevector | - |
+| WS05-T13 | evidencevector-0-2-0 | EvidenceVector 0.2.0: dispenser group, seq_repeat / seq_gap, cuff_value_repeated, ADR-033 and ADR-040 conventions (contract, extractor, rule, tests, documents) | agent | WS05-T07 | yes | no | 4 | ADR-032, ADR-033, ADR-034, ADR-040, ADR-074 | #evidencevector #attribution | - |
+| WS05-T14 | conformal-attribution-sets | Conformal calibration of attribution sets (patient-level split, Mondrian per template) | agent | WS05-T06, WS02-T06 | yes | no | 2 | ADR-074 | #conformal-calibrator #alert | - |
 
 Total estimate: 27.0 person-days.
 
@@ -138,14 +141,14 @@ Total estimate: 18.0 person-days.
 | id | slug | title | owner | depends_on | crit | nonneg | pd | sources | interfaces | review_items |
 |---|---|---|---|---|---|---|---|---|---|---|
 | WS08-T01 | runner-metrics | Experiment runner, config and metrics module | agent | WS04-T11, WS06-T01, WS05-T08, WS05-T11 | yes | no | 3 | analisi §5.5 | #metrics #experiment-config-and-outputs | - |
-| WS08-T02 | main-experiment | Main experiment: B1-B5 versus proposed method | agent | WS08-T01, WS06-T07, WS04-T16, WS08-T08, WS05-T12, WS08-T09 | yes | no | 2.5 | analisi §5.4, §5.5 | #metrics #detector | R3-W1 R3-W6 AE-1 |
+| WS08-T02 | main-experiment | Main experiment: B1-B5 versus proposed method | agent | WS08-T01, WS06-T07, WS04-T16, WS08-T08, WS05-T12, WS08-T09, WS04-T18 | yes | no | 2.5 | analisi §5.4, §5.5 | #metrics #detector | R3-W1 R3-W6 AE-1 |
 | WS08-T03 | ablations | Ablations A1, A2, A3, A5, A7 | agent | WS08-T02 | yes | no | 3 | analisi §5.6 | #experiment-config-and-outputs | R2-W1 R2-W9 |
 | WS08-T04 | ablation-a4-embodied | Ablation A4: embodied channel removed | agent | WS08-T02, WS02-T05 | yes | yes | 2 | analisi §5.6 (A4), §10 (3) | #evidencevector #attribution | R3-W2 AE-4 |
 | WS08-T05 | shift-a6 | Distribution shift and A6: split versus adaptive conformal | agent | WS08-T02 | no | no | 2 | analisi §5.6 (A6), §5.5 | #conformal-calibrator | R2-W4 |
 | WS08-T06 | unlabeled-real-run | Unlabeled real-data run for alert load (blocked until access) | agent | WS08-T02, WS04-T13 | no | no | 1.5 | analisi §5.1, §5.8 | #priorsource | - |
 | WS08-T07 | result-freeze | Reproducibility check and result freeze | agent | WS08-T03, WS08-T04, WS08-T05 | yes | no | 1 | analisi §5.1, §5.5 | #experiment-config-and-outputs | AE-1 |
 | WS08-T08 | per-template-background-metrics | Per-template metrics, equal-weight aggregate without RESP, false alarms outside injection windows (ADR-071 (b), ADR-072 (b)) | agent | WS08-T01 | yes | no | 2 | ADR-071, ADR-072, analisi §5.5 | #metrics | - |
-| WS08-T09 | probabilistic-attribution-metrics | Metrics for probabilistic attribution: log score, Brier, calibration curves, pair likelihood ratio, McNemar on direction (ADR-074) | agent | WS08-T08, WS02-T06 | yes | no | 2 | ADR-074, analisi §5.5 | #metrics | - |
+| WS08-T09 | probabilistic-attribution-metrics | Metrics for probabilistic attribution: log score, Brier, calibration curves, pair likelihood ratio, McNemar on direction (ADR-074) | agent | WS08-T08, WS02-T06, WS05-T14 | yes | no | 3 | ADR-074, analisi §5.5 | #metrics | - |
 
 Total estimate: 15.0 person-days.
 

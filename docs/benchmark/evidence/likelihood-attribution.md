@@ -1550,3 +1550,703 @@ Reading of 9.4.
 `/tmp/research/likelihood/{subtype_model.py,config/subtype_priors.yaml}`; scripts `pairs_subtype.py`, `diag_decomp.py`, `diag_variants.py`, `xrep_nat.py`, `xrep_report.py {tight|unscoped}`, `set_metrics.py`, `setlib.py`, `sens_data2.py`, `assemble_section9.py`; logs and tables in `logs/` and `out/` (`pairs_subtype.md`, `diag_decomp.md`, `diag_variants.md`, `xrep_nat.md`, `xrep_report_*.md`, `set_metrics.md`); data `out/pairs_p40b_sw1.pkl`, `out/main_{m120b,ff,idle1h,idle6h}.pkl`.
 
 Reproduction (from `scripts/`): `python3 run_members.py 40 p40b 1`; `python3 run_main.py m120b 120 30 default`; `RALMON_RATES=0,0,0 python3 run_main.py ff 120 30 default`; `RALMON_DIAG_IDLE_STALE_MS=3600000 python3 run_main.py idle1h 120 30 default`; `python3 sens_data2.py`; then the report scripts above and `python3 assemble_section9.py`.
+
+
+## 10. Second follow-up of 2026-10-11 (ADR-032 and ADR-034 accepted; tight labelling primary; conformal sets)
+
+### 10.0 Summary, and what changed
+
+**Decisions taken by gab and applied.** ADR-032 (dispenser group: interval since the previous opening, content change) and ADR-034 (repeat against gap) are accepted and enter the subtype model as native cells; the TIGHT (causal) labelling of the main population is the primary one, and **every table that depends on the labelling is printed for both versions (tight, labelling of section 5). The choice of the tight labelling was made after seeing the result of 9.2 (that diagnostics improve the log score under it) and after seeing that the labelling of section 5 gives C2 coverage 44.6% in 10.3; it is a decision, not a finding.** The tight labelling: a ground-truth event is compatible with an alert only if the template can be violated by the event, the dropout target is in the template's data scope, and the alert is decided while the event window is open.
+
+**What changed in the prototype.** (i) The generator copy rounds the cuff readings (`bp`, and the `hr_pulse` the cuff reports) at its output, as run parameters `RALMON_CUFF_RES_MMHG` (1.0) and `RALMON_CUFF_PULSE_RES_BPM` (1.0), in `finalize_observed`; from here on the main population `m400r`, the pairs `p40r`, `p120r` and the fault-free run `ffr` are rounded builds. (ii) `subtype_model.py` has native cells for the accepted fields (`SubParams.adr32`, `adr34`, `rep`). (iii) New builds: `m400r` (400 patients x 30 days), `p120r` (3 240 pairs). Sections 0 to 9 are unchanged and describe the unrounded generator.
+
+| quantity | value |
+|---|---|
+| Natural repeat probability, rounded generator, fault-free run | **350 of 17 797 = 0.0197** (Wilson 0.0177-0.0218); the formula of 9.3.1 predicted 0.0200; unrounded: 0 |
+| Repeat at stuck_at (tight, rounded readings) | 90 of 96 alerts read A (93.8%); natural A among the other cuff-template alerts 153 of 5 106 (3.0%) |
+| Rounding side effects | alert lists change for **163 of 2 160 pair members** (141 `range` and 22 `resp` alerts only in the unrounded build, 15 `resp` only in the rounded one) and for 263 of 3 600 patient-days of the main population; ground truth, pair flags and `separated_by` unchanged; 230 of 17 363 readings (1.32%) change in-band status, 13 (0.07%) the below-hold status |
+| Silent-fault table, tight (stuck_at 96, cuff_silent_bias 156, dispenser_bounce 3), level 0.9, rep_nat 0.0197 | stuck_at: sets containing a C1 subtype 95 -> 35, exact {stuck_at} 0 -> 60, coverage 94 -> 90; cuff_silent_bias: C1 154 -> 150 (4 sets lose C1), coverage 152 -> 147; wrongly removed: 3 of 6 496 other alerts (148 with the channel asserted) |
+| Silent-fault table, labelling of section 5 (136 / 255 / 40, 431 in all) | stuck_at: contains C1 136 -> 78, exact 0 -> 58, coverage 135 -> 85 (the 51 alerts that read D are decided after the frozen window); cuff_silent_bias 252 -> 246; wrongly removed 159 of 14 484 (mostly spontaneous_range) |
+| Pairs, subtype level, accepted channels (612 distinguishable / 210 indistinguishable) | D > 0 **537 of 612 (88%)** against 255 of 612 (42%) with the section-4 channels; both members in the right direction 433 (71%) against 201 (33%); McNemar ACC against V0 b = 282, c = 0 (p 2.6e-85); all of the gain is ADR-032 (b = 282, c = 0 against the variant without it); ADR-034 and the repeated value change no direction in the pairs; indistinguishable D = 0 in 210 of 210 |
+| Conformal, main population, tight, test part 5 692 alerts of 100 patients, alpha 0.1 | marginal **90.8%** (Wilson 90-92, patients 90-92) mean size 2.93; Mondrian per template 93.1% size 3.39; alpha 0.2: 84.9% / 86.4%; alpha 0.05: 95.7% / 97.3% |
+| Where the marginal guarantee does not reach (alpha 0.1, tight) | per template: sched 74.9%, range 85.1%, hold 87.6% (Mondrian: all >= 90.0%); per true class: **C3 48.6%** (Mondrian 67.0%), C2 81.9% (87.3%), C1 96.6% |
+| Methods at equal coverage (tight, oracle threshold, size at coverage >= 0.9) | subtype model with the accepted channels 2.93 (90.8%); without them 2.73 (90.7%); class-level table 3.12 (91.3%); prior only 4.47 (93.4%); hierarchical rule kappa as a set 16.20 at 93.4% |
+| Conformal, pairs, separate calibration, alpha 0.1 (test 1 419 members of 771 pairs) | marginal 93.4% size 4.22, Mondrian 94.5% size 3.57; distinguishable 96.8%, **indistinguishable 80.6% (Mondrian 86.4%)** |
+| Transfer main (tight) -> pairs, alpha 0.1 | marginal **83.9%** (size 2.83), Mondrian 87.8% (3.64), against 93.4% / 94.5% with the separate calibration; alpha 0.05 marginal 93.4% against 97.3% |
+
+### 10.1 Cuff resolution in the generator
+
+Implementation (research copy only): in `repo/src/ralmon/benchmark/injection.py:finalize_observed`, after the injections and before the driver reports, every `bp` sample is rounded to the multiple of `RALMON_CUFF_RES_MMHG` and every `hr_pulse` sample to the multiple of `RALMON_CUFF_PULSE_RES_BPM` (both device-profile parameters; the run default of section 10 is 1 and 1). The rounding is the last step at the device boundary, so a silent bias or a frozen value is added or repeated BEFORE the display rounds it; a frozen window therefore stays exactly identical after rounding, natural readings are rounded independently. Nothing else is touched (latent days, ground truth, labeller).
+
+
+#### 10.1.1 Natural repeat probability, fault-free run with the cuff rounded to 1 mmHg in the generator (`RALMON_CUFF_RES_MMHG=1`, pulse 1 bpm)
+Fault-free run `ffr` (injection rates 0, 120 patients x 30 days, seed 0): 17917 readings, all integers: True; consecutive pairs 17797, **exactly equal 350: observed frequency 0.0197 (Wilson 95% 0.0177-0.0218)**. The formula of 9.3.1 (E[max(0, 1 - |Delta|/r)] on the unrounded differences) predicted 0.0200; the unrounded run had 0 of 17 797. This measured value is the cell rep_nat used in section 10 (a grid value: 0.5 x, 1 x and 2 x of it are swept in 10.1.4).
+
+#### 10.1.2 Does rounding change anything else? Pairs (1080 pairs, 2160 members), unrounded build `p40b` against rounded build `p40r`
+- pair alerts present only in the unrounded build: {'range': 141, 'resp': 22}; only in the rounded build: {'resp': 15}; alerts present in both whose old kappa or decision time changes: 0.
+- members whose alert list (template, key, decision time, old kappa with and without diagnostics) differs: **163 of 2160** (alerts compared: 10662); members whose ground-truth event list differs: 0; pairs whose `indistinguishable_by_construction` flag changes: 0; pairs whose `separated_by` changes: 0.
+  - double_take_vs_bounce nominal_content_robot #10A: only unrounded [('range', 'range@29725661', 29760000, 'C1', 'UNDETERMINED')]; only rounded []
+  - double_take_vs_bounce nominal_content_robot #18B: only unrounded [('range', 'range@80134086', 80160000, 'C1', 'UNDETERMINED'), ('resp', 'resp@75600000', 82800000, 'UNDETERMINED', 'UNDETERMINED')]; only rounded []
+  - double_take_vs_bounce nominal_content_robot #33B: only unrounded [('range', 'range@80124582', 80160000, 'C1', 'UNDETERMINED')]; only rounded []
+  - double_take_vs_bounce nominal_content_norobot #50A: only unrounded [('range', 'range@29728522', 29760000, 'C1', 'UNDETERMINED'), ('range', 'range@80126391', 80160000, 'C1', 'UNDETERMINED')]; only rounded []
+  - double_take_vs_bounce nominal_content_norobot #55A: only unrounded [('range', 'range@29727853', 29760000, 'C1', 'UNDETERMINED')]; only rounded []
+  - double_take_vs_bounce nominal_content_norobot #55B: only unrounded [('range', 'range@29727853', 29760000, 'C1', 'UNDETERMINED')]; only rounded []
+  - double_take_vs_bounce nominal_nocontent_robot #91A: only unrounded [('range', 'range@51327064', 51360000, 'C1', 'UNDETERMINED')]; only rounded []
+  - double_take_vs_bounce nominal_nocontent_robot #91B: only unrounded [('range', 'range@51327064', 51360000, 'C1', 'UNDETERMINED')]; only rounded []
+  - ... 155 more
+- main population: alerts only in the unrounded build {'resp': 19, 'range': 230, 'hold': 4}; only in the rounded build {'resp': 17}; in both with a changed old kappa or decision time: 1.
+- main population m120 (3600 patient-days, 17015 unrounded alerts, 16779 rounded): patient-days whose alert list differs: **263**; ground-truth lists that differ: 0.
+  - p0000 day 5: only unrounded [('resp', 'resp@507600000', 514800000, 'UNDETERMINED')]; only rounded []
+  - p0000 day 16: only unrounded [('range', 'range@1412130612', 1412160000, 'C1')]; only rounded []
+  - p0001 day 10: only unrounded [('range', 'range@944127056', 944160000, 'C1')]; only rounded []
+  - p0001 day 28: only unrounded [('range', 'range@2492131479', 2492160000, 'C1')]; only rounded [('range', 'range@2492131479', 2492160000, 'UNDETERMINED')]
+  - p0002 day 1: only unrounded [('resp', 'resp@162000000', 169200000, 'C2')]; only rounded []
+  - p0002 day 6: only unrounded [('range', 'range@598528720', 598560000, 'C1')]; only rounded []
+  - p0002 day 14: only unrounded [('resp', 'resp@1234800000', 1242000000, 'UNDETERMINED')]; only rounded []
+  - p0002 day 21: only unrounded [('range', 'range@1844128789', 1844160000, 'C1')]; only rounded []
+  - ... 255 more
+- static band checks (B1-style, registry bp_band_low 110.0, bp_band_high 140.0, bp_hold_threshold 100.0): of 17363 readings, **230 change in-band status and 13 change the below-hold status** when rounded to 1 mmHg (1.32% and 0.07%); the readings are those of m120b and m120r (same latent days).
+
+**Reading of 10.1.2.** The rounding changes what the monitor sees at the band edges: readings within 0.5 mmHg of a limit move across it. In the pairs, 141 `range` alerts and 22 `resp` alerts of the unrounded build disappear and 15 `resp` alerts appear; the 2160 alert lists of sections 3 to 9 are therefore those of the unrounded generator, and the pair counts in 10.2 differ slightly from section 9 (612 against 613 distinguishable pairs). The ground-truth events are identical (they come from the latent day), and so are the pair flags. This is a change of the benchmark that a real device resolution would also make; it is reported, not corrected.
+
+#### 10.1.3 The repeated-value channel with the really rounded readings (main population m120r; rep_nat = the measured 0.0197, x0.5 and x2 as grid values)
+
+
+##### tight (causal) labelling: 6751 alerts; silent-fault alerts: stuck_at 96, cuff_silent_bias 156, dispenser_bounce 3 (total 255)
+
+Reading class of the channel (really rounded readings, cuff templates) by true subtype:
+| true subtype | alerts | A | D | U |
+|---|---|---|---|---|
+| ble_dropout | 47 | 2 (4.3%) | 44 | 1 |
+| cuff_detached | 311 | 11 (3.5%) | 296 | 4 |
+| cuff_silent_bias | 156 | 5 (3.2%) | 148 | 3 |
+| dispense_forgery | 60 | 0 (0.0%) | 60 | 0 |
+| drug_nonresponse | 61 | 3 (4.9%) | 58 | 0 |
+| hypotension_below_hold | 52 | 0 (0.0%) | 50 | 2 |
+| injection_informed | 127 | 3 (2.4%) | 124 | 0 |
+| injection_naive | 157 | 0 (0.0%) | 156 | 1 |
+| measurement_refusal | 224 | 6 (2.7%) | 216 | 2 |
+| replay | 201 | 5 (2.5%) | 196 | 0 |
+| spontaneous_hold | 369 | 5 (1.4%) | 361 | 3 |
+| spontaneous_resp | 3356 | 113 (3.4%) | 3240 | 3 |
+| stuck_at | 96 | 90 (93.8%) | 6 | 0 |
+Natural A rate among the non-stuck_at alerts: 153/5106 = 0.0300 (fault-free pairs: 0.0197).
+
+Effect on the subtype set (design uniform; rep_nat = the measured value x multiplier). 'Contains C1': the set holds a C1 subtype; 'exact': the set is exactly the true subtype; 'lose C1': sets that contained a C1 subtype and no longer do.
+| level | rep_nat | true subtype | alerts | coverage without -> with | mean size without -> with | contains C1 without -> with | exact without -> with | lose C1 |
+|---|---|---|---|---|---|---|---|---|
+| 0.8 | 0.0098 | stuck_at | 96 | 92 -> 90 | 5.07 -> 1.33 | 95 -> 6 | 0 -> 89 | 89 |
+| 0.8 | 0.0098 | cuff_silent_bias | 156 | 151 -> 146 | 4.60 -> 4.24 | 151 -> 146 | 0 -> 0 | 5 |
+| 0.8 | 0.0098 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.8 | 0.0197 | stuck_at | 96 | 92 -> 89 | 5.07 -> 1.93 | 95 -> 35 | 0 -> 60 | 60 |
+| 0.8 | 0.0197 | cuff_silent_bias | 156 | 151 -> 146 | 4.60 -> 4.27 | 151 -> 148 | 0 -> 0 | 3 |
+| 0.8 | 0.0197 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.8 | 0.0393 | stuck_at | 96 | 92 -> 89 | 5.07 -> 1.95 | 95 -> 35 | 0 -> 60 | 60 |
+| 0.8 | 0.0393 | cuff_silent_bias | 156 | 151 -> 146 | 4.60 -> 4.27 | 151 -> 148 | 0 -> 0 | 3 |
+| 0.8 | 0.0393 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.9 | 0.0098 | stuck_at | 96 | 94 -> 90 | 6.77 -> 2.09 | 95 -> 35 | 0 -> 60 | 60 |
+| 0.9 | 0.0098 | cuff_silent_bias | 156 | 152 -> 147 | 6.04 -> 4.96 | 154 -> 150 | 0 -> 0 | 4 |
+| 0.9 | 0.0098 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.9 | 0.0197 | stuck_at | 96 | 94 -> 90 | 6.77 -> 2.43 | 95 -> 35 | 0 -> 60 | 60 |
+| 0.9 | 0.0197 | cuff_silent_bias | 156 | 152 -> 147 | 6.04 -> 4.97 | 154 -> 150 | 0 -> 0 | 4 |
+| 0.9 | 0.0197 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.9 | 0.0393 | stuck_at | 96 | 94 -> 90 | 6.77 -> 3.94 | 95 -> 35 | 0 -> 0 | 60 |
+| 0.9 | 0.0393 | cuff_silent_bias | 156 | 152 -> 152 | 6.04 -> 5.03 | 154 -> 150 | 0 -> 0 | 4 |
+| 0.9 | 0.0393 | dispenser_bounce | 3 | 0 -> 0 | 5.00 -> 5.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.95 | 0.0098 | stuck_at | 96 | 95 -> 90 | 7.78 -> 2.85 | 95 -> 35 | 0 -> 60 | 60 |
+| 0.95 | 0.0098 | cuff_silent_bias | 156 | 152 -> 149 | 7.09 -> 6.17 | 155 -> 152 | 0 -> 0 | 3 |
+| 0.95 | 0.0098 | dispenser_bounce | 3 | 3 -> 3 | 6.00 -> 6.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.95 | 0.0197 | stuck_at | 96 | 95 -> 90 | 7.78 -> 4.99 | 95 -> 95 | 0 -> 0 | 0 |
+| 0.95 | 0.0197 | cuff_silent_bias | 156 | 152 -> 152 | 7.09 -> 6.25 | 155 -> 155 | 0 -> 0 | 0 |
+| 0.95 | 0.0197 | dispenser_bounce | 3 | 3 -> 3 | 6.00 -> 6.00 | 3 -> 3 | 0 -> 0 | 0 |
+| 0.95 | 0.0393 | stuck_at | 96 | 95 -> 90 | 7.78 -> 6.21 | 95 -> 95 | 0 -> 0 | 0 |
+| 0.95 | 0.0393 | cuff_silent_bias | 156 | 152 -> 152 | 7.09 -> 6.29 | 155 -> 155 | 0 -> 0 | 0 |
+| 0.95 | 0.0393 | dispenser_bounce | 3 | 3 -> 3 | 6.00 -> 6.00 | 3 -> 3 | 0 -> 0 | 0 |
+
+Alerts of other causes (not stuck_at, not in the silent-fault set) whose true subtype leaves the set because of the channel:
+| level | rep_nat | other alerts | with A (identical) | true subtype removed | by (cause, subtype) |
+|---|---|---|---|---|---|
+| 0.8 | 0.0098 | 6496 | 148 | 121 | {('C1', 'spontaneous_resp'): 112, ('C1', 'drug_nonresponse'): 3, ('C1', 'spontaneous_hold'): 5, ('C3', 'injection_informed'): 1} |
+| 0.8 | 0.0197 | 6496 | 148 | 1 | {('C3', 'injection_informed'): 1} |
+| 0.8 | 0.0393 | 6496 | 148 | 1 | {('C3', 'injection_informed'): 1} |
+| 0.9 | 0.0098 | 6496 | 148 | 4 | {('C3', 'injection_informed'): 3, ('C3', 'replay'): 1} |
+| 0.9 | 0.0197 | 6496 | 148 | 3 | {('C3', 'injection_informed'): 2, ('C3', 'replay'): 1} |
+| 0.9 | 0.0393 | 6496 | 148 | 3 | {('C3', 'injection_informed'): 2, ('C3', 'replay'): 1} |
+| 0.95 | 0.0098 | 6496 | 148 | 6 | {('C3', 'injection_informed'): 2, ('C3', 'replay'): 4} |
+| 0.95 | 0.0197 | 6496 | 148 | 6 | {('C3', 'injection_informed'): 2, ('C3', 'replay'): 4} |
+| 0.95 | 0.0393 | 6496 | 148 | 5 | {('C3', 'injection_informed'): 2, ('C3', 'replay'): 3} |
+
+##### labelling of section 5: 14915 alerts; silent-fault alerts: stuck_at 136, cuff_silent_bias 255, dispenser_bounce 40 (total 431)
+
+Reading class of the channel (really rounded readings, cuff templates) by true subtype:
+| true subtype | alerts | A | D | U |
+|---|---|---|---|---|
+| ble_dropout | 1197 | 55 (4.6%) | 1138 | 4 |
+| cuff_detached | 325 | 10 (3.1%) | 311 | 4 |
+| cuff_silent_bias | 255 | 6 (2.4%) | 246 | 3 |
+| dispense_forgery | 165 | 4 (2.4%) | 161 | 0 |
+| dispenser_bounce | 17 | 2 (11.8%) | 15 | 0 |
+| drug_nonresponse | 53 | 2 (3.8%) | 51 | 0 |
+| hypertensive_spike | 325 | 4 (1.2%) | 320 | 1 |
+| hypotension_below_hold | 37 | 0 (0.0%) | 35 | 2 |
+| injection_informed | 210 | 9 (4.3%) | 201 | 0 |
+| injection_naive | 229 | 2 (0.9%) | 226 | 1 |
+| manipulation_failure | 251 | 6 (2.4%) | 236 | 9 |
+| measurement_refusal | 159 | 5 (3.1%) | 152 | 2 |
+| nav_delay | 164 | 2 (1.2%) | 161 | 1 |
+| replay | 261 | 5 (1.9%) | 256 | 0 |
+| spontaneous_hold | 245 | 4 (1.6%) | 239 | 2 |
+| spontaneous_range | 7028 | 139 (2.0%) | 6825 | 64 |
+| spontaneous_resp | 2368 | 69 (2.9%) | 2298 | 1 |
+| stuck_at | 136 | 85 (62.5%) | 51 | 0 |
+Natural A rate among the non-stuck_at alerts: 324/13195 = 0.0246 (fault-free pairs: 0.0197).
+
+Effect on the subtype set (design uniform; rep_nat = the measured value x multiplier). 'Contains C1': the set holds a C1 subtype; 'exact': the set is exactly the true subtype; 'lose C1': sets that contained a C1 subtype and no longer do.
+| level | rep_nat | true subtype | alerts | coverage without -> with | mean size without -> with | contains C1 without -> with | exact without -> with | lose C1 |
+|---|---|---|---|---|---|---|---|---|
+| 0.8 | 0.0098 | stuck_at | 136 | 133 -> 85 | 4.91 -> 2.35 | 136 -> 51 | 0 -> 85 | 85 |
+| 0.8 | 0.0098 | cuff_silent_bias | 255 | 247 -> 240 | 4.76 -> 4.42 | 250 -> 244 | 0 -> 0 | 6 |
+| 0.8 | 0.0098 | dispenser_bounce | 40 | 17 -> 13 | 5.85 -> 5.17 | 40 -> 38 | 0 -> 0 | 2 |
+| 0.8 | 0.0197 | stuck_at | 136 | 133 -> 85 | 4.91 -> 2.74 | 136 -> 78 | 0 -> 58 | 58 |
+| 0.8 | 0.0197 | cuff_silent_bias | 255 | 247 -> 240 | 4.76 -> 4.43 | 250 -> 245 | 0 -> 0 | 5 |
+| 0.8 | 0.0197 | dispenser_bounce | 40 | 17 -> 13 | 5.85 -> 5.28 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.8 | 0.0393 | stuck_at | 136 | 133 -> 85 | 4.91 -> 2.75 | 136 -> 78 | 0 -> 58 | 58 |
+| 0.8 | 0.0393 | cuff_silent_bias | 255 | 247 -> 240 | 4.76 -> 4.43 | 250 -> 245 | 0 -> 0 | 5 |
+| 0.8 | 0.0393 | dispenser_bounce | 40 | 17 -> 13 | 5.85 -> 5.33 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.9 | 0.0098 | stuck_at | 136 | 135 -> 85 | 6.50 -> 3.03 | 136 -> 78 | 0 -> 58 | 58 |
+| 0.9 | 0.0098 | cuff_silent_bias | 255 | 250 -> 244 | 6.27 -> 5.24 | 252 -> 246 | 0 -> 0 | 6 |
+| 0.9 | 0.0098 | dispenser_bounce | 40 | 17 -> 15 | 7.08 -> 6.40 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.9 | 0.0197 | stuck_at | 136 | 135 -> 85 | 6.50 -> 3.24 | 136 -> 78 | 0 -> 58 | 58 |
+| 0.9 | 0.0197 | cuff_silent_bias | 255 | 250 -> 244 | 6.27 -> 5.25 | 252 -> 246 | 0 -> 0 | 6 |
+| 0.9 | 0.0197 | dispenser_bounce | 40 | 17 -> 15 | 7.08 -> 6.50 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.9 | 0.0393 | stuck_at | 136 | 135 -> 85 | 6.50 -> 4.25 | 136 -> 78 | 0 -> 0 | 58 |
+| 0.9 | 0.0393 | cuff_silent_bias | 255 | 250 -> 250 | 6.27 -> 5.28 | 252 -> 246 | 0 -> 0 | 6 |
+| 0.9 | 0.0393 | dispenser_bounce | 40 | 17 -> 15 | 7.08 -> 6.60 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.95 | 0.0098 | stuck_at | 136 | 136 -> 85 | 7.51 -> 3.90 | 136 -> 78 | 0 -> 58 | 58 |
+| 0.95 | 0.0098 | cuff_silent_bias | 255 | 250 -> 245 | 7.33 -> 6.46 | 253 -> 248 | 0 -> 0 | 5 |
+| 0.95 | 0.0098 | dispenser_bounce | 40 | 40 -> 38 | 8.12 -> 7.83 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.95 | 0.0197 | stuck_at | 136 | 136 -> 85 | 7.51 -> 5.35 | 136 -> 136 | 0 -> 0 | 0 |
+| 0.95 | 0.0197 | cuff_silent_bias | 255 | 250 -> 250 | 7.33 -> 6.51 | 253 -> 253 | 0 -> 0 | 0 |
+| 0.95 | 0.0197 | dispenser_bounce | 40 | 40 -> 40 | 8.12 -> 7.92 | 40 -> 40 | 0 -> 0 | 0 |
+| 0.95 | 0.0393 | stuck_at | 136 | 136 -> 85 | 7.51 -> 6.16 | 136 -> 136 | 0 -> 0 | 0 |
+| 0.95 | 0.0393 | cuff_silent_bias | 255 | 250 -> 250 | 7.33 -> 6.54 | 253 -> 253 | 0 -> 0 | 0 |
+| 0.95 | 0.0393 | dispenser_bounce | 40 | 40 -> 40 | 8.12 -> 7.97 | 40 -> 40 | 0 -> 0 | 0 |
+
+Alerts of other causes (not stuck_at, not in the silent-fault set) whose true subtype leaves the set because of the channel:
+| level | rep_nat | other alerts | with A (identical) | true subtype removed | by (cause, subtype) |
+|---|---|---|---|---|---|
+| 0.8 | 0.0098 | 14484 | 316 | 251 | {('C2', 'manipulation_failure'): 6, ('C1', 'spontaneous_range'): 160, ('C1', 'spontaneous_resp'): 69, ('C1', 'drug_nonresponse'): 2, ('C3', 'injection_informed'): 5, ('C1', 'spontaneous_hold'): 4, ('C3', 'dispense_forgery'): 1, ('C1', 'hypertensive_spike'): 4} |
+| 0.8 | 0.0197 | 14484 | 316 | 176 | {('C2', 'manipulation_failure'): 6, ('C1', 'spontaneous_range'): 160, ('C3', 'injection_informed'): 5, ('C3', 'dispense_forgery'): 1, ('C1', 'hypertensive_spike'): 4} |
+| 0.8 | 0.0393 | 14484 | 316 | 175 | {('C2', 'manipulation_failure'): 6, ('C1', 'spontaneous_range'): 160, ('C3', 'injection_informed'): 5, ('C1', 'hypertensive_spike'): 4} |
+| 0.9 | 0.0098 | 14484 | 316 | 165 | {('C2', 'manipulation_failure'): 8, ('C1', 'spontaneous_range'): 139, ('C3', 'injection_informed'): 9, ('C3', 'dispense_forgery'): 4, ('C1', 'hypertensive_spike'): 4, ('C3', 'replay'): 1} |
+| 0.9 | 0.0197 | 14484 | 316 | 159 | {('C2', 'manipulation_failure'): 8, ('C1', 'spontaneous_range'): 139, ('C3', 'dispense_forgery'): 3, ('C1', 'hypertensive_spike'): 4, ('C3', 'injection_informed'): 4, ('C3', 'replay'): 1} |
+| 0.9 | 0.0393 | 14484 | 316 | 154 | {('C1', 'spontaneous_range'): 139, ('C2', 'manipulation_failure'): 3, ('C3', 'dispense_forgery'): 3, ('C1', 'hypertensive_spike'): 4, ('C3', 'injection_informed'): 4, ('C3', 'replay'): 1} |
+| 0.95 | 0.0098 | 14484 | 316 | 182 | {('C2', 'manipulation_failure'): 5, ('C1', 'spontaneous_range'): 160, ('C3', 'injection_informed'): 5, ('C3', 'dispense_forgery'): 3, ('C1', 'hypertensive_spike'): 4, ('C3', 'replay'): 5} |
+| 0.95 | 0.0197 | 14484 | 316 | 170 | {('C1', 'spontaneous_range'): 160, ('C3', 'injection_informed'): 5, ('C3', 'replay'): 5} |
+| 0.95 | 0.0393 | 14484 | 316 | 32 | {('C1', 'spontaneous_range'): 23, ('C3', 'injection_informed'): 5, ('C3', 'replay'): 4} |
+
+
+**Reading of 10.1.3.** Tight labelling: of 96 stuck_at alerts 90 read A (identical) and 6 read D; with rep_nat 0.0197 and level 0.9 the stuck_at sets containing a C1 subtype fall from 95 to 35 and 60 sets become exactly {stuck_at}; coverage of the true subtype falls from 94 to 90 (the 6 D alerts remove stuck_at). Smaller rep_nat makes the channel more decisive (level 0.8: 95 -> 6 containing C1) and costs more false removals when the cell is too small (rep_nat 0.0098, level 0.8: 121 other alerts, 112 of them spontaneous_resp); larger rep_nat leaves the C1 subtype in the set at level 0.95. cuff_silent_bias loses its C1 subtypes in 0 to 5 of 156 sets (a denied reading can only remove stuck_at) and dispenser_bounce does not change (tight labelling keeps only 3 bounce alerts: the COUNT alert of a bounce is decided at the next dose step, outside the open window; the 40 of the labelling of section 5 keep the table of section 9). The natural A rate among alerts that are not stuck_at is 3.0% (tight) and 2.5% (section 5), above the fault-free 1.97% because some alerts are raised inside an active stuck window that carries another cause's label, and because readings around a dose are not a random pair.
+
+### 10.2 The accepted channels in the subtype model: pairs
+
+Native cells. ADR-032: `dispenser.short_interval` (the interval since the previous opening is below T_b, 10 s as the reference grid value) with the bounce conditional (qc) and every other sub-cause at eps; `dispenser.no_content_change` (content change = 0) raised by the bounce by construction (1 - eps) and `None` for a dispenser without content sensing or a forged dispense with no payload. ADR-034: the field `seq_gap_or_replay` is replaced by `seq_repeat` and `seq_gap`, derived from the existing field and the delivery ratio (repeat = asserted with a complete ratio; gap = ratio below one; `None` where the two cannot be told), with cells replay_naive: repeat; naive injection and naive forged dispense: repeat with probability qc, gap with 1 - qc; ble_dropout and message_drop: gap with qc. Repeated value: P(A | stuck_at) = 1 - eps, P(A | any other) = rep_nat = 0.0197 (10.1.1). No grouped variant is used. ACC = the section-4 channels plus the three; the older variants are printed for comparison. Pairs `p40r` (rounded), design uniform.
+
+
+#### 10.2.1 Pairs at subtype level with the accepted channel set (ACC), rounded generator, design uniform, reference cells (eps .01, qc .5), T_b 10 s, rep_nat = the measured 0.0197
+Lambda = log P(e | subtype_A) - log P(e | subtype_B) at the alert of the common template; subtype pairs as in 9.1. The alert lists of the rounded build differ slightly from the unrounded one (10.1.2), so the pair counts differ slightly from section 9.
+| group | stratum | pairs | Lambda_A > 0 | Lambda_B < 0 | both (correct direction) | D > 0 | D = 0 | D < 0 | median Lambda_A | median Lambda_B | 9.1.1 (section-4 channels) median Lambda_A |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| double_take_vs_bounce | dist | 256 | 256/256 (100%; 99-100) | 217/256 (85%; 80-89) | 217/256 (85%; 80-89) | 217/256 (85%; 80-89) | 39 | 0 | 5.278 | -3.912 | 0.000 |
+| double_take_vs_bounce | indist | 38 | 38/38 (100%; 91-100) | 0/38 (0%; 0-9) | 0/38 (0%; 0-9) | 0/38 (0%; 0-9) | 38 | 0 | 0.683 | 0.683 | 0.000 |
+| nonresponse_vs_falsified_dispense | dist | 106 | 106/106 (100%; 97-100) | 78/106 (74%; 64-81) | 78/106 (74%; 64-81) | 92/106 (87%; 79-92) | 14 | 0 | 5.061 | -3.788 | 5.278 |
+| nonresponse_vs_falsified_dispense | indist | 53 | 53/53 (100%; 93-100) | 0/53 (0%; 0-7) | 0/53 (0%; 0-7) | 0/53 (0%; 0-7) | 53 | 0 | 0.466 | 0.466 | 0.683 |
+| refusal_vs_robot_missed | dist | 40 | 0/40 (0%; 0-9) | 40/40 (100%; 91-100) | 0/40 (0%; 0-9) | 40/40 (100%; 91-100) | 0 | 0 | 0.000 | -4.595 | 0.000 |
+| refusal_vs_robot_missed | indist | 80 | 0/80 (0%; 0-5) | 0/80 (0%; 0-5) | 0/80 (0%; 0-5) | 0/80 (0%; 0-5) | 80 | 0 | 0.000 | 0.000 | 0.000 |
+| bounce_vs_forged_dispense | dist | 210 | 210/210 (100%; 98-100) | 138/210 (66%; 59-72) | 138/210 (66%; 59-72) | 188/210 (90%; 85-93) | 22 | 0 | 9.656 | -0.217 | 5.278 |
+| bounce_vs_forged_dispense | indist | 39 | 39/39 (100%; 91-100) | 0/39 (0%; 0-9) | 0/39 (0%; 0-9) | 0/39 (0%; 0-9) | 39 | 0 | 4.378 | 4.378 | 0.683 |
+| ALL | dist | 612 | 572/612 (93%; 91-95) | 473/612 (77%; 74-80) | 433/612 (71%; 67-74) | 537/612 (88%; 85-90) | 75 | 0 | | | |
+| ALL | indist | 210 | 130/210 (62%; 55-68) | 0/210 (0%; 0-2) | 0/210 (0%; 0-2) | 0/210 (0%; 0-2) | 210 | 0 | | | |
+
+#### 10.2.2 Distribution of Lambda (nats), ACC: min / q25 / median / q75 / max
+| group | stratum | member | min | q25 | median | q75 | max |
+|---|---|---|---|---|---|---|---|
+| double_take_vs_bounce | dist | A | 0.683 | 0.683 | 5.278 | 5.278 | 5.278 |
+| double_take_vs_bounce | dist | B | -8.507 | -8.507 | -3.912 | -3.912 | 5.278 |
+| double_take_vs_bounce | dist | D | 0.000 | 4.595 | 9.190 | 13.785 | 13.785 |
+| double_take_vs_bounce | indist | A | 0.683 | 0.683 | 0.683 | 0.683 | 0.683 |
+| double_take_vs_bounce | indist | B | 0.683 | 0.683 | 0.683 | 0.683 | 0.683 |
+| double_take_vs_bounce | indist | D | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| nonresponse_vs_falsified_dispense | dist | A | 0.466 | 2.127 | 5.061 | 5.744 | 5.744 |
+| nonresponse_vs_falsified_dispense | dist | B | -4.129 | -4.129 | -3.788 | 0.466 | 5.061 |
+| nonresponse_vs_falsified_dispense | dist | D | 0.000 | 0.683 | 9.190 | 9.190 | 9.873 |
+| nonresponse_vs_falsified_dispense | indist | A | 0.466 | 0.466 | 0.466 | 1.149 | 1.149 |
+| nonresponse_vs_falsified_dispense | indist | B | 0.466 | 0.466 | 0.466 | 1.149 | 1.149 |
+| nonresponse_vs_falsified_dispense | indist | D | -0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| refusal_vs_robot_missed | dist | A | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| refusal_vs_robot_missed | dist | B | -4.595 | -4.595 | -4.595 | -4.595 | -4.595 |
+| refusal_vs_robot_missed | dist | D | 4.595 | 4.595 | 4.595 | 4.595 | 4.595 |
+| refusal_vs_robot_missed | indist | A | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| refusal_vs_robot_missed | indist | B | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| refusal_vs_robot_missed | indist | D | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| bounce_vs_forged_dispense | dist | A | 5.061 | 8.973 | 9.656 | 13.568 | 14.251 |
+| bounce_vs_forged_dispense | dist | B | -7.170 | -2.575 | -0.217 | 2.021 | 9.656 |
+| bounce_vs_forged_dispense | dist | D | 0.000 | 9.190 | 9.190 | 12.231 | 21.421 |
+| bounce_vs_forged_dispense | indist | A | 4.378 | 4.378 | 4.378 | 4.378 | 5.061 |
+| bounce_vs_forged_dispense | indist | B | 4.378 | 4.378 | 4.378 | 4.378 | 5.061 |
+| bounce_vs_forged_dispense | indist | D | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+
+#### 10.2.3 Distinguishable pairs by separating channel set: D > 0, ACC
+| group | separated_by | pairs | D > 0 | D = 0 | D < 0 | mean D |
+|---|---|---|---|---|---|---|
+| bounce_vs_forg | content_change | 39 | 39 | 0 | 0 | 9.190 |
+| bounce_vs_forg | content_change,dispense_seq | 20 | 20 | 0 | 0 | 11.623 |
+| bounce_vs_forg | content_change,dispense_seq,verification | 29 | 29 | 0 | 0 | 19.734 |
+| bounce_vs_forg | content_change,verification | 36 | 36 | 0 | 0 | 13.785 |
+| bounce_vs_forg | dispense_seq | 22 | 21 | 1 | 0 | 2.902 |
+| bounce_vs_forg | dispense_seq,verification | 26 | 22 | 4 | 0 | 10.349 |
+| bounce_vs_forg | verification | 38 | 21 | 17 | 0 | 5.079 |
+| double_take_vs | content_change | 39 | 39 | 0 | 0 | 9.190 |
+| double_take_vs | content_change,dispense_interval | 37 | 36 | 1 | 0 | 13.413 |
+| double_take_vs | content_change,dispense_interval,witness | 37 | 37 | 0 | 0 | 13.785 |
+| double_take_vs | content_change,witness | 35 | 35 | 0 | 0 | 9.190 |
+| double_take_vs | dispense_interval | 34 | 34 | 0 | 0 | 4.595 |
+| double_take_vs | dispense_interval,witness | 36 | 36 | 0 | 0 | 4.595 |
+| double_take_vs | witness | 38 | 0 | 38 | 0 | 0.000 |
+| nonresponse_vs | dispense_seq | 13 | 0 | 13 | 0 | 0.000 |
+| nonresponse_vs | dispense_seq,verification | 14 | 14 | 0 | 0 | 9.190 |
+| nonresponse_vs | dispense_seq,verification,witness | 14 | 14 | 0 | 0 | 9.873 |
+| nonresponse_vs | dispense_seq,witness | 14 | 14 | 0 | 0 | 0.683 |
+| nonresponse_vs | verification | 47 | 46 | 1 | 0 | 8.995 |
+| nonresponse_vs | verification,witness | 4 | 4 | 0 | 0 | 9.873 |
+| refusal_vs_rob | robot_task_outcome | 40 | 40 | 0 | 0 | 4.595 |
+
+#### 10.2.4 McNemar on 'D > 0' (distinguishable pairs matched in both variants), ACC against each other variant; exact binomial on the discordant pairs
+| group | variant X | variant Y | pairs | b (X right, Y not) | c (Y right, X not) | exact p |
+|---|---|---|---|---|---|---|
+| double_take_vs | ACC | V0 (section-4 channels) | 256 | 217 | 0 | 9.5e-66 |
+| bounce_vs_forg | ACC | V0 (section-4 channels) | 210 | 65 | 0 | 5.42e-20 |
+| ALL | ACC | V0 (section-4 channels) | 612 | 282 | 0 | 2.57e-85 |
+| ALL | ACC | + ADR-032 only | 612 | 0 | 0 | 1 |
+| double_take_vs | ACC | + ADR-034 only | 256 | 217 | 0 | 9.5e-66 |
+| bounce_vs_forg | ACC | + ADR-034 only | 210 | 65 | 0 | 5.42e-20 |
+| ALL | ACC | + ADR-034 only | 612 | 282 | 0 | 2.57e-85 |
+| double_take_vs | ACC | + repeated value only | 256 | 217 | 0 | 9.5e-66 |
+| bounce_vs_forg | ACC | + repeated value only | 210 | 65 | 0 | 5.42e-20 |
+| ALL | ACC | + repeated value only | 612 | 282 | 0 | 2.57e-85 |
+| nonresponse_vs | ACC | ACC, no witness | 106 | 14 | 0 | 0.000122 |
+| ALL | ACC | ACC, no witness | 612 | 14 | 0 | 0.000122 |
+| nonresponse_vs | ACC | ACC, no verification | 106 | 60 | 0 | 1.73e-18 |
+| bounce_vs_forg | ACC | ACC, no verification | 210 | 21 | 0 | 9.54e-07 |
+| ALL | ACC | ACC, no verification | 612 | 81 | 0 | 8.27e-25 |
+| nonresponse_vs | ACC | ACC, no witness, no verification | 106 | 92 | 0 | 4.04e-28 |
+| bounce_vs_forg | ACC | ACC, no witness, no verification | 210 | 21 | 0 | 9.54e-07 |
+| ALL | ACC | ACC, no witness, no verification | 612 | 113 | 0 | 1.93e-34 |
+| ALL | ACC | ACC, profile without diagnostics | 612 | 0 | 0 | 1 |
+| double_take_vs | ACC | ACC without ADR-032 | 256 | 217 | 0 | 9.5e-66 |
+| bounce_vs_forg | ACC | ACC without ADR-032 | 210 | 65 | 0 | 5.42e-20 |
+| ALL | ACC | ACC without ADR-032 | 612 | 282 | 0 | 2.57e-85 |
+| ALL | ACC | ACC without ADR-034 | 612 | 0 | 0 | 1 |
+| ALL | ACC | ACC without repeated value | 612 | 0 | 0 | 1 |
+(rows with no discordant pair are printed for ALL only)
+
+#### 10.2.5 Variants side by side (distinguishable stratum, all groups)
+| variant | dist pairs | D > 0 | both correct | D > 0 by group g1/g2/g3/g4 | indist D = 0 | median Lambda_A, indist g1/g2/g3/g4 |
+|---|---|---|---|---|---|---|
+| V0 (section-4 channels) | 612 | 255/612 (42%; 38-46) | 201/612 (33%; 29-37) | 0/256 / 92/106 / 40/40 / 123/210 | 210/210 | 0.00 / 0.68 / 0.00 / 0.68 |
+| + ADR-032 only | 612 | 537/612 (88%; 85-90) | 376/612 (61%; 58-65) | 217/256 / 92/106 / 40/40 / 188/210 | 210/210 | 0.68 / 0.68 / 0.00 / 4.60 |
+| + ADR-034 only | 612 | 255/612 (42%; 38-46) | 201/612 (33%; 29-37) | 0/256 / 92/106 / 40/40 / 123/210 | 210/210 | 0.00 / 0.47 / 0.00 / 0.47 |
+| + repeated value only | 612 | 255/612 (42%; 38-46) | 201/612 (33%; 29-37) | 0/256 / 92/106 / 40/40 / 123/210 | 210/210 | 0.00 / 0.68 / 0.00 / 0.68 |
+| ACC (V0 + ADR-032 + ADR-034 + repeated value) | 612 | 537/612 (88%; 85-90) | 433/612 (71%; 67-74) | 217/256 / 92/106 / 40/40 / 188/210 | 210/210 | 0.68 / 0.47 / 0.00 / 4.38 |
+| ACC, no witness | 612 | 523/612 (85%; 82-88) | 440/612 (72%; 68-75) | 217/256 / 78/106 / 40/40 / 188/210 | 210/210 | 0.68 / 0.47 / 0.00 / 4.38 |
+| ACC, no verification | 612 | 456/612 (75%; 71-78) | 333/612 (54%; 50-58) | 217/256 / 32/106 / 40/40 / 167/210 | 210/210 | 0.68 / 0.47 / 0.00 / 4.38 |
+| ACC, no witness, no verification | 612 | 424/612 (69%; 66-73) | 341/612 (56%; 52-60) | 217/256 / 0/106 / 40/40 / 167/210 | 210/210 | 0.68 / 0.47 / 0.00 / 4.38 |
+| ACC, profile without diagnostics | 612 | 537/612 (88%; 85-90) | 433/612 (71%; 67-74) | 217/256 / 92/106 / 40/40 / 188/210 | 210/210 | 0.68 / 0.47 / 0.00 / 4.38 |
+| ACC without ADR-032 | 612 | 255/612 (42%; 38-46) | 201/612 (33%; 29-37) | 0/256 / 92/106 / 40/40 / 123/210 | 210/210 | 0.00 / 0.47 / 0.00 / 0.47 |
+| ACC without ADR-034 | 612 | 537/612 (88%; 85-90) | 376/612 (61%; 58-65) | 217/256 / 92/106 / 40/40 / 188/210 | 210/210 | 0.68 / 0.68 / 0.00 / 4.60 |
+| ACC without repeated value | 612 | 537/612 (88%; 85-90) | 433/612 (71%; 67-74) | 217/256 / 92/106 / 40/40 / 188/210 | 210/210 | 0.68 / 0.47 / 0.00 / 4.38 |
+
+#### 10.2.6 Sensitivity of ACC: T_b, within-class design, eps and qc, rep_nat
+| setting | value | D > 0 g1/g2/g3/g4 | both correct (all dist) | median Lambda_A indist g1/g2/g3/g4 |
+|---|---|---|---|---|
+| T_b | 1 s | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.68 / 0.47 / 0.00 / 4.38 |
+| T_b | 10 s | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.68 / 0.47 / 0.00 / 4.38 |
+| T_b | 30 s | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.68 / 0.47 / 0.00 / 4.38 |
+| T_b | 60 s | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.68 / 0.47 / 0.00 / 4.38 |
+| T_b | 180 s | 0.57 / 0.87 / 1.00 / 0.90 | 363/612 | -3.91 / 0.47 / 0.00 / 4.38 |
+| design | uniform | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.68 / 0.47 / 0.00 / 4.38 |
+| design | quiet_rare | 0.85 / 0.87 / 1.00 / 0.90 | 376/612 | 0.68 / 0.91 / 0.00 / 4.82 |
+| design | quiet_common | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.68 / 0.16 / 0.00 / 4.07 |
+| eps, qc | 0.001, 0.25 | 0.85 / 0.87 / 1.00 / 0.90 | 440/612 | 0.29 / 0.52 / 0.00 / 6.04 |
+| eps, qc | 0.001, 0.5 | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.69 / 0.47 / 0.00 / 6.68 |
+| eps, qc | 0.001, 0.75 | 0.85 / 0.87 / 1.00 / 0.90 | 376/612 | 1.38 / 0.52 / 0.00 / 7.14 |
+| eps, qc | 0.01, 0.25 | 0.85 / 0.87 / 1.00 / 0.90 | 440/612 | 0.28 / 0.52 / 0.00 / 3.75 |
+| eps, qc | 0.01, 0.5 | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.68 / 0.47 / 0.00 / 4.38 |
+| eps, qc | 0.01, 0.75 | 0.85 / 0.87 / 1.00 / 0.90 | 376/612 | 1.36 / 0.52 / 0.00 / 4.83 |
+| eps, qc | 0.05, 0.25 | 0.85 / 0.87 / 1.00 / 0.90 | 440/612 | 0.27 / 0.49 / 0.00 / 2.20 |
+| eps, qc | 0.05, 0.5 | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.64 / 0.45 / 0.00 / 2.75 |
+| eps, qc | 0.05, 0.75 | 0.85 / 0.87 / 1.00 / 0.90 | 376/612 | 1.24 / 0.49 / 0.00 / 3.17 |
+| eps, qc | 0.1, 0.25 | 0.85 / 0.87 / 1.00 / 0.90 | 440/612 | 0.25 / 0.46 / 0.00 / 1.56 |
+| eps, qc | 0.1, 0.5 | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.59 / 0.42 / 0.00 / 2.03 |
+| eps, qc | 0.1, 0.75 | 0.85 / 0.87 / 1.00 / 0.90 | 376/612 | 1.10 / 0.46 / 0.00 / 2.41 |
+| rep_nat | 0.0098 | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.68 / 0.47 / 0.00 / 4.38 |
+| rep_nat | 0.0197 | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.68 / 0.47 / 0.00 / 4.38 |
+| rep_nat | 0.0393 | 0.85 / 0.87 / 1.00 / 0.90 | 433/612 | 0.68 / 0.47 / 0.00 / 4.38 |
+
+
+**Reading of 10.2.**
+* **All the gain is ADR-032**: D > 0 rises from 255 to 537 of 612 distinguishable pairs (group 1: 0 -> 217 of 256; group 4: 123 -> 188 of 210), the same discordant pairs as the class-level prototype of 4.5 (b = 282, c = 0). ADR-034 and the repeated value change no direction in the pairs (no stuck_at in the pairs, and the sequence evidence adds nothing beyond the verification and the dispenser fields), but they change the lean: the median Lambda of an identical stream is 0.47 (groups 2) instead of 0.68, because a denied repeat excludes the naive forgery less than a denied combined field did.
+* **Group 4 indistinguishable: Lambda = +4.38 for BOTH members.** The forger in these pairs copies the bounce timing, so the interval field reads A in both members; the table, which does not model attacker timing, leans 4.4 nats toward the bounce. For the bounce member this is right, for the forged dispense it is wrong, D = 0. This is a declared limit of the interval field against an informed attacker (T_b 180 s collapses group 1: D > 0 217 -> 146).
+* **Witness and verification** keep their effect: removing verification costs 81 pairs (b = 81, c = 0), removing the witness 14, both 113; diagnostics change nothing (0 discordant).
+* **Sensitivity.** D > 0 does not move with eps, qc, rep_nat or the design; the lean and the both-correct count do (376 to 440 of 612 over qc 0.25 to 0.75; 376 with quiet_rare against 433).
+
+### 10.3 Conformal sets on the main population
+
+**Procedure.** Population `m400r`: 400 virtual patients x 30 days, rounded generator, default device profile (no authentication, no content sensing), measured-only monitor with one earlier day of history, VIOLATED alerts only. Split by patient with the builder's own function (`split_patients`, fractions 0.5 / 0.25 / 0.25, generation seed 0): 200 train, 100 calibration, 100 test patients. The model has no trained parameter, so the train part is unused (a variant that calibrates on train + calibration is in 10.3.4). Nonconformity score of an alert = 1 - p(true subtype | e, t) from the subtype model (accepted channels, design uniform, reference cells; an alert whose true subtype cannot violate the template has p = 0 and score 1). Threshold = the ceil((n+1)(1-alpha))-th smallest calibration score (the standard split-conformal quantile with the finite-sample correction; infinity, i.e. the full set, if that rank exceeds n). Prediction set = all subtypes with score <= threshold. (a) marginal: one threshold from all calibration alerts; (b) Mondrian: one threshold per template, from the calibration alerts of that template. alpha in {0.2, 0.1, 0.05} are sensitivity values.
+
+**What the guarantee is, and is not.** Split conformal gives marginal coverage >= 1 - alpha for a new alert if calibration and test alerts are EXCHANGEABLE. Here the unit of exchange is the patient: alerts of one patient (and of one event) are strongly correlated, the benchmark injects at rates fixed by the generator (placeholders), and the split is by patient, so the statement is only that the coverage holds for the test distribution OF THIS BENCHMARK when calibration and test patients are exchangeable draws from it. It says nothing about another population (10.4 shows that it fails across populations), nothing conditional on the template or the true cause for the marginal version (10.3.2), and nothing for a real ward. Ties in the score make the coverage conservative. The intervals printed are Wilson over alerts (which ignores the correlation) and a cluster bootstrap over test patients (1 000 resamples, seed 0), which is the honest one; the per-patient coverage is also given.
+
+
+##### 10.3 tight (causal) labelling [primary]: m400r, 400 patients x 30 days; the builder's patient-level split (seed 0, fractions 0.5 / 0.25 / 0.25): calibration 5624 alerts of 100 patients, test 5692 alerts of 100 patients (the 11157 alerts of the train patients are not used: the model has no trained parameter).
+
+##### 10.3.1 Primary method (subtype model, accepted channels): achieved coverage on the test part, marginal and Mondrian per template. W = Wilson 95% interval over alerts; 'patients' = 95% cluster-bootstrap interval over test patients (1000 resamples, seed 0).
+| alpha | mode | threshold q (marginal) | achieved coverage, mean size | set size distribution % (1 / 2 / 3 / 4 / 5-6 / 7-9 / 10+) | per-patient coverage: median, 10th percentile |
+|---|---|---|---|---|---|
+| 0.2 (target 0.80) | marginal | 0.855 | 4830/5692 = 84.9% (W 84-86; patients 83-86), size 2.53 | 16 / 58 / 4 / 0 / 22 / 0 / 0 | 0.85, 0.76 |
+| 0.2 (target 0.80) | mondrian | count 0.855 (n 1291); hold 0.903 (n 482); range 0.899 (n 350); resp 0.722 (n 3048); sched 0.966 (n 453) | 4920/5692 = 86.4% (W 86-87; patients 85-88), size 2.81 | 12 / 51 / 1 / 9 / 25 / 0 / 0 | 0.87, 0.79 |
+| 0.1 (target 0.90) | marginal | 0.915 | 5167/5692 = 90.8% (W 90-92; patients 90-92), size 2.93 | 8 / 46 / 12 / 11 / 22 / 0 / 0 | 0.92, 0.83 |
+| 0.1 (target 0.90) | mondrian | count 0.855 (n 1291); hold 0.948 (n 482); range 0.934 (n 350); resp 0.915 (n 3048); sched 0.994 (n 453) | 5298/5692 = 93.1% (W 92-94; patients 92-94), size 3.39 | 8 / 46 / 9 / 2 / 28 / 4 / 3 | 0.93, 0.88 |
+| 0.05 (target 0.95) | marginal | 0.960 | 5450/5692 = 95.7% (W 95-96; patients 95-96), size 5.56 | 5 / 3 / 5 / 2 / 72 / 13 / 0 | 0.97, 0.91 |
+| 0.05 (target 0.95) | mondrian | count 0.959 (n 1291); hold 0.991 (n 482); range 0.991 (n 350); resp 0.950 (n 3048); sched 0.994 (n 453) | 5541/5692 = 97.3% (W 97-98; patients 97-98), size 5.77 | 4 / 2 / 4 / 1 / 76 / 2 / 10 | 0.98, 0.94 |
+
+##### 10.3.2 Coverage and mean size per template on the test part, alpha 0.1 (target 0.90)
+| template | alerts | marginal | Mondrian per template |
+|---|---|---|---|
+| range | 329 | 280/329 = 85.1% (W 81-89), size 2.99 | 313/329 = 95.1% (W 92-97), size 3.56 |
+| sched | 390 | 292/390 = 74.9% (W 70-79), size 2.78 | 387/390 = 99.2% (W 98-100), size 6.46 |
+| hold | 469 | 411/469 = 87.6% (W 84-90), size 3.25 | 422/469 = 90.0% (W 87-92), size 5.51 |
+| count | 1335 | 1243/1335 = 93.1% (W 92-94), size 4.73 | 1235/1335 = 92.5% (W 91-94), size 4.70 |
+| resp | 3169 | 2941/3169 = 92.8% (W 92-94), size 2.14 | 2941/3169 = 92.8% (W 92-94), size 2.14 |
+
+##### 10.3.2 Coverage and mean size per true cause class on the test part, alpha 0.1 (target 0.90)
+| true cause class | alerts | marginal | Mondrian per template |
+|---|---|---|---|
+| C1 | 4669 | 4510/4669 = 96.6% (W 96-97), size 3.02 | 4515/4669 = 96.7% (W 96-97), size 3.44 |
+| C2 | 480 | 393/480 = 81.9% (W 78-85), size 2.08 | 419/480 = 87.3% (W 84-90), size 2.73 |
+| C3 | 543 | 264/543 = 48.6% (W 44-53), size 2.85 | 364/543 = 67.0% (W 63-71), size 3.59 |
+
+##### 10.3.2b Coverage per template, Mondrian, all alpha (test part)
+| template | cal. alerts | alpha 0.2 | alpha 0.1 | alpha 0.05 |
+|---|---|---|---|---|
+| range | 350 | 278/329 = 84.5% (W 80-88), size 2.98 | 313/329 = 95.1% (W 92-97), size 3.56 | 328/329 = 99.7% (W 98-100), size 5.81 |
+| sched | 453 | 312/390 = 80.0% (W 76-84), size 3.98 | 387/390 = 99.2% (W 98-100), size 6.46 | 387/390 = 99.2% (W 98-100), size 6.46 |
+| hold | 482 | 394/469 = 84.0% (W 80-87), size 2.98 | 422/469 = 90.0% (W 87-92), size 5.51 | 456/469 = 97.2% (W 95-98), size 12.16 |
+| count | 1291 | 1235/1335 = 92.5% (W 91-94), size 4.70 | 1235/1335 = 92.5% (W 91-94), size 4.70 | 1328/1335 = 99.5% (W 99-100), size 5.73 |
+| resp | 3048 | 2701/3169 = 85.2% (W 84-86), size 1.82 | 2941/3169 = 92.8% (W 92-94), size 2.14 | 3042/3169 = 96.0% (W 95-97), size 4.75 |
+
+##### 10.3.3 Methods at equal coverage (each method calibrated to the same target on the calibration part; test part; Mondrian per template in brackets)
+| target coverage | subtype model, accepted channels | subtype model, section-9 channels | class-level table (section 1) | prior only |
+|---|---|---|---|---|
+| 0.80 | 84.9% size 2.53 (86.4% size 2.81) | 83.9% size 2.48 (89.8% size 2.83) | 83.1% size 2.28 (90.9% size 3.02) | 88.7% size 2.96 (95.6% size 4.04) |
+| 0.90 | 90.8% size 2.93 (93.1% size 3.39) | 90.8% size 2.82 (94.4% size 3.32) | 91.3% size 3.12 (93.8% size 3.20) | 93.4% size 4.47 (96.9% size 5.44) |
+| 0.95 | 95.7% size 5.56 (97.3% size 5.77) | 96.1% size 6.07 (98.1% size 6.70) | 95.5% size 4.93 (96.9% size 4.74) | 97.2% size 9.11 (98.1% size 8.78) |
+| 0.932 (= coverage of the hierarchical rule on the calibration part) | 94.1% size 4.75 (94.0% size 4.42) | 94.1% size 4.06 (95.9% size 4.50) | 94.7% size 3.47 (96.1% size 3.45) | 97.2% size 9.11 (96.9% size 5.44) |
+
+
+Descriptive size-coverage comparison with an oracle threshold (the smallest marginal threshold that reaches the stated coverage ON THE TEST PART ITSELF; this is not conformal, it removes the discreteness of the quantile so that sizes can be compared at the same coverage):
+| coverage reached | subtype model, accepted channels | subtype model, section-9 channels | class-level table (section 1) | prior only | hierarchical rule (fixed) |
+|---|---|---|---|---|---|
+| >= 0.8 | 84.9% size 2.53 | 83.9% size 2.48 | 83.1% size 2.28 | 88.7% size 2.96 | 93.4% size 16.20 |
+| >= 0.9 | 90.8% size 2.93 | 90.7% size 2.73 | 91.3% size 3.12 | 93.4% size 4.47 | 93.4% size 16.20 |
+| >= 0.932 | 93.2% size 4.66 | 93.2% size 3.96 | 93.4% size 3.31 | 93.4% size 4.47 | 93.4% size 16.20 |
+| >= 0.95 | 95.7% size 5.56 | 96.1% size 6.07 | 95.0% size 3.53 | 97.2% size 9.11 | 93.4% size 16.20 |
+Hierarchical rule (diagnostics emitted), kappa as a set (kappa -> all subtypes of that class applicable at the template, UNDETERMINED -> all applicable): coverage 93.4% on the test part (93.2% on the calibration part), mean size 16.20. It has no tunable threshold, so the other methods are calibrated to its calibration-part coverage in the last row.
+
+Set-size distribution (%, 1 / 2 / 3 / 4 / 5-6 / 7-9 / 10+) at alpha 0.1, marginal, test part:
+- subtype model, accepted channels: 8 / 46 / 12 / 11 / 22 / 0 / 0; mean 2.93
+- subtype model, section-9 channels: 5 / 62 / 2 / 7 / 23 / 0 / 0; mean 2.82
+- class-level table (section 1): 1 / 55 / 1 / 13 / 25 / 0 / 2; mean 3.12
+- prior only: 0 / 0 / 0 / 71 / 23 / 6 / 0; mean 4.47
+- hierarchical rule: 0 / 4 / 0 / 0 / 0 / 1 / 94; mean 16.20
+
+##### 10.3.4 Sensitivity: calibration on train + calibration patients (75% of the patients; the model uses no training data)
+| alpha | mode | achieved coverage, mean size |
+|---|---|---|
+| 0.2 | marginal | 4830/5692 = 84.9% (W 84-86; patients 83-86), size 2.53 |
+| 0.2 | mondrian | 4900/5692 = 86.1% (W 85-87; patients 85-87), size 2.71 |
+| 0.1 | marginal | 5167/5692 = 90.8% (W 90-92; patients 90-92), size 2.93 |
+| 0.1 | mondrian | 5296/5692 = 93.0% (W 92-94; patients 92-94), size 3.21 |
+| 0.05 | marginal | 5450/5692 = 95.7% (W 95-96; patients 95-96), size 5.56 |
+| 0.05 | mondrian | 5513/5692 = 96.9% (W 96-97; patients 96-97), size 5.71 |
+
+##### 10.3.5 Exchangeability check at the patient level: roles of the calibration and test parts swapped (calibrate on the test patients, evaluate on the calibration patients)
+| alpha | mode | achieved coverage, mean size |
+|---|---|---|
+| 0.2 | marginal | 4719/5624 = 83.9% (W 83-85; patients 82-85), size 2.50 |
+| 0.2 | mondrian | 4805/5624 = 85.4% (W 84-86; patients 84-87), size 2.79 |
+| 0.1 | marginal | 5079/5624 = 90.3% (W 90-91; patients 89-91), size 2.93 |
+| 0.1 | mondrian | 5152/5624 = 91.6% (W 91-92; patients 91-92), size 3.40 |
+| 0.05 | marginal | 5343/5624 = 95.0% (W 94-96; patients 94-96), size 5.50 |
+| 0.05 | mondrian | 5416/5624 = 96.3% (W 96-97; patients 96-97), size 5.68 |
+
+
+
+##### 10.3 labelling of section 5: m400r, 400 patients x 30 days; the builder's patient-level split (seed 0, fractions 0.5 / 0.25 / 0.25): calibration 12461 alerts of 100 patients, test 12269 alerts of 100 patients (the 24943 alerts of the train patients are not used: the model has no trained parameter).
+
+##### 10.3.1 Primary method (subtype model, accepted channels): achieved coverage on the test part, marginal and Mondrian per template. W = Wilson 95% interval over alerts; 'patients' = 95% cluster-bootstrap interval over test patients (1000 resamples, seed 0).
+| alpha | mode | threshold q (marginal) | achieved coverage, mean size | set size distribution % (1 / 2 / 3 / 4 / 5-6 / 7-9 / 10+) | per-patient coverage: median, 10th percentile |
+|---|---|---|---|---|---|
+| 0.2 (target 0.80) | marginal | 0.868 | 9899/12269 = 80.7% (W 80-81; patients 80-82), size 3.23 | 9 / 29 / 1 / 52 / 9 / 0 / 0 | 0.82, 0.73 |
+| 0.2 (target 0.80) | mondrian | count 1.000 (n 1243); hold 0.995 (n 523); range 0.737 (n 6789); resp 1.000 (n 3337); sched 0.993 (n 569) | 11295/12269 = 92.1% (W 92-93; patients 91-93), size 8.96 | 4 / 0 / 50 / 0 / 1 / 2 / 42 | 0.92, 0.88 |
+| 0.1 (target 0.90) | marginal | 0.996 | 11012/12269 = 89.8% (W 89-90; patients 89-91), size 8.40 | 2 / 0 / 0 / 0 / 54 / 11 / 33 | 0.90, 0.83 |
+| 0.1 (target 0.90) | mondrian | count 1.000 (n 1243); hold 1.000 (n 523); range 0.737 (n 6789); resp 1.000 (n 3337); sched 0.994 (n 569) | 11383/12269 = 92.8% (W 92-93; patients 92-93), size 9.27 | 4 / 0 / 50 / 0 / 1 / 1 / 43 | 0.93, 0.89 |
+| 0.05 (target 0.95) | marginal | 1.000 | 12097/12269 = 98.6% (W 98-99; patients 98-99), size 12.42 | 0 / 0 / 0 / 0 / 0 / 53 / 47 | 0.99, 0.97 |
+| 0.05 (target 0.95) | mondrian | count 1.000 (n 1243); hold 1.000 (n 523); range 0.899 (n 6789); resp 1.000 (n 3337); sched 1.000 (n 569) | 11788/12269 = 96.1% (W 96-96; patients 96-97), size 10.18 | 2 / 1 / 0 / 50 / 1 / 0 / 47 | 0.96, 0.93 |
+
+##### 10.3.2 Coverage and mean size per template on the test part, alpha 0.1 (target 0.90)
+| template | alerts | marginal | Mondrian per template |
+|---|---|---|---|
+| range | 6521 | 6499/6521 = 99.7% (W 99-100), size 6.01 | 5985/6521 = 91.8% (W 91-92), size 2.87 |
+| sched | 537 | 476/537 = 88.6% (W 86-91), size 7.34 | 473/537 = 88.1% (W 85-91), size 6.30 |
+| hold | 494 | 395/494 = 80.0% (W 76-83), size 13.52 | 446/494 = 90.3% (W 87-93), size 20.41 |
+| count | 1253 | 1025/1253 = 81.8% (W 80-84), size 7.13 | 1153/1253 = 92.0% (W 90-93), size 10.15 |
+| resp | 3464 | 2617/3464 = 75.5% (W 74-77), size 12.80 | 3326/3464 = 96.0% (W 95-97), size 19.85 |
+
+##### 10.3.2 Coverage and mean size per true cause class on the test part, alpha 0.1 (target 0.90)
+| true cause class | alerts | marginal | Mondrian per template |
+|---|---|---|---|
+| C1 | 9199 | 9199/9199 = 100.0% (W 100-100), size 7.99 | 8987/9199 = 97.7% (W 97-98), size 7.91 |
+| C2 | 2263 | 1010/2263 = 44.6% (W 43-47), size 10.06 | 1882/2263 = 83.2% (W 82-85), size 14.49 |
+| C3 | 807 | 803/807 = 99.5% (W 99-100), size 8.39 | 514/807 = 63.7% (W 60-67), size 10.05 |
+
+##### 10.3.2b Coverage per template, Mondrian, all alpha (test part)
+| template | cal. alerts | alpha 0.2 | alpha 0.1 | alpha 0.05 |
+|---|---|---|---|---|
+| range | 6789 | 5985/6521 = 91.8% (W 91-92), size 2.87 | 5985/6521 = 91.8% (W 91-92), size 2.87 | 6219/6521 = 95.4% (W 95-96), size 3.88 |
+| sched | 569 | 438/537 = 81.6% (W 78-85), size 6.23 | 473/537 = 88.1% (W 85-91), size 6.30 | 500/537 = 93.1% (W 91-95), size 12.60 |
+| hold | 523 | 393/494 = 79.6% (W 76-83), size 12.90 | 446/494 = 90.3% (W 87-93), size 20.41 | 493/494 = 99.8% (W 99-100), size 20.92 |
+| count | 1243 | 1153/1253 = 92.0% (W 90-93), size 10.15 | 1153/1253 = 92.0% (W 90-93), size 10.15 | 1250/1253 = 99.8% (W 99-100), size 10.92 |
+| resp | 3337 | 3326/3464 = 96.0% (W 95-97), size 19.85 | 3326/3464 = 96.0% (W 95-97), size 19.85 | 3326/3464 = 96.0% (W 95-97), size 19.85 |
+
+##### 10.3.3 Methods at equal coverage (each method calibrated to the same target on the calibration part; test part; Mondrian per template in brackets)
+| target coverage | subtype model, accepted channels | subtype model, section-9 channels | class-level table (section 1) | prior only |
+|---|---|---|---|---|
+| 0.80 | 80.7% size 3.23 (92.1% size 8.96) | 80.5% size 3.18 (93.9% size 9.58) | 80.1% size 3.39 (94.4% size 8.77) | 82.9% size 6.23 (97.5% size 10.35) |
+| 0.90 | 89.8% size 8.40 (92.8% size 9.27) | 89.9% size 9.15 (94.7% size 9.85) | 96.2% size 11.03 (94.9% size 9.06) | 98.2% size 11.96 (97.5% size 10.35) |
+| 0.95 | 98.6% size 12.42 (96.1% size 10.18) | 98.9% size 12.44 (96.7% size 10.24) | 96.2% size 11.03 (96.6% size 9.82) | 98.2% size 11.96 (100.0% size 12.48) |
+| 0.952 (= coverage of the hierarchical rule on the calibration part) | 98.6% size 12.42 (96.2% size 10.19) | 98.9% size 12.44 (96.7% size 10.24) | 96.2% size 11.03 (96.6% size 9.82) | 98.2% size 11.96 (100.0% size 12.48) |
+
+
+Descriptive size-coverage comparison with an oracle threshold (the smallest marginal threshold that reaches the stated coverage ON THE TEST PART ITSELF; this is not conformal, it removes the discreteness of the quantile so that sizes can be compared at the same coverage):
+| coverage reached | subtype model, accepted channels | subtype model, section-9 channels | class-level table (section 1) | prior only | hierarchical rule (fixed) |
+|---|---|---|---|---|---|
+| >= 0.8 | 80.7% size 3.23 | 80.5% size 3.18 | 80.1% size 3.39 | 82.9% size 6.23 | 95.5% size 9.07 |
+| >= 0.9 | 90.1% size 10.43 | 90.0% size 9.20 | 96.2% size 11.03 | 98.2% size 11.96 | 95.5% size 9.07 |
+| >= 0.932 | 93.4% size 12.20 | 93.5% size 12.21 | 96.2% size 11.03 | 98.2% size 11.96 | 95.5% size 9.07 |
+| >= 0.95 | 98.6% size 12.42 | 98.9% size 12.44 | 96.2% size 11.03 | 98.2% size 11.96 | 95.5% size 9.07 |
+Hierarchical rule (diagnostics emitted), kappa as a set (kappa -> all subtypes of that class applicable at the template, UNDETERMINED -> all applicable): coverage 95.5% on the test part (95.2% on the calibration part), mean size 9.07. It has no tunable threshold, so the other methods are calibrated to its calibration-part coverage in the last row.
+
+Set-size distribution (%, 1 / 2 / 3 / 4 / 5-6 / 7-9 / 10+) at alpha 0.1, marginal, test part:
+- subtype model, accepted channels: 2 / 0 / 0 / 0 / 54 / 11 / 33; mean 8.40
+- subtype model, section-9 channels: 2 / 0 / 0 / 0 / 1 / 64 / 32; mean 9.15
+- class-level table (section 1): 0 / 0 / 0 / 0 / 10 / 58 / 31; mean 11.03
+- prior only: 0 / 0 / 0 / 0 / 0 / 57 / 43; mean 11.96
+- hierarchical rule: 0 / 52 / 0 / 0 / 0 / 1 / 47; mean 9.07
+
+##### 10.3.4 Sensitivity: calibration on train + calibration patients (75% of the patients; the model uses no training data)
+| alpha | mode | achieved coverage, mean size |
+|---|---|---|
+| 0.2 | marginal | 9798/12269 = 79.9% (W 79-81; patients 79-81), size 2.73 |
+| 0.2 | mondrian | 11294/12269 = 92.1% (W 92-93; patients 91-93), size 8.95 |
+| 0.1 | marginal | 11006/12269 = 89.7% (W 89-90; patients 89-91), size 8.32 |
+| 0.1 | mondrian | 11393/12269 = 92.9% (W 92-93; patients 92-93), size 9.47 |
+| 0.05 | marginal | 12097/12269 = 98.6% (W 98-99; patients 98-99), size 12.42 |
+| 0.05 | mondrian | 11757/12269 = 95.8% (W 95-96; patients 95-96), size 10.17 |
+
+##### 10.3.5 Exchangeability check at the patient level: roles of the calibration and test parts swapped (calibrate on the test patients, evaluate on the calibration patients)
+| alpha | mode | achieved coverage, mean size |
+|---|---|---|
+| 0.2 | marginal | 10053/12461 = 80.7% (W 80-81; patients 79-82), size 3.24 |
+| 0.2 | mondrian | 11282/12461 = 90.5% (W 90-91; patients 90-91), size 8.28 |
+| 0.1 | marginal | 11261/12461 = 90.4% (W 90-91; patients 89-91), size 10.29 |
+| 0.1 | mondrian | 11560/12461 = 92.8% (W 92-93; patients 92-93), size 9.28 |
+| 0.05 | marginal | 12308/12461 = 98.8% (W 99-99; patients 99-99), size 12.27 |
+| 0.05 | mondrian | 12006/12461 = 96.3% (W 96-97; patients 96-97), size 10.01 |
+
+
+**Reading of 10.3.**
+* **Marginal coverage holds on the test patients, with the tight labelling**: 84.9%, 90.8%, 95.7% for targets 80%, 90%, 95% (cluster intervals 83-86, 90-92, 95-96); swapping the roles of the calibration and test patients gives 83.9%, 90.3%, 95.0%. The coverage is above the target by a few points because the score is discrete (many subtypes share a probability).
+* **It does not hold conditionally.** Marginal sets cover 74.9% of `sched` alerts at alpha 0.1 (target 90%), 85.1% of `range`; Mondrian per template restores 90-99% for each template at a larger mean size (3.39 against 2.93). By true cause the marginal set covers C1 96.6%, C2 81.9% and **C3 48.6%** (Mondrian 96.7 / 87.3 / 67.0): the guarantee is about the average alert, which is mostly C1, and an attack is under-covered. No threshold per cause is possible at deployment because the cause is unknown; a Mondrian partition by true class is not a usable method here.
+* **Per patient** (alpha 0.1, marginal): median coverage 0.92, 10th percentile 0.83.
+* **Labelling of section 5** (second table): 89.8% marginal and 92.8% Mondrian at alpha 0.1 but with mean sizes 8.4 and 9.3, because the label noise (C2 labels on dropouts outside the template's scope) pushes the thresholds toward 1; C2 coverage is 44.6% (marginal). The sets under this labelling are larger by a factor three for the same nominal coverage.
+* **Methods at equal coverage.** With the oracle threshold (descriptive), at coverage >= 0.9 on the tight test part: subtype model with the accepted channels 2.93, without them 2.73, class-level table of section 1 3.12 (a class posterior spread over its subtypes by pi), prior only 4.47; at >= 0.95: 5.56 / 6.07 / 3.53 / 9.11. The hierarchical rule's kappa as a set has coverage 93.4% at mean size 16.20 (94% of its sets are of size 10 or more: UNDETERMINED is the full set). With conformal calibration to the same targets the ordering is the same (10.3.3). **The accepted channels do not shrink the sets in the main population** (the dispenser group is absent from the default profile and stuck_at is rare); their benefit is in the pairs (10.4.4). At the 0.95 target the class-level table is smaller than the subtype model, which is not what one would hope and is reported as it is.
+* The comparison with the sets of section 9 (level 0.9, coverage 95% at size 7.83 under the tight labelling) is not like for like: that was a posterior-mass set, this one is calibrated.
+
+### 10.4 Conformal sets on the pair population: separate calibration and transfer
+
+
+##### 10.4 Pair population `p120r` (3 240 pairs built = 27 variants x 120, 3071 of them with at least one matched member, rounded generator, seed 0; the 1080 pairs of `p40r` were too few for a calibration part per template and group, so 3 240 pairs were built: 3x as many, new pair patients, same machinery). Split by pair (the builder's patient-level split, seed 0, fractions 0.5 / 0.25 / 0.25): calibration 1412 matched members of 770 pairs, test 1419 members of 771 pairs; the train part is not used. Members with a matched alert only (the unmatched are misses, not part of the alert-set).
+
+Calibration members by template: {'count': 874, 'resp': 361, 'sched': 174, 'hold': 3}; truth cause: {'C1': 458, 'C2': 554, 'C3': 400}
+Main population (tight, calibration part) for comparison: templates {'resp': 3048, 'sched': 453, 'hold': 482, 'count': 1291, 'range': 350}; truth cause {'C1': 4517, 'C2': 538, 'C3': 569}. The pair population has 50% of each mechanism and (almost) only count, resp and sched alerts; the main population is dominated by C1 range and resp alerts.
+
+##### 10.4.1 Separate calibration on the pair calibration part: achieved coverage on the pair test part (primary method), marginal and Mondrian per template; 'pairs' = 95% cluster-bootstrap over pairs
+| alpha | mode | thresholds | coverage, mean size | size distribution % (1 / 2 / 3 / 4 / 5-6 / 7-9 / 10+) |
+|---|---|---|---|---|
+| 0.2 | marginal | 0.820 | 1175/1419 = 82.8% (W 81-85; pairs 81-85), size 2.19 | 51 / 24 / 2 / 1 / 22 / 0 / 0 |
+| 0.2 | mondrian | count 0.820 (n 874); hold inf (n 3); resp 0.913 (n 361); sched 0.961 (n 174) | 1246/1419 = 87.8% (W 86-89; pairs 86-89), size 3.06 | 38 / 20 / 7 / 2 / 25 / 8 / 0 |
+| 0.1 | marginal | 0.959 | 1326/1419 = 93.4% (W 92-95; pairs 92-95), size 4.22 | 19 / 16 / 8 / 8 / 41 / 4 / 6 |
+| 0.1 | mondrian | count 0.954 (n 874); hold inf (n 3); resp 0.920 (n 361); sched 0.961 (n 174) | 1341/1419 = 94.5% (W 93-96; pairs 93-96), size 3.57 | 31 / 15 / 14 / 1 / 31 / 8 / 0 |
+| 0.05 | marginal | 0.961 | 1381/1419 = 97.3% (W 96-98; pairs 96-98), size 4.61 | 19 / 16 / 8 / 0 / 41 / 12 / 6 |
+| 0.05 | mondrian | count 0.959 (n 874); hold inf (n 3); resp 0.975 (n 361); sched 0.961 (n 174) | 1383/1419 = 97.5% (W 97-98; pairs 97-98), size 4.91 | 19 / 16 / 6 / 2 / 33 / 19 / 6 |
+
+##### 10.4.2 Per group and stratum on the pair test part, SEPARATE calibration, alpha 0.2 (target 0.80)
+| group | stratum | test members | marginal | Mondrian per template |
+|---|---|---|---|---|
+| double_take_vs_bounce | dist | 406 | 374/406 = 92.1% (W 89-94), size 3.26 | 374/406 = 92.1% (W 89-94), size 3.26 |
+| double_take_vs_bounce | indist | 54 | 27/54 = 50.0% (W 37-63), size 5.00 | 27/54 = 50.0% (W 37-63), size 5.00 |
+| nonresponse_vs_falsified_dispense | dist | 290 | 264/290 = 91.0% (W 87-94), size 1.79 | 278/290 = 95.9% (W 93-98), size 2.03 |
+| nonresponse_vs_falsified_dispense | indist | 98 | 47/98 = 48.0% (W 38-58), size 1.98 | 47/98 = 48.0% (W 38-58), size 1.98 |
+| refusal_vs_robot_missed | dist | 70 | 70/70 = 100.0% (W 95-100), size 1.00 | 70/70 = 100.0% (W 95-100), size 4.00 |
+| refusal_vs_robot_missed | indist | 110 | 55/110 = 50.0% (W 41-59), size 1.00 | 110/110 = 100.0% (W 97-100), size 9.00 |
+| bounce_vs_forged_dispense | dist | 359 | 322/359 = 89.7% (W 86-92), size 1.65 | 324/359 = 90.3% (W 87-93), size 1.85 |
+| bounce_vs_forged_dispense | indist | 32 | 16/32 = 50.0% (W 34-66), size 1.00 | 16/32 = 50.0% (W 34-66), size 1.00 |
+| ALL | dist | 1125 | 1030/1125 = 91.6% (W 90-93), size 2.22 | 1046/1125 = 93.0% (W 91-94), size 2.54 |
+| ALL | indist | 294 | 145/294 = 49.3% (W 44-55), size 2.06 | 200/294 = 68.0% (W 62-73), size 5.05 |
+
+##### 10.4.2 Per group and stratum on the pair test part, SEPARATE calibration, alpha 0.1 (target 0.90)
+| group | stratum | test members | marginal | Mondrian per template |
+|---|---|---|---|---|
+| double_take_vs_bounce | dist | 406 | 404/406 = 99.5% (W 98-100), size 3.85 | 404/406 = 99.5% (W 98-100), size 3.56 |
+| double_take_vs_bounce | indist | 54 | 54/54 = 100.0% (W 93-100), size 6.00 | 54/54 = 100.0% (W 93-100), size 6.00 |
+| nonresponse_vs_falsified_dispense | dist | 290 | 288/290 = 99.3% (W 98-100), size 5.86 | 288/290 = 99.3% (W 98-100), size 3.48 |
+| nonresponse_vs_falsified_dispense | indist | 98 | 97/98 = 99.0% (W 94-100), size 8.02 | 74/98 = 75.5% (W 66-83), size 2.54 |
+| refusal_vs_robot_missed | dist | 70 | 70/70 = 100.0% (W 95-100), size 4.00 | 70/70 = 100.0% (W 95-100), size 4.00 |
+| refusal_vs_robot_missed | indist | 110 | 55/110 = 50.0% (W 41-59), size 4.00 | 110/110 = 100.0% (W 97-100), size 9.00 |
+| bounce_vs_forged_dispense | dist | 359 | 327/359 = 91.1% (W 88-94), size 2.31 | 325/359 = 90.5% (W 87-93), size 2.05 |
+| bounce_vs_forged_dispense | indist | 32 | 31/32 = 96.9% (W 84-99), size 2.06 | 16/32 = 50.0% (W 34-66), size 1.12 |
+| ALL | dist | 1125 | 1089/1125 = 96.8% (W 96-98), size 3.88 | 1087/1125 = 96.6% (W 95-98), size 3.09 |
+| ALL | indist | 294 | 237/294 = 80.6% (W 76-85), size 5.50 | 254/294 = 86.4% (W 82-90), size 5.44 |
+
+##### 10.4.2 Per group and stratum on the pair test part, SEPARATE calibration, alpha 0.05 (target 0.95)
+| group | stratum | test members | marginal | Mondrian per template |
+|---|---|---|---|---|
+| double_take_vs_bounce | dist | 406 | 404/406 = 99.5% (W 98-100), size 3.85 | 404/406 = 99.5% (W 98-100), size 3.86 |
+| double_take_vs_bounce | indist | 54 | 54/54 = 100.0% (W 93-100), size 6.00 | 54/54 = 100.0% (W 93-100), size 6.00 |
+| nonresponse_vs_falsified_dispense | dist | 290 | 288/290 = 99.3% (W 98-100), size 5.86 | 288/290 = 99.3% (W 98-100), size 6.69 |
+| nonresponse_vs_falsified_dispense | indist | 98 | 97/98 = 99.0% (W 94-100), size 8.02 | 98/98 = 100.0% (W 96-100), size 9.48 |
+| refusal_vs_robot_missed | dist | 70 | 70/70 = 100.0% (W 95-100), size 4.00 | 70/70 = 100.0% (W 95-100), size 4.00 |
+| refusal_vs_robot_missed | indist | 110 | 110/110 = 100.0% (W 97-100), size 9.00 | 110/110 = 100.0% (W 97-100), size 9.00 |
+| bounce_vs_forged_dispense | dist | 359 | 327/359 = 91.1% (W 88-94), size 2.31 | 328/359 = 91.4% (W 88-94), size 2.44 |
+| bounce_vs_forged_dispense | indist | 32 | 31/32 = 96.9% (W 84-99), size 2.06 | 31/32 = 96.9% (W 84-99), size 2.06 |
+| ALL | dist | 1125 | 1089/1125 = 96.8% (W 96-98), size 3.89 | 1090/1125 = 96.9% (W 96-98), size 4.14 |
+| ALL | indist | 294 | 292/294 = 99.3% (W 98-100), size 7.37 | 293/294 = 99.7% (W 98-100), size 7.85 |
+
+##### 10.4.2b Per true subtype, separate calibration, alpha 0.1, Mondrian
+| group | true subtype | test members | coverage, size |
+|---|---|---|---|
+| double_take_vs | dispenser_bounce | 235 | 233/235 = 99.1% (W 97-100), size 2.27 |
+| double_take_vs | double_take | 225 | 225/225 = 100.0% (W 98-100), size 5.49 |
+| nonresponse_vs | dispense_forgery | 223 | 197/223 = 88.3% (W 83-92), size 3.94 |
+| nonresponse_vs | drug_nonresponse | 165 | 165/165 = 100.0% (W 98-100), size 2.30 |
+| refusal_vs_rob | manipulation_failure | 90 | 90/90 = 100.0% (W 96-100), size 6.28 |
+| refusal_vs_rob | measurement_refusal | 90 | 90/90 = 100.0% (W 96-100), size 7.83 |
+| bounce_vs_forg | dispense_forgery | 170 | 120/170 = 70.6% (W 63-77), size 3.22 |
+| bounce_vs_forg | dispenser_bounce | 221 | 221/221 = 100.0% (W 98-100), size 1.02 |
+
+##### 10.4.3 Transfer: thresholds calibrated on the MAIN population (builder's calibration part of m400r) applied to the pair test part
+Main calibration, tight (causal) labelling:
+| alpha | mode | coverage on pair test, mean size | separate calibration (10.4.1) | coverage on main test (10.3.1) |
+|---|---|---|---|---|
+| 0.2 | marginal | 1175/1419 = 82.8% (W 81-85; pairs 81-85), size 2.46 | 82.8%, size 2.19 | 84.9%, size 2.53 |
+| 0.2 | mondrian | 1150/1419 = 81.0% (W 79-83; pairs 79-83), size 3.03 | 87.8%, size 3.06 | 86.4%, size 2.81 |
+| 0.1 | marginal | 1191/1419 = 83.9% (W 82-86; pairs 82-86), size 2.83 | 93.4%, size 4.22 | 90.8%, size 2.93 |
+| 0.1 | mondrian | 1246/1419 = 87.8% (W 86-89; pairs 86-89), size 3.64 | 94.5%, size 3.57 | 93.1%, size 3.39 |
+| 0.05 | marginal | 1326/1419 = 93.4% (W 92-95; pairs 92-95), size 4.22 | 97.3%, size 4.61 | 95.7%, size 5.56 |
+| 0.05 | mondrian | 1355/1419 = 95.5% (W 94-96; pairs 94-97), size 4.56 | 97.5%, size 4.91 | 97.3%, size 5.77 |
+
+Per group and stratum, transferred thresholds, alpha 0.1, tight:
+| group | stratum | test members | marginal | Mondrian per template |
+|---|---|---|---|---|
+| double_take_vs_bounce | dist | 406 | 374/406 = 92.1% (W 89-94), size 3.27 | 374/406 = 92.1% (W 89-94), size 3.27 |
+| double_take_vs_bounce | indist | 54 | 27/54 = 50.0% (W 37-63), size 5.00 | 27/54 = 50.0% (W 37-63), size 5.00 |
+| nonresponse_vs_falsified_dispense | dist | 290 | 279/290 = 96.2% (W 93-98), size 3.11 | 279/290 = 96.2% (W 93-98), size 3.11 |
+| nonresponse_vs_falsified_dispense | indist | 98 | 47/98 = 48.0% (W 38-58), size 1.98 | 47/98 = 48.0% (W 38-58), size 1.98 |
+| refusal_vs_robot_missed | dist | 70 | 70/70 = 100.0% (W 95-100), size 2.50 | 70/70 = 100.0% (W 95-100), size 8.00 |
+| refusal_vs_robot_missed | indist | 110 | 55/110 = 50.0% (W 41-59), size 4.00 | 110/110 = 100.0% (W 97-100), size 11.00 |
+| bounce_vs_forged_dispense | dist | 359 | 323/359 = 90.0% (W 86-93), size 1.86 | 323/359 = 90.0% (W 86-93), size 1.87 |
+| bounce_vs_forged_dispense | indist | 32 | 16/32 = 50.0% (W 34-66), size 1.12 | 16/32 = 50.0% (W 34-66), size 1.12 |
+
+Main calibration, labelling of section 5:
+| alpha | mode | coverage on pair test, mean size | separate calibration (10.4.1) | coverage on main test (10.3.1) |
+|---|---|---|---|---|
+| 0.2 | marginal | 1176/1419 = 82.9% (W 81-85; pairs 81-85), size 2.54 | 82.8%, size 2.19 | 80.7%, size 3.23 |
+| 0.2 | mondrian | 1418/1419 = 99.9% (W 100-100; pairs 100-100), size 12.07 | 87.8%, size 3.06 | 92.1%, size 8.96 |
+| 0.1 | marginal | 1386/1419 = 97.7% (W 97-98; pairs 97-98), size 7.45 | 93.4%, size 4.22 | 89.8%, size 8.40 |
+| 0.1 | mondrian | 1419/1419 = 100.0% (W 100-100; pairs 100-100), size 12.08 | 94.5%, size 3.57 | 92.8%, size 9.27 |
+| 0.05 | marginal | 1419/1419 = 100.0% (W 100-100; pairs 100-100), size 13.39 | 97.3%, size 4.61 | 98.6%, size 12.42 |
+| 0.05 | mondrian | 1419/1419 = 100.0% (W 100-100; pairs 100-100), size 13.16 | 97.5%, size 4.91 | 96.1%, size 10.18 |
+
+Per group and stratum, transferred thresholds, alpha 0.1, s5:
+| group | stratum | test members | marginal | Mondrian per template |
+|---|---|---|---|---|
+| double_take_vs_bounce | dist | 406 | 405/406 = 99.8% (W 99-100), size 5.64 | 406/406 = 100.0% (W 99-100), size 9.55 |
+| double_take_vs_bounce | indist | 54 | 54/54 = 100.0% (W 93-100), size 7.00 | 54/54 = 100.0% (W 93-100), size 10.00 |
+| nonresponse_vs_falsified_dispense | dist | 290 | 288/290 = 99.3% (W 98-100), size 9.11 | 290/290 = 100.0% (W 99-100), size 17.18 |
+| nonresponse_vs_falsified_dispense | indist | 98 | 98/98 = 100.0% (W 96-100), size 13.52 | 98/98 = 100.0% (W 96-100), size 19.46 |
+| refusal_vs_robot_missed | dist | 70 | 70/70 = 100.0% (W 95-100), size 10.00 | 70/70 = 100.0% (W 95-100), size 8.00 |
+| refusal_vs_robot_missed | indist | 110 | 110/110 = 100.0% (W 97-100), size 12.00 | 110/110 = 100.0% (W 97-100), size 11.00 |
+| bounce_vs_forged_dispense | dist | 359 | 329/359 = 91.6% (W 88-94), size 4.80 | 359/359 = 100.0% (W 99-100), size 10.46 |
+| bounce_vs_forged_dispense | indist | 32 | 32/32 = 100.0% (W 89-100), size 6.31 | 32/32 = 100.0% (W 89-100), size 9.62 |
+
+##### 10.4.4 Methods at equal coverage on the pair test part (each calibrated on the pair calibration part; Mondrian per template in brackets)
+| target | subtype model, accepted channels | subtype model, section-9 channels | class-level table (section 1) | prior only |
+|---|---|---|---|---|
+| 0.800 | 82.8% size 2.19 (87.8% size 3.06) | 87.2% size 4.37 (92.0% size 4.94) | 100.0% size 12.58 (93.8% size 8.84) | 92.5% size 8.18 (98.8% size 9.46) |
+| 0.900 | 93.4% size 4.22 (94.5% size 3.57) | 90.6% size 4.68 (94.9% size 5.28) | 100.0% size 12.58 (98.4% size 9.07) | 92.5% size 8.18 (98.8% size 9.46) |
+| 0.950 | 97.3% size 4.61 (97.5% size 4.91) | 95.7% size 6.39 (97.8% size 6.34) | 100.0% size 12.58 (99.2% size 11.20) | 98.8% size 10.55 (98.8% size 9.46) |
+| 1.000 (= rule coverage on the calibration part) | 100.0% size 13.87 (100.0% size 13.87) | 100.0% size 13.87 (100.0% size 13.87) | 100.0% size 13.87 (100.0% size 13.87) | 100.0% size 13.87 (100.0% size 13.87) |
+Hierarchical rule as a set: coverage 100.0% on the pair test part, mean size 12.34.
+
+Descriptive oracle-threshold comparison on the pair test part (as in 10.3.3):
+| coverage reached | subtype model, accepted channels | subtype model, section-9 channels | class-level table (section 1) | prior only |
+|---|---|---|---|---|
+| >= 0.8 | 82.8% size 2.19 | 87.2% size 4.37 | 100.0% size 12.58 | 92.5% size 8.18 |
+| >= 0.9 | 92.4% size 3.75 | 90.6% size 4.68 | 100.0% size 12.58 | 92.5% size 8.18 |
+| >= 0.95 | 97.3% size 4.61 | 95.7% size 6.39 | 100.0% size 12.58 | 98.8% size 10.55 |
+
+
+**Reading of 10.4.**
+* **The pair population needs its own calibration.** It has 50% of each mechanism and almost only `count`, `resp` and `sched` alerts (874 / 361 / 174 calibration members); the main population is 80% C1 and dominated by `resp` and `range`. Thresholds from the main population (tight) give on the pair test part 83.9% (marginal, target 90%), 87.8% (Mondrian), 93.4% (marginal, target 95%), against 93.4%, 94.5%, 97.3% with the separate calibration; the labelling of section 5 over-covers (97.7% to 100%) at sets of 7 to 13 subtypes. The drop is the non-exchangeability of the two populations, not noise.
+* **Separate calibration holds marginally** (93.4% and 94.5% at alpha 0.1, cluster interval over pairs 92-95 and 93-96), but **not for the indistinguishable stratum**: 80.6% (marginal) and 86.4% (Mondrian) at alpha 0.1, 49% to 68% at alpha 0.2. By construction two identical streams give the same set for both members, so a set that holds one subtype of the pair covers only one of the two members unless it holds both; coverage 50% is the structural value of a set that picks one (group 3 `outcome_withheld`, 110 members: 50% marginal, 100% Mondrian at set size 9, i.e. by listing everything).
+* **Group 4 forged dispenses** are covered 70.6% (Mondrian, alpha 0.1) while the bounce is covered 100%: the interval field makes the forgery that copies the bounce timing look like a bounce.
+* **Methods at equal coverage on the pairs** (10.4.4): the subtype model with the accepted channels has the smallest sets (93.4% at size 4.22; 94.5% at 3.57 with Mondrian) against 90.6% at 4.68 without the new channels, 8.18 for the prior only and 12.6 for the class-level table (whose score cannot separate the members: its threshold is the full set); the hierarchical rule as a set covers 100% at size 12.34.
+* Hold has 3 calibration members in the pairs, so its Mondrian threshold is the full set (infinity); one of the 1 419 test members is a `hold` alert.
+
+### 10.5 What could not be determined
+
+* **Real cuff.** The resolution of 1 mmHg is a device-profile parameter that I set as the default as instructed; the true resolution, the noise and the way a frozen cuff repeats are not in the repository. rep_nat = 0.0197 is a property of this generator with this rounding (and of the benchmark's SD of consecutive readings, 20 mmHg), not a device constant.
+* **Exchangeability.** The conformal statements are marginal, over this benchmark, for patient-level exchangeable calibration and test parts; the patients of one benchmark share the generator's placeholders. They do not transfer to another population (10.4), to a real ward, or to a conditional statement. I did not use any phrase stronger than that.
+* **The labelling.** The tight labelling is primary by decision, taken after the result; the section-5 labelling is printed everywhere. The ground truth of an alert is still an inference (template, time, scope); alerts caused by two co-occurring events are assigned to one.
+* **ADR-034** is applied through the existing field and the delivery ratio (the extractor was not changed), so cases with a repeat and a gap in the same window read `None` for the repeat; a native extractor could do better. **ADR-032** fields are computed from the observed DISPENSE events up to the decision time, not per instance.
+* **Pairs.** 3 240 pairs were built, 3 071 have a matched member; Mondrian per group is not possible at deployment (the group is unknown); Mondrian per template has 3 calibration members at `hold`. The unrounded 1080 pairs of sections 3 to 9 were not rebuilt with the accepted channels.
+* **Eps, qc, the within-class weights, T_b and the levels** are still sensitivity values awaiting gab; only the sensitivity of 10.2 and 10.1.3 was run, not a full factorial of the conformal sets.
+
+### 10.6 Files and reproduction
+
+Files in `/tmp/research/likelihood/`: `subtype_model.py` (native ADR-032/034/repeat cells), `scripts/{round_check,silent_native,pairs_accepted,conflib,conformal_main,conformal_pairs,sens3_data}.py`, tables in `out/{round_check,silent_native,pairs_accepted,conformal_main_tight,conformal_main_s5,conformal_pairs}.md`, data `out/main_{ffr,m120r,m400r}.pkl`, `out/pairs_{p40r,p120r}_sw1.pkl`, `out/sens3_*.pkl`.
+
+From `scripts/`:
+```
+export RALMON_CUFF_RES_MMHG=1 RALMON_CUFF_PULSE_RES_BPM=1
+python3 run_members.py 40 p40r 1 ; python3 run_members.py 120 p120r 1
+RALMON_RATES=0,0,0 python3 run_main.py ffr 120 30 default
+python3 run_main.py m120r 120 30 default ; python3 run_main.py m400r 400 30 default
+python3 round_check.py                       # 10.1.1, 10.1.2
+python3 sens3_data.py pairs p40r ; python3 sens3_data.py main m120r ; python3 sens3_data.py pairs p120r ; python3 sens3_data.py main m400r
+python3 silent_native.py                     # 10.1.3
+python3 pairs_accepted.py                    # 10.2
+python3 conformal_main.py                    # 10.3 (also writes the thresholds used by 10.4)
+python3 conformal_pairs.py                   # 10.4
+python3 assemble_section10.py                # this section
+```

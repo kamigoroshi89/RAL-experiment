@@ -4,10 +4,10 @@ title: "Metrics for probabilistic attribution: log score, Brier, calibration cur
 workstream: WS08-experiments
 owner: agent
 status: blocked
-depends_on: ["WS08-T08", "WS02-T06"]
+depends_on: ["WS08-T08", "WS02-T06", "WS05-T14"]
 critical_path: true
 non_negotiable: false
-estimate_pd: 2
+estimate_pd: 3
 sources: ["ADR-074", "analisi §5.5"]
 interfaces: ["02-interfaces.md#metrics"]
 review_items: []
@@ -50,3 +50,7 @@ ADR-074, ADR-072 (b), `docs/models/attribution-likelihood.md`, `docs/benchmark/e
 ### Amendment of 2026-10-11 (gab; ADR-074, decision 1)
 
 Add to the metrics: set coverage (the true subtype is in the set) and mean set size, per stratum and per template; the pair likelihood ratio is taken between the two specific subtypes, not between classes. Tests: `test_set_coverage_and_size_hand_values`, `test_pair_llr_between_subtypes`.
+
+### Amendment of 2026-10-11 (gab; ADR-074, amendments 2 and 3)
+
+(1) Methods are compared AT EQUAL COVERAGE by mean set size: each method's sets are calibrated (WS05-T14) to the same target on the calibration part (patient-level split of the builder) and compared on the test part; the hierarchical rule's kappa as a set (kappa -> all subtypes of its class; UNDETERMINED -> all applicable) and a prior-only baseline are included. (2) The pairs get a SEPARATE calibration (50% prevalence); report also the transfer from the main population to show why. (3) Truth: the TIGHT causal labelling is primary; the looser labelling is reported next to it in every table, and the metadata states that the choice was made after seeing the result (ADR-074 amendment 2). (4) Coverage is reported marginal, per template, per true cause and per patient (cluster bootstrap); the metadata carries the exchangeability statement. Tests: `test_equal_coverage_comparison_hand_values`, `test_pair_calibration_is_separate`, `test_both_labellings_are_reported`, `test_coverage_per_patient_cluster_bootstrap`.
