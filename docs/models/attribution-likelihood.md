@@ -8,12 +8,12 @@ Validation in this project is technical and pre-clinical. Nothing in this docume
 
 | kind | what | how it is written |
 |---|---|---|
-| structural | a field raised by construction by a subtype; a field raised by no subtype | `1-eps` and `eps`, with `eps` a parameter; 22 explicit cells have this kind, every unlisted (subtype, field) pair is the structural zero `eps` |
-| conditional | a field raised only when a stated condition holds (lease, deadline, sequence provision, profile, attacker behaviour) | `awaiting_human_value`, with the form `eps + (1-2 eps) * qc` (or `q_stale`, `delta`); 64 cells |
-| natural | the coincidence of two consecutive cuff readings | `max(rep_nat, eps)`, `rep_nat` a sensitivity parameter |
+| structural | a field raised by construction by a subtype; a field raised by no subtype | `1-eps` and `eps`, with `eps` a parameter; 19 structural cells are explicit, every unlisted (subtype, field) pair is the structural zero `eps` |
+| conditional | a field raised only when a stated condition holds (lease, deadline, sequence provision, time bound, profile, attacker behaviour) | `awaiting_human_value`, with the form `eps + (1-2 eps) * qc` (or `1-qc`, `q_stale`, `delta`); 37 conditional cells (tokens C, Cn, S, V) |
+| natural | the coincidence of two consecutive cuff readings | `max(rep_nat, eps)`, `rep_nat` a sensitivity parameter; 30 natural-repeat cells, one per component that can violate a cuff-reading template (apart from `stuck_at`), with a single parameter |
 | priors | class priors, `pi(subtype given class)`, thresholds | `awaiting_human_value` with a sensitivity range, designs labelled `illustrative` |
 
-The file has 86 explicit cells over 38 components of 35 subtypes. `verified_by` is `null` in every row: no human has recorded a check. No row cites the literature; a row of source type `literature` would need a verified bibliography key (`bib_key`), and none has one.
+The file has 86 explicit cells over 38 components of 35 subtypes: 19 structural and 67 awaiting (37 conditional plus 30 natural-repeat). `verified_by` is `null` in every row: no human has recorded a check. No row cites the literature; a row of source type `literature` would need a verified bibliography key (`bib_key`), and none has one.
 
 ## The model
 
@@ -28,11 +28,11 @@ p(s | e, t)  proportional to  prior_t(class(s)) * pi(s | class(s), t) * product 
 - `s` runs over the components that can violate `t` (the column "templates" of the catalogue below; the fault model's "Effects on templates" and the threat model's "templates it can change").
 - `prior_t(c)`: the class prior, restricted to the classes that have a component at `t` and renormalised; a class with no component at `t` (C1 at `sys` and at `int`) has prior 0.
 - `pi(s | c, t)`: the weight of the component inside its class, normalised over the components of that class applicable at `t` (the designs `uniform`, `quiet_rare`, `quiet_common` below).
-- `R_t`: the fields read for `t` (table below) minus the fields masked in the run.
+- `R_t`: the cells read for `t`: the fields of the table below minus the fields masked in the run, where the pair (`system.ble_link_quality`, `system.seq_gap`) counts as ONE joint cell in the reference (below).
 - `P(class_f | s)`: the cell: the probability that field `f` has the reading class `class_f` in {A, D} under `s`; `P(D | s) = 1 - P(A | s)`.
 - **A field whose reading is `None` has no cell in the product and contributes the factor 1** (the rule of `#evidencevector`: unavailable is never a negative reading). The same holds for an out-of-domain reading and for the class K of `system.node_lifecycle` (a deliberate transition; no subtype of the model produces it).
 - **The class posterior** `p_kappa(c)` is the sum of `p(s | e, t)` over the components of the class; it fills `Alert.p_kappa`. The subtype posterior (the sum over the levels of a subtype) is what `posterior_subtypes` returns.
-- **The independence assumption.** The read fields are treated as independent given the component (naive Bayes). This is an **ASSUMPTION** of the model, not a finding: it is false for fields that a single event raises together, and the grouped cells below are the sensitivity variants that relax it for the two groups that overlap. The assumption is stated in the paper with its sensitivity, and the independent product is the reference.
+- **The independence assumption.** The read fields are treated as independent given the component (naive Bayes), with one exception that is part of the REFERENCE: `system.ble_link_quality` and `system.seq_gap` overlap (the delivery ratio is exactly 1.0 when no value is missing) and are ONE joint cell, so they are not multiplied as two factors (ADR-074 amendment 3; ADR-075). The independence of the other fields is an **ASSUMPTION** of the model, not a finding: it is false for fields that a single event raises together. Two sensitivity variants relax or restore it: the fully independent product (the pair counted as two factors, which double counts one dropout) and the cross-device group (`cross_device_signal_quality`, with the common cause `ecg_noise`). The assumption is stated in the paper with its sensitivity.
 
 **Pseudo-code** (the reference that WS05-T12 implements; `tests/attribution/test_likelihood_spec.py` holds a test-local transcription used to check hand-computed examples).
 
@@ -49,7 +49,9 @@ def posterior_subtypes(t, reading_classes, params, design, mask):
             if r is None: continue                                    # factor 1
             pa = cell(s, f, params)                                   # eps, 1-eps or a conditional form
             logp[s] += log(pa if r == 'A' else 1 - pa)
-        # grouped variant: the terms of the fields of a group are replaced by log P(joint class | s)
+        # REFERENCE: the pair (system.ble_link_quality, system.seq_gap) is one joint term, log P(joint class | s), not two factors;
+        # variant reference_plus_cross_device: the terms of (pulse_vs_ecg_hr_diff, ecg_sqi, ppg_sqi) are replaced the same way;
+        # variant fully_independent: every field is its own factor
     p = softmax(logp)
     sub[subtype(s)] += p[s] for each component s
     p_kappa[class(s)] += p[s] for each component s                    # equals the sum of the subtype posteriors
@@ -84,6 +86,8 @@ The relevance map of `attribution-rule.md` (fields marked E, s, b, q, r) is the 
 - **Witness fields** (`witness.identity_confirmed`, `witness.intake_observed`) are read only for `resp` (backing of the response), as in the relevance map; for `int` they are context (AD-3), so the `presence_spoof` cells exist but no template reads them.
 - **Mask A4** (ablation of the embodied channel; `evidence-channels.md`, Ablation A4 mask): the cells of the fields that become `None` are removed, that is, read as unavailable with the factor 1: `witness.identity_confirmed`, `witness.intake_observed`, `system.nav_task_failed`, `system.manip_task_failed` (`system.battery_low` and `witness.robot_present` are not read). The four aggregate `system` fields (`node_lifecycle`, `diagnostics_ok`, `liveliness_ok`, `qos_deadline_missed`) are recomputed by the extractor over the device nodes and keep their cells. The set of applicable subtypes does not change under A4: the robot-side subtypes become less distinguishable and the sets larger, which is the quantity A4 measures. `mask` of the pseudo-code is this set (in `masks.a4.cells_removed`).
 
+| field | range | sched | hold | count | resp | sys | int |
+|---|---|---|---|---|---|---|---|
 | `system.node_lifecycle` | read | read | read | read | read | read | read |
 | `system.diagnostics_ok` | read | read | read | read | read | read | read |
 | `system.liveliness_ok` | read | read | read | read | read | read | read |
@@ -109,7 +113,7 @@ The relevance map of `attribution-rule.md` (fields marked E, s, b, q, r) is the 
 
 ## The subtype catalogue
 
-The catalogue is the union of the C2 identifiers of `docs/models/fault-model.md` (Subtype vocabulary, 17), the C3 identifiers of `docs/models/threat-model.md` (Subtype vocabulary, 7) and the C1 labels of the benchmark: the five injected subtypes of `ralmon.benchmark.inject_c1`, the two natural labels `double_take` and `dose_omission` of the labeller, and one label `spontaneous_<template>` for each of the five C1-capable templates (`range`, `sched`, `hold`, `count`, `resp`; the labeller names a violation with no injection behind it by the template). A test compares the file with these sources. The templates of a component are those where the fault model's "Effects on templates" lists the outcome violated (or shifted, for a loss that makes an instance decide on an older value), and the threat model's "templates it can change". `in benchmark v1` marks the subtypes that benchmark v1 produces.
+The catalogue is the union of the C2 identifiers of `docs/models/fault-model.md` (Subtype vocabulary, 17), the C3 identifiers of `docs/models/threat-model.md` (Subtype vocabulary, 7) and the C1 labels of the benchmark: the five injected subtypes of `ralmon.benchmark.inject_c1` (`double_take` is both an injected subtype and a natural label of the labeller), the natural label `dose_omission`, and one label `spontaneous_<template>` for each of the five C1-capable templates (`range`, `sched`, `hold`, `count`, `resp`; the labeller names a violation with no injection behind it by the template). A test compares the file with these sources. The templates of a component are those where the fault model's "Effects on templates" lists the outcome violated (or shifted, for a loss that makes an instance decide on an older value), and the threat model's "templates it can change". `in benchmark v1` marks the subtypes that benchmark v1 produces.
 
 | subtype | class | levels | templates it can violate | in benchmark v1 |
 |---|---|---|---|---|
@@ -193,8 +197,8 @@ Every cell of the file has a `source_type` (fault-model row, threat-model row, d
 | `localisation_noise` | C2 | sched, resp, hold | `nav_task_failed` C (D5); `cuff_value_repeated` N (NATREP) |
 | `impossible_goal` | C2 | sched, resp, hold | `nav_task_failed` R; `cuff_value_repeated` N (NATREP) |
 | `link_delay` | C2 | sched, hold, resp, int | `qos_deadline_missed` C (LC); `cuff_value_repeated` N (NATREP); `timestamp_implausible` R |
-| `out_of_order` | C2 | none | `timestamp_implausible` R |
-| `clock_skew` | C2 | sched, hold | `cuff_value_repeated` N (NATREP); `timestamp_implausible` R |
+| `out_of_order` | C2 | none | `timestamp_implausible` C (BOUND) |
+| `clock_skew` | C2 | sched, hold | `cuff_value_repeated` N (NATREP); `timestamp_implausible` C (BOUND) |
 | `battery_depleted` | C2 | sched, hold, resp | `liveliness_ok` C (LC); `qos_deadline_missed` C (LC); `cuff_value_repeated` N (NATREP) |
 | `uncommanded_lifecycle_transition` | C2 | sched, hold, resp, count | `node_lifecycle` R; `diagnostics_ok` S (STALE); `cuff_value_repeated` N (NATREP) |
 | `replay_naive` | C3 | sched, hold, resp | `cuff_value_repeated` N (NATREP); `seq_repeat` R; `timestamp_implausible` R |
@@ -206,7 +210,7 @@ Every cell of the file has a `source_type` (fault-model row, threat-model row, d
 | `presence_spoof_naive` | C3 | int | `identity_confirmed` C (IDCHECK) |
 | `presence_spoof_informed` | C3 | int | none (silent) |
 | `dispenser_physical_tamper` | C3 | count, hold, resp, int | `cuff_value_repeated` N (NATREP); `intake_observed` C (COLOC) |
-| `timestamp_manipulation` | C3 | sched, hold, range, resp | `cuff_value_repeated` N (NATREP); `authenticated` R (AUTHDEP); `timestamp_implausible` R |
+| `timestamp_manipulation` | C3 | sched, hold, range, resp | `cuff_value_repeated` N (NATREP); `authenticated` R (AUTHDEP); `timestamp_implausible` C (BOUND) |
 
 Notes on individual cells.
 
@@ -228,6 +232,7 @@ Notes on individual cells.
 - **literature**
   - diverted dose (delta): 2 cell(s), components `drug_nonresponse`, `spontaneous_resp`
 - **device_specification**
+  - time evidence raised only beyond the bound D or skew_max (clock_skew, out_of_order, timestamp_manipulation): 3 cell(s), components `clock_skew`, `out_of_order`, `timestamp_manipulation`
   - link metric degraded by a long run of losses: 1 cell(s), components `message_drop`
   - interval below T_b for a bounce (dispenser reports the key, D-15): 1 cell(s), components `dispenser_bounce`
   - conditional raise of `liveliness_ok` / `qos_deadline_missed` (lease and deadline condition LC): 9 cell(s), components `battery_depleted`, `ble_dropout`, `link_delay`, `message_drop`, `process_kill`
@@ -239,11 +244,17 @@ Notes on individual cells.
 
 The structural cells need only `eps`. The parameters themselves (below) also need gab or a device specification.
 
-## Grouped cells (the sensitivity variants of the independence assumption)
+## Grouped cells (the reference pair and the sensitivity variants)
 
-Two groups of fields are not independent given a single event, and the file declares both as variants (`grouped_cells`; sensitivity `grouped_variant`: `independent` is the reference).
+Two groups of fields are not independent given a single event. The pair `ble_seq_gap` is the REFERENCE of the table; the cross-device group is the only variant that relaxes the independence assumption further; the fully independent product is a labelled sensitivity variant (`grouped_cells` in the file; sensitivity `grouped_variant` with the values `reference`, `fully_independent`, `reference_plus_cross_device`).
 
-**`ble_seq_gap`: `system.ble_link_quality` with `system.seq_gap` (ADR-074 amendment 3).** The two fields overlap: the delivery ratio is exactly 1.0 when no value of the observed span is missing, so a gap implies a ratio below 1 (and an asserted gap with a complete ratio is an extractor defect, RS-2). The variant reads them as ONE joint class of four values: `clean` (link denied, gap denied), `gap` (link denied, gap asserted: class G), `degraded` (link asserted, gap denied) and `gap_degraded` (both asserted). A component with no entry in the modes is `clean` with probability 1; a component with modes spreads its probability over the listed joint classes, and every other joint class gets the leak `eps / (K - 1)` with `K = 4`. A `None` coordinate is summed over; both `None` is the factor 1.
+**`ble_seq_gap`: `system.ble_link_quality` with `system.seq_gap` (ADR-074 amendment 3; REFERENCE).** The two fields overlap: the delivery ratio is exactly 1.0 when no value of the observed span is missing, so a gap implies a ratio below 1 (and an asserted gap with a complete ratio is an extractor defect, RS-2). The reference reads them as ONE joint class of four values, in the order (`ble_link_quality`, `seq_gap`), A asserted and D denied: `clean` (D,D), `gap` (D,A: class G, a value is missing and the link is not degraded), `degraded` (A,D) and `gap_degraded` (A,A). The joint probability of a component is, with `K = 4` joint classes and the weights of its modes summing to 1:
+
+```
+P(j | s) = sum over the modes m of s of  weight(m) * [ (1 - eps) * 1(j = m)  +  eps / (K - 1) * 1(j != m) ]
+```
+
+so it sums to 1 over the four joint classes (this is `_jdist` of the prototype, `likelihood_attr.py`, with `eps/3`). A component with no entry in the modes has the single mode `clean` with weight 1. **None rule:** if one member is `None` the joint probability is summed over (marginalised over) the unavailable member; if both are `None` the factor is 1. The explicit cells of `system.ble_link_quality` and `system.seq_gap` in `cells` are the marginals that the fully independent variant multiplies and the source record of the modes; in the reference they are not multiplied.
 
 | component | modes (joint class: probability) |
 |---|---|
@@ -252,11 +263,11 @@ Two groups of fields are not independent given a single event, and the file decl
 | `injection_naive` | gap: 1-qc, clean: qc |
 | `dispense_forgery_naive` | gap: 1-qc, clean: qc |
 
-The modes are inherited from the research prototype (variant G1) and re-expressed on the two split fields; the probabilities are `qc` and `1-qc`, so the variant has no number of its own. `crypto_temporal.seq_repeat` is outside the group (it is integrity evidence, `system.seq_gap` is system evidence).
+The modes are inherited from the research prototype (variant G1) and re-expressed on the two split fields; the probabilities are `qc` and `1-qc`, so the cell has no number of its own, and the modes of `message_drop`, `injection_naive` and `dispense_forgery` (naive) are design choices that need gab. `crypto_temporal.seq_repeat` is outside the pair (it is integrity evidence, `system.seq_gap` is system evidence). **A difference to know:** for `message_drop` the fault model lists the link degradation and the gap as two independent conditions, so the independent product allows a degraded link without a gap and both together with probability `qc^2`; the reference modes make the loss either seen as a gap with a link that is not degraded (`gap`) or unseen (`clean`), and give a degraded link without a gap only the leak `eps/3`. The fully independent variant restores the fault model's reading.
 
-**`cross_device_signal_quality`: `cross_device.pulse_vs_ecg_hr_diff` with `signal_quality.ecg_sqi` and `signal_quality.ppg_sqi`.** Under this variant the three fields (for `range`, `hold`, `resp`, `sys`) are read as one joint class of eight values, the product of the marginals given the component, plus the common cause `ecg_noise`: the subtype is made applicable at those templates as a co-occurrence nuisance (it violates no template by itself) with the modes `A,A,D: qc` and `A,D,D: 1-qc` over (diff, ecg_sqi, ppg_sqi). The reason is the evidence confound of the fault model: a noisy ECG during a real clinical violation raises the cross-device difference, which the independent product would count as integrity evidence.
+**`cross_device_signal_quality`: `cross_device.pulse_vs_ecg_hr_diff` with `signal_quality.ecg_sqi` and `signal_quality.ppg_sqi` (variant `reference_plus_cross_device`; independent in the reference).** Under this variant the three fields (for `range`, `hold`, `resp`, `sys`) are read as one joint class of eight values (each member A or D, in the order diff, ecg_sqi, ppg_sqi). For a component with no modes it is the product of its marginals; for the common cause `ecg_noise` the subtype is made applicable at those templates as a co-occurrence nuisance (it violates no template by itself) with the modes `A,A,D: qc` and `A,D,D: 1-qc`, and the same formula with `K = 8` (`eps/7` on every other joint class), which sums to 1. **None rule:** the same as above: summed over the unavailable members, factor 1 when all three are `None`. The reason is the evidence confound of the fault model: a noisy ECG during a real clinical violation raises the cross-device difference, which the independent product would count as integrity evidence.
 
-Both rows are `awaiting_human_value` with the sensitivity range `independent`, `grouped`.
+The two rows are `awaiting_human_value`; their sensitivity ranges are `grouped`, `independent` (cross-device: reference `independent`; ble_seq_gap: reference `grouped`). The normalisation of every joint, for every component and every pattern of available members, is a test.
 
 ## System diagnostics: the two profiles
 
@@ -319,7 +330,7 @@ Lambda_M = log P(e_M | s_A) - log P(e_M | s_B)        for the alert of member M 
 D        = Lambda_A - Lambda_B
 ```
 
-`P(e | s)` is the product of the cells of the fields read at the alert's template for the subtype `s`; for a subtype with two levels it is the mixture over its levels with the within-subtype weights. The subtypes need not be applicable at the template: a pair compares its two actual causes. It does not depend on the class priors or on `pi(subtype | class)`. In the indistinguishable stratum identical streams give `D = 0` exactly (a necessary property, tested on identical readings); in the distinguishable stratum the criterion is the correct direction (`Lambda_A > 0` and `Lambda_B < 0`) with McNemar between methods on that direction, and `D > 0`. `Lambda` itself is not 0 on identical streams: it is the lean of the catalogue and the cells.
+`P(e | s)` is the product of the cells read at the alert's template for the subtype `s` (the pair `ble_seq_gap` as one joint term); for a subtype with two knowledge levels it is the mixture over its levels, `P(e | s) = sum over the levels l of w(l) / sum(w) * P(e | s at l)`, with the **within-subtype level weights `w(l)` of the pi design in force**. The reference is the design `uniform`, uniform over components (weight 1 per component, so the two levels of `replay`, `dispense_forgery` and `presence_spoof` weigh equally); it is a declared reference design awaiting gab, not a value from the literature, and `quiet_rare` and `quiet_common` change it (they weigh the informed level of those subtypes by 0.25 and 4). The subtypes need not be applicable at the template: a pair compares its two actual causes. It does not depend on the class priors or on the weights BETWEEN subtypes (`pi(subtype | class)`); it depends on the within-subtype weights only for the three subtypes with two levels. In the indistinguishable stratum identical streams give `D = 0` exactly (a necessary property, tested on identical readings); in the distinguishable stratum the criterion is the correct direction (`Lambda_A > 0` and `Lambda_B < 0`) with McNemar between methods on that direction, and `D > 0`. `Lambda` itself is not 0 on identical streams: it is the lean of the catalogue and the cells.
 
 ## Sets and conformal calibration (for WS05-T14)
 
@@ -329,10 +340,19 @@ The cumulative-level set is the specification of the table. The calibrated set f
 
 - **Where nothing is raised, C1 cannot be told from the silent faults.** At `range` the likelihood ratio between a C1 subtype and `cuff_silent_bias` is **exactly 1** on every reading, because every cell is `Z` or `N` for both; the posterior is the prior. Any prior, catalogue or threshold that makes C1 confident makes the silent faults confident C1 (research 7.2). The remedy of the paper is the SET of subtypes and the diagnosability matrix, not a better threshold. `stuck_at` is the exception only through `signal_quality.cuff_value_repeated`, and only when the reading exists.
 - **Indistinguishable pairs have `D = 0`.** Streams that are identical by construction (an informed attacker coherent on every channel; a bounce and a forged dispense that copies the bounce timing, where `Lambda` is the same non-zero number for both members) cannot be separated by any method of this family; they are declared, not repaired.
-- **The independent product double counts correlated channels**: one dropout raises several system fields. The grouped variants are the sensitivity.
+- **The fully independent product double counts correlated channels**: one dropout raises several system fields. The reference therefore reads `system.ble_link_quality` and `system.seq_gap` as one joint cell; the fully independent product and the cross-device group are the sensitivity variants.
+- **Time cells beyond the bound.** `crypto_temporal.timestamp_implausible` is raised by `clock_skew`, `out_of_order` and `timestamp_manipulation` only beyond the bound (late beyond `D`, or future-stamped beyond `skew_max`; fault-model Fault-to-evidence table, threat-model Attack-to-evidence table and TX-8 (a)), so these cells are conditional (`C`, condition BOUND), not `1-eps`. All three subtypes are outside benchmark v1 (`clock_skew` and `timestamp_manipulation` are modelled and not injected; `out_of_order` is absorbed by the reorder buffer within the bound), so the benchmark cannot test these cells.
+- **A dead awaiting cell.** `presence_spoof` (naive) is applicable at `int` and its cell is the identity check (`witness.identity_confirmed`), but the witness fields are context for `int` (AD-3) and no template reads that cell for it: it is a dead awaiting cell, and the naive `presence_spoof` is indistinguishable from the informed one at `int`. The other cells that no applicable template reads are those of `out_of_order` (applicable nowhere) and the two of `ecg_noise` (live only in the cross-device variant).
+- **`message_drop`.** The reference (joint) and the fully independent readings differ for it (previous section): the link degradation and the gap are coupled in the reference, independent in the fault model's table.
+- **`replay` (naive) and `system.seq_gap`.** The threat model says that the suppressed genuine messages would leave a gap in the device's own sequence (`system.seq_gap`) and that this is not modelled at the naive level (H-SUPP): the cell of `replay` (naive) for `system.seq_gap` is the structural zero `eps` although a replay with suppression would add a gap; a replay together with a loss is read as a loss (TM-GAP-SEQ).
 - **The interval channel is defeated by an attacker who copies the bounce timing**, and by a threshold above the double-take gap (the research found the interval stops separating at 180 s).
 - **The cells describe the generator's and the catalogue's own view**; the fault and threat tables were written in this project, so they are not independent evidence of what a ward produces.
 - **A predicted violation** is not attributed by this table (its attribution is UNDETERMINED by definition); cascades and the multi-alert aggregation of one event are not treated.
+
+## Declared dependencies on decisions that are proposed or unconfirmed
+
+- **ADR-075 (proposed, DA-CONFERMARE).** In the hierarchical rule `ours-hier`, `system.seq_gap` blocks C1 (RS-2, AM-2) but is not a C2 predicate: the delivery ratio below the floor remains the C2 evidence, and the paper must not say that the gap is C2 evidence for `ours-hier`. The likelihood table is not bound by this: it gives `system.seq_gap` cells (the pair `ble_seq_gap` is one joint cell). The two methods therefore treat the same field differently by design, and a comparison must say so.
+- **ADR-074 amendment 4 (generator modelling choices of WS04-T18, to be confirmed by gab).** (1) The INFORMED forger is coherent on the interval chain: the forged opening counts in the chain of `dispenser.interval_since_previous_ms`, so the next genuine opening carries the interval of its non-response twin. The all-structural-zero interval cells of the C3 subtypes rest on this, and they await gab's confirmation. If the alternative holds (an informed attacker that cannot rewrite the device's own counter), about 7 of 16 forged-first-dose pairs of each informed noauth variant (`informed_norobot_noauth`, `informed_robot_noauth`) would be distinguishable by the interval, the declared `expected_indistinguishable: true` of those two variants would become false, and the interval cell of the informed `dispense_forgery` would no longer be the structural zero. The naive forger is not coherent: the next genuine opening is measured from the previous genuine one, so a naive forgery in place of a first dose leaves it without an interval. (2) The driver sessions derive from what the device SENT: a requested but unanswered measurement (silent detachment, refusal, a cuff that never answers) opens no session, so `stale` is in practice a `ble_dropout` signal and `P(stale | cuff_detached) = 0` is a property of the generator, not of the liveness contract (a real driver that tracks requests would report it). This is why only the four subtypes listed in the diagnostics section have a stale cell.
 
 ## Sensitivity design
 
@@ -350,13 +370,13 @@ Every dimension of the study, with its range (`sensitivity_design` in the file).
 | `pi_designs` | uniform, quiet_rare, quiet_common | pi(component | class, t) |
 | `cumulative_level` | 0.8, 0.9, 0.95 | level of the subtype set |
 | `tau` | 0.5, 0.67, 0.8, 0.9, 0.95, 0.99 | abstention threshold of kappa |
-| `grouped_variant` | independent, ble_seq_gap, cross_device_signal_quality, both | independence assumption |
+| `grouped_variant` | reference, fully_independent, reference_plus_cross_device | independence assumption: reference = ble_seq_gap grouped, cross-device independent; fully_independent relaxes nothing; reference_plus_cross_device adds the common cause ecg_noise |
 | `diagnostics_profile` | driver_with_diagnostics, without_diagnostics | profile of system.diagnostics_ok |
 | `cell_scope` | template, all | components of a cell: those that can violate t (reference) or every component of the class |
 | `family` | catalogue, benchmark_v1 | all subtypes of the catalogue or only those the benchmark injects |
 | `labelling` | tight, loose | truth used to score; tight is primary (decided after seeing the result, ADR-074 amendment 2) |
 
-`eps`, `qc`, `q_stale`, `rep_nat`, `delta`, `dispense_bounce_interval_ms`, the class priors, the within-class designs, `cumulative_level` and `tau` are the parameters and designs listed above; `grouped_variant` is the independence variant; `diagnostics_profile` is a case of the device profile, not a parameter; `cell_scope` (components of a cell: those that can violate the template, or every component of the class as a co-occurrence reading), `family` (the whole catalogue or only the subtypes that benchmark v1 injects) and `labelling` (tight, loose) are the switches of the study. The mixtures that the task calls the within-cause weights are the designs `pi_designs`; the share of silent faults inside C2 is a derived quantity of them.
+`eps`, `qc`, `q_stale`, `rep_nat`, `delta`, `dispense_bounce_interval_ms`, the class priors, the within-class designs, `cumulative_level` and `tau` are the parameters and designs listed above; `grouped_variant` is the independence variant (reference: the pair `ble_seq_gap` grouped; `fully_independent` and `reference_plus_cross_device` are the variants); `diagnostics_profile` is a case of the device profile, not a parameter; `cell_scope` (components of a cell: those that can violate the template, or every component of the class as a co-occurrence reading), `family` (the whole catalogue or only the subtypes that benchmark v1 injects) and `labelling` (tight, loose) are the switches of the study. The mixtures that the task calls the within-cause weights are the designs `pi_designs`; the share of silent faults inside C2 is a derived quantity of them.
 
 ## Differences from the research prototype
 
@@ -368,6 +388,8 @@ The specification is not a copy of the prototype. Where it differs, the reason i
 4. **`stuck_at`** raises `cuff_value_repeated` by construction given a reading (as the prototype); every other subtype has the natural probability.
 5. **C1 subtypes** include `spontaneous_sched`; the diversion cell is attached to the C1 subtypes that can be read at `resp`.
 6. **Components and subtypes.** Knowledge levels are components, as in the prototype; the output set names subtypes.
+7. **The reference is grouped for the pair.** The prototype's reference was the independent product, with the grouped pair as variant G1; ADR-074 amendment 3 and ADR-075 make `system.seq_gap` with `system.ble_link_quality` ONE cell, so it is the reference here and the fully independent product is the variant.
+8. **Time cells** of `clock_skew`, `out_of_order` and `timestamp_manipulation` are conditional (beyond the bound), not raised by construction.
 
 ## Contract
 

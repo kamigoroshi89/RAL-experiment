@@ -254,6 +254,8 @@ def number_is_allowed(path: tuple[str, ...]) -> bool:
         return True
     if len(path) >= 3 and path[0] == "sensitivity_design" and path[2] == "range":
         return True
+    if len(path) == 3 and path[0] == "grouped_cells" and path[2] == "K":
+        return True  # number of joint classes, an integer, not a probability
     return (
         len(path) >= 2
         and path[0] in {"class_priors", "pi_designs"}

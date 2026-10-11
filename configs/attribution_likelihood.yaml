@@ -20,7 +20,8 @@ contracts:
 model:
   document: docs/models/attribution-likelihood.md
   posterior: p(s | e, t) proportional to prior_t(class(s)) * pi(s | class, t) * product over the read fields of P(class_f | s)
-  independence: 'ASSUMPTION: the read fields are independent given the SUBTYPE component (naive Bayes); two grouped-field variants are sensitivity'
+  independence: 'ASSUMPTION: the read fields are independent given the SUBTYPE component (naive Bayes) EXCEPT the pair (system.ble_link_quality, system.seq_gap), which is ONE joint cell in the reference;
+    the cross-device group and the fully independent product are sensitivity variants'
   unavailable_rule: a None reading contributes the factor 1
 unavailable:
   reading_class: U
@@ -1907,19 +1908,25 @@ cells:
   - 0.1
 - component: out_of_order
   field: crypto_temporal.timestamp_implausible
-  token: R
-  A: 1-eps
-  D: eps
-  status: structural
-  needs: none
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: BOUND
+  condition_note: raised only beyond the bound (late beyond D, or future-stamped beyond skew_max); a displacement or delay inside the bound is accepted, unflagged, and leaves no evidence (fault-model.md
+    Fault-to-evidence table; threat-model.md Attack-to-evidence table and TX-8 (a)); D and skew_max are run parameters
+  needs: device_specification
   source_type: fault_model_row
-  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `out_of_order`
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `out_of_order`, condition BOUND
   verified_by: null
   sensitivity_range:
-  - 0.001
-  - 0.01
-  - 0.05
-  - 0.1
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
 - component: clock_skew
   field: signal_quality.cuff_value_repeated
   token: N
@@ -1942,19 +1949,25 @@ cells:
   sensitivity_label: sensitivity, not a proposal
 - component: clock_skew
   field: crypto_temporal.timestamp_implausible
-  token: R
-  A: 1-eps
-  D: eps
-  status: structural
-  needs: none
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: BOUND
+  condition_note: raised only beyond the bound (late beyond D, or future-stamped beyond skew_max); a displacement or delay inside the bound is accepted, unflagged, and leaves no evidence (fault-model.md
+    Fault-to-evidence table; threat-model.md Attack-to-evidence table and TX-8 (a)); D and skew_max are run parameters
+  needs: device_specification
   source_type: fault_model_row
-  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `clock_skew`
+  source_ref: docs/models/fault-model.md, Fault-to-evidence table, row `clock_skew`, condition BOUND
   verified_by: null
   sensitivity_range:
-  - 0.001
-  - 0.01
-  - 0.05
-  - 0.1
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
 - component: battery_depleted
   field: system.liveliness_ok
   token: C
@@ -2590,30 +2603,46 @@ cells:
   - 0.1
 - component: timestamp_manipulation
   field: crypto_temporal.timestamp_implausible
-  token: R
-  A: 1-eps
-  D: eps
-  status: structural
-  needs: none
+  token: C
+  A: awaiting_human_value
+  D: 1-A
+  form: eps+(1-2*eps)*qc
+  param: qc
+  status: awaiting_human_value
+  value: null
+  condition: BOUND
+  condition_note: raised only beyond the bound (late beyond D, or future-stamped beyond skew_max); a displacement or delay inside the bound is accepted, unflagged, and leaves no evidence (fault-model.md
+    Fault-to-evidence table; threat-model.md Attack-to-evidence table and TX-8 (a)); D and skew_max are run parameters
+  needs: device_specification
   source_type: threat_model_row
-  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `timestamp_manipulation`
+  source_ref: docs/models/threat-model.md, Attack-to-evidence table, row `timestamp_manipulation`, condition BOUND
   verified_by: null
   sensitivity_range:
-  - 0.001
-  - 0.01
-  - 0.05
-  - 0.1
+  - 0.25
+  - 0.5
+  - 0.75
+  sensitivity_label: sensitivity, not a proposal
 grouped_cells:
   ble_seq_gap:
     fields:
     - system.ble_link_quality
     - system.seq_gap
     templates: all
+    reference_mode: grouped
+    reference_note: 'REFERENCE of the table (ADR-074 amendment 3, ADR-075): the pair is ONE joint cell; the fully independent product is the labelled sensitivity variant'
+    K: 4
     joint_classes:
     - clean
     - gap
     - degraded
     - gap_degraded
+    joint_class_map:
+      D,D: clean
+      D,A: gap
+      A,D: degraded
+      A,A: gap_degraded
+    joint_class_map_order: (system.ble_link_quality, system.seq_gap); A asserted, D denied
+    joint_formula: P(j | s) = sum over the modes m of s of weight(m) * [(1-eps) * 1(j = m) + eps/(K-1) * 1(j != m)], K = 4; weights of a component sum to 1, so the K values sum to 1
     joint_definition:
       clean: ble_link_quality denied (at or above the floor) and seq_gap denied
       gap: 'ble_link_quality denied and seq_gap asserted (class G: a sequence value is missing, link not degraded)'
@@ -2635,18 +2664,18 @@ grouped_cells:
       dispense_forgery_naive:
         gap: 1-qc
         clean: qc
-    none_rule: if one coordinate is None the joint probability is summed over it; if both are None the factor is 1
+    none_rule: if one coordinate is None the joint probability is summed over it (marginalised); if both are None the factor is 1
     status: awaiting_human_value
     value: null
     source_type: design_choice
     source_ref: 'ADR-074 amendment 3: system.seq_gap and system.ble_link_quality overlap (the ratio is 1.0 exactly when no value is missing) and are ONE grouped cell; modes inherited from the research prototype
-      (variant G1) and re-expressed on the split fields'
+      (variant G1) and re-expressed on the split fields; the explicit cells of the two fields in `cells` are their marginals, used by the fully independent variant and as the source record of the modes'
     verified_by: null
     needs: gab
     sensitivity_label: sensitivity, not a proposal
     sensitivity_range:
-    - independent
     - grouped
+    - independent
   cross_device_signal_quality:
     fields:
     - cross_device.pulse_vs_ecg_hr_diff
@@ -2657,7 +2686,13 @@ grouped_cells:
     - hold
     - resp
     - sys
+    reference_mode: independent
+    reference_note: 'the only independence-relaxing variant: off in the reference, on in the sensitivity variant reference_plus_cross_device'
+    K: 8
     joint_classes: 2^3 combinations of (diff, ecg_sqi, ppg_sqi), each A or D
+    joint_formula: 'component with modes: P(j | s) = sum over the modes m of weight(m) * [(1-eps) * 1(j = m) + eps/(K-1) * 1(j != m)], K = 8; component without modes: the product of its marginals; both
+      sum to 1 over the K joint classes'
+    none_rule: if members are None the joint probability is summed over (marginalised over) the unavailable members, like ble_seq_gap; if all are None the factor is 1
     default_mode: product of the marginals given the component
     modes:
       ecg_noise:
@@ -2771,11 +2806,11 @@ sensitivity_design:
   applies_to: abstention threshold of kappa
 - name: grouped_variant
   range:
-  - independent
-  - ble_seq_gap
-  - cross_device_signal_quality
-  - both
-  applies_to: independence assumption
+  - reference
+  - fully_independent
+  - reference_plus_cross_device
+  applies_to: 'independence assumption: reference = ble_seq_gap grouped, cross-device independent; fully_independent relaxes nothing; reference_plus_cross_device adds the common cause ecg_noise'
+  reference: reference
 - name: diagnostics_profile
   range:
   - driver_with_diagnostics
