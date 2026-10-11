@@ -3,7 +3,7 @@ id: WS04-T18
 title: "Generator: cuff resolution (rounding), driver diagnostics reports under two device profiles, dispenser interval, ADR-040 conventions (ADR-074)"
 workstream: WS04-benchmark
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS05-T13", "WS04-T16"]
 critical_path: true
 non_negotiable: false
