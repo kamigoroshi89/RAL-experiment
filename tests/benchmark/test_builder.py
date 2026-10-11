@@ -181,7 +181,11 @@ def write_injections(
 
 
 def write_generator_design(
-    tmp_path: Path, *, fill: bool = True, leave_unset: Sequence[str] = ()
+    tmp_path: Path,
+    *,
+    fill: bool = True,
+    leave_unset: Sequence[str] = (),
+    overrides: Mapping[str, Any] | None = None,
 ) -> Path:
     """The committed design file with every awaiting row filled by a FIXTURE-ONLY value, except ``leave_unset``."""
     document = yaml.safe_load(GENERATOR_DESIGN.read_text(encoding="utf-8"))
@@ -191,6 +195,17 @@ def write_generator_design(
         if fill and row["status"] == "awaiting_human_value":
             row.update(
                 value=GENERATOR_VALUES[row["parameter"]],
+                status="filled",
+                source_ref=FIXTURE_REF,
+                rationale="FIXTURE-ONLY: arithmetic",
+                verified_by=None,
+            )
+    for row in document["parameters"]:
+        if (
+            overrides and row["parameter"] in overrides
+        ):  # a TEST VALUE replaces the fixture one
+            row.update(
+                value=overrides[row["parameter"]],
                 status="filled",
                 source_ref=FIXTURE_REF,
                 rationale="FIXTURE-ONLY: arithmetic",
@@ -255,6 +270,8 @@ def config_document(
     split: Mapping[str, float] | None = None,
     device_profile: Mapping[str, Any] | None = None,
     leave_unset: Sequence[str] = (),
+    design_overrides: Mapping[str, Any] | None = None,
+    registry: Path | None = None,
 ) -> dict[str, Any]:
     prior_path = prior if prior is not None else make_prior(tmp_path)
     return {
@@ -262,9 +279,11 @@ def config_document(
         "benchmark_version": "fixture-0",
         "pathway_template_id": "hypertension-fixture",
         "paths": {
-            "registry": str(F0_PATH),
+            "registry": str(registry if registry is not None else F0_PATH),
             "generator_design": str(
-                write_generator_design(tmp_path, leave_unset=leave_unset)
+                write_generator_design(
+                    tmp_path, leave_unset=leave_unset, overrides=design_overrides
+                )
             ),
             "care_plans": str(CARE_PLANS),
             "injections": str(write_injections(tmp_path, rates=rates, pairs=pairs)),

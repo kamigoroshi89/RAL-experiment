@@ -27,10 +27,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ralmon.eval.device_capabilities import device_capabilities_from_manifest
 
-from ralmon.attribution.extract import DeviceCapabilities
+from ralmon.attribution.extract import DeviceCapabilities, DeviceProfile
 from ralmon.benchmark import vocab
 from ralmon.benchmark.builder import (
+    BuildContext,
     generate_benchmark,
     load_config,
     open_benchmark,
@@ -46,9 +48,16 @@ from ralmon.benchmark.device_profile import (
     DeviceProfileError,
     DriverDiagnostics,
     GeneratorDeviceProfile,
+    LeaseTooShortError,
     Session,
     UnsetDriverParameterError,
+    check_lease,
+    driver_inputs,
     driver_reports,
+    longest_start_to_reading_ms,
+    message_view,
+    round_cuff_samples,
+    round_to_resolution,
 )
 from ralmon.benchmark.injection import (
     InjectionSpec,
@@ -66,7 +75,7 @@ from ralmon.benchmark.priors import (
 )
 from ralmon.benchmark.schedule import Schedule
 from ralmon.benchmark.trace import InjectedClass
-from ralmon.signals import Event, EventKind
+from ralmon.signals import Event, EventKind, Sample
 
 from .test_builder import (
     GENERATOR_DESIGN,
@@ -491,7 +500,7 @@ def test_dropout_over_a_reading_makes_the_cuff_stale_and_an_idle_dropout_does_no
     )  # nothing was lost, so the gateway reported nothing
 
 
-def test_a_refused_or_failed_measurement_opens_no_session() -> None:
+def test_a_failed_manipulation_opens_no_session() -> None:
     """A patient who refuses, or a manipulation that fails, sends no message: no session, no stale (C1 stays C1)."""
     out = run(
         [manip(10 * HOUR)],
@@ -587,7 +596,7 @@ def test_the_committed_design_file_holds_the_two_rows_as_awaiting() -> None:
         assert rows[name].unit == "ms" and rows[name].consumer_task == "WS04-T18"
 
 
-def test_a_built_benchmark_with_the_diagnostics_profile_records_it_and_reports_ok_and_stale(
+def test_a_built_benchmark_with_the_diagnostics_profile_records_it_and_reports_ok_at_every_period(
     tmp_path: Path,
 ) -> None:
     doc = config_document(
@@ -911,3 +920,528 @@ def test_colocated_events_follow_the_robot_visits(
                 assert type(e.payload["colocated"]) is bool
             n_robot += 1
     assert n_robot >= 4 and n_norobot >= 2
+
+
+# ---------------------------------------------------------------------------
+# Fix round: B1 (the informed forger is coherent on the interval chain)
+# ---------------------------------------------------------------------------
+
+ROOT = Path(__file__).resolve().parents[2]
+REAL_REGISTRY = ROOT / "configs" / "registry" / "hypertension.yaml"
+SRC = ROOT / "src" / "ralmon" / "benchmark"
+
+
+def without_first_dose(stream: ObservedStream) -> ObservedStream:
+    """The fixture day of the forgery member: the patient took nothing at the first dose."""
+    keep = lambda e: (
+        not (
+            e.kind in (EventKind.DISPENSE, EventKind.INTAKE)
+            and e.t_device_ms < DOSE_TICKS[0] + HOUR
+        )
+    )
+    return dataclasses.replace(
+        stream, events=tuple(e for e in stream.events if keep(e))
+    )
+
+
+def test_an_informed_forgery_counts_in_the_interval_chain_a_naive_one_does_not() -> (
+    None
+):
+    """The genuine opening after a forged one: informed -> the interval its twin has; naive -> the genuine chain."""
+    twin = run([], stream_=fractional_stream(), device_profile=GeneratorDeviceProfile())
+    wanted = dispenses(twin.stream.events)[1].payload[vocab.KEY_INTERVAL]
+    assert wanted == DOSE_TICKS[1] - DOSE_TICKS[0]
+    base = without_first_dose(fractional_stream())
+    informed = run(
+        [forgery("informed", DOSE_TICKS[0])],
+        stream_=base,
+        device_profile=GeneratorDeviceProfile(),
+    )
+    forged, genuine = dispenses(informed.stream.events)
+    assert vocab.KEY_INTERVAL not in forged.payload  # nothing precedes it
+    assert genuine.payload[vocab.KEY_INTERVAL] == wanted
+    naive = run(
+        [forgery("naive", DOSE_TICKS[0])],
+        stream_=base,
+        device_profile=GeneratorDeviceProfile(),
+    )
+    forged, genuine = dispenses(naive.stream.events)
+    assert vocab.KEY_INTERVAL not in forged.payload
+    assert (
+        vocab.KEY_INTERVAL not in genuine.payload
+    )  # the first GENUINE opening of its stream
+    # a forgery between two genuine openings: informed re-chains the next one, naive leaves the genuine chain
+    mid = 12 * HOUR
+    for level, expected in (
+        ("informed", DOSE_TICKS[1] - mid),
+        ("naive", DOSE_TICKS[1] - DOSE_TICKS[0]),
+    ):
+        out = run(
+            [forgery(level, mid)],
+            stream_=fractional_stream(),
+            device_profile=GeneratorDeviceProfile(),
+        )
+        _, forged, last = dispenses(out.stream.events)
+        assert (
+            forged.payload[vocab.KEY_INTERVAL] == mid - DOSE_TICKS[0]
+        )  # stream-derived at both levels
+        assert last.payload[vocab.KEY_INTERVAL] == expected, level
+    # without the capability nothing is written
+    quiet = run([forgery("informed", mid)], stream_=fractional_stream())
+    assert not any(
+        vocab.KEY_INTERVAL in e.payload for e in dispenses(quiet.stream.events)
+    )
+
+
+def test_a_forged_interval_is_measured_from_the_latest_delivered_opening() -> None:
+    """After a dropout that lost the genuine opening, the forged one has no previous opening to measure from."""
+    out = run(
+        [ble(DOSE_TICKS[0] - MIN, 2 * MIN, "dispenser"), forgery("naive", 12 * HOUR)],
+        stream_=fractional_stream(),
+        device_profile=GeneratorDeviceProfile(),
+    )
+    forged, last = dispenses(out.stream.events)
+    assert forged.t_device_ms == 12 * HOUR and vocab.KEY_INTERVAL not in forged.payload
+    assert (
+        last.payload[vocab.KEY_INTERVAL] == DOSE_TICKS[1] - DOSE_TICKS[0]
+    )  # the device measured from the lost one
+
+
+@pytest.fixture(scope="module")
+def pair_flags(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[tuple[int, bool], list[tuple[str, int, bool, bool]]]:
+    """``(variant, ordinal, declared, computed)`` of 16 pairs of every committed variant, per seed and profile."""
+    from ralmon.benchmark.confounders import evaluate_pair
+    from ralmon.benchmark.rng import StreamPurpose, stream
+
+    from .test_builder import set_row
+
+    table: dict[tuple[int, bool], list[tuple[str, int, bool, bool]]] = {}
+    for seed in (3, 5):
+        for interval in (True, False):
+            tmp = tmp_path_factory.mktemp(f"flags{seed}{int(interval)}")
+            doc = config_document(
+                tmp, n_patients=2, n_days=1, pairs=16, variants=None,
+                device_profile={"dispenser_reports_interval": interval},
+            )  # fmt: skip
+            doc = set_row(doc, "generation_seed", seed)
+            config = load_config(write_config(tmp, doc))
+            prior = LiteraturePriorSource(
+                Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True
+            )
+            context = BuildContext.create(config, prior, allow_fixture_only=True)
+            cohort = context.cohorts[config.cohorts[0].id]
+            rows: list[tuple[str, int, bool, bool]] = []
+            for number, (_, group, variant, ordinal) in enumerate(context.pair_units()):
+                index = config.total_patients + number
+                shared = cohort.prior.sample_patient(
+                    stream(config.generation_seed, index, None, StreamPurpose.PATIENT),
+                    index,
+                )
+                flag = evaluate_pair(
+                    group, variant, context.pair_base(shared, index, ordinal)
+                )
+                rows.append(
+                    (
+                        variant.variant_id,
+                        ordinal,
+                        variant.expected_indistinguishable,
+                        flag.indistinguishable_by_construction,
+                    )
+                )
+            table[(seed, interval)] = rows
+    return table
+
+
+def test_informed_noauth_pairs_stay_indistinguishable_with_the_interval_channel(
+    pair_flags: dict[tuple[int, bool], list[tuple[str, int, bool, bool]]],
+) -> None:
+    """TM-OP-5: the informed attacker coherent on every available channel is not distinguishable by construction."""
+    for (seed, interval), rows in pair_flags.items():
+        for variant in ("informed_norobot_noauth", "informed_robot_noauth"):
+            mine = [r for r in rows if r[0] == variant]
+            assert len(mine) >= 16, (seed, interval, variant)
+            assert all(declared and computed for _, _, declared, computed in mine), (
+                seed,
+                interval,
+                variant,
+            )
+
+
+def test_computed_flags_equal_the_declared_ones_for_every_committed_variant(
+    pair_flags: dict[tuple[int, bool], list[tuple[str, int, bool, bool]]],
+) -> None:
+    """With the interval channel on, a pair is as distinguishable as the declared grid says, bar the coincidences
+    that the channel does not cause (the flag is the same with the channel off)."""
+    for seed in (3, 5):
+        on, off = pair_flags[(seed, True)], pair_flags[(seed, False)]
+        assert [r[:3] for r in on] == [r[:3] for r in off]
+        variants = {r[0] for r in on}
+        assert len(variants) == 19
+        for (variant, ordinal, declared, computed), (_, _, _, computed_off) in zip(
+            on, off, strict=True
+        ):
+            assert computed == declared or computed == computed_off, (
+                seed,
+                variant,
+                ordinal,
+            )
+            if declared:
+                assert computed, (
+                    seed,
+                    variant,
+                    ordinal,
+                )  # a declared-indistinguishable pair always is
+        # the declared-indistinguishable variants never become distinguishable
+        mismatches = [r for r in on if r[2] != r[3]]
+        assert all(r[0] == "naive_norobot_noauth" for r in mismatches), mismatches
+
+
+# ---------------------------------------------------------------------------
+# Fix round: I1 (a built benchmark) and the sessions
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def dropout_build(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A fault-free-rates benchmark with a high dropout rate (FIXTURE value) and the diagnostics profile."""
+    tmp = tmp_path_factory.mktemp("dropouts")
+    prior = make_prior(tmp, row_updates={"ble_dropout_rate_per_h": {"value": 3.0}})
+    doc = config_document(
+        tmp, prior=prior, n_patients=4, n_days=3, variants=[], rates=(0.0, 0.0, 0.0),
+        device_profile={"diagnostics_profile": PROFILE_WITH_DIAGNOSTICS},
+    )  # fmt: skip
+    out, _ = build_benchmark(tmp, document=doc)
+    return out
+
+
+def test_stale_appears_in_a_built_benchmark_only_where_a_dropout_lost_a_message(
+    dropout_build: Path,
+) -> None:
+    reader = open_benchmark(dropout_build)
+    stale_device_days = 0
+    for patient in reader.patients:
+        for d in (*reader.days(patient), reader.tail_day(patient)):
+            day = reader.observed(patient, d)
+            stale = {
+                e.source for e in day.events
+                if e.kind is EventKind.NODE_STATE and e.payload.get(vocab.KEY_DIAGNOSTICS) == "stale"
+            }  # fmt: skip
+            lost = {
+                str(r["params"]["target"])
+                for r in (reader.truth(patient, d).injection_log or [])
+                if r["subtype"] == "ble_dropout"
+                and r["realised"]
+                and r["details"]["n_samples_removed"] + r["details"]["n_events_removed"]
+                > 0
+            }
+            assert stale <= lost, (patient, d, stale, lost)
+            stale_device_days += len(stale)
+    assert stale_device_days > 0  # the check is not vacuous
+
+
+def test_c1_refusal_and_an_omitted_dose_open_no_session_and_never_stale(
+    tmp_path: Path,
+) -> None:
+    """Real C1 injections: a measurement refusal (declined task) and an omitted dose send nothing."""
+    from ralmon.benchmark.adherence import AdherenceState
+    from ralmon.benchmark.confounders import (
+        GROUP_REFUSAL_VS_ROBOT_MISSED,
+        build_confounder_pair,
+        realise_scenario,
+    )
+    from ralmon.benchmark.latent_day import ForcedSlot
+    from ralmon.benchmark.rng import StreamPurpose, stream
+
+    doc = config_document(
+        tmp_path, n_patients=2, n_days=1, pairs=1, variants=None,
+        device_profile={"diagnostics_profile": PROFILE_WITH_DIAGNOSTICS},
+    )  # fmt: skip
+    config = load_config(write_config(tmp_path, doc))
+    prior = LiteraturePriorSource(
+        Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True
+    )
+    context = BuildContext.create(config, prior, allow_fixture_only=True)
+    cohort = context.cohorts[config.cohorts[0].id]
+    index = config.total_patients
+    shared = cohort.prior.sample_patient(
+        stream(config.generation_seed, index, None, StreamPurpose.PATIENT), index
+    )
+    base = context.pair_base(shared, index, 0)
+    variant = context.design.variants[GROUP_REFUSAL_VS_ROBOT_MISSED][0]
+    refusal, _ = build_confounder_pair(GROUP_REFUSAL_VS_ROBOT_MISSED, variant, base)
+    omitted = dataclasses.replace(
+        refusal, forced_slots=(ForcedSlot(0, base.dose_index, AdherenceState.OMITTED),)
+    )
+    results = {
+        name: realise_scenario(sc, base)
+        for name, sc in (("refusal", refusal), ("omitted", omitted))
+    }
+    for name, result in results.items():
+        assert any(
+            r.spec.subtype == "measurement_refusal" and r.realised
+            for r in result.records
+        ), name
+        day = result.observed
+        assert any(
+            e.payload.get("outcome") == "declined"
+            for e in day.events
+            if e.kind is EventKind.ROBOT_TASK
+        )
+        for device in (vocab.SOURCE_CUFF, vocab.SOURCE_DISPENSER):
+            levels = reports_of(day.events, device)
+            assert levels and {level for _, level in levels} == {"ok"}, (name, device)
+    n_refusal = len(dispenses(results["refusal"].observed.events))
+    n_omitted = len(dispenses(results["omitted"].observed.events))
+    assert n_omitted == n_refusal - 1  # the omitted dose sent no opening
+    readings = [s for s in results["refusal"].observed.samples if s.signal == "bp"]
+    assert (
+        len(readings) == len(base.schedule.measurement_ticks_ms) - 1
+    )  # the refused reading was never sent
+
+
+def test_driver_state_does_not_carry_across_midnight() -> None:
+    """A session left open at the end of a day does not make the next day start stale (each day is a stream)."""
+    events = driver_reports(
+        vocab.SOURCE_CUFF, MODE_ON_DEMAND, period_ms=HOUR, stale_lease_ms=LEASE,
+        day_start_ms=DAY, day_end_ms=2 * DAY, sessions=(), message_times=(),
+    )  # fmt: skip
+    assert reports_of(events, vocab.SOURCE_CUFF)[0] == (DAY, "ok")
+
+
+def test_a_build_with_the_diagnostics_profile_reproduces_its_bytes(
+    tmp_path: Path,
+) -> None:
+    doc = config_document(
+        tmp_path, n_patients=2, n_days=2, variants=["nominal_content_robot"],
+        device_profile={"diagnostics_profile": PROFILE_WITH_DIAGNOSTICS},
+    )  # fmt: skip
+    config = load_config(write_config(tmp_path, doc))
+    prior = LiteraturePriorSource(
+        Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True
+    )
+    dirs = []
+    for name in ("first", "second"):
+        out = tmp_path / name
+        generate_benchmark(config, prior, out, allow_fixture_only=True, git_rev=GIT_REV)
+        dirs.append(
+            {
+                p.relative_to(out).as_posix(): p.read_bytes()
+                for p in sorted(out.rglob("*"))
+                if p.is_file()
+            }
+        )
+    assert dirs[0] == dirs[1] and len(dirs[0]) > 10
+
+
+# ---------------------------------------------------------------------------
+# Fix round: I2 (the lease against the longest start-to-reading time)
+# ---------------------------------------------------------------------------
+
+
+def test_the_lease_must_be_strictly_above_the_longest_start_to_reading_time() -> None:
+    check_lease(10, 9, "x")
+    for lease in (9, 8):
+        with pytest.raises(LeaseTooShortError, match="stale_lease_ms"):
+            check_lease(lease, 9, "x")
+    assert issubclass(LeaseTooShortError, DeviceProfileError)
+    # the generator's own values: the draw is nominal + sd * z raised to the registry minimum
+    assert (
+        longest_start_to_reading_ms(
+            nominal_ms=30_000, sd_ms=0.0, min_ms=15_000, registry_upper_ms=None
+        )[0]
+        == 30_000
+    )
+    assert (
+        longest_start_to_reading_ms(
+            nominal_ms=10_000, sd_ms=0.0, min_ms=15_000, registry_upper_ms=None
+        )[0]
+        == 15_000
+    )
+    assert (
+        longest_start_to_reading_ms(
+            nominal_ms=30_000, sd_ms=3_000.0, min_ms=15_000, registry_upper_ms=180_000.0
+        )[0]
+        == 180_000
+    )
+    assert (
+        longest_start_to_reading_ms(
+            nominal_ms=30_000, sd_ms=3_000.0, min_ms=15_000, registry_upper_ms=None
+        )[0]
+        == 30_000
+    )
+
+
+def context_for(tmp_path: Path, lease: int, **kwargs: Any) -> Any:
+    doc = config_document(
+        tmp_path, n_patients=2, n_days=1, variants=[],
+        device_profile={"diagnostics_profile": PROFILE_WITH_DIAGNOSTICS},
+        design_overrides={"driver_stale_lease_ms": lease}, **kwargs,
+    )  # fmt: skip
+    config = load_config(write_config(tmp_path, doc))
+    prior = LiteraturePriorSource(
+        Path(doc["cohorts"][0]["prior"]), strict=False, allow_fixture_only=True
+    )
+    return config, prior
+
+
+def test_the_builder_refuses_a_lease_not_above_the_registry_bound_of_the_inflation(
+    tmp_path: Path,
+) -> None:
+    bound = 180_000  # bound_inflation_ms_upper of the committed registry
+    for lease in (bound - 1, bound):
+        folder = tmp_path / f"lease{lease}"
+        folder.mkdir()
+        config, prior = context_for(folder, lease, registry=REAL_REGISTRY)
+        with pytest.raises(LeaseTooShortError, match="bound_inflation_ms_upper"):
+            BuildContext.create(config, prior, allow_fixture_only=True)
+    folder = tmp_path / "ok"
+    folder.mkdir()
+    config, prior = context_for(folder, bound + 1, registry=REAL_REGISTRY)
+    built = BuildContext.create(config, prior, allow_fixture_only=True)
+    assert (
+        built.device_profile.driver is not None
+        and built.device_profile.driver.stale_lease_ms == bound + 1
+    )
+
+
+def test_the_builder_refuses_a_lease_not_above_the_nominal_reading_time_without_a_registry_bound(
+    tmp_path: Path,
+) -> None:
+    config, prior = context_for(
+        tmp_path, 30_000
+    )  # the fixture registry declares no bound; nominal is 30 s
+    with pytest.raises(LeaseTooShortError, match="inflation_ms_nominal"):
+        BuildContext.create(config, prior, allow_fixture_only=True)
+
+
+def test_a_reading_longer_than_the_lease_stops_the_build_instead_of_a_spurious_stale(
+    tmp_path: Path,
+) -> None:
+    """Above the nominal time but below a draw (the fixture SD is 2 s): the first long reading raises."""
+    config, prior = context_for(tmp_path, 31_000)
+    with pytest.raises(LeaseTooShortError, match="inflation"):
+        generate_benchmark(
+            config,
+            prior,
+            tmp_path / "refused",
+            allow_fixture_only=True,
+            git_rev=GIT_REV,
+        )
+    assert not (tmp_path / "refused").exists()
+    # the pure rule: a delivered reading whose session is not shorter than the lease is a profile error
+    sent = message_view(
+        vocab.SOURCE_CUFF,
+        [Sample("inflation_ms", 100_000, 100_000, 31_000.0, None, None)],
+        [],
+    )
+    with pytest.raises(LeaseTooShortError):
+        driver_inputs(sent, sent, [], stale_lease_ms=31_000)
+    driver_inputs(sent, sent, [], stale_lease_ms=31_001)
+
+
+# ---------------------------------------------------------------------------
+# Fix round: I3 (the extractor's capabilities from the manifest) and the minor points
+# ---------------------------------------------------------------------------
+
+
+def test_the_extractor_capabilities_come_from_the_manifest(
+    rounding_builds: tuple[Path, Path, Any, Any],
+) -> None:
+    _, _, rounded, free = rounding_builds
+    profile = device_capabilities_from_manifest(rounded)
+    assert (
+        profile.caps(vocab.SOURCE_CUFF).cuff_resolution
+        == rounded.settings["device_profile"]["cuff_resolution_mmhg"]
+        == 1.0
+    )
+    assert profile.caps(vocab.SOURCE_DISPENSER).content_sensing is False
+    assert (
+        profile.caps(vocab.SOURCE_CUFF).diagnostics is False
+    )  # without_diagnostics: no report, no capability
+    assert (
+        device_capabilities_from_manifest(free).caps(vocab.SOURCE_CUFF).cuff_resolution
+        is None
+    )
+    # the mapping of the section and of the settings are accepted too, and a base profile is completed, not replaced
+    section = rounded.settings["device_profile"]
+    assert (
+        device_capabilities_from_manifest(section).caps("cuff").cuff_resolution == 1.0
+    )
+    base = DeviceProfile(
+        {
+            "cuff": DeviceCapabilities(error_codes=True),
+            "robot": DeviceCapabilities(battery=True),
+        }
+    )
+    merged = device_capabilities_from_manifest(rounded.settings, base)
+    assert (
+        merged.caps("cuff").error_codes is True
+        and merged.caps("cuff").cuff_resolution == 1.0
+    )
+    assert merged.caps("robot").battery is True
+    # a diagnostics benchmark declares the capability on the nodes of the driver, content sensing as built
+    with_driver = {
+        **section, "diagnostics_profile": PROFILE_WITH_DIAGNOSTICS, "dispenser_content_sensing": True,
+        "authenticating_devices": ["dispenser"],
+        "driver": {"period_ms": HOUR, "stale_lease_ms": LEASE, "devices": ["cuff", "dispenser"], "activity_modes": {}},
+    }  # fmt: skip
+    caps = device_capabilities_from_manifest(with_driver)
+    assert caps.caps("cuff").diagnostics and caps.caps("dispenser").diagnostics
+    assert (
+        caps.caps("dispenser").content_sensing and caps.caps("dispenser").authenticates
+    )
+    assert not caps.caps("cuff").authenticates and not caps.caps("ecg").diagnostics
+    with pytest.raises(ValueError, match="device_profile"):
+        device_capabilities_from_manifest({"nothing": 1})
+
+
+def test_rounding_raises_only_the_named_error() -> None:
+    for bad in (0.0, -1.0, math.nan, math.inf, True, None):
+        with pytest.raises(DeviceProfileError):
+            round_to_resolution(1.5, bad)  # type: ignore[arg-type]
+    for value in (math.nan, math.inf, -math.inf):
+        with pytest.raises(DeviceProfileError):
+            round_to_resolution(value, 1.0)
+        with pytest.raises(DeviceProfileError):
+            round_cuff_samples(
+                [Sample("bp", 0, 0, value, None, None)], GeneratorDeviceProfile()
+            )
+    assert round_to_resolution(2.5, 1.0) == 2.0 and round_to_resolution(7.4, 5.0) == 5.0
+
+
+def test_device_profile_module_stays_below_the_injectors_and_the_truth() -> None:
+    import ast
+
+    tree = ast.parse((SRC / "device_profile.py").read_text(encoding="utf-8"))
+    imported = set()
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+            names |= {a.name for a in node.names}
+        elif isinstance(node, ast.Import):
+            imported |= {a.name for a in node.names}
+        elif isinstance(node, ast.Name):
+            names.add(node.id)
+    ralmon = {m for m in imported if m.startswith("ralmon")}
+    assert ralmon == {
+        "ralmon.benchmark",
+        "ralmon.benchmark.latent",
+        "ralmon.signals",
+    }, ralmon
+    assert (
+        not {
+            "GroundTruthEvent",
+            "BenchmarkDay",
+            "TruthRecord",
+            "LatentDay",
+            "InjectionRecord",
+        }
+        & names
+    )
+    assert not any(
+        m.split(".")[0] in {"time", "datetime", "random", "os", "socket", "subprocess"}
+        for m in imported
+    )
