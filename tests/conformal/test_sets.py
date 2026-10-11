@@ -615,3 +615,80 @@ def test_the_public_types_are_immutable_values() -> None:
     assert isinstance(out.subtypes, tuple)
     sequence: Sequence[str] = out.subtypes
     assert all(isinstance(x, str) for x in sequence)
+
+
+# --- fix round after the independent review (I1, I3, M3) -------------------------------------------------------
+
+
+def test_a_bare_string_is_not_a_collection_of_patient_ids() -> None:
+    """``"c3"`` would iterate as the characters ``"c"`` and ``"3"`` and silently miss a leak (review I1)."""
+    cal = marginal()
+    with pytest.raises(TypeError, match="str"):
+        cal.fit(nine(), model_version="m1", test_patient_ids="c3")  # type: ignore[arg-type]
+    cal.fit(nine(), model_version="m1")
+    with pytest.raises(TypeError, match="str"):
+        cal.require_disjoint("c3")  # type: ignore[arg-type]
+    cal.require_disjoint(["t1"])  # a list of ids is still accepted
+
+
+def test_the_wording_does_not_claim_a_finite_sample_bound_over_correlated_alerts() -> (
+    None
+):
+    """Review I3: exact only for one designated alert per patient; otherwise approximate and checked empirically."""
+    s = sets()
+    assumptions = " ".join(s.ASSUMPTIONS_SETS)
+    for text in (s.GUARANTEE_SETS, s.GUARANTEE_SETS_MONDRIAN, assumptions):
+        assert "distribution-free" not in text
+    assert "one designated alert per patient" in assumptions
+    assert "approximate" in assumptions
+    assert "empirically" in assumptions
+    assert "correlated" in assumptions
+    for text in (s.GUARANTEE_SETS, s.GUARANTEE_SETS_MONDRIAN):
+        assert "marginal" in text
+        assert "approximate" in text or "one designated alert per patient" in text
+    module_doc = s.__doc__ or ""
+    assert "one designated alert per patient" in module_doc
+    assert "empirically" in module_doc
+
+
+def test_appending_alerts_to_one_mondrian_cell_leaves_the_other_cell_unchanged() -> (
+    None
+):
+    items = [example(f"r{i}", "range", p) for i, p in enumerate(P_TRUE)]
+    items += [example(f"h{i}", "hold", p) for i, p in enumerate(P_TRUE[:6])]
+    before = mondrian()
+    before.fit(items, model_version="m1")
+    more = items + [
+        example(f"x{i}", "range", p) for i, p in enumerate([0.0625, 0.125, 0.5, 0.9375])
+    ]
+    after = mondrian()
+    after.fit(more, model_version="m1")
+    for alpha in (0.5, 0.3, 0.2):
+        assert after.threshold("hold", alpha) == before.threshold("hold", alpha)
+    assert after.threshold("range", 0.2) != before.threshold("range", 0.2)
+    assert after.cell_sizes() == {"hold": 6, "range": 13}
+
+
+def test_tied_calibration_scores_at_the_threshold_keep_every_tied_subtype() -> None:
+    """Ties make the coverage conservative: a test subtype tied with the threshold score is inside."""
+    # nine alerts with p(true) in {0.75 x 5, 0.5 x 4}: scores 0.25 (x5) and 0.5 (x4), sorted
+    # 0.25 0.25 0.25 0.25 0.25 0.5 0.5 0.5 0.5; k = ceil(10 * 0.8) = 8 at alpha 0.2 -> 0.5
+    items = [example(f"c{i}", "range", 0.75) for i in range(5)]
+    items += [example(f"d{i}", "range", 0.5) for i in range(4)]
+    cal = marginal()
+    cal.fit(items, model_version="m1")
+    assert cal.threshold("range", 0.2).value == 0.5
+    tied = {"a": 0.5, "b": 0.25, "c": 0.25}  # scores 0.5, 0.75, 0.75
+    out = cal.predict_set(tied, "range", 0.2, patient_id="t1", model_version="m1")
+    assert out.subtypes == ("a",)  # equal to the threshold: inside
+    just_above = {"a": 0.4375, "b": 0.5625}
+    out = cal.predict_set(just_above, "range", 0.2, patient_id="t1", model_version="m1")
+    assert out.subtypes == (
+        "b",
+    )  # score 0.4375 and 0.5625 against 0.5: only b is below
+    assert out.top1_fill is False
+    # alpha 0.5 -> k = 5 -> 0.25: the five tied scores sit at the threshold
+    assert cal.threshold("range", 0.5).value == 0.25
+    exact = {"a": 0.75, "b": 0.25}
+    out = cal.predict_set(exact, "range", 0.5, patient_id="t1", model_version="m1")
+    assert out.subtypes == ("a",)
