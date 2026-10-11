@@ -83,10 +83,16 @@ Conventions of the attacks on the cuff stream (``replay``, ``injection_naive``,
 ``content_change``, no ``auth`` sample, no ``INTAKE``, nothing in the latent day). When the device profile says that
 the dispenser reports the interval (WS04-T18), the forged event carries ``interval_since_previous_ms``: the interval
 since the latest earlier ``DISPENSE`` of the stream when it is written (genuine ones that arrived, and forged ones
-written before it), absent when there is none, whatever the level. The naive forger's interval is thus whatever
-the real stream gives; the informed forger copies the bounce timing by where it puts the message (one bounce gap after
-a real opening it reports the bounce interval). The genuine dispenser never saw the forged opening, so the interval of
-its next genuine opening is measured from the previous genuine one. Informed: the number after
+written before it), absent when there is none, whatever the level; it is measured from the latest opening that
+REACHED the gateway, so a forgery after a genuine opening lost by a dropout differs from a real twin. The naive
+forger's interval is thus whatever the real stream gives, and the genuine chain is left as the device measured it: the
+genuine opening after a naive forgery reports the interval since the previous GENUINE opening (the device never saw
+the forged one), so a naive forgery in place of a first dose leaves the next genuine opening without an interval,
+unlike its twin. The INFORMED forger is coherent on this channel (it is coherent on every available channel,
+hypotheses H-SUPP and H-FRESH): the forged opening counts in the chain, so the next opening reports the interval since
+it (``details["n_rechained"]`` 1), as the twin without the attack would; it also copies the bounce timing by where it
+puts the message (one bounce gap after a real opening it reports the bounce interval). The assumption that the
+informed forger can rewrite the interval of the device's next report is the same one as H-FRESH for the counter. Informed: the number after
 the last earlier dispense and every later dispense of the dispenser shifted by one (TM-OP-7: the
 informed forgery renumbers), ``settings["next_dispenser_seq"]`` follows. Naive: its own number
 from ``FORGED_SEQ_START`` (the first one that no dispense at that instant uses); the device's
@@ -967,23 +973,48 @@ def dispense_forgery(
             work.attacker_next[device] = _seq_in_range(seq + 1)
         payload: dict[str, Any] = {}
         profile = context.device_profile
+        rechained = 0
         if profile is not None and profile.dispenser_reports_interval:
             earlier_t = [
                 e.t_device_ms for e in events if _is_dispense(e) and e.t_device_ms <= t
             ]
             if earlier_t:
-                # the interval the stream gives, whatever the level; the informed forger copies the bounce
-                # timing by where it puts the message (module docstring, WS04-T18)
+                # stream-derived: measured from the latest opening that reached the gateway (genuine or forged)
                 payload[vocab.KEY_INTERVAL] = t - max(earlier_t)
+            if caps.fresh_metadata:
+                # The informed forger is coherent on the interval channel (threat model: coherent on every
+                # available channel, hypotheses H-SUPP and H-FRESH): the forged opening is an opening of the
+                # chain, so the NEXT opening reports the interval since it, as its twin without the attack
+                # would. The naive forger is not coherent: the genuine chain is left as the device measured it.
+                later = [
+                    i
+                    for i, e in enumerate(events)
+                    if _is_dispense(e) and e.t_device_ms > t
+                ]
+                if later:
+                    i = min(later, key=lambda k: (events[k].t_device_ms, k))
+                    following = events[i]
+                    events[i] = dataclasses.replace(
+                        following,
+                        payload={
+                            **following.payload,
+                            vocab.KEY_INTERVAL: following.t_device_ms - t,
+                        },
+                    )
+                    rechained = 1
         events.append(Event(EventKind.DISPENSE, t, t, device, payload, seq))
-        n = 1 + shifted
+        n = 1 + shifted + rechained
         if auth:
             events.append(_gateway_failure(device, t))
             n += 1
         work.events = events
         if scheme and caps.fresh_metadata:
             _bump_counter(work, "next_dispenser_seq", 1)
-        details = {"seq": seq, "n_renumbered": shifted}
+        details: dict[str, Any] = {"seq": seq, "n_renumbered": shifted}
+        if rechained:
+            details["n_rechained"] = (
+                rechained  # the interval of the next opening, re-chained (informed)
+            )
         records.append(
             _record(
                 spec,

@@ -96,6 +96,8 @@ from ralmon.benchmark.device_profile import (
     DeviceProfileError,
     DriverDiagnostics,
     GeneratorDeviceProfile,
+    check_lease,
+    longest_start_to_reading_ms,
 )
 from ralmon.benchmark.inject_c1 import (
     C1_SUBTYPES,
@@ -1063,7 +1065,9 @@ class BuildContext:
         self.measurement: MeasurementDesign = load_measurement_design(
             config.generator_design_path, inflation_min_ms=inflation_min
         )
-        self.device_profile = self._device_profile(config)
+        self.device_profile = self._device_profile(
+            config, self.registry, self.measurement
+        )
         adherence_config = load_adherence_config(config.generator_design_path)
         peak = load_filled_rows(
             config.generator_design_path, ("circadian_peak_clock_ms",)
@@ -1152,12 +1156,17 @@ class BuildContext:
         return {ids[0]: prior}
 
     @staticmethod
-    def _device_profile(config: BenchmarkConfig) -> GeneratorDeviceProfile:
+    def _device_profile(
+        config: BenchmarkConfig, registry: Any, measurement: MeasurementDesign
+    ) -> GeneratorDeviceProfile:
         """The declared device profile of the run (``ralmon.benchmark.device_profile``).
 
         For the profile 'driver_with_diagnostics' the period and the lease are read from the design rows
         ``driver_period_ms`` and ``driver_stale_lease_ms``, which have no default: while they are awaiting the run is
-        refused (the check on the design rows has already named them).
+        refused (the check on the design rows has already named them). The lease must also be strictly above the
+        longest time from the start of a measurement to its reading that the generator can emit (the registry bound
+        of ``inflation_ms`` when declared, else the nominal time), or the build raises ``LeaseTooShortError``; the
+        per-reading check at generation completes it.
         """
         driver: DriverDiagnostics | None = None
         if config.diagnostics_profile == PROFILE_WITH_DIAGNOSTICS:
@@ -1169,6 +1178,17 @@ class BuildContext:
                 )
             except DeviceProfileError as exc:
                 raise BenchmarkConfigError(f"driver profile: {exc}") from exc
+            try:
+                upper: float | None = float(registry.bounds("inflation_ms").upper)
+            except RegistryError:
+                upper = None
+            longest, source = longest_start_to_reading_ms(
+                nominal_ms=measurement.inflation_ms_nominal,
+                sd_ms=measurement.inflation_ms_sd,
+                min_ms=measurement.inflation_min_ms,
+                registry_upper_ms=upper,
+            )
+            check_lease(driver.stale_lease_ms, longest, source)
         return GeneratorDeviceProfile(
             config.cuff_resolution_mmhg,
             config.pulse_resolution_bpm,

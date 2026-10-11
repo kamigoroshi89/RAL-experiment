@@ -25,8 +25,17 @@ liveness contract for ``diagnostics = stale``"), for each device named by the pr
   starts (the reading instant minus its inflation time) and closes when the reading arrives; that of a dispenser
   opening opens and closes at its instant. A message lost on the link leaves its session open until the link is
   reported active again or the device delivers another message; a refused or failed measurement sends nothing and
-  opens no session. Nothing is derived from an injection record or the ground truth;
+  opens no session. This is a MODELLING CHOICE that departs from the wording of the contract (a session is open when a
+  measurement was "requested or announced"): a requested but unanswered measurement (silent detachment, refusal, a
+  cuff that never answers) is never stale, so ``stale`` is in practice a ``ble_dropout`` signal and
+  ``P(stale | cuff_detached) = 0`` is a property of this generator, not of the contract. Nothing is derived from an
+  injection record or the ground truth. The state of a driver does not carry across midnight: each day is a stream
+  and starts ``ok``;
 * a CONTINUOUS device (``ecg``, ``oximeter``) is stale while it has been silent for more than the lease.
+
+The lease must be strictly above the longest time from the start of a measurement to its reading
+(``longest_start_to_reading_ms``, ``check_lease``, ``LeaseTooShortError``; checked at the build against the registry
+bound, or the nominal time as a floor, and again at generation against every reading): no margin is invented.
 
 ``warn`` and ``error`` are not produced: they come from the status the device itself reports, and the fault model
 attributes no fault to ``system.diagnostics_ok`` (fault-model OP-4). The lease and the driver period have NO
@@ -36,7 +45,8 @@ Dispenser interval (``dispenser_reports_interval``, default True). The dispenser
 previous opening in the payload of each ``DISPENSE``: see ``measurement.assign_dispense_intervals``.
 
 Resource bounds: at most ``MAX_DRIVER_REPORTS_PER_DAY`` periodic reports per device and day. Every public function
-raises ``DeviceProfileError`` for an invalid argument and nothing else.
+raises ``DeviceProfileError`` (``UnsetDriverParameterError``, ``LeaseTooShortError`` are subclasses) for an invalid
+argument and nothing else, rounding included.
 """
 
 from __future__ import annotations
@@ -67,11 +77,14 @@ __all__ = [
     "DeviceProfileError",
     "DriverDiagnostics",
     "GeneratorDeviceProfile",
+    "LeaseTooShortError",
     "MessageView",
     "Session",
     "UnsetDriverParameterError",
+    "check_lease",
     "driver_inputs",
     "driver_reports",
+    "longest_start_to_reading_ms",
     "message_view",
     "round_cuff_samples",
     "round_to_resolution",
@@ -150,6 +163,14 @@ class UnsetDriverParameterError(DeviceProfileError):
 
     Both are device-profile parameters with NO default (rows ``driver_period_ms`` and ``driver_stale_lease_ms`` of
     ``generator_design.yaml``, ``awaiting_human_value``): the run fails instead of inventing one.
+    """
+
+
+class LeaseTooShortError(DeviceProfileError):
+    """``stale_lease_ms`` is not strictly above the longest time from the start of a measurement to its reading.
+
+    A lease at or below that time makes a healthy reading show a short ``stale`` (a profile error, not a fault),
+    which would turn C1 events into apparent system faults: the run is refused instead.
     """
 
 
@@ -313,8 +334,23 @@ class GeneratorDeviceProfile:
 
 
 def round_to_resolution(value: float, resolution: float) -> float:
-    """``value`` rounded to the nearest multiple of ``resolution`` (ties to even, as ``round``)."""
-    return round(value / resolution) * resolution
+    """``value`` rounded to the nearest multiple of ``resolution`` (ties to even, as ``round``).
+
+    Raises ``DeviceProfileError`` for a resolution that is not a positive finite number and for a value that is not
+    finite (a reading the injectors left as NaN or infinity cannot be shown on a display).
+    """
+    if isinstance(resolution, bool) or not isinstance(resolution, numbers.Real):
+        raise DeviceProfileError("the resolution must be a positive finite number")
+    step = float(resolution)
+    if not math.isfinite(step) or step <= 0.0:
+        raise DeviceProfileError("the resolution must be a positive finite number")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, numbers.Real)
+        or not math.isfinite(value)
+    ):
+        raise DeviceProfileError("a reading to round must be a finite number")
+    return round(value / step) * step
 
 
 def round_cuff_samples(
@@ -333,6 +369,45 @@ def round_cuff_samples(
             s = replace(s, value=round_to_resolution(s.value, pulse))
         out.append(s)
     return tuple(out)
+
+
+def longest_start_to_reading_ms(
+    *,
+    nominal_ms: int,
+    sd_ms: float,
+    min_ms: int,
+    registry_upper_ms: float | None,
+) -> tuple[int, str]:
+    """The longest time from the start of a cuff measurement to its reading that the generator can emit, and its source.
+
+    The generator draws ``round(nominal + sd * z)`` raised to the registry minimum ``min_ms`` (``measurement``
+    module). That draw has no upper limit of its own; the registry declares one for the signal when it holds
+    ``bound_inflation_ms_upper`` (``registry_upper_ms``), and then the bound is the larger of that and the nominal
+    time. Without a declared bound and with a spread of 0 the longest draw is the nominal time (or the minimum, if
+    larger); with a spread and no bound it is only a floor, and the per-reading check at generation
+    (``driver_inputs``) completes it. Nothing is added as a margin.
+    """
+    floor = max(int(nominal_ms), int(min_ms))
+    if registry_upper_ms is not None:
+        return max(
+            floor, math.ceil(registry_upper_ms)
+        ), "registry bound_inflation_ms_upper"
+    if sd_ms == 0:
+        return floor, "inflation_ms_nominal (spread 0; raised to cuff_inflation_min)"
+    return (
+        floor,
+        "inflation_ms_nominal (a floor: the draw has a spread and the registry declares no bound_inflation_ms_upper)",
+    )
+
+
+def check_lease(stale_lease_ms: int, longest_ms: int, source: str) -> None:
+    """Raise ``LeaseTooShortError`` unless the lease is strictly above ``longest_ms``."""
+    if stale_lease_ms <= longest_ms:
+        raise LeaseTooShortError(
+            f"driver_stale_lease_ms {stale_lease_ms} must be strictly above the longest time from the start of a "
+            f"measurement to its reading, {longest_ms} ms ({source}); a lease at or below it makes a healthy "
+            "reading show a short stale"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -491,12 +566,18 @@ def message_view(
 
 
 def driver_inputs(
-    sent: MessageView, delivered: MessageView, events: Iterable[Event]
+    sent: MessageView,
+    delivered: MessageView,
+    events: Iterable[Event],
+    *,
+    stale_lease_ms: int | None = None,
 ) -> tuple[list[Session], list[int]]:
     """The sessions and the delivered message instants of a device, from what it sent and what the link delivered.
 
     ``events`` are the events of the stream after the link stage: a ``NODE_STATE`` ``active`` report of the device
     (the gateway reporting the link restored, or the device back from a deactivation) restores a lost session.
+    With ``stale_lease_ms``, a message whose session lasted at least the lease raises ``LeaseTooShortError``
+    (a healthy reading must never show a stale).
     """
     device = sent.device
     if delivered.device != device:
@@ -513,6 +594,12 @@ def driver_inputs(
     sessions: list[Session] = []
     for t, setup in sorted(sent.setups.items()):
         opened = t - setup
+        if stale_lease_ms is not None and setup >= stale_lease_ms:
+            raise LeaseTooShortError(
+                f"a {device} message at {t} ms was read {setup} ms after its measurement started, "
+                f"not below driver_stale_lease_ms {stale_lease_ms}: the lease must exceed every start-to-reading "
+                "time of the generator (inflation_ms)"
+            )
         if t in delivered.setups:
             sessions.append(Session(opened, t))
             continue

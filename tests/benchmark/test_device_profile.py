@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from ralmon.eval.device_capabilities import device_capabilities_from_manifest
 
 from ralmon.attribution.extract import DeviceCapabilities, DeviceProfile
 from ralmon.benchmark import vocab
@@ -75,6 +74,7 @@ from ralmon.benchmark.priors import (
 )
 from ralmon.benchmark.schedule import Schedule
 from ralmon.benchmark.trace import InjectedClass
+from ralmon.eval.device_capabilities import device_capabilities_from_manifest
 from ralmon.signals import Event, EventKind, Sample
 
 from .test_builder import (
@@ -811,9 +811,11 @@ def test_a_forged_dispense_reports_the_interval_the_stream_gives() -> None:
         extra = [e for e in opens if e.t_device_ms == DOSE_TICKS[0] + gap]
         assert len(extra) == 1
         assert extra[0].payload[vocab.KEY_INTERVAL] == gap
-        # the genuine device did not see the forgery: its next opening is measured from the real opening
+        # the naive forgery is not seen by the device: the next opening is measured from the real opening; the
+        # informed forger is coherent and re-chains it (B1 of the review: the forged opening counts)
         later = [e for e in opens if e.t_device_ms == DOSE_TICKS[1]]
-        assert later[0].payload[vocab.KEY_INTERVAL] == DOSE_TICKS[1] - DOSE_TICKS[0]
+        chain_from = DOSE_TICKS[0] + (gap if level == "informed" else 0)
+        assert later[0].payload[vocab.KEY_INTERVAL] == DOSE_TICKS[1] - chain_from
         if (
             level == "informed"
         ):  # the informed forger continues the counter; the naive one repeats a number

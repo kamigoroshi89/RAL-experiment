@@ -73,6 +73,7 @@ from ralmon.benchmark import vocab
 from ralmon.benchmark.device_profile import (
     ACTIVITY_MODES,
     GeneratorDeviceProfile,
+    LeaseTooShortError,
     MessageView,
     driver_inputs,
     driver_reports,
@@ -1440,7 +1441,12 @@ def _driver_diagnostics(
     try:
         for device in driver.devices:
             delivered = message_view(device, work.samples, work.events)
-            sessions, arrivals = driver_inputs(sent[device], delivered, work.events)
+            sessions, arrivals = driver_inputs(
+                sent[device],
+                delivered,
+                work.events,
+                stale_lease_ms=driver.stale_lease_ms,
+            )
             added.extend(
                 driver_reports(
                     device,
@@ -1453,6 +1459,8 @@ def _driver_diagnostics(
                     message_times=arrivals,
                 )
             )
+    except LeaseTooShortError:
+        raise
     except ValueError as exc:
         raise InjectionContextError(str(exc)) from exc
     work.events.extend(added)
