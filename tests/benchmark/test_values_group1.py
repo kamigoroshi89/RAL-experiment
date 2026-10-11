@@ -70,8 +70,9 @@ BIAS_LEVELS = {
     ),
 }
 
-# The 46 rows that still wait for a human value, by file (the nine duration rows of the three cuff faults were
-# entered as proposals in readings by WS04-T16, ADR-070 (a): 55 - 9).
+# The 48 rows that still wait for a human value, by file (the nine duration rows of the three cuff faults were
+# entered as proposals in readings by WS04-T16, ADR-070 (a): 55 - 9; WS04-T18 added the two rows of the driver
+# profile 'driver_with_diagnostics', the lease and the period, which have no default: 46 + 2).
 AWAITING_PRIOR = ["mean_delay_ms"]
 AWAITING_DESIGN = [
     "circadian_peak_clock_ms",
@@ -79,6 +80,8 @@ AWAITING_DESIGN = [
     "double_take_gap_ms",
     "robot_dwell_ms",
     "vitals_period_ms",
+    "driver_period_ms",
+    "driver_stale_lease_ms",
 ]
 READINGS_ROWS = {
     f"{family}_duration_{level}": value
@@ -86,7 +89,7 @@ READINGS_ROWS = {
     for level, value in (("short", 1), ("medium", 2), ("long", 3))
 }
 FILLED_NOW = 48
-AWAITING_NOW = 46
+AWAITING_NOW = 48
 
 
 def flat(text: str | None) -> str:
@@ -238,7 +241,7 @@ def test_cuff_duration_rows_are_in_readings_and_device_bias_stays_a_definition()
     assert rows["cuff_silent_bias_magnitude_device_bias"].status == "filled"
 
 
-def test_awaiting_rows_are_exactly_the_other_46() -> None:
+def test_awaiting_rows_are_exactly_the_other_48() -> None:
     expected_injections = {
         name
         for name, row in injection_rows().items()
