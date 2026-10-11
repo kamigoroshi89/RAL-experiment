@@ -73,7 +73,6 @@ from ralmon.benchmark.anchoring import (
     ANCHORED_SUBTYPES,
     READINGS_UNIT,
     anchored_choices,
-    annotate_reading_counts,
     draw_anchored_window,
     stream_readings,
 )
@@ -1122,7 +1121,10 @@ class BuildContext:
         n_readings = len(self.schedule.measurement_ticks_ms)
         for subtype in ANCHORED_SUBTYPES:
             entry = self.design.c2[subtype]
-            assert entry.duration is not None and entry.duration.unit == READINGS_UNIT
+            if entry.duration is None or entry.duration.unit != READINGS_UNIT:
+                raise BenchmarkConfigError(
+                    f"{subtype} needs a duration block in {READINGS_UNIT} (ADR-070 (a))"
+                )
             for level in entry.duration.levels:
                 if level.value is not None and level.value > n_readings:
                     raise BenchmarkConfigError(
@@ -1494,7 +1496,8 @@ class BuildContext:
                 subtype = self._pick(rng, subtypes)
                 if cls_name == "c2" and subtype == "stuck_at" and day == 0:
                     # the first scored day has no previous evening whose last reading a stuck cuff could
-                    # repeat (ADR-070 (d)): excluded from the draw, counted, not left to be unrealised
+                    # repeat (ADR-070 (d)): drawn and not placed, counted in plan_skipped, so that no
+                    # unrealised injection stands among the positives
                     skipped["c2/stuck_at/first_day"] += 1
                     continue
                 if cls_name == "c2":
@@ -1739,9 +1742,7 @@ class BuildContext:
         observed = _withhold(observed, robot_present, task_outcomes)
         if robot_present:
             observed = self._with_reports(observed, result.stream.visits)
-        # the readings the plan drew next to the ones the injector found after the robot stage (ADR-070 (b))
-        records = annotate_reading_counts(result.records, stream_)
-        return observed, result.stream, records, result.disabled_subtypes
+        return observed, result.stream, result.records, result.disabled_subtypes
 
     # -- patients --------------------------------------------------------------------------------
 
@@ -2121,6 +2122,8 @@ class _Writer:
         self.skipped: Counter[str] = Counter()
         self.cuff_readings: dict[str, Counter[str]] = {}
         self.cuff_realised: dict[str, Counter[str]] = {}
+        self.cuff_by_k: dict[str, dict[str, Counter[str]]] = {}
+        self.unrealised: Counter[str] = Counter()
 
     def abort(self) -> None:
         """Remove what this build wrote: the directory if it created it, else only its contents."""
@@ -2203,8 +2206,21 @@ class _Writer:
             if subtype not in ANCHORED_SUBTYPES:
                 continue
             details = entry["details"]
-            key = f"{details['n_readings_drawn']}->{details['n_readings_covered']}"
-            self.cuff_readings.setdefault(subtype, Counter())[key] += 1
+            drawn, got = details["n_readings_drawn"], details["n_readings_covered"]
+            self.cuff_readings.setdefault(subtype, Counter())[f"{drawn}->{got}"] += 1
+            cell = self.cuff_by_k.setdefault(subtype, {}).setdefault(
+                str(drawn), Counter()
+            )
+            cell["draws"] += 1
+            cell["readings_drawn"] += drawn
+            cell["lost_robot"] += details["n_readings_lost_robot"]
+            cell["removed_robot"] += details["n_readings_removed_robot"]
+            cell["gained_robot"] += details["n_readings_gained_robot"]
+            cell["lost_device"] += details["n_readings_lost_device"]
+            cell["covered_differs"] += int(got != drawn)
+            cell["covered_zero"] += int(got == 0)
+            if got == 0:
+                self.unrealised[f"c2/{subtype}/covered_zero"] += 1
             self.cuff_realised.setdefault(subtype, Counter())["placed"] += 1
             if entry["realised"]:
                 self.cuff_realised[subtype]["realised"] += 1
@@ -2294,7 +2310,12 @@ class _Writer:
                     s: {"placed": c["placed"], "realised": c["realised"]}
                     for s, c in sorted(self.cuff_realised.items())
                 },
+                "by_drawn_k": {
+                    s: {k: dict(sorted(c.items())) for k, c in sorted(per.items())}
+                    for s, per in sorted(self.cuff_by_k.items())
+                },
             },
+            "plan_unrealised": dict(sorted(self.unrealised.items())),
             "n_unverified_prior": context.n_unverified_prior,
             "n_unverified_design": context.n_unverified_design,
             "schedule": {

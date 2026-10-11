@@ -25,6 +25,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))  # works from a checkout without an installed package
 DEFAULT_CONFIG = ROOT / "configs" / "benchmark" / "default.yaml"
 DEFAULT_DOC = ROOT / "docs" / "benchmark" / "builder.md"
 
@@ -79,14 +80,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    from ralmon.benchmark.anchoring import find_block, observability_table, render_block
-
     try:
+        from ralmon.benchmark.anchoring import (
+            find_block,
+            observability_table,
+            render_block,
+        )
+
         readings, step, ks = default_day(args.config)
-    except Exception as exc:  # noqa: BLE001  any loader error (configuration, registry, design) is reported plainly
-        print(f"cannot derive the default day: {exc}", file=sys.stderr)
+        table = observability_table(readings, step_ms=step, ks=ks)
+    except Exception as exc:  # noqa: BLE001  a missing dependency or any loader error is reported plainly
+        print(
+            f"cannot derive the default day ({type(exc).__name__}): {exc}. "
+            "Run it with the virtual environment of the project (.venv/bin/python).",
+            file=sys.stderr,
+        )
         return 2
-    table = observability_table(readings, step_ms=step, ks=ks)
     if not (args.write or args.check):
         print(table)
         return 0

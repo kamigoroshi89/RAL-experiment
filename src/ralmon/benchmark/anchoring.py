@@ -13,10 +13,10 @@ reading at the onset is inside and the next reading (``end <= r[i+k]``) is outsi
 readings and never passes the day end. The onset and the end are independent. Drawing every ``(onset, end)``
 pair equally likely instead would make the first covered reading depend on the gaps between readings.
 
-``annotate_reading_counts`` adds ``n_readings_drawn`` (the readings of the fault-free base stream inside the
-window: the ``k`` of the rule) to the injection record, next to the ``n_readings_covered`` that the injector
-writes after the robot stage (``nav_delay`` and ``manipulation_failure`` run first and can move or remove a
-reading, so the effective number is ``k - 1`` or ``k + 1`` in a few percent of the draws; ADR-070 (b)).
+The injector writes the reading ledger of the window into the record (``InjectionWork.reading_ledger``):
+``n_readings_drawn`` (the ``k`` of the rule), the readings lost to the robot stage (``nav_delay`` and
+``manipulation_failure`` run first), gained from it, lost to an earlier ``cuff_detached`` window, and
+``n_readings_covered``, the effective ``k`` (ADR-070 (b)).
 
 ``observability_table`` builds the table of ``docs/benchmark/builder.md`` by exact enumeration;
 ``python tools/anchored_observability_table.py --write`` rewrites it from the configuration files (``--check``
@@ -35,13 +35,8 @@ from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
-from ralmon.benchmark.injection import (
-    READING_DURATION_SUBTYPES,
-    READINGS_UNIT,
-    InjectionRecord,
-)
+from ralmon.benchmark.injection import READING_DURATION_SUBTYPES, READINGS_UNIT
 from ralmon.benchmark.latent import T_DAY_MS
-from ralmon.benchmark.trace import InjectedClass
 from ralmon.signals import MS_PER_HOUR, MS_PER_MINUTE, MS_PER_SECOND
 
 if TYPE_CHECKING:
@@ -53,7 +48,6 @@ __all__ = [
     "AnchoredChoice",
     "AnchoringError",
     "anchored_choices",
-    "annotate_reading_counts",
     "count_readings",
     "draw_anchored_window",
     "find_block",
@@ -172,37 +166,6 @@ def count_readings(
 def stream_readings(stream_: ObservedStream) -> list[int]:
     """The sorted reading instants (``t_device_ms`` of the ``bp`` samples) of an observed stream."""
     return sorted({s.t_device_ms for s in stream_.samples if s.signal == _BP})
-
-
-def annotate_reading_counts(
-    records: Iterable[InjectionRecord], base_stream: ObservedStream
-) -> tuple[InjectionRecord, ...]:
-    """Add ``n_readings_drawn`` to the records of the three anchored subtypes (the others are returned as they are).
-
-    ``base_stream`` is the stream the plan was drawn on, before any injection: the readings of the fault-free
-    day inside the window are the ``k`` that the rule drew. The injector wrote ``n_readings_covered`` after the
-    robot stage; the truth keeps both (ADR-070 (b)) and every per-k report uses the covered one.
-    """
-    readings = stream_readings(base_stream)
-    out: list[InjectionRecord] = []
-    for record in records:
-        spec = record.spec
-        if (
-            spec.cls is not InjectedClass.C2
-            or spec.subtype not in READING_DURATION_SUBTYPES
-            or spec.duration_ms is None
-        ):
-            out.append(record)
-            continue
-        drawn = count_readings(
-            readings, spec.onset_ms, spec.onset_ms + spec.duration_ms
-        )
-        out.append(
-            dataclasses.replace(
-                record, details={**record.details, "n_readings_drawn": drawn}
-            )
-        )
-    return tuple(out)
 
 
 # ---------------------------------------------------------------------------------------------------

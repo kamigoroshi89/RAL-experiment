@@ -535,6 +535,44 @@ def test_effective_k_after_the_robot_stage() -> None:
     assert not set(LEDGER) & set(other.details)
 
 
+def test_the_robot_loss_is_split_into_removed_and_moved_out() -> None:
+    ticks = default_ticks()
+    base = fixture_stream(ticks)
+    window = (8 * HOUR, 9 * HOUR)  # the 08:15:30 reading only
+    removed = only(
+        run([manip(ticks[1]), detached(window[0], HOUR)], stream_=base),
+        "cuff_detached",
+    )
+    assert removed.details["n_readings_lost_robot"] == 1
+    assert removed.details["n_readings_removed_robot"] == 1
+    moved = only(
+        run(
+            [nav(ticks[1], 110 * MIN, kind="measurement"), detached(window[0], HOUR)],
+            stream_=base,
+            task_deadline_offset_ms=30 * MIN,
+        ),
+        "cuff_detached",
+    )
+    assert (
+        moved.details["n_readings_lost_robot"] == 1
+    )  # moved to 10:05, out of the window
+    assert moved.details["n_readings_removed_robot"] == 0
+    assert moved.details["n_readings_covered"] == 0 and not moved.realised
+
+
+def test_a_reading_moved_inside_the_window_is_neither_lost_nor_gained() -> None:
+    ticks = default_ticks()
+    base = fixture_stream(ticks)
+    onset, end = 8 * HOUR, 15 * HOUR  # readings 08:15:30 and 14:15:30
+    # the 08:15 visit arrives 30 minutes late: the reading moves to 08:45:30, still inside the window
+    out = run(
+        [nav(ticks[1], 30 * MIN, kind="measurement"), detached(onset, end - onset)],
+        stream_=base,
+        task_deadline_offset_ms=60 * MIN,
+    )
+    assert ledger(only(out, "cuff_detached")) == (2, 0, 0, 0, 2)
+
+
 def test_a_device_fault_before_the_bias_is_counted_apart_from_the_robot_stage() -> None:
     ticks = default_ticks()
     base = fixture_stream(ticks)
@@ -667,6 +705,7 @@ def test_manifest_tallies_the_ledger_by_drawn_k(tmp_path: Path) -> None:
                 cell["draws"] += 1
                 cell["readings_drawn"] += d["n_readings_drawn"]
                 cell["lost_robot"] += d["n_readings_lost_robot"]
+                cell["removed_robot"] += d["n_readings_removed_robot"]
                 cell["gained_robot"] += d["n_readings_gained_robot"]
                 cell["lost_device"] += d["n_readings_lost_device"]
                 cell["covered_differs"] += int(
