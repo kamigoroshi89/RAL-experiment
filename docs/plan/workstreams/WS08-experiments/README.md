@@ -137,5 +137,5 @@ These rules bind T02 to T07. A result that contradicts a hypothesis of analisi Â
 | WS08-T05 | Distribution shift and A6: split versus adaptive conformal | agent | blocked | WS08-T02 |
 | WS08-T06 | Unlabeled real-data run for alert load (blocked until access) | agent | blocked | WS08-T02, WS04-T13 |
 | WS08-T07 | Reproducibility check and result freeze | agent | blocked | WS08-T03, WS08-T04, WS08-T05 |
-| WS08-T08 | Per-template metrics, equal-weight aggregate without RESP, false alarms outside injection windows (ADR-071 (b), ADR-072 (b)) | agent | in_progress | WS08-T01 |
-| WS08-T09 | Metrics for probabilistic attribution: log score, Brier, calibration curves, pair likelihood ratio, McNemar on direction (ADR-074) | agent | blocked | WS08-T08, WS02-T06, WS05-T14 |
+| WS08-T08 | Per-template metrics, equal-weight aggregate without RESP, false alarms outside injection windows (ADR-071 (b), ADR-072 (b)) | agent | done | WS08-T01 |
+| WS08-T09 | Metrics for probabilistic attribution: log score, Brier, calibration curves, pair likelihood ratio, McNemar on direction (ADR-074) | agent | ready | WS08-T08, WS02-T06, WS05-T14 |

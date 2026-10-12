@@ -3,7 +3,7 @@ id: WS08-T08
 title: "Per-template metrics, equal-weight aggregate without RESP, false alarms outside injection windows (ADR-071 (b), ADR-072 (b))"
 workstream: WS08-experiments
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS08-T01"]
 critical_path: true
 non_negotiable: false
