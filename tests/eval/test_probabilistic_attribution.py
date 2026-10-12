@@ -1231,3 +1231,56 @@ def test_the_static_c3_table_agrees_with_the_likelihood_catalogue(table) -> None
         if component.cls == "C3":
             by_subtype.setdefault(component.subtype, set()).update(component.templates)
     assert {k: set(v) for k, v in T.C3_EVENT_TEMPLATES.items()} == by_subtype
+
+
+def test_scores_on_a_real_alert_of_the_likelihood_rule(rule) -> None:  # type: ignore[no-untyped-def]
+    """End to end with the real attributor: a COUNT alert of ``RuleAttributor(rule=LikelihoodRule)`` carries ``p_kappa`` (keys are
+    ``AttributedCause``) and a cumulative-level ``cause_set``; its log score against a C2 cause is ``-ln p_kappa[C2]``, and a
+    double take (C1) event at the alert's instant makes the C1 posterior the one that is scored."""
+    from ralmon.attribution import RuleAttributor
+    from ralmon.spec import load_templates
+
+    record = make_record("count", decided_at_ms=20 * HOUR + 5_000)
+    evidence = count_vector(0.0, 5_000)
+    attributor = RuleAttributor(REGISTRY, load_templates(registry=REGISTRY), rule=rule)
+    (real,) = attributor.attribute_all([record], {record.instance_key: evidence})
+    assert real.p_kappa is not None and real.cause_set is not None
+    bounce = event("C2", "ble_dropout", 20 * HOUR, 21 * HOUR, None, injected=True)
+    res = _label(
+        [bounce],
+        [real],
+        [T.EventContext(("count",), "dispenser")],
+        "tight",
+        patient_id="p",
+    )
+    assert [x.true_class for x in res.labelled] == ["C2"]
+    ls = M.attribution_log_score(res.labelled)
+    assert ls is not None
+    assert ls["COUNT"] == pytest.approx(-math.log(real.p_kappa[C2]), abs=1e-12)
+    double_take = event("C1", "double_take", 20 * HOUR, None, "count", injected=True)
+    c1 = _label([double_take], [real], None, "tight", patient_id="p")
+    ls1 = M.attribution_log_score(c1.labelled)
+    assert ls1 is not None and ls1["COUNT"] == pytest.approx(
+        -math.log(real.p_kappa[C1]), abs=1e-12
+    )
+    br = M.attribution_brier(c1.labelled)
+    expected = sum(
+        (real.p_kappa[c] - (1.0 if c is C1 else 0.0)) ** 2 for c in (C1, C2, C3)
+    )
+    assert br is not None and br["COUNT"] == pytest.approx(expected, abs=1e-12)
+    sets = S.set_metrics(c1.labelled, n_resamples=100, level=0.95, seed=0)
+    assert sets is not None and sets["overall"]["n"] == 1
+
+
+def test_a_point_c2_event_is_the_tight_cause_only_at_its_own_instant() -> None:
+    """A C2 event with no window (``end_ms`` None: the extra opening of a ``dispenser_bounce``) is active only at its onset: under the
+    TIGHT labelling an alert decided later (the COUNT alert of a bounce is decided at the next dose step) is not caused by it, under the
+    LOOSE one it is, within the allowance. This is the reading of the ADR ('decided while the event window is active') and of the
+    research prototype, which kept only 3 bounce alerts under the tight labelling; the consequence is reported in the Notes."""
+    bounce = event("C2", "dispenser_bounce", 20 * HOUR, None, None)
+    ctx = [T.EventContext(("count", "hold", "resp", "int"), "dispenser")]
+    at = p_alert(20 * HOUR, "count", (0.2, 0.7, 0.1))
+    later = p_alert(20 * HOUR + 30_000, "count", (0.2, 0.7, 0.1))
+    assert len(_label([bounce], [at], ctx, "tight").labelled) == 1
+    assert _label([bounce], [later], ctx, "tight").labelled == ()
+    assert len(_label([bounce], [later], ctx, "loose").labelled) == 1

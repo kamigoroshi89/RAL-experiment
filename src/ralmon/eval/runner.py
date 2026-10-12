@@ -2533,7 +2533,7 @@ def _applicable_table() -> tuple[
     path = root / "configs" / "attribution_likelihood.yaml"
     if not path.is_file():
         return None, None
-    from ralmon.attribution.likelihood import load_likelihood_table
+    from ralmon.attribution import load_likelihood_table
 
     table = load_likelihood_table(path)
     return applicable_from_table(

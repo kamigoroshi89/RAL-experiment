@@ -41,12 +41,12 @@ from typing import Any, Final
 
 import numpy as np
 
-from ralmon.conformal.scores import Level
-from ralmon.conformal.sets import (
+from ralmon.conformal import (
     ASSUMPTIONS_SETS,
     GUARANTEE_SETS,
     GUARANTEE_SETS_MONDRIAN,
     AttributionSet,
+    Level,
     SetThreshold,
     SubtypeCalibrationAlert,
     SubtypeSetCalibrator,
@@ -180,7 +180,7 @@ def alert_inputs_from_rule(
     with every field unavailable, which contributes the factor 1, so the posterior is ``prior_t(class) * pi``), the evidence
     vector (for the pair quantity) and, when the hierarchical rule's ``kappa`` is given, its kappa as a fixed set (``hier``: every
     subtype of that class applicable at the template; ``UNDETERMINED`` every applicable subtype). Reads no truth."""
-    from ralmon.attribution.evidence import empty_evidence
+    from ralmon.attribution import empty_evidence
 
     template = evidence.provenance.violated_template
     by_class = applicable_from_table(rule.table)[template.value]
@@ -263,7 +263,7 @@ def _per_patient(
         "n_patients": len(patients),
         "coverage_by_patient": per,
         "median_coverage": float(np.median(values)),
-        "p10_coverage": float(np.percentile(values, 10)),
+        "min_coverage": float(values.min()),
     }
     boot: dict[str, Any] = {
         "unit": "patient",
@@ -339,10 +339,7 @@ def set_metrics(
             for s in sorted({r.true_subtype for r in rows})
         },
         "per_patient": per_patient,
-        "cluster_bootstrap": {
-            **boot,
-            "pooled_coverage_note": "the interval resamples patients",
-        },
+        "cluster_bootstrap": boot,
     }
 
 
