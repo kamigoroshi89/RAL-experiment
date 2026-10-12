@@ -1362,3 +1362,273 @@ def test_table_loader_validates_the_file(tmp_path: Path) -> None:
     table = load_likelihood_table(CONFIG_PATH)
     assert table.sha256 and len(table.sha256) == 64
     assert table.schema_version == "0.1.0"
+
+
+# ---- fix round (review of WS05-T12) ------------------------------------------------------------------------------------
+
+
+def _design_prior(table: Any, name: str) -> dict[str, float]:
+    from fractions import Fraction
+
+    raw = table.raw["class_priors"]["designs"][name]
+    return {c: float(Fraction(str(raw[c]))) for c in CLASSES}
+
+
+def _design_weights(table: Any, name: str) -> dict[str, float]:
+    """component id -> weight of a pi design, read from the raw file (independent of the production code)."""
+    design = table.raw["pi_designs"]["designs"][name]
+    out: dict[str, float] = {}
+    for comp in table.raw["components"]:
+        weight = float(design["default"])
+        for group, members in table.raw["pi_designs"]["groups"].items():
+            if comp["id"] in members:
+                weight = float(design["weights"][group])
+        out[comp["id"]] = weight
+    return out
+
+
+def _vector_with_threshold(
+    template: str, classes: Mapping[str, str | None], registry: Any, t_b: float
+) -> Any:
+    fields: dict[str, Any] = {}
+    for path, c in classes.items():
+        if c is None:
+            continue
+        if path == "dispenser.interval_since_previous_ms":
+            fields[path] = int(t_b // 2) if c == "A" else int(t_b * 2) + 1
+        else:
+            fields[path] = AD[path][0 if c == "A" else 1]
+    return vector(template, fields, registry)
+
+
+def test_sweep_over_parameters_designs_and_variants(registry, table) -> None:  # type: ignore[no-untyped-def]
+    rng = random.Random(20261013)
+    for _ in range(160):
+        values = {
+            "eps": rng.choice((0.001, 0.01, 0.05, 0.1)),
+            "qc": rng.choice((0.25, 0.5, 0.75)),
+            "q_stale": rng.choice((0.25, 0.5, 0.75)),
+            "rep_nat": rng.choice((0.0098, 0.0197, 0.0393)),
+            "delta": rng.choice((0, 0.1, 0.25)),
+            "dispense_bounce_interval_ms": rng.choice((1000, 10000, 30000, 180000)),
+            "tau": 0.67,
+            "cumulative_level": 0.9,
+            "class_priors": rng.choice(sorted(table.raw["class_priors"]["designs"])),
+            "pi_designs": rng.choice(sorted(table.raw["pi_designs"]["designs"])),
+        }
+        variant = rng.choice(
+            ("reference", "fully_independent", "reference_plus_cross_device")
+        )
+        a4 = rng.random() < 0.3
+        profile = rng.choice(("driver_with_diagnostics", "without_diagnostics"))
+        rule = build_rule(
+            registry,
+            table,
+            sensitivity_values=values,
+            grouped_variant=variant,
+            a4=a4,
+            diagnostics_profile=profile,
+        )
+        mask = set(A4_REMOVED) if a4 else set()
+        if profile == "without_diagnostics":
+            mask.add(DIAG)
+        template = rng.choice(TEMPLATES)
+        classes = _random_classes(rng)
+        evidence = _vector_with_threshold(
+            template, classes, registry, values["dispense_bounce_interval_ms"]
+        )
+        par = {
+            k: float(values[k]) for k in ("eps", "qc", "q_stale", "rep_nat", "delta")
+        }
+        _comp, sub, cls = reference_posterior(
+            table.raw,
+            template,
+            classes,
+            par,
+            prior=_design_prior(table, values["class_priors"]),
+            mask=frozenset(mask),
+            grouped_off=variant == "fully_independent",
+            pi_weights=_design_weights(table, values["pi_designs"]),
+            cross_device=variant == "reference_plus_cross_device",
+        )
+        got = rule.posterior_subtypes(make_record(template), evidence)
+        assert set(got) == set(sub), (variant, template)
+        for name, value in sub.items():
+            assert got[name] == pytest.approx(value, abs=1e-9, rel=1e-9), (
+                variant,
+                template,
+                name,
+            )
+        got_cls = rule.posterior(make_record(template), evidence)
+        for c in CLASSES:
+            assert got_cls[AttributedCause(c)] == pytest.approx(
+                cls[c], abs=1e-9, rel=1e-9
+            )
+
+
+def test_decisive_fields_use_the_posterior_weights_inside_every_class(
+    registry, table
+) -> None:  # type: ignore[no-untyped-def]
+    """The margin of a field: log of the posterior-weighted likelihood in the leading class minus the same in the rest."""
+    rule = build_rule(registry, table, sensitivity_values={**TEST_VALUES, "tau": 0.34})
+    rng = random.Random(20261013)
+    checked = 0
+    for _ in range(300):
+        template = rng.choice(TEMPLATES)
+        classes = _random_classes(rng)
+        evidence = classes_to_vector(template, classes, registry)
+        record = make_record(template)
+        decision = rule.decide(record, evidence)
+        comp, _sub, cls = reference_posterior(
+            table.raw, template, classes, PARAMS, mask=frozenset()
+        )
+        by_id = {c["id"]: c for c in table.raw["components"]}
+        ranked = sorted(cls.items(), key=lambda kv: -kv[1])
+        if ranked[0][1] - ranked[1][1] <= 1e-9:
+            assert decision.evidence_used == ()  # a tie has no leading class
+            continue
+        leading = ranked[0][0]
+        assert decision.contributions is not None
+        keys = {k for terms in decision.contributions.values() for k in terms}
+        expected: dict[str, float] = {}
+        near_zero = False
+        for key in keys:
+            lead = [
+                (comp[c], t[key])
+                for c, t in decision.contributions.items()
+                if by_id[c]["class"] == leading and comp[c] > 0
+            ]
+            rest = [
+                (comp[c], t[key])
+                for c, t in decision.contributions.items()
+                if by_id[c]["class"] != leading and comp[c] > 0
+            ]
+            if not lead or not rest:
+                continue
+            log_lead = math.log(
+                sum(w * math.exp(v) for w, v in lead) / sum(w for w, _ in lead)
+            )
+            log_rest = math.log(
+                sum(w * math.exp(v) for w, v in rest) / sum(w for w, _ in rest)
+            )
+            margin = log_lead - log_rest
+            if abs(margin) < 1e-9:
+                near_zero = True
+            expected[key] = margin
+        if near_zero:
+            continue  # a margin at numerical zero may fall on either side
+        want = {
+            p
+            for key, m in expected.items()
+            if m > 0
+            for p in key.split("+")
+            if classes.get(p) is not None
+        }
+        assert set(decision.evidence_used) == want, (template, classes)
+        scores = [
+            max(m for k, m in expected.items() if p in k.split("+"))
+            for p in decision.evidence_used
+        ]
+        assert scores == sorted(scores, reverse=True)
+        checked += 1
+    assert checked > 100
+
+
+def _tampered_table(tmp_path: Path, old: str, new: str) -> Any:
+    from ralmon.attribution.likelihood import load_likelihood_table
+
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    assert text.count(old) == 1
+    target = tmp_path / "attribution_likelihood.yaml"
+    target.write_text(text.replace(old, new), encoding="utf-8")
+    return load_likelihood_table(target)
+
+
+NATURAL_TOKEN = "  N:\n    form: max(rep_nat, eps)\n"
+
+
+def test_names_inside_a_token_form_are_required_at_construction(
+    registry, tmp_path
+) -> None:  # type: ignore[no-untyped-def]
+    from ralmon.attribution.likelihood import AwaitingValueError
+
+    tampered = _tampered_table(
+        tmp_path, NATURAL_TOKEN, "  N:\n    form: max(rep_nat, eps) * q_stale\n"
+    )
+    values = {k: v for k, v in TEST_VALUES.items() if k != "q_stale"}
+    # q_stale is not a parameter of the declared token, only a name inside its form; without_diagnostics does not need it
+    with pytest.raises(AwaitingValueError) as excinfo:
+        build_rule(
+            registry,
+            tampered,
+            sensitivity_values=values,
+            diagnostics_profile="without_diagnostics",
+        )
+    assert excinfo.value.names == ("q_stale",)
+    build_rule(
+        registry,
+        tampered,
+        sensitivity_values=TEST_VALUES,
+        diagnostics_profile="without_diagnostics",
+    )
+
+
+def test_every_live_cell_is_evaluated_at_construction(registry, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from ralmon.attribution.likelihood import LikelihoodConfigError
+
+    tampered = _tampered_table(
+        tmp_path, NATURAL_TOKEN, "  N:\n    form: max(rep_nat, eps) + 1\n"
+    )
+    with pytest.raises(LikelihoodConfigError, match="strictly between"):
+        build_rule(registry, tampered)
+
+
+def test_metadata_path_is_repo_relative(registry, table, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    rule = build_rule(registry, table)
+    assert rule.metadata["config_path"] == "configs/attribution_likelihood.yaml"
+    assert not Path(rule.metadata["config_path"]).is_absolute()
+    assert rule.metadata["config_sha256"] == table.sha256
+    copy = _tampered_table(tmp_path, "schema_version: 0.1.0", "schema_version: 0.1.0")
+    assert (
+        build_rule(registry, copy).metadata["config_path"]
+        == "attribution_likelihood.yaml"
+    )
+
+
+def test_a_tie_is_named_and_has_no_leading_class(registry, rule) -> None:  # type: ignore[no-untyped-def]
+    evidence = classes_to_vector("range", {DIAG: "D"}, registry)
+    record = make_record("range")
+    cls = rule.posterior(record, evidence)
+    assert cls[AttributedCause.C1_CLINICAL] == pytest.approx(
+        cls[AttributedCause.C3_INTEGRITY]
+    )
+    assert cls[AttributedCause.C1_CLINICAL] > cls[AttributedCause.C2_SYSTEM]
+    decision = rule.decide(record, evidence)
+    assert decision.kappa is AttributedCause.UNDETERMINED
+    assert decision.evidence_used == ()
+    (alert,) = attributor_for(registry, rule).attribute_all(
+        [record], {record.instance_key: evidence}
+    )
+    text = alert.xi.text
+    assert "C1 and C3 share the largest posterior" in text
+    assert "leading" not in text
+    assert "not a measured frequency" in text
+    assert (
+        "diagnostics reported ok" not in text
+    )  # no class is favoured, so no evidence is claimed to favour one
+
+
+def test_undetermined_below_threshold_carries_the_frequency_sentence(
+    registry, rule
+) -> None:  # type: ignore[no-untyped-def]
+    evidence = classes_to_vector(
+        "range", {"system.liveliness_ok": "D", AUTH: "D"}, registry
+    )
+    record = make_record("range")
+    (alert,) = attributor_for(registry, rule).attribute_all(
+        [record], {record.instance_key: evidence}
+    )
+    assert alert.kappa is AttributedCause.UNDETERMINED
+    assert "not a measured frequency" in alert.xi.text
+    assert "Evidence that favours" in alert.xi.text
+    assert "share the largest posterior" not in alert.xi.text
