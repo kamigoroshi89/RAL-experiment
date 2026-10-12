@@ -27,6 +27,7 @@ from collections.abc import Sequence
 from typing import Final
 
 from ralmon.attribution.alert import Alert, AttributedCause
+from ralmon.attribution.likelihood import NUMERICAL_ZERO
 from ralmon.attribution.rule import AbstentionReason, Decision
 from ralmon.monitor import (
     MonitorConfigError,
@@ -470,22 +471,34 @@ def _cause_likelihood(alert: Alert, decision: Decision) -> str:
     tau = decision.abstention_threshold
     classes = ", ".join(f"{c.value} {posterior[c]:.2f}" for c in _CLASSES)
     best = max(_CLASSES, key=lambda c: (posterior[c], -_CLASSES.index(c)))
+    tied = [c for c in _CLASSES if posterior[c] >= posterior[best] - NUMERICAL_ZERO]
     head = f"Attributed cause: {_CAUSE_WORDS[kappa]}"
+    table_note = (
+        "The posterior comes from a likelihood table whose numbers are sensitivity values; it is not a "
+        "measured frequency."
+    )
     if kappa is AttributedCause.UNDETERMINED:
-        if tau is not None and posterior[best] < tau:
+        if len(tied) > 1:
+            names = " and ".join(
+                [", ".join(c.value for c in tied[:-1]), tied[-1].value]
+            )
+            why = f"{names} share the largest posterior ({posterior[best]:.2f})"
+            if tau is not None and posterior[best] < tau:
+                why += f", which is also below the declared threshold tau {tau:.2f}"
+        else:
             why = (
                 f"the largest class posterior ({best.value} {posterior[best]:.2f}) is below the declared "
                 f"threshold tau {tau:.2f}"
+                if tau is not None
+                else "no class posterior reaches the declared threshold"
             )
-        else:
-            why = "two or more classes share the largest posterior"
         text = (
             f"{head}. Reason: {why}. Class posterior: {classes}. No class is attributed, so every one of "
             f"the {len(subtypes)} subtypes applicable to this constraint remains possible: "
             + ", ".join(sorted(subtypes))
-            + "."
+            + f". {table_note}"
         )
-        lead = f"the leading class ({_CAUSE_WORDS[best]})"
+        lead = f"the class with the largest posterior ({_CAUSE_WORDS[best]})"
     else:
         threshold = (
             f" the declared threshold tau {tau:.2f}"
@@ -494,8 +507,7 @@ def _cause_likelihood(alert: Alert, decision: Decision) -> str:
         )
         text = (
             f"{head}, class posterior {classes}: the most probable class, and its posterior reaches{threshold}. "
-            "The posterior comes from a likelihood table whose numbers are sensitivity values; it is not a "
-            "measured frequency."
+            f"{table_note}"
         )
         lead = "this class"
     if decision.evidence_used:

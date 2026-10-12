@@ -118,12 +118,18 @@ class Decision:
     ``evidence_used`` lists the decisive fields in precedence order (AD-17); ``missing`` lists, for an
     UNDETERMINED result of reason ``insufficient``, the fields of the exclusion set (or of the qualifier) that were
     unavailable, in contract order.
+
+    For a decision of the likelihood attributor (``p_kappa`` set) ``evidence_used`` is different: it lists the fields
+    whose reading FAVOURS the class with the largest posterior (empty on a tie), most favourable first; it is not "the
+    fields that decided kappa" and it is not causal (``ralmon.attribution.likelihood``).
     """
 
     kappa: AttributedCause
     row: int | None  # 1 to 8; None for a predicted alert (the rule is not evaluated)
     reason: AbstentionReason | None
-    evidence_used: tuple[str, ...]
+    evidence_used: tuple[
+        str, ...
+    ]  # hierarchical rule: the decisive fields; likelihood rule: the fields that FAVOUR the top class
     missing: tuple[str, ...]
     #: The value of each decisive field (a mapping as sorted pairs), so that the text can state the reading
     #: itself and not only the name of the field: "no intake observed" is not "intake observed".
@@ -139,7 +145,8 @@ class Decision:
     #: log P(reading class of the field | component): component id -> field -> value (a grouped cell is one
     #: entry under the key "member+member"). The sum over the fields of a component is log P(e | component).
     contributions: Mapping[str, Mapping[str, float]] | None = None
-    #: The same for each class: class -> field -> log of the pi-weighted mixture over the components of the class.
+    #: The same for each class: class -> field -> log of the POSTERIOR-weighted mean, over the components of the class,
+    #: of P(reading class | component) (the weights are the posteriors of the components renormalised to the class).
     class_contributions: Mapping[str, Mapping[str, float]] | None = None
     #: The declared threshold ``tau`` the label was compared with.
     abstention_threshold: float | None = None

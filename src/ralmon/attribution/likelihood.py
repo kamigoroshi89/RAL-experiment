@@ -31,12 +31,13 @@ needs and that is not supplied makes construction raise ``AwaitingValueError``. 
 uses (``q_stale`` without the driver diagnostics, ``delta`` under A4) is not required.
 
 The decision record (``Decision`` of ``rule.py``) carries ``p_kappa``, the subtype posterior, the set, the log
-likelihood contributions per component and per class, and the decisive fields (``evidence_used``): the fields whose
-reading favours the leading class against the rest (single-field log likelihood ratio of the pi-weighted class mixture
-against the mixture of the other classes weighted by their posterior mass, larger than numerical zero), most favourable
-first. They are traceability of the table,
-not an explanation of the cause. The set is the cumulative-level set unless the attributor injects a selector (the
-conformal set of WS05-T14, which this package may not import, see ``tests/test_layering.py``).
+likelihood contributions per component and per class, and ``evidence_used``. ``evidence_used`` is NOT "the fields that
+decided kappa": it lists the fields whose reading FAVOURS the class with the largest posterior against the rest (the
+single-field log likelihood ratio between the posterior-weighted mean likelihood of the reading in that class and in
+the components of the other classes, weighted by the class posterior, larger than numerical zero), most favourable
+first; with a tie at the maximum it is empty. The criterion is the worker's own, deterministic, and it is traceability
+of the table, not an explanation of the cause and not causal. The set is the cumulative-level set unless the attributor
+injects a selector (the conformal set of WS05-T14, which this package may not import, see ``tests/test_layering.py``).
 
 The prior-free pair quantity of ADR-074 decision 3 is ``log_likelihood_ratio`` and ``pair_statistic``.
 """
@@ -547,6 +548,20 @@ class _Evaluation:
     readings: Mapping[str, str | None]
 
 
+def _repo_relative(path: Path | None) -> str | None:
+    """The path of the table from its ``configs`` directory (``configs/attribution_likelihood.yaml``), else the file name.
+
+    The metadata is written next to the outputs; an absolute path would tie the output to one machine.
+    """
+    if path is None:
+        return None
+    parts = path.resolve().parts
+    if "configs" in parts:
+        index = len(parts) - 1 - parts[::-1].index("configs")
+        return "/".join(parts[index:])
+    return path.name
+
+
 def _group_key(fields: Iterable[str]) -> str:
     return "+".join(fields)
 
@@ -625,6 +640,7 @@ class LikelihoodRule:
         self._pa_cache: dict[tuple[str, str], float] = {}
         self._group_cache: dict[tuple[str, str], list[tuple[str, float]]] = {}
         self._check_groups()
+        self._check_cells(live)
         self._plans = {t: self._plan(t) for t in self._reads}
         self.model_version = self._version()
         self.metadata: Mapping[str, Any] = self._metadata()
@@ -651,13 +667,13 @@ class LikelihoodRule:
         return out
 
     def _needed(self, live: set[str]) -> list[str]:
-        """The names the run needs: every parameter some live cell or mode uses, the thresholds and the designs."""
+        """The names the run needs: every name inside the form of a live cell or in a mode, the thresholds and the designs."""
         table = self.table
         needed = {"eps"}
         for (_comp, field), token in table.cell_token.items():
             if field in live:
-                needed.add(table.tokens[token][1])
-        needed.add(table.tokens[table.default_token][1])
+                needed |= _names(table.tokens[token][0])
+        needed |= _names(table.tokens[table.default_token][0])
         for gname in self._active_groups:
             for modes in table.group_modes[gname].values():
                 for _combo, tree in modes:
@@ -806,6 +822,14 @@ class LikelihoodRule:
                 )
             self._group_cache[key] = resolved
         return self._group_cache[key]
+
+    def _check_cells(self, live: set[str]) -> None:
+        """Evaluate every live cell now, so that a bad form or a missing name fails at construction, not at an alert."""
+        for component, field in self.table.cell_token:
+            if field in live:
+                self._pa(component, field)
+        if live:  # the default cell, shared by every unlisted pair
+            self._pa("", min(live, key=_ORDER.__getitem__))
 
     def _check_groups(self) -> None:
         for group in self._active_groups:
@@ -1122,7 +1146,12 @@ class LikelihoodRule:
 
     @staticmethod
     def _class_terms(ev: _Evaluation) -> dict[str, dict[str, float]]:
-        """class -> field key -> log of the pi-weighted mixture, over the components of the class, of P(reading | s)."""
+        """class -> field key -> log of the POSTERIOR-weighted mean, over the components of the class, of P(reading | s).
+
+        The weights are the posterior probabilities of the components inside the class, renormalised to the class
+        (the within-class weights pi enter through the posterior); a class whose posterior mass underflowed to zero
+        falls back to the weights pi.
+        """
         keys: list[str] = []
         for terms in ev.terms.values():
             for key in terms:
@@ -1131,7 +1160,11 @@ class LikelihoodRule:
         out: dict[str, dict[str, float]] = {}
         for cls in ev.plan.classes:
             comps = [c for c in ev.plan.components if c.cls == cls]
-            weights = [ev.plan.pi[c.id] for c in comps]
+            weights = [ev.components[c.id] for c in comps]
+            if math.fsum(weights) <= 0.0:
+                weights = [ev.plan.pi[c.id] for c in comps]
+            total = math.fsum(weights)
+            weights = [w / total for w in weights]
             out[cls] = {
                 key: _logsumexp([ev.terms[c.id][key] for c in comps], weights)
                 for key in keys
@@ -1142,22 +1175,32 @@ class LikelihoodRule:
     def _decisive(
         ev: _Evaluation, class_terms: Mapping[str, Mapping[str, float]]
     ) -> tuple[str, ...]:
-        """The fields whose reading favours the leading class against the rest, best first.
+        """The fields whose reading favours the leading class against the rest, most favourable first.
 
-        The margin of a field is the single-field log likelihood ratio of the leading class against the mixture of
-        the other applicable classes, weighted by their posterior mass; a field is decisive if the margin exceeds
-        numerical zero. It is traceability of the table (which readings pulled towards the class), not a causal claim.
+        This is the criterion of the worker, not a rule of the specification, and it is not causal. The margin of a
+        field is the single-field log likelihood ratio between the posterior-weighted mean likelihood of its reading
+        in the leading class and in all the components of the other classes (the same posterior weights inside every
+        class, the class posterior across classes); a field favours the class if the margin exceeds numerical zero.
+        When two classes tie at the maximum there is no leading class and the result is empty.
         """
-        order = {c: i for i, c in enumerate(CLASS_ORDER)}
-        leading = max(ev.plan.classes, key=lambda c: (ev.classes[_CAUSE[c]], -order[c]))
-        others = [c for c in ev.plan.classes if c != leading]
-        mass = [ev.classes[_CAUSE[c]] for c in others]
-        if not others or math.fsum(mass) <= 0.0:
+        ranked = sorted(ev.plan.classes, key=lambda c: -ev.classes[_CAUSE[c]])
+        if len(ranked) < 2:
             return ()
+        leading, runner_up = ranked[0], ranked[1]
+        if (
+            abs(ev.classes[_CAUSE[leading]] - ev.classes[_CAUSE[runner_up]])
+            <= NUMERICAL_ZERO
+        ):
+            return ()
+        others = ranked[1:]
+        mass = [ev.classes[_CAUSE[c]] for c in others]
+        if math.fsum(mass) <= 0.0:
+            return ()
+        total = math.fsum(mass)
         scored: list[tuple[float, int, str]] = []
         for key, lead in class_terms[leading].items():
-            rest = _logsumexp([class_terms[o][key] for o in others], mass) - math.log(
-                math.fsum(mass)
+            rest = _logsumexp(
+                [class_terms[o][key] for o in others], [m / total for m in mass]
             )
             margin = lead - rest
             if margin > NUMERICAL_ZERO:
@@ -1248,7 +1291,7 @@ class LikelihoodRule:
         return {
             "model": "likelihood table of ADR-074 (docs/models/attribution-likelihood.md)",
             "model_version": self.model_version,
-            "config_path": str(table.path) if table.path is not None else None,
+            "config_path": _repo_relative(table.path),
             "config_sha256": table.sha256,
             "schema_version": table.schema_version,
             "sensitivity_values": {k: dict(v) for k, v in self._recorded.items()},
