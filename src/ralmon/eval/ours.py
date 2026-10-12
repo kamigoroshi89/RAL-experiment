@@ -605,7 +605,9 @@ class OursDetector:
             "sets_issued": issued,
             "note": (
                 "a population without a calibrator issues the cumulative-level set (cumulative_fallback); the pairs never borrow the "
-                "main calibrator"
+                "main calibrator. sets_issued aggregates over every run of this detector and of its at_alpha siblings (they share the "
+                "calibrators and the counters), the calibration-patient runs excluded: a patient-day run for each alpha of the grid "
+                "counts, so read the shares, not the totals"
             ),
         }
 
@@ -633,7 +635,6 @@ class OursDetector:
             replace(self._config, alpha=alpha) if self._predictive else self._config
         )
         other._forks = {}
-        other._store = {}
         other.last_run = None
         calibrator = self._calibrator
         if (
@@ -665,7 +666,7 @@ class OursDetector:
         self._n_censored = 0
         self._forecaster = None
         self._calibrator = None
-        self._store = {}
+        self._store.clear()
         self._set_state.calibrators.clear()
         self._set_state.issued.clear()
         if self._predictive:

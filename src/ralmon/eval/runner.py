@@ -1284,6 +1284,17 @@ def make_environment(
     )
 
 
+def require_set_calibration(
+    name: str, status: Mapping[str, Any] | None, *, headline: bool
+) -> None:
+    """A headline run must not issue uncalibrated sets by accident: a detector with a ``set_alpha`` whose set calibrator was not
+    fitted is a ``ConfigError`` (outside a headline run the status is written to ``meta`` with its reason)."""
+    if headline and status is not None and not status.get("fitted"):
+        raise ConfigError(
+            f"{name}: the alert sets were not calibrated ({status.get('reason')}); a headline run needs them"
+        )
+
+
 def _manifest_device_profile(manifest: Any | None) -> Mapping[str, Any] | None:
     """The ``settings.device_profile`` mapping of a manifest, None when it records none (a benchmark built before WS04-T18)."""
     settings = getattr(manifest, "settings", None)
@@ -1438,14 +1449,23 @@ def _likelihood_spec(
     diagnostics profile must agree with the one the benchmark manifest records.
     """
     block = spec.get("likelihood")
-    if name == "ours-hier" or block is None:
+    if block is not None:
+        _need(
+            isinstance(block, Mapping),
+            "detector_params.ours.likelihood must be a mapping",
+        )
+        unknown = sorted(set(block) - _LIKELIHOOD_KEYS)
+        _need(not unknown, f"detector_params.ours.likelihood: unknown keys {unknown}")
+    if name == "ours-hier":
         return None
-    _need(
-        isinstance(block, Mapping),
-        "detector_params.ours.likelihood must be a mapping",
-    )
-    unknown = sorted(set(block) - _LIKELIHOOD_KEYS)
-    _need(not unknown, f"detector_params.ours.likelihood: unknown keys {unknown}")
+    if block is None:
+        if env.options.headline and name in ("ours", "ours-A4"):
+            raise ConfigError(
+                f"{name}: a headline run needs detector_params.ours.likelihood (the likelihood attributor of ADR-074); without it "
+                "the detector would silently run the hierarchical rule and every probabilistic metric would be null. Check the "
+                f"key is spelled 'likelihood' and sits under run_options.detector_params.ours (present under ours: {sorted(spec)})"
+            )
+        return None
     values = block.get("sensitivity_values")
     _need(
         isinstance(values, Mapping),
@@ -2763,6 +2783,15 @@ def _run_seed(
     pre_calibration: dict[str, list[AR.PatientRecord]] = {}
     set_calibration: dict[str, dict[str, Any]] = {}
     for inst in instances:
+        if (
+            inst.main
+            and getattr(inst.detector, "set_alpha", None) is not None
+            and not AR.wants_set_calibration(inst.detector, attr_pre)
+        ):
+            set_calibration[inst.name] = {
+                "fitted": False,
+                "reason": AR.set_calibration_skip_reason(inst.detector, attr_pre),
+            }
         if inst.main and AR.wants_set_calibration(inst.detector, attr_pre):
             records = _calibration_records(
                 inst, by_split["calibration"], reader_obs, reader_full, env, options
@@ -2773,6 +2802,10 @@ def _run_seed(
                 records,
                 attr_pre,
                 test_patient_ids=[*test_patients, *twin_ids],
+            )
+        if inst.name in set_calibration:
+            require_set_calibration(
+                inst.name, set_calibration[inst.name], headline=options.headline
             )
     for inst in instances:
         for p in test_patients:
@@ -3089,6 +3122,16 @@ def _run_seed(
         for name, detector in sorted(mains.items())
         if getattr(detector, "likelihood_rule", None) is not None
     }
+    for name, detector in sorted(mains.items()):
+        if isinstance(detector, OursDetector) and detector.likelihood_rule is None:
+            document["meta"]["attribution"]["rules"][name] = {
+                "rule": "hierarchical",
+                "reason": (
+                    "ours-hier is the hierarchical rule by definition"
+                    if name == "ours-hier"
+                    else "no detector_params.ours.likelihood block: the hierarchical rule ran, p_kappa and cause_set are None"
+                ),
+            }
     document["meta"]["attribution"]["set_selector"] = {
         name: {
             **detector.set_selector_metadata(),

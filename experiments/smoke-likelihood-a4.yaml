@@ -1,6 +1,6 @@
-# Smoke experiment of WS08-T10 (A4 variant) (ADR-074): the proposed method with the likelihood attributor, its hierarchical variant and one
-# baseline on the hand-written MINI benchmark of tests/fixtures/eval. It checks that the wiring writes the probabilistic-attribution
-# keys of metrics.json and produces no result. ILLUSTRATIVE, UNVERIFIED, FIXTURE-ONLY.
+# Smoke experiment of WS08-T10, A4 variant (ADR-074): `ours` (likelihood attributor) and `ours-A4` (the same without the embodied
+# channel) on the hand-written MINI benchmark of tests/fixtures/eval; no hierarchical variant and no baseline. It checks that the
+# wiring writes the probabilistic-attribution keys of metrics.json for both and produces no result. ILLUSTRATIVE, UNVERIFIED, FIXTURE-ONLY.
 # EVERY NUMBER BELOW IS A TEST VALUE: it has no source, was written before the run and was never tuned. In particular the
 # `run_options.attribution` values (`loose_after_ms`, `set_alphas`, `pair_primary_templates`) and the `sensitivity_values` of
 # `detector_params.ours.likelihood` are labelled test values, never a headline value; the 67 `awaiting_human_value` rows of

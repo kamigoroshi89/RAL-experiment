@@ -65,6 +65,7 @@ __all__ = [
     "meta_block",
     "pair_outcome",
     "parse_options",
+    "set_calibration_skip_reason",
 ]
 
 AWAITING: Final = "awaiting_human_value"
@@ -440,6 +441,20 @@ def wants_set_calibration(detector: Any, options: AttributionOptions) -> bool:
         and hasattr(detector, "fit_set_calibrator")
         and options.loose_after_ms is not None
     )
+
+
+def set_calibration_skip_reason(detector: Any, options: AttributionOptions) -> str:
+    """Why a detector with a ``set_alpha`` has no set calibration (the inverse of ``wants_set_calibration``)."""
+    reasons = []
+    if options.loose_after_ms is None:
+        reasons.append(
+            "run_options.attribution.loose_after_ms is an awaiting_human_value: no alert can be assigned a cause to calibrate on"
+        )
+    if getattr(detector, "alert_inputs", None) is None:
+        reasons.append("the detector has no alert_inputs hook")
+    if not hasattr(detector, "fit_set_calibrator"):
+        reasons.append("the detector has no fit_set_calibrator")
+    return "; ".join(reasons) + ": the sets stay the cumulative-level set"
 
 
 def set_calibration_alerts(
