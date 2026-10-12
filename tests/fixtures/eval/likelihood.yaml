@@ -8,7 +8,7 @@ experiment_id: likelihood
 benchmark_manifest: mini_benchmark          # relative to this file
 detectors: [B3, ours, ours-hier]
 seeds: [0]
-split: {train: 0.34, calibration: 0.33, test: 0.33}   # 6 patients: 2, 2, 2 (largest remainder)
+split: {train: 0.3, calibration: 0.3, test: 0.4}   # 6 patients: 2, 2, 2 or 1, 2, 3 by seed (test value); the one pair lands in test
 match: {tolerance_ms: 60000, time_reference: first_decidable}   # test value: one monitor step
 alpha: 0.5                                   # test value: the calibration set is tiny
 monitor:

@@ -100,7 +100,13 @@ from typing import Any, Final
 import numpy as np
 import yaml
 
-from ralmon.attribution import Alert, Detection, RuleAttributor, extract_evidence
+from ralmon.attribution import (
+    Alert,
+    Detection,
+    LikelihoodConfigError,
+    RuleAttributor,
+    extract_evidence,
+)
 from ralmon.baselines import (
     B1StaticThresholds,
     B2AnomalyDetection,
@@ -121,6 +127,7 @@ from ralmon.eval import attribution_report as AR
 from ralmon.eval.attribution_sets import applicable_from_table
 from ralmon.eval.attribution_truth import EventContext, day_contexts
 from ralmon.eval.background import PatientBackground, patient_footprints
+from ralmon.eval.device_capabilities import device_capabilities_from_manifest
 from ralmon.eval.metrics import (
     AGGREGATE_TEMPLATES,
     CLASSES,
@@ -164,6 +171,7 @@ from ralmon.eval.metrics import (
 )
 from ralmon.eval.ours import (
     CompositeForecaster,
+    LikelihoodSpec,
     OursDetector,
     PipelineComponents,
 )
@@ -1157,6 +1165,8 @@ class DetectorEnvironment:
     timing: Any | None
     profile: object | None
     params: Mapping[str, Any]
+    #: ``settings.device_profile.diagnostics_profile`` of the manifest when it records one (WS04-T18), else None
+    diagnostics_profile: str | None = None
 
 
 def _hint(function: Any, name: str) -> Any:
@@ -1205,8 +1215,15 @@ def make_environment(
     seed: int,
     *,
     plan_for_day: Callable[[ObservedDay], CarePlan] | None = None,
+    manifest: Any | None = None,
 ) -> DetectorEnvironment:
-    """The registry, the templates, the shared timing and the plan lookup of a seed."""
+    """The registry, the templates, the shared timing and the plan lookup of a seed.
+
+    ``manifest`` is the manifest of the benchmark (``run_experiment`` passes it). When it records a ``settings.device_profile``
+    (WS04-T18), the profile that the evidence extractor gets is the declared ``detector_params.ours.device_profile`` completed by
+    ``device_capabilities_from_manifest``: the cuff resolution the generator rounded to, the dispenser content sensing, the
+    authenticating devices and the nodes whose driver reports diagnostics.
+    """
     monitor = config.monitor
     registry_path = options.registry
     try:
@@ -1242,6 +1259,16 @@ def make_environment(
         )
         timing = _timing_class()(monitor.step_ms, monitor.reorder_delay_ms, tail)
     profile_spec = _params_dict(params, "ours").get("device_profile")
+    profile = _build_profile(profile_spec)
+    diagnostics_profile: str | None = None
+    section = _manifest_device_profile(manifest)
+    if section is not None:
+        try:
+            profile = device_capabilities_from_manifest(manifest, profile)  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"manifest device_profile: {exc}") from exc
+        recorded = section.get("diagnostics_profile")
+        diagnostics_profile = recorded if isinstance(recorded, str) else None
     return DetectorEnvironment(
         config,
         options,
@@ -1251,9 +1278,17 @@ def make_environment(
         monitor,
         plan_for_day,
         timing,
-        _build_profile(profile_spec),
+        profile,
         params,
+        diagnostics_profile,
     )
+
+
+def _manifest_device_profile(manifest: Any | None) -> Mapping[str, Any] | None:
+    """The ``settings.device_profile`` mapping of a manifest, None when it records none (a benchmark built before WS04-T18)."""
+    settings = getattr(manifest, "settings", None)
+    section = settings.get("device_profile") if isinstance(settings, Mapping) else None
+    return section if isinstance(section, Mapping) else None
 
 
 def _params_dict(params: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -1338,26 +1373,117 @@ def build_detector(
         raise ConfigError(f"unknown detector {name!r}")
     _need(env.monitor is not None, "ours needs a monitor configuration")
     assert env.monitor is not None
-    components = PipelineComponents() if name == "ours" else _resolve_variant(name)
+    a4 = name == "ours-A4"
+    components = (
+        PipelineComponents() if name in _BUILTIN_OURS else _resolve_variant(name)
+    )
     if components is None:
         raise ConfigError(f"no extension module knows the detector variant {name!r}")
     monitor = env.monitor if alpha is None else replace(env.monitor, alpha=alpha)
     spec = _params_dict(env.params, "ours")
     predictive = components.use_forecaster and monitor.predictive
-    return OursDetector(
-        monitor,
-        env.registry,
-        env.templates,
-        name=name,
-        components=components,
-        forecaster_factory=_forecaster_factory(env, with_deadline=True)
-        if predictive
-        else None,
-        plan_for_day=env.plan_for_day,
-        profile=env.profile,
-        seed=env.seed,
-        collect_episodes=bool(spec.get("collect_episodes", True)),
+    likelihood = _likelihood_spec(name, env, spec)
+    try:
+        return OursDetector(
+            monitor,
+            env.registry,
+            env.templates,
+            name=name,
+            components=components,
+            forecaster_factory=_forecaster_factory(env, with_deadline=True)
+            if predictive
+            else None,
+            plan_for_day=env.plan_for_day,
+            profile=env.profile,
+            seed=env.seed,
+            collect_episodes=bool(spec.get("collect_episodes", True)),
+            likelihood=likelihood,
+            a4=a4,
+        )
+    except LikelihoodConfigError as exc:
+        names = getattr(exc, "names", ())
+        raise ConfigError(
+            f"detector_params.ours.likelihood: {exc}"
+            + (
+                f" (awaiting_human_value without a supplied sensitivity value: {', '.join(names)})"
+                if names
+                else ""
+            )
+        ) from exc
+
+
+#: ``ours`` names the runner builds itself (the proposed method, its hierarchical-rule variant and the embodied-channel ablation A4);
+#: any other ``ours-*`` is resolved by an extension module.
+_BUILTIN_OURS: Final[frozenset[str]] = frozenset({"ours", "ours-hier", "ours-A4"})
+_LIKELIHOOD_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "sensitivity_values",
+        "diagnostics_profile",
+        "grouped_variant",
+        "set_alpha",
+        "set_mode",
+        "min_cell_size",
+    }
+)
+
+
+def _likelihood_spec(
+    name: str, env: DetectorEnvironment, spec: Mapping[str, Any]
+) -> LikelihoodSpec | None:
+    """The likelihood wiring of an ``ours*`` detector from ``detector_params.ours.likelihood`` (WS08-T10, ADR-074).
+
+    ``ours-hier`` never has it (the hierarchical rule, unchanged). Without the block the other names keep the hierarchical rule too,
+    so configurations written before ADR-074 run as before; with the block, ``sensitivity_values`` is required (labelled sensitivity
+    values for the awaiting rows of ``configs/attribution_likelihood.yaml``: none has a default, a missing one fails loudly) and the
+    diagnostics profile must agree with the one the benchmark manifest records.
+    """
+    block = spec.get("likelihood")
+    if name == "ours-hier" or block is None:
+        return None
+    _need(
+        isinstance(block, Mapping),
+        "detector_params.ours.likelihood must be a mapping",
     )
+    unknown = sorted(set(block) - _LIKELIHOOD_KEYS)
+    _need(not unknown, f"detector_params.ours.likelihood: unknown keys {unknown}")
+    values = block.get("sensitivity_values")
+    _need(
+        isinstance(values, Mapping),
+        "detector_params.ours.likelihood.sensitivity_values is required: the labelled sensitivity values of the awaiting rows "
+        "of configs/attribution_likelihood.yaml (eps, qc, q_stale, rep_nat, delta, dispense_bounce_interval_ms, tau, "
+        "cumulative_level, class_priors, pi_designs as the run reads them); none has a default",
+    )
+    declared = block.get("diagnostics_profile")
+    recorded = env.diagnostics_profile
+    if recorded is not None and declared is not None and declared != recorded:
+        raise ConfigError(
+            f"detector_params.ours.likelihood.diagnostics_profile {declared!r} differs from the diagnostics_profile {recorded!r} "
+            "that the benchmark manifest records: the run must follow the benchmark"
+        )
+    profile = recorded if recorded is not None else declared
+    _need(
+        isinstance(profile, str),
+        "detector_params.ours.likelihood.diagnostics_profile is required when the manifest records none "
+        "(without_diagnostics or driver_with_diagnostics)",
+    )
+    root = _repo_root()
+    _need(
+        root is not None,
+        "the likelihood table configs/attribution_likelihood.yaml needs the repository",
+    )
+    assert root is not None
+    try:
+        return LikelihoodSpec(
+            table_path=root / "configs" / "attribution_likelihood.yaml",
+            sensitivity_values=dict(values),
+            diagnostics_profile=profile,
+            grouped_variant=block.get("grouped_variant"),
+            set_alpha=block.get("set_alpha"),
+            set_mode=block.get("set_mode", "marginal"),
+            min_cell_size=block.get("min_cell_size"),
+        )
+    except ValueError as exc:
+        raise ConfigError(f"detector_params.ours.likelihood: {exc}") from exc
 
 
 def _build_baseline(name: str, env: DetectorEnvironment, alpha: float | None) -> Any:
@@ -2475,7 +2601,9 @@ def run_experiment(
         else []
     )
     lookup, plans = _plan_cache(reader_obs, ids)
-    first_env = make_environment(config, options, config.seeds[0], plan_for_day=lookup)
+    first_env = make_environment(
+        config, options, config.seeds[0], plan_for_day=lookup, manifest=manifest
+    )
     without_tail = tuple(
         p for p in (*ids, *twin_ids) if reader_full.tail_day(p) is None
     )
@@ -2589,7 +2717,9 @@ def _run_seed(
     plans: dict[str, CarePlan],
     static: RunFacts,
 ) -> dict[str, Any]:
-    env = make_environment(config, options, seed, plan_for_day=lookup)
+    env = make_environment(
+        config, options, seed, plan_for_day=lookup, manifest=manifest
+    )
     split = split_patients(ids, config.split, seed)
     by_split = {
         s: tuple(sorted(p for p, v in split.items() if v == s)) for s in _SPLITS
@@ -2627,6 +2757,23 @@ def _run_seed(
         for p in test_patients
     }
     units = [(p, d) for p in test_patients for d in range(len(test_days[p]))]
+    # the sets of a detector with a set calibrator are calibrated BEFORE the test run (WS08-T10): the detector is run on the calibration
+    # patients (scoring side labels them), its calibrator is fitted on those alerts and installed, then the test patients get the sets
+    attr_pre = options.attribution or AR.AttributionOptions()
+    pre_calibration: dict[str, list[AR.PatientRecord]] = {}
+    set_calibration: dict[str, dict[str, Any]] = {}
+    for inst in instances:
+        if inst.main and AR.wants_set_calibration(inst.detector, attr_pre):
+            records = _calibration_records(
+                inst, by_split["calibration"], reader_obs, reader_full, env, options
+            )
+            pre_calibration[inst.name] = records
+            set_calibration[inst.name] = AR.calibrate_detector_sets(
+                inst.detector,
+                records,
+                attr_pre,
+                test_patient_ids=[*test_patients, *twin_ids],
+            )
     for inst in instances:
         for p in test_patients:
             inst.detections[p] = _run_patient(inst, p, test_days[p], env, options)
@@ -2805,7 +2952,9 @@ def _run_seed(
             and getattr(inst.detector, "alert_inputs", None) is not None
         )
         calibration_records = (
-            _calibration_records(
+            pre_calibration[inst.name]
+            if inst.name in pre_calibration
+            else _calibration_records(
                 inst, by_split["calibration"], reader_obs, reader_full, env, options
             )
             if wants_calibration
@@ -2939,6 +3088,15 @@ def _run_seed(
         name: dict(detector.likelihood_rule.metadata)
         for name, detector in sorted(mains.items())
         if getattr(detector, "likelihood_rule", None) is not None
+    }
+    document["meta"]["attribution"]["set_selector"] = {
+        name: {
+            **detector.set_selector_metadata(),
+            "calibration": set_calibration.get(name),
+        }
+        for name, detector in sorted(mains.items())
+        if getattr(detector, "likelihood_rule", None) is not None
+        and hasattr(detector, "set_selector_metadata")
     }
     _run_hooks(
         document,

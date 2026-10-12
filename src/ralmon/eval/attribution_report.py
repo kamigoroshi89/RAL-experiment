@@ -31,6 +31,7 @@ import numpy as np
 
 from ralmon.attribution import Alert, Detection
 from ralmon.benchmark import GroundTruthEvent, InjectedClass
+from ralmon.conformal import SubtypeCalibrationAlert
 from ralmon.eval import attribution_sets as S
 from ralmon.eval import metrics as M
 from ralmon.eval import pairs as P
@@ -57,6 +58,7 @@ __all__ = [
     "PairOutcome",
     "PairPatient",
     "PatientRecord",
+    "calibrate_detector_sets",
     "dump_options",
     "instance_blocks",
     "mcnemar_blocks",
@@ -424,6 +426,69 @@ def _curve_block(
         "resp": one("RESP"),
         "excluded": dict(excluded),
     }
+
+
+# ---- the sets of the detector (WS08-T10) ---------------------------------------------------------------------------------------
+
+
+def wants_set_calibration(detector: Any, options: AttributionOptions) -> bool:
+    """A detector with a likelihood rule and a configured ``set_alpha`` gets its alert sets calibrated before the test run, when the
+    labelling can be applied (``loose_after_ms``)."""
+    return (
+        getattr(detector, "alert_inputs", None) is not None
+        and getattr(detector, "set_alpha", None) is not None
+        and hasattr(detector, "fit_set_calibrator")
+        and options.loose_after_ms is not None
+    )
+
+
+def set_calibration_alerts(
+    detector: Any, records: Sequence[PatientRecord], options: AttributionOptions
+) -> list[SubtypeCalibrationAlert]:
+    """The calibration alerts of the sets: the VIOLATED alerts of the calibration patients under the TIGHT labelling (the primary one),
+    each with the likelihood posterior (``lik``) and the true subtype. The truth is read here, on the scoring side; the detector only
+    receives the finished ``SubtypeCalibrationAlert`` list."""
+    labelled = label_records(records, "tight", options, detector.alert_inputs).labelled
+    return [
+        SubtypeCalibrationAlert(
+            item.patient_id,
+            item.template,
+            dict(item.inputs.posteriors[S.METHOD_LIKELIHOOD]),
+            item.true_subtype,
+        )
+        for item in labelled
+        if item.inputs is not None and S.METHOD_LIKELIHOOD in item.inputs.posteriors
+    ]
+
+
+def calibrate_detector_sets(
+    detector: Any,
+    records: Sequence[PatientRecord],
+    options: AttributionOptions,
+    *,
+    test_patient_ids: Sequence[str],
+) -> dict[str, Any]:
+    """Fit and install the main-population set calibrator of ``detector`` on the calibration part; returns what was done (for ``meta``).
+
+    Without a calibration alert nothing is fitted and the detector keeps issuing the cumulative-level set (the status says so). The
+    pairs get their OWN calibrator elsewhere, from the calibration part of the pair population: never this one."""
+    alerts = set_calibration_alerts(detector, records, options)
+    status: dict[str, Any] = {
+        "labelling": "tight",
+        "population": "main",
+        "n_calibration_alerts": len(alerts),
+        "n_calibration_patients": len({a.patient_id for a in alerts}),
+        "fitted": False,
+    }
+    if not alerts:
+        status["reason"] = (
+            "no labelled alert in the calibration part: the sets stay the cumulative-level set"
+        )
+        return status
+    detector.fit_set_calibrator(alerts, test_patient_ids=list(test_patient_ids))
+    detector.reset_set_counts()
+    status["fitted"] = True
+    return status
 
 
 # ---- sets and equal coverage -----------------------------------------------------------------------------------------------------

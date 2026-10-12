@@ -48,7 +48,6 @@ from tests.eval.helpers import FIXTURES, MINI, REGISTRY, ms
 from tests.eval.test_ours import (
     STEP,
     config,
-    device_profile,
     make_ours,
     out_of_band_day,
     range_plan,
@@ -126,8 +125,9 @@ def top_of(posterior: dict[str, float]) -> str:
 def mini() -> SimpleNamespace:
     cfg, options = load_experiment(LIKELIHOOD)
     reader = open_benchmark(cfg.benchmark_manifest, view="observed")
-    env = make_environment(cfg, options, 0, manifest=reader.manifest)
-    ids = list(reader.patient_ids(role="patient"))
+    full = open_benchmark(cfg.benchmark_manifest)
+    env = make_environment(cfg, options, 0, manifest=full.manifest)
+    ids = list(full.patient_ids(role="patient"))
     split = split_patients(ids, cfg.split, 0)
 
     def days(part: str) -> list[BenchmarkDay]:
@@ -143,7 +143,7 @@ def mini() -> SimpleNamespace:
         detector = build_detector(name, env, alpha=0.5)
         detector.fit(days("train"), days("calibration"))
         detectors[name] = detector
-    everyone = [*ids, *reader.patient_ids(role="confounder_pair")]
+    everyone = [*ids, *full.patient_ids(role="confounder_pair")]
     return SimpleNamespace(
         config=cfg,
         options=options,
@@ -251,7 +251,9 @@ def test_sensitivity_values_are_recorded_in_the_metadata(
     sets = e2e.metrics["meta"]["attribution"]["set_selector"]
     assert set(sets) == {"ours"}
     assert sets["ours"]["fallback_level"]["label"] == SENSITIVITY
-    json.dumps(sets)  # inf thresholds are written as null with a flag, alpha as a string
+    json.dumps(
+        sets
+    )  # inf thresholds are written as null with a flag, alpha as a string
 
 
 # 4
@@ -298,7 +300,8 @@ def test_set_selector_uses_the_fitted_calibrator_and_refuses_a_stale_model_versi
     leaked = make_lik(registry, templates)
     leaked.fit([], [])
     leaked.fit_set_calibrator(
-        calibration_alerts(posterior, top, prefix="px"), test_patient_ids=["zz"]
+        [SubtypeCalibrationAlert("px", "range", posterior, top)] * 4,
+        test_patient_ids=["zz"],
     )
     with pytest.raises(PatientLeakError):
         leaked.run(day, plan, None)
@@ -333,16 +336,24 @@ def test_pairs_use_a_separate_calibrator(registry: Any, templates: Any) -> None:
         test_patient_ids=[day.patient_id],
         population="pairs",
     )
-    assert pairs is not main and pairs.population == "pairs" and main.population == "main"
+    assert (
+        pairs is not main and pairs.population == "pairs" and main.population == "main"
+    )
     (as_main,) = violated_alerts(ours.run(day, plan, None))
     with ours.using_population("pairs"):
         (as_pair,) = violated_alerts(ours.run(day, plan, None))
-    assert as_main.cause_set == main.predict_set(
-        posterior, "range", 0.5, patient_id=day.patient_id, model_version=token
-    ).subtypes
-    assert as_pair.cause_set == pairs.predict_set(
-        posterior, "range", 0.5, patient_id=day.patient_id, model_version=token
-    ).subtypes
+    assert (
+        as_main.cause_set
+        == main.predict_set(
+            posterior, "range", 0.5, patient_id=day.patient_id, model_version=token
+        ).subtypes
+    )
+    assert (
+        as_pair.cause_set
+        == pairs.predict_set(
+            posterior, "range", 0.5, patient_id=day.patient_id, model_version=token
+        ).subtypes
+    )
     assert set(as_main.cause_set) < set(as_pair.cause_set)
     # outside the context the main calibrator is back
     (again,) = violated_alerts(ours.run(day, plan, None))
@@ -359,9 +370,11 @@ def test_pairs_use_a_separate_calibrator(registry: Any, templates: Any) -> None:
     assert borrowed.cause_set == cumulative_level_set(posterior, 0.9)
     issued = alone.set_selector_metadata()["sets_issued"]
     assert issued["pairs"]["range"]["cumulative_fallback"] == 1
-    with pytest.raises(ValueError, match="population"):
-        with alone.using_population("main2"):
-            pass
+    with (
+        pytest.raises(ValueError, match="population"),
+        alone.using_population("main2"),
+    ):
+        pass
 
 
 # 6
@@ -423,9 +436,7 @@ def e2e(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
     cfg, options = load_experiment(LIKELIHOOD)
     folders = []
     for name in ("run1", "run2"):
-        folders.extend(
-            run_experiment(cfg, options, tmp / name, git_rev=lambda: "rev0")
-        )
+        folders.extend(run_experiment(cfg, options, tmp / name, git_rev=lambda: "rev0"))
     metrics = json.loads((folders[0] / "metrics.json").read_text(encoding="utf-8"))
     return SimpleNamespace(folders=folders, metrics=metrics)
 
@@ -438,6 +449,12 @@ def test_end_to_end_run_writes_the_new_metric_keys(e2e: SimpleNamespace) -> None
         assert block is not None, key
         assert "status" not in block or block["status"] == "ok", (key, block)
         assert metrics[key]["B3"] is None, key
+    # not a hollow block: the tight labelling scored an alert, the one fixture pair (in the test part) has a quantity
+    score = metrics["attribution_log_score"]["ours"]["labellings"]["tight"]
+    assert score["n_scored"] >= 1
+    pair = metrics["pair_llr"]["ours"]
+    assert pair["n_pairs_test"] == 1 and pair["pairs"][0]["subtype_a"] == "double_take"
+    assert metrics["attribution_sets"]["ours"]["labellings"]["tight"]["n_alerts"] >= 1
     # ours-hier has no posterior: the scores and the pair quantities are null, its kappa is scored as a set
     for key in (
         "attribution_log_score",
@@ -456,8 +473,9 @@ def test_end_to_end_run_writes_the_new_metric_keys(e2e: SimpleNamespace) -> None
     # the alert sets of the likelihood detector were calibrated before the test run (patient-level split of the builder)
     sets = metrics["meta"]["attribution"]["set_selector"]["ours"]
     assert sets["populations"]["main"]["n_calibration"] >= 1
-    assert sets["populations"]["main"]["model_version"] == (
-        metrics["meta"]["attribution"]["rules"]["ours"]["model_version"]
+    assert (
+        sets["populations"]["main"]["model_version"]
+        == (metrics["meta"]["attribution"]["rules"]["ours"]["model_version"])
     )
     assert "ours-hier" not in metrics["meta"]["attribution"]["set_selector"]
     # JSON discipline: no inf or nan anywhere (strict parse)
@@ -505,10 +523,12 @@ def test_device_profile_reaches_the_extractor(
     bench = with_device_profile(tmp_path, cuff_resolution_mmhg=resolution)
     cfg, options = load_experiment(LIKELIHOOD)
     cfg = dataclasses.replace(cfg, benchmark_manifest=str(bench))
-    manifest = open_benchmark(bench, view="observed").manifest
+    manifest = open_benchmark(bench).manifest
     env = make_environment(cfg, options, 0, manifest=manifest)
     cuff = env.profile.caps("cuff")
-    assert cuff.cuff_resolution == resolution  # the manifest's value, None when the benchmark is not rounded
+    assert (
+        cuff.cuff_resolution == resolution
+    )  # the manifest's value, None when the benchmark is not rounded
     assert env.profile.caps("dispenser").content_sensing is False
     ours = OursDetector(
         config(env.registry),
@@ -533,7 +553,7 @@ def test_manifest_diagnostics_profile_must_agree_with_the_run(
     bench = with_device_profile(tmp_path, diagnostics_profile="driver_with_diagnostics")
     cfg, options = load_experiment(LIKELIHOOD)  # declares without_diagnostics
     cfg = dataclasses.replace(cfg, benchmark_manifest=str(bench))
-    manifest = open_benchmark(bench, view="observed").manifest
+    manifest = open_benchmark(bench).manifest
     env = make_environment(cfg, options, 0, manifest=manifest)
     with pytest.raises(ConfigError, match="diagnostics_profile"):
         build_detector("ours", env, alpha=0.5)

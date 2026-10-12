@@ -29,13 +29,22 @@ from ralmon.conformal.sets import (
     AttributionSet as AttributionSet,
 )
 from ralmon.conformal.sets import (
+    PatientLeakError as PatientLeakError,
+)
+from ralmon.conformal.sets import (
     SetThreshold as SetThreshold,
+)
+from ralmon.conformal.sets import (
+    StaleSetCalibratorError as StaleSetCalibratorError,
 )
 from ralmon.conformal.sets import (
     SubtypeCalibrationAlert as SubtypeCalibrationAlert,
 )
 from ralmon.conformal.sets import (
     SubtypeSetCalibrator as SubtypeSetCalibrator,
+)
+from ralmon.conformal.sets import (
+    cumulative_level_set as cumulative_level_set,
 )
 from ralmon.conformal.split import (
     ConformalCalibrator,

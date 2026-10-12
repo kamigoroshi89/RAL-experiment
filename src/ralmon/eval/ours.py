@@ -24,6 +24,21 @@ history uses a calibrator fitted on per-day episodes; the runner reports it. An 
 (no leakage between patients) and updated once per completed episode, after the day that holds the episode has been run
 (a prediction of the day is made with the state at the start of the day: the simplification of an offline run).
 
+The attribution rule (WS08-T10, ADR-074). Without ``likelihood`` the detector is ``ours-hier``: the hierarchical rule, ``Alert.p_kappa``
+and ``Alert.cause_set`` None, no ``alert_inputs``. With a ``LikelihoodSpec`` it builds the ``LikelihoodRule`` of WS05-T12 from
+``configs/attribution_likelihood.yaml`` and the labelled ``sensitivity_values`` of the run (an awaiting row without a supplied value
+fails at construction, ``AwaitingValueError``; the values are sensitivity values, never proposals). The rule is built with
+``needs_cumulative_level=False`` and the set of every alert comes from this detector's selector: the conformal set of a fitted
+``SubtypeSetCalibrator`` when one is installed for the population in use (``main``; ``pairs`` inside ``using_population("pairs")``,
+a SEPARATE instance, never borrowed from ``main``), else ``cumulative_level_set`` with the declared ``cumulative_level``. The set
+calibrator needs the true subtype of the calibration alerts, which a detector never sees: the scoring side (the runner) labels the
+alerts of the calibration patients and hands the calibration alerts to ``fit_set_calibrator`` (``test_patient_ids`` refuses a patient
+that is in both parts), and the calibrator is fitted with the model-version token of the rule (``StaleSetCalibratorError`` on a
+mismatch). ``alert_inputs(patient_id, alert)`` gives the scoring side the subtype posterior, the prior-only baseline, the
+hierarchical rule's kappa as a fixed set and the evidence vector of an alert (``alert_inputs_from_rule``); the evidence vectors and
+records are kept per run for it and are released by ``fit``. ``a4=True`` is the variant ``ours-A4``: the extractor leaves the robot out
+(witness and robot system fields None, the four aggregates recomputed over the devices) and the rule drops the cells of those fields.
+
 Diagnostics. After each ``run`` the detector exposes ``last_run`` (``OursRunDetails``): the verdict records, the alerts,
 the counters of the monitor (``n_tests``, ``per_test_alpha``, the INT gate of ADR-054, the rejected inputs), the
 logical verdict latencies and the outcome of every predicted instance. The runner reads it for the metrics that need more
@@ -33,18 +48,42 @@ than ``Detection``s (coverage, calibration of rho, latency).
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
-from typing import Any
+from collections import Counter
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
+from fractions import Fraction
+from pathlib import Path
+from typing import Any, Final
 
 from ralmon.attribution import (
     Alert,
+    AwaitingValueError,
     EvidenceVector,
+    LikelihoodRule,
     RuleAttributor,
+    empty_evidence,
     extract_evidence,
+    load_likelihood_table,
 )
 from ralmon.benchmark import BenchmarkDay, ObservedDay
-from ralmon.conformal import CalibrationEpisode, ConformalCalibrator, SplitConformal
+from ralmon.conformal import (
+    ASSUMPTIONS_SETS,
+    GUARANTEE_SETS,
+    GUARANTEE_SETS_MONDRIAN,
+    CalibrationEpisode,
+    ConformalCalibrator,
+    SplitConformal,
+    SubtypeCalibrationAlert,
+    SubtypeSetCalibrator,
+    cumulative_level_set,
+)
+from ralmon.eval.attribution_sets import (
+    alert_inputs_from_rule,
+    alpha_key,
+    threshold_json,
+)
+from ralmon.eval.attribution_truth import AlertInputs
 from ralmon.monitor import (
     Forecast,
     Forecaster,
@@ -63,6 +102,7 @@ from ralmon.spec import CarePlan, ParameterRegistry, Template, rank_alerts
 
 __all__ = [
     "CompositeForecaster",
+    "LikelihoodSpec",
     "OursDetector",
     "OursRunDetails",
     "PipelineComponents",
@@ -200,6 +240,64 @@ class OursRunDetails:
     episodes: tuple[CalibrationEpisode, ...]
     n_censored: int
     stats: MonitorStats | None
+    #: the evidence vector of each violation-claiming instance, as the attribution rule read it (after ``evidence_transform``)
+    evidence: Mapping[str, EvidenceVector] = field(default_factory=dict)
+
+
+SENSITIVITY_LABEL: Final = "sensitivity, not a proposal"
+POPULATIONS: Final[tuple[str, ...]] = ("main", "pairs")
+
+
+@dataclass(frozen=True, slots=True)
+class LikelihoodSpec:
+    """The wiring of the likelihood attributor of ADR-074 into ``OursDetector`` (WS08-T10). No number has a default.
+
+    * ``table_path``: ``configs/attribution_likelihood.yaml``.
+    * ``sensitivity_values``: a labelled sensitivity value for each awaiting row the run reads (``LikelihoodRule``), plus the
+      ``cumulative_level`` of the set that is used until a set calibrator is installed. They are sensitivity values, not proposals.
+    * ``diagnostics_profile``: ``without_diagnostics`` or ``driver_with_diagnostics`` (the profile of the benchmark; no default).
+    * ``grouped_variant``: None for the reference declared in the file.
+    * ``set_alpha``: the miscoverage target of the calibrated set (None: the set is always the cumulative-level set).
+    * ``set_mode`` / ``min_cell_size``: ``marginal`` or ``mondrian`` and the optional minimum size of a Mondrian cell.
+    """
+
+    table_path: str | Path
+    sensitivity_values: Mapping[str, object]
+    diagnostics_profile: str
+    grouped_variant: str | None = None
+    set_alpha: float | Fraction | None = None
+    set_mode: str = "marginal"
+    min_cell_size: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.set_mode not in ("marginal", "mondrian"):
+            raise ValueError(
+                f"set_mode must be 'marginal' or 'mondrian', got {self.set_mode!r}"
+            )
+        alpha = self.set_alpha
+        if alpha is not None and (
+            isinstance(alpha, bool)
+            or not isinstance(alpha, (int, float, Fraction))
+            or not 0 < alpha < 1
+        ):
+            raise ValueError(f"set_alpha must be None or in (0, 1), got {alpha!r}")
+
+
+class _SetState:
+    """The set calibrators and the counters of the sets issued, shared by a detector and its ``at_alpha`` siblings (the posterior
+    does not depend on the monitor level, so one calibration serves the whole alpha grid)."""
+
+    def __init__(self) -> None:
+        self.calibrators: dict[str, SubtypeSetCalibrator] = {}
+        self.population = "main"
+        self.patient = ""
+        self.issued: dict[tuple[str, str], Counter[str]] = {}
+
+    def count(self, population: str, template: str, *flags: str) -> None:
+        tally = self.issued.setdefault((population, template), Counter())
+        tally["n"] += 1
+        for flag in flags:
+            tally[flag] += 1
 
 
 class OursDetector:
@@ -218,6 +316,8 @@ class OursDetector:
         profile: object | None = None,
         seed: int = 0,
         collect_episodes: bool = False,
+        likelihood: LikelihoodSpec | None = None,
+        a4: bool = False,
     ) -> None:
         self.name = name
         self._components = (
@@ -238,6 +338,14 @@ class OursDetector:
         self._n_censored = 0
         self._fitted = False
         self.last_run: OursRunDetails | None = None
+        self._likelihood = likelihood
+        self._a4 = bool(a4)
+        self._set_state = _SetState()
+        self._store: dict[tuple[str, str, int], tuple[Any, EvidenceVector, str]] = {}
+        self._fallback_level: object = None
+        self._rule: LikelihoodRule | None = (
+            None if likelihood is None else self._build_rule(likelihood)
+        )
         if self._predictive:
             if forecaster_factory is None or plan_for_day is None:
                 raise ValueError(
@@ -297,6 +405,220 @@ class OursDetector:
     def is_predictive(self) -> bool:
         return self._predictive
 
+    # -- the attribution rule (WS08-T10) --------------------------------------------------------------------------
+
+    @property
+    def likelihood_rule(self) -> LikelihoodRule | None:
+        """The ``LikelihoodRule`` of the run, None for ``ours-hier`` (the pair quantities of the runner need it)."""
+        return self._rule
+
+    @property
+    def alert_inputs(self) -> Callable[[str, Alert], AlertInputs | None] | None:
+        """The hook of the scoring side, ``(patient_id, alert) -> AlertInputs | None``; None without a likelihood rule."""
+        return None if self._rule is None else self._alert_inputs
+
+    @property
+    def is_a4(self) -> bool:
+        return self._a4
+
+    @property
+    def set_alpha(self) -> float | Fraction | None:
+        return None if self._likelihood is None else self._likelihood.set_alpha
+
+    def _build_rule(self, spec: LikelihoodSpec) -> LikelihoodRule:
+        values = dict(spec.sensitivity_values)
+        level = values.get("cumulative_level")
+        if level is None:
+            raise AwaitingValueError(
+                ["cumulative_level"],
+                "cumulative_level is an awaiting_human_value: the set of an alert before a set calibrator is fitted is the "
+                "cumulative-level set, and the level must be supplied as a labelled sensitivity value (run option "
+                "sensitivity_values)",
+            )
+        table = load_likelihood_table(Path(spec.table_path))
+        rule = LikelihoodRule(
+            self._registry,
+            table,
+            sensitivity_values=values,
+            diagnostics_profile=spec.diagnostics_profile,
+            grouped_variant=spec.grouped_variant,
+            a4=self._a4,
+            needs_cumulative_level=False,
+        )
+        self._fallback_level = level
+        return rule
+
+    def _select(
+        self, posteriors: Mapping[str, float], template: Any, instance_key: str
+    ) -> Sequence[str]:
+        """The injected ``set_selector``: the conformal set of the calibrator of the population in use, else the cumulative-level set."""
+        assert self._rule is not None and self._likelihood is not None
+        state = self._set_state
+        population, name = state.population, str(template.value).lower()
+        calibrator = state.calibrators.get(population)
+        alpha = self._likelihood.set_alpha
+        if calibrator is None or alpha is None:
+            state.count(population, name, "cumulative_fallback")
+            return cumulative_level_set(posteriors, self._fallback_level)  # type: ignore[arg-type]
+        got = calibrator.predict_set(
+            posteriors,
+            name,
+            alpha,
+            patient_id=state.patient,
+            model_version=self._rule.model_version,
+        )
+        state.count(
+            population,
+            name,
+            *(["full_set_fallback"] if got.full_set_fallback else []),
+            *(["top1_fill"] if got.top1_fill else []),
+        )
+        return got.subtypes
+
+    @staticmethod
+    def _check_population(population: str) -> None:
+        if population not in POPULATIONS:
+            raise ValueError(
+                f"population must be one of {list(POPULATIONS)}, got {population!r}"
+            )
+
+    def set_calibrator(self, population: str = "main") -> SubtypeSetCalibrator | None:
+        self._check_population(population)
+        return self._set_state.calibrators.get(population)
+
+    def fit_set_calibrator(
+        self,
+        alerts: Sequence[SubtypeCalibrationAlert],
+        *,
+        test_patient_ids: Collection[str],
+        population: str = "main",
+    ) -> SubtypeSetCalibrator:
+        """Fit and install the set calibrator of ``population`` on calibration alerts that the SCORING side labelled.
+
+        The detector never sees the true subtype: ``alerts`` are built by the caller from the posteriors of the calibration part
+        (``alert_inputs``) and the labelled truth. ``test_patient_ids`` are the patients the sets will be issued for; a patient in
+        both parts raises ``PatientLeakError``. The calibrator carries the model-version token of the rule. The ``pairs`` population is a
+        separate instance, fitted on the calibration part of the pair population.
+        """
+        if self._rule is None or self._likelihood is None:
+            raise RuntimeError(
+                "fit_set_calibrator needs a likelihood rule (ours-hier has no sets)"
+            )
+        if self._likelihood.set_alpha is None:
+            raise ValueError(
+                "no set_alpha is configured: a calibrated set needs the miscoverage target of the run"
+            )
+        self._check_population(population)
+        calibrator = SubtypeSetCalibrator(
+            self._likelihood.set_mode,  # type: ignore[arg-type]
+            population=population,
+            min_cell_size=self._likelihood.min_cell_size,
+        )
+        calibrator.fit(
+            alerts,
+            model_version=self._rule.model_version,
+            test_patient_ids=test_patient_ids,
+        )
+        self._set_state.calibrators[population] = calibrator
+        return calibrator
+
+    def install_set_calibrator(
+        self, calibrator: SubtypeSetCalibrator, *, population: str = "main"
+    ) -> None:
+        """Install a fitted calibrator; ``StaleSetCalibratorError`` if it was not fitted for this rule's model version."""
+        if self._rule is None:
+            raise RuntimeError("install_set_calibrator needs a likelihood rule")
+        self._check_population(population)
+        if calibrator.population != population:
+            raise ValueError(
+                f"the calibrator is for the population {calibrator.population!r}, not {population!r}"
+            )
+        calibrator.check_fresh(self._rule.model_version)
+        self._set_state.calibrators[population] = calibrator
+
+    @contextmanager
+    def using_population(self, population: str) -> Iterator[None]:
+        """Issue the sets of the runs inside the block with the calibrator of ``population`` (``pairs``: the separate instance)."""
+        self._check_population(population)
+        state = self._set_state
+        before = state.population
+        state.population = population
+        try:
+            yield
+        finally:
+            state.population = before
+
+    def reset_set_counts(self) -> None:
+        self._set_state.issued.clear()
+
+    def set_selector_metadata(self) -> dict[str, Any]:
+        """JSON-ready account of the sets: the mode and target, the declared fallback level, per population the calibration and its
+        thresholds (``inf`` written as null with the ``fallback`` flag), the sets issued with their fallback and fill counts per
+        template, and the guarantee strings as the set builder states them."""
+        if self._rule is None or self._likelihood is None:
+            raise RuntimeError("an ours-hier detector has no set selector")
+        spec, state = self._likelihood, self._set_state
+        alpha = spec.set_alpha
+        populations: dict[str, Any] = {}
+        for name, calibrator in sorted(state.calibrators.items()):
+            thresholds: dict[str, Any] = {}
+            if alpha is not None:
+                cells = (
+                    sorted(calibrator.cell_sizes())
+                    if calibrator.mode == "mondrian"
+                    else ["all"]
+                )
+                for cell in cells:
+                    thresholds[cell] = threshold_json(
+                        calibrator.threshold("range" if cell == "all" else cell, alpha)
+                    )
+            populations[name] = {
+                "mode": calibrator.mode,
+                "n_calibration": calibrator.n_calibration,
+                "n_patients": len(calibrator.calibration_patients),
+                "model_version": calibrator.calibrated_for,
+                "cell_sizes": dict(sorted(calibrator.cell_sizes().items())),
+                "thresholds": thresholds,
+                "guarantee": GUARANTEE_SETS
+                if calibrator.mode == "marginal"
+                else GUARANTEE_SETS_MONDRIAN,
+                "assumptions": list(ASSUMPTIONS_SETS),
+            }
+        issued: dict[str, dict[str, Any]] = {}
+        for (population, template), tally in sorted(state.issued.items()):
+            issued.setdefault(population, {})[template] = {
+                "n": tally["n"],
+                "full_set_fallback": tally["full_set_fallback"],
+                "top1_fill": tally["top1_fill"],
+                "cumulative_fallback": tally["cumulative_fallback"],
+            }
+        return {
+            "mode": spec.set_mode,
+            "set_alpha": None if alpha is None else alpha_key(alpha),
+            "min_cell_size": spec.min_cell_size,
+            "fallback_level": {
+                "value": self._fallback_level,
+                "label": SENSITIVITY_LABEL,
+            },
+            "model_version": self._rule.model_version,
+            "populations": populations,
+            "sets_issued": issued,
+            "note": (
+                "a population without a calibrator issues the cumulative-level set (cumulative_fallback); the pairs never borrow the "
+                "main calibrator"
+            ),
+        }
+
+    def _alert_inputs(self, patient_id: str, alert: Alert) -> AlertInputs | None:
+        assert self._rule is not None
+        entry = self._store.get((patient_id, alert.xi.instance_key, alert.t_ms))
+        if entry is None or alert.verdict is not VerdictState.VIOLATED:
+            return None
+        record, evidence, kappa = entry
+        return alert_inputs_from_rule(
+            self._rule, record, evidence, hierarchical_kappa=kappa
+        )
+
     def at_alpha(self, alpha: float) -> OursDetector:
         """A sibling at another total level that shares the fitted forecaster and the calibration episodes.
 
@@ -311,6 +633,7 @@ class OursDetector:
             replace(self._config, alpha=alpha) if self._predictive else self._config
         )
         other._forks = {}
+        other._store = {}
         other.last_run = None
         calibrator = self._calibrator
         if (
@@ -342,6 +665,9 @@ class OursDetector:
         self._n_censored = 0
         self._forecaster = None
         self._calibrator = None
+        self._store = {}
+        self._set_state.calibrators.clear()
+        self._set_state.issued.clear()
         if self._predictive:
             assert (
                 self._forecaster_factory is not None and self._plan_for_day is not None
@@ -444,12 +770,12 @@ class OursDetector:
                 reorder_delay_ms=cfg.reorder_delay_ms,
                 profile=self._profile,  # type: ignore[arg-type]
                 plan=the_plan,
+                exclude_robot=self._a4,
             )
         )
         used = components.evidence_transform(extracted, self._seed)
-        attributor = RuleAttributor(
-            self._registry, self._templates, plan=the_plan, variant=cfg.variant
-        )
+        self._set_state.patient = day.patient_id
+        attributor = self._attributor(the_plan, cfg.variant)
         violated = [
             a
             for a in attributor.attribute_all(records, used)
@@ -460,11 +786,15 @@ class OursDetector:
             if record.state is VerdictState.PREDICTED_VIOLATION:
                 first_predicted.setdefault(record.instance_key, record)
         predicted = list(
-            RuleAttributor(
-                self._registry, self._templates, plan=the_plan, variant=cfg.variant
-            ).attribute_all(list(first_predicted.values()), used)
+            self._attributor(the_plan, cfg.variant).attribute_all(
+                list(first_predicted.values()), used
+            )
         )
         alerts = [*violated, *predicted]
+        if self._rule is not None:
+            self._remember(
+                day.patient_id, records, used, violated, the_plan, cfg.variant
+            )
         by_key: dict[str, VerdictRecord] = {}
         for record in records:
             held = by_key.get(record.instance_key)
@@ -510,8 +840,62 @@ class OursDetector:
             episodes,
             n_censored,
             stats,
+            used,
         )
         return ranked
+
+    def _attributor(self, plan: CarePlan, variant: str | None) -> RuleAttributor:
+        """The attributor of a run: the likelihood rule with this detector's set selector, or the hierarchical rule."""
+        if self._rule is None:
+            return RuleAttributor(
+                self._registry, self._templates, plan=plan, variant=variant
+            )
+        return RuleAttributor(
+            self._registry,
+            self._templates,
+            self._rule,
+            plan=plan,
+            variant=variant,
+            set_selector=self._select,
+        )
+
+    def _remember(
+        self,
+        patient_id: str,
+        records: Sequence[VerdictRecord],
+        used: Mapping[str, EvidenceVector],
+        violated: Sequence[Alert],
+        plan: CarePlan,
+        variant: str | None,
+    ) -> None:
+        """Keep, per VIOLATED alert, the record and the evidence vector the rule read and the hierarchical rule's kappa, for
+        ``alert_inputs``. A cascade effect carries the posterior of its root, so it points to the root's entry."""
+        first: dict[str, VerdictRecord] = {}
+        for record in records:
+            if record.state is VerdictState.VIOLATED:
+                held = first.get(record.instance_key)
+                if held is None or record.t_eval_ms < held.t_eval_ms:
+                    first[record.instance_key] = record
+        hier = {
+            a.xi.instance_key: str(getattr(a.kappa, "value", a.kappa))
+            for a in RuleAttributor(
+                self._registry, self._templates, plan=plan, variant=variant
+            ).attribute_all(records, used)
+            if a.verdict is VerdictState.VIOLATED
+        }
+        for alert in violated:
+            key = alert.xi.instance_key
+            root = alert.caused_by if alert.caused_by in first else key
+            source = first.get(root)
+            if source is None:
+                continue
+            vector = used.get(root)
+            evidence = vector if vector is not None else empty_evidence(source.template)
+            self._store[(patient_id, key, alert.t_ms)] = (
+                source,
+                evidence,
+                hier.get(root, "UNDETERMINED"),
+            )
 
     @staticmethod
     def _latencies(
