@@ -246,7 +246,8 @@ def test_sensitivity_values_are_recorded_in_the_metadata(
     assert selector["set_alpha"] == "0.5"
     # the run writes them next to the metrics, for the likelihood detector only
     rules = e2e.metrics["meta"]["attribution"]["rules"]
-    assert set(rules) == {"ours"}
+    assert set(rules) == {"ours", "ours-hier"}
+    assert rules["ours-hier"]["rule"] == "hierarchical"
     assert rules["ours"]["sensitivity_values"]["eps"]["label"] == SENSITIVITY
     sets = e2e.metrics["meta"]["attribution"]["set_selector"]
     assert set(sets) == {"ours"}
@@ -613,3 +614,126 @@ def test_experiments_smoke_config_labels_its_values_as_tests() -> None:
     assert {"ours", "ours-hier"} <= set(cfg.detectors)
     ours = options.detector_params["ours"]["likelihood"]
     assert set(TEST_VALUES) <= set(ours["sensitivity_values"])
+
+
+# ---- fix round: no silent hierarchical fallback, no silent skip of the set calibration, shared store ---------------------------
+
+
+def headline_env(mini: SimpleNamespace) -> Any:
+    return dataclasses.replace(
+        mini.env, options=dataclasses.replace(mini.env.options, headline=True)
+    )
+
+
+def without_block(mini: SimpleNamespace, env: Any, **block: Any) -> Any:
+    ours = {k: v for k, v in env.params["ours"].items() if k != "likelihood"}
+    if block:
+        ours["likelihood"] = block
+    return dataclasses.replace(env, params={**env.params, "ours": ours})
+
+
+@pytest.mark.parametrize("name", ["ours", "ours-A4"])
+def test_headline_run_without_the_likelihood_block_is_refused(
+    mini: SimpleNamespace, name: str
+) -> None:
+    env = without_block(mini, headline_env(mini))
+    with pytest.raises(ConfigError, match="likelihood"):
+        build_detector(name, env, alpha=0.5)
+    # a misplaced block (a typo of the key) is the same case
+    typo = dataclasses.replace(
+        env,
+        params={
+            **env.params,
+            "ours": {**env.params["ours"], "likelyhood": {"sensitivity_values": {}}},
+        },
+    )
+    with pytest.raises(ConfigError, match="likelihood"):
+        build_detector(name, typo, alpha=0.5)
+    # not a headline run: the hierarchical rule, as before
+    plain = without_block(mini, mini.env)
+    assert build_detector(name, plain, alpha=0.5).likelihood_rule is None
+    # ours-hier never needs the block, also in a headline run
+    assert build_detector("ours-hier", env, alpha=0.5).likelihood_rule is None
+
+
+def test_ours_hier_validates_the_keys_of_an_ignored_block(
+    mini: SimpleNamespace,
+) -> None:
+    env = without_block(mini, mini.env, sensitivity_values={}, set_alfa=0.5)
+    with pytest.raises(ConfigError, match="set_alfa"):
+        build_detector("ours-hier", env, alpha=0.5)
+    ok = without_block(mini, mini.env, sensitivity_values={}, set_alpha=0.5)
+    assert build_detector("ours-hier", ok, alpha=0.5).likelihood_rule is None
+
+
+def run_variant(tmp_path: Path, mutate: Any, detectors: list[str]) -> dict[str, Any]:
+    import yaml
+
+    from tests.eval.helpers import write_config
+
+    doc = yaml.safe_load(LIKELIHOOD.read_text(encoding="utf-8"))
+    doc["benchmark_manifest"] = str(MINI)
+    doc["run_options"]["registry"] = str(REGISTRY)
+    doc["detectors"] = detectors
+    mutate(doc)
+    cfg, options = load_experiment(write_config(tmp_path / "cfg.yaml", doc))
+    (folder,) = run_experiment(cfg, options, tmp_path / "out", git_rev=lambda: "r")
+    return json.loads((folder / "metrics.json").read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+
+
+def test_hierarchical_rule_is_visible_in_the_metadata(tmp_path: Path) -> None:
+    def drop(doc: dict[str, Any]) -> None:
+        del doc["run_options"]["detector_params"]["ours"]["likelihood"]
+
+    rules = run_variant(tmp_path, drop, ["ours", "ours-hier"])["meta"]["attribution"][
+        "rules"
+    ]
+    assert rules["ours"]["rule"] == "hierarchical" and rules["ours"]["reason"]
+    assert rules["ours-hier"]["rule"] == "hierarchical"
+
+
+def test_skipped_set_calibration_is_written_with_its_reason(tmp_path: Path) -> None:
+    def awaiting(doc: dict[str, Any]) -> None:
+        doc["run_options"]["attribution"]["loose_after_ms"] = "awaiting_human_value"
+
+    meta = run_variant(tmp_path, awaiting, ["ours"])["meta"]["attribution"]
+    calibration = meta["set_selector"]["ours"]["calibration"]
+    assert calibration["fitted"] is False
+    assert "loose_after_ms" in calibration["reason"]
+
+
+def test_unfitted_set_calibration_is_a_hard_error_in_a_headline_run() -> None:
+    from ralmon.eval.runner import require_set_calibration
+
+    status = {"fitted": False, "reason": "why"}
+    with pytest.raises(ConfigError, match="why"):
+        require_set_calibration("ours", status, headline=True)
+    require_set_calibration("ours", status, headline=False)
+    require_set_calibration("ours", {"fitted": True}, headline=True)
+    require_set_calibration("ours-hier", None, headline=True)
+
+
+def test_siblings_share_the_alert_store(registry: Any, templates: Any) -> None:
+    base = make_lik(registry, templates)
+    base.fit([], [])
+    sibling = base.at_alpha(0.3)
+    day, plan = out_of_band_day(), range_plan(registry)
+    (a,) = violated_alerts(base.run(day, plan, None))
+    size = len(base._store)
+    (b,) = violated_alerts(sibling.run(day, plan, None))
+    assert sibling._store is base._store and len(base._store) == size
+    assert sibling.alert_inputs(day.patient_id, b) is not None
+    assert base.alert_inputs(day.patient_id, a) is not None
+    assert "aggregates" in base.set_selector_metadata()["note"]
+
+
+def test_calibrator_cell_key_matches_every_template() -> None:
+    from ralmon.attribution import load_likelihood_table
+    from ralmon.eval.attribution_sets import applicable_from_table
+    from ralmon.spec import TemplateId
+
+    applicable = applicable_from_table(load_likelihood_table(TABLE))
+    for member in TemplateId:
+        key = str(member.value).lower()
+        assert key == member.value  # the selector's key is the value itself
+        assert key in applicable, member
