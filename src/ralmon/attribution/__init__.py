@@ -3,7 +3,7 @@
 The package turns violated verdict records into alerts: ``EvidenceVector`` and its parts (``evidence``), the
 alert tuple (``alert``), the hierarchical rule with abstention (``rule``), the attributor with cascade root-cause
 propagation (``attributor``), the nursing-staff text (``render``) and the evidence extractor (``extract``).
-The likelihood attributor of ADR-074 (``LikelihoodRule``, ``load_likelihood_table``, ``AwaitingValueError``) is in the
+The likelihood attributor of ADR-074 (``LikelihoodRule``, ``load_likelihood_table``, ``AwaitingValueError``, ``LikelihoodConfigError``) is in the
 submodule ``ralmon.attribution.likelihood``; ``RuleAttributor`` takes it as its ``rule`` (the hierarchical rule stays the
 default, ``ours-hier``). Those names, and ``empty_evidence``, are also importable from this package root, outside ``__all__``
 (``tests/test_layering.py`` requires cross-package imports through the root; the likelihood module loads on first use). Other helpers
@@ -73,7 +73,13 @@ __all__ = [
 # are importable from the package root and stay outside ``__all__`` (the table of ``#package-public-api`` is frozen), because
 # ``ralmon.eval`` reads them and ``tests/test_layering.py`` requires imports through the package root (WS08-T09).
 _LIKELIHOOD_NAMES = frozenset(
-    {"AwaitingValueError", "LikelihoodRule", "LikelihoodTable", "load_likelihood_table"}
+    {
+        "AwaitingValueError",
+        "LikelihoodConfigError",
+        "LikelihoodRule",
+        "LikelihoodTable",
+        "load_likelihood_table",
+    }
 )
 
 
