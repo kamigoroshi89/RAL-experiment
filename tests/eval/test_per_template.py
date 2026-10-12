@@ -10,7 +10,6 @@ import json
 import math
 import shutil
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pytest
@@ -58,10 +57,22 @@ def row(**counts: float) -> np.ndarray:
 
 
 def event(
-    cls: str, template: str | None, onset: int, end: int | None = None, injected: bool | None = None
+    cls: str,
+    template: str | None,
+    onset: int,
+    end: int | None = None,
+    injected: bool | None = None,
 ) -> GroundTruthEvent:
     c = InjectedClass(cls)
-    return GroundTruthEvent(c, "fx", onset, end, c is not InjectedClass.C1 if injected is None else injected, template, None)
+    return GroundTruthEvent(
+        c,
+        "fx",
+        onset,
+        end,
+        c is not InjectedClass.C1 if injected is None else injected,
+        template,
+        None,
+    )
 
 
 # ---- the vocabulary ----------------------------------------------------------------------------------------------------
@@ -69,7 +80,14 @@ def event(
 
 def test_the_templates_and_the_aggregate_set_are_declared() -> None:
     assert TEMPLATES == ("RANGE", "SCHED", "HOLD", "COUNT", "RESP", "SYS", "INT")
-    assert AGGREGATE_TEMPLATES == ("RANGE", "SCHED", "HOLD", "COUNT", "SYS", "INT")  # RESP is apart (ADR-072 (b))
+    assert AGGREGATE_TEMPLATES == (
+        "RANGE",
+        "SCHED",
+        "HOLD",
+        "COUNT",
+        "SYS",
+        "INT",
+    )  # RESP is apart (ADR-072 (b))
 
 
 def test_template_of_an_event_is_its_template_for_c1_and_sys_int_for_c2_c3() -> None:
@@ -97,7 +115,14 @@ def test_metrics_are_available_per_template(tmp_path: Path) -> None:
     m = read_metrics(run_doc(tmp_path, hand_document(), factory_for(SCRIPT))[0])
     block = m["per_template"]["ours-s1"]
     t = block["templates"]
-    assert list(t) == ["RANGE", "SCHED", "HOLD", "COUNT", "SYS", "INT"]
+    assert set(t) == {
+        "RANGE",
+        "SCHED",
+        "HOLD",
+        "COUNT",
+        "SYS",
+        "INT",
+    }  # the file has sorted keys
     expected = {
         "RANGE": (2, 2, 2 / 5, 1.0, 4 / 7, 15_000.0),
         "SCHED": (1, 1, 1 / 4, 1.0, 0.4, 0.0),
@@ -113,7 +138,9 @@ def test_metrics_are_available_per_template(tmp_path: Path) -> None:
         assert e["f1"]["value"] == pytest.approx(f1), name
         assert set(e["recall"]) == SCALAR
         if delay is None:
-            assert e["delay_ms"]["mean"]["value"] is None  # nothing matched: no delay, not zero
+            assert (
+                e["delay_ms"]["mean"]["value"] is None
+            )  # nothing matched: no delay, not zero
         else:
             assert e["delay_ms"]["mean"]["value"] == pytest.approx(delay), name
         assert e["delay_ms"]["n_matched"] == n_tp
@@ -135,7 +162,9 @@ def test_a_template_with_no_truth_event_is_null_not_zero() -> None:
     total = row(RANGE_gt=3, RANGE_tp=1, fa_background=2, exposure_days=4)
     assert table_template_metric(total, "RANGE", "recall") == pytest.approx(1 / 3)
     for key in ("precision", "recall", "f1", "delay_mean", "fraction_early"):
-        assert math.isnan(table_template_metric(total, "HOLD", key)), key  # nan here, null in the file
+        assert math.isnan(table_template_metric(total, "HOLD", key)), (
+            key
+        )  # nan here, null in the file
     # a template that has events but no match: recall 0, precision 0, delay undefined
     missed = row(SCHED_gt=2, fa_background=1)
     assert table_template_metric(missed, "SCHED", "recall") == 0.0
@@ -152,15 +181,23 @@ def test_per_template_counts_of_a_matching_by_hand() -> None:
         event("C2", None, 15 * H),
         event("C3", None, 18 * H),
     ]
-    from tests.eval.helpers import det
     from ralmon.eval.metrics import template_table
+    from tests.eval.helpers import det
 
     dets = [det(10 * H + 20_000), det(15 * H - 40_000), det(3 * H)]
     matching = match_events(gt, dets, CFG, n_days=1)
-    table = template_table(matching, [0, 0, 0, 0], [0, 0, 0], 1, PatientBackground((), 1, margin_ms=0))
+    table = template_table(
+        matching, [0, 0, 0, 0], [0, 0, 0], 1, PatientBackground((), 1, margin_ms=0)
+    )
     total = table.sum(axis=0)
-    assert total[TEMPLATE_COLUMNS.index("RANGE_gt")] == 2 and total[TEMPLATE_COLUMNS.index("RANGE_tp")] == 1
-    assert total[TEMPLATE_COLUMNS.index("SYS_tp")] == 1 and total[TEMPLATE_COLUMNS.index("INT_tp")] == 0
+    assert (
+        total[TEMPLATE_COLUMNS.index("RANGE_gt")] == 2
+        and total[TEMPLATE_COLUMNS.index("RANGE_tp")] == 1
+    )
+    assert (
+        total[TEMPLATE_COLUMNS.index("SYS_tp")] == 1
+        and total[TEMPLATE_COLUMNS.index("INT_tp")] == 0
+    )
     assert table_template_metric(total, "RANGE", "delay_mean") == 20_000.0
     assert table_template_metric(total, "SYS", "delay_mean") == -40_000.0
     assert table_template_metric(total, "SYS", "fraction_early") == 1.0
@@ -181,34 +218,48 @@ def test_aggregate_is_the_equal_weight_mean_of_the_templates_without_resp() -> N
     )  # fmt: skip
     without = table_aggregate_metric(total, "recall")
     assert without == pytest.approx(17 / 30)
-    with_resp = table_aggregate_metric(total, "recall", templates=(*AGGREGATE_TEMPLATES, "RESP"))
+    with_resp = table_aggregate_metric(
+        total, "recall", templates=(*AGGREGATE_TEMPLATES, "RESP")
+    )
     assert with_resp == pytest.approx(17 / 36)
     assert without - with_resp == pytest.approx(17 / 180)
     pooled = (2 + 2 + 0 + 1 + 5) / (4 + 2 + 1 + 3 + 5)
     assert pooled == pytest.approx(2 / 3) and without != pytest.approx(pooled)
     # precision of a template is TP / (TP + 3): RANGE 2/5, SCHED 2/5, HOLD 0, COUNT 1/4, SYS 5/8 -> mean over five
     precisions = [2 / 5, 2 / 5, 0.0, 1 / 4, 5 / 8]
-    assert table_aggregate_metric(total, "precision") == pytest.approx(sum(precisions) / 5)
+    assert table_aggregate_metric(total, "precision") == pytest.approx(
+        sum(precisions) / 5
+    )
 
 
-def test_aggregate_f1_is_the_mean_of_the_template_f1_and_delay_the_mean_of_the_template_delays() -> None:
+def test_aggregate_f1_is_the_mean_of_the_template_f1_and_delay_the_mean_of_the_template_delays() -> (
+    None
+):
     # RANGE: gt 2, tp 1, FA 1 -> p = 1/2, r = 1/2, f1 = 1/2.  SYS: gt 1, tp 1 -> p = 1/2, r = 1, f1 = 2/3.
     total = row(
         RANGE_gt=2, RANGE_tp=1, RANGE_delay_n=1, RANGE_delay_sum_ms=1000,
         SYS_gt=1, SYS_tp=1, SYS_delay_n=1, SYS_delay_sum_ms=-3000, fa_background=1, exposure_days=1,
     )  # fmt: skip
     assert table_aggregate_metric(total, "f1") == pytest.approx((1 / 2 + 2 / 3) / 2)
-    assert table_aggregate_metric(total, "delay_mean") == pytest.approx((1000 - 3000) / 2)  # equal weights, not pooled
+    assert table_aggregate_metric(total, "delay_mean") == pytest.approx(
+        (1000 - 3000) / 2
+    )  # equal weights, not pooled
 
 
-def test_aggregate_is_undefined_when_no_template_has_an_event_and_resp_alone_does_not_make_one() -> None:
+def test_aggregate_is_undefined_when_no_template_has_an_event_and_resp_alone_does_not_make_one() -> (
+    None
+):
     assert math.isnan(table_aggregate_metric(row(), "recall"))
     only_resp = row(RESP_gt=3, RESP_tp=3, fa_background=1, exposure_days=1)
-    assert math.isnan(table_aggregate_metric(only_resp, "recall"))  # RESP is not in the aggregate
+    assert math.isnan(
+        table_aggregate_metric(only_resp, "recall")
+    )  # RESP is not in the aggregate
     assert table_template_metric(only_resp, "RESP", "recall") == 1.0
 
 
-def test_aggregate_leaves_of_the_runner_agree_with_the_template_leaves(tmp_path: Path) -> None:
+def test_aggregate_leaves_of_the_runner_agree_with_the_template_leaves(
+    tmp_path: Path,
+) -> None:
     """From the hand case of test 1: present templates RANGE, SCHED, COUNT, SYS, INT (HOLD absent, RESP apart).
     Recall (1 + 1 + 1 + 1 + 0) / 5 = 0.8; precision (2/5 + 1/4 + 1/4 + 2/5 + 0) / 5 = 0.26; F1 (4/7 + 2/5 + 2/5 + 4/7 + 0) / 5;
     delay (15 000 + 0 - 30 000 + 0) / 4 over the four templates with a delay = -3750."""
@@ -238,10 +289,15 @@ def test_resp_reported_apart_flag(tmp_path: Path) -> None:
     assert "resp" in m["per_template"]["ours-s1"]
 
 
-def test_every_detector_gets_a_per_template_entry_even_a_scripted_one_with_no_detection(tmp_path: Path) -> None:
+def test_every_detector_gets_a_per_template_entry_even_a_scripted_one_with_no_detection(
+    tmp_path: Path,
+) -> None:
     m = read_metrics(run_doc(tmp_path, hand_document(), factory_for({}))[0])
     t = m["per_template"]["ours-s1"]["templates"]
-    assert t["RANGE"]["recall"]["value"] == 0.0 and t["RANGE"]["precision"]["value"] is None  # 0 / (0 + 0) is undefined
+    assert (
+        t["RANGE"]["recall"]["value"] == 0.0
+        and t["RANGE"]["precision"]["value"] is None
+    )  # 0 / (0 + 0) is undefined
     assert t["RANGE"]["delay_ms"]["mean"]["value"] is None
     assert "NaN" not in json.dumps(m)
 
@@ -250,7 +306,9 @@ def test_every_detector_gets_a_per_template_entry_even_a_scripted_one_with_no_de
 
 
 def eventful_background(window: tuple[int, int]) -> PatientBackground:
-    return PatientBackground((Footprint("hypertensive_spike", "C1", *window),), 2, margin_ms=0)
+    return PatientBackground(
+        (Footprint("hypertensive_spike", "C1", *window),), 2, margin_ms=0
+    )
 
 
 def test_excess_table_by_hand() -> None:
@@ -260,7 +318,10 @@ def test_excess_table_by_hand() -> None:
     template: ignored).  In the windows: 2 events, 1 detected, 4 H = 1/6 day.  Outside every footprint: 3 events, 1 detected,
     48 H - 4 H = 44 H = 11/6 day."""
     bg = PatientBackground(
-        (Footprint("hypertensive_spike", "C1", 13 * H, 15 * H), Footprint("hypertensive_spike", "C1", D + 13 * H, D + 15 * H)),
+        (
+            Footprint("hypertensive_spike", "C1", 13 * H, 15 * H),
+            Footprint("hypertensive_spike", "C1", D + 13 * H, D + 15 * H),
+        ),
         2,
         margin_ms=0,
     )
@@ -280,11 +341,20 @@ def test_excess_table_by_hand() -> None:
     total = table.sum(axis=0)
     col = {name: float(total[i]) for i, name in enumerate(EXCESS_COLUMNS)}
     assert col == pytest.approx(
-        {"events_in": 2, "detected_in": 1, "exposure_in_days": 1 / 6, "events_bg": 3, "detected_bg": 1, "exposure_bg_days": 11 / 6}
+        {
+            "events_in": 2,
+            "detected_in": 1,
+            "exposure_in_days": 1 / 6,
+            "events_bg": 3,
+            "detected_bg": 1,
+            "exposure_bg_days": 11 / 6,
+        }
     )
     # rate of events: 2 / (1/6) = 12 per day inside, 3 / (11/6) = 18/11 outside
     assert table_excess_events(total) == pytest.approx(12 - 18 / 11)
-    assert table_excess_detected(total) == pytest.approx(6 - 6 / 11)  # 1 / (1/6) - 1 / (11/6)
+    assert table_excess_detected(total) == pytest.approx(
+        6 - 6 / 11
+    )  # 1 / (1/6) - 1 / (11/6)
     assert table_excess_recall(total) == pytest.approx(1 / 2 - 1 / 3)
 
 
@@ -310,18 +380,36 @@ def test_excess_over_background() -> None:
     injected = table([1] * 8, [0, 1] * 4)
     total = injected.sum(axis=0)
     assert table_excess_events(total) == pytest.approx(10 - 4 / 7.2)
-    lo, hi = bootstrap_statistic(injected, table_excess_events, n_resamples=200, level=0.95, seed=3, clusters=patients)
+    lo, hi = bootstrap_statistic(
+        injected,
+        table_excess_events,
+        n_resamples=200,
+        level=0.95,
+        seed=3,
+        clusters=patients,
+    )
     assert 0 < lo <= 10 - 4 / 7.2 <= hi
 
-    none = table([0, 1, 0, 1, 0, 1, 0, 1], [4, 5, 4, 5, 4, 5, 4, 5])  # 4 in 0.8 day = 5; 36 in 7.2 days = 5
+    none = table(
+        [0, 1, 0, 1, 0, 1, 0, 1], [4, 5, 4, 5, 4, 5, 4, 5]
+    )  # 4 in 0.8 day = 5; 36 in 7.2 days = 5
     assert table_excess_events(none.sum(axis=0)) == pytest.approx(0.0)
-    lo, hi = bootstrap_statistic(none, table_excess_events, n_resamples=200, level=0.95, seed=3, clusters=patients)
+    lo, hi = bootstrap_statistic(
+        none,
+        table_excess_events,
+        n_resamples=200,
+        level=0.95,
+        seed=3,
+        clusters=patients,
+    )
     assert lo < 0 < hi
 
 
 def test_excess_is_undefined_without_exposure_or_without_events() -> None:
     total = np.zeros(len(EXCESS_COLUMNS))
-    assert math.isnan(table_excess_events(total)) and math.isnan(table_excess_detected(total))
+    assert math.isnan(table_excess_events(total)) and math.isnan(
+        table_excess_detected(total)
+    )
     assert math.isnan(table_excess_recall(total))
     no_window = np.zeros(len(EXCESS_COLUMNS))
     no_window[EXCESS_COLUMNS.index("events_bg")] = 2
@@ -329,7 +417,9 @@ def test_excess_is_undefined_without_exposure_or_without_events() -> None:
     assert math.isnan(table_excess_events(no_window))
 
 
-def test_the_runner_reports_the_excess_of_an_injected_c1_subtype(tmp_path: Path) -> None:
+def test_the_runner_reports_the_excess_of_an_injected_c1_subtype(
+    tmp_path: Path,
+) -> None:
     """The mini benchmark with a spike record covering 13:00-15:00 of p05 day 0 (the RANGE event at 14:00 of that patient
     is in the window; the RANGE event of p01 at 14:00 is outside every footprint). Both are detected by SCRIPT.
     Windows: 1 event, 1 detected, 2 H = 1/12 day; outside: 1 event, 1 detected, 12 - 1/12 = 143/12 days.
@@ -338,9 +428,13 @@ def test_the_runner_reports_the_excess_of_an_injected_c1_subtype(tmp_path: Path)
     shutil.copytree(MINI, bench)
     path = bench / "truth" / "p05" / "0.json"
     doc = json.loads(path.read_text(encoding="utf-8"))
-    doc["injection_log"] = [entry("C1", "hypertensive_spike", ms(13), ms(15), truth_indices=(0,))]
+    doc["injection_log"] = [
+        entry("C1", "hypertensive_spike", ms(13), ms(15), truth_indices=(0,))
+    ]
     path.write_text(json.dumps(doc), encoding="utf-8")
-    m = read_metrics(run_doc(tmp_path, background_document(bench), factory_for(SCRIPT))[0])
+    m = read_metrics(
+        run_doc(tmp_path, background_document(bench), factory_for(SCRIPT))[0]
+    )
     block = m["background"]["excess_over_background"]["ours-s1"]["hypertensive_spike"]
     assert block["template"] == "RANGE"
     assert block["events"]["value"] == pytest.approx(12 - 12 / 143)
@@ -354,6 +448,10 @@ def test_the_runner_reports_the_excess_of_an_injected_c1_subtype(tmp_path: Path)
     assert "NaN" not in json.dumps(m)
 
 
-def test_a_benchmark_without_injected_c1_records_has_an_empty_excess_block(tmp_path: Path) -> None:
-    m = read_metrics(run_doc(tmp_path, background_document(None), factory_for(SCRIPT))[0])
+def test_a_benchmark_without_injected_c1_records_has_an_empty_excess_block(
+    tmp_path: Path,
+) -> None:
+    m = read_metrics(
+        run_doc(tmp_path, background_document(None), factory_for(SCRIPT))[0]
+    )
     assert m["background"]["excess_over_background"]["ours-s1"] == {}

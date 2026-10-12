@@ -340,7 +340,7 @@ def test_git_rev_txt_content(tmp_path: Path) -> None:
 # 35
 def test_metrics_json_top_level_keys(hand_run: dict[str, Any]) -> None:
     m = hand_run["metrics"]
-    assert set(m) <= set(METRICS) | {"meta", "analysis"}
+    assert set(m) <= set(METRICS) | {"meta", "analysis", "per_template", "background"}
     assert set(METRICS) <= set(m)  # a metric that does not apply is null, never omitted
     assert META_KEYS <= set(m["meta"])
     assert m["meta"]["experiment_id"] == "smoke" and m["meta"]["seed"] == 0

@@ -102,6 +102,23 @@ flag computed from the two observed days, not the expectation of the YAML grid),
   day d explained by a record of day d-1 (the morning COUNT event after an evening `double_take`, a RESP event after an
   evening `drug_nonresponse`) is `injected` and is in no `truth_indices` of day d: the record is found by this list.
 
+## Footprint of an injection (ADR-071 (b), WS08-T08)
+
+The metrics that measure false alarms on the windows WITHOUT injections (`ralmon.eval.background`) read the `injection_log` and the
+ground truth of a patient as a set of footprints on its continuing axis. A C2 or C3 record acts on its window `[onset_ms, end_ms]` (the
+instant for a point or per-tick fault); the window is on the RECEIVE axis (`t_rx`), which for a replay is the only valid reading
+because the replayed copies keep an old `t_device` and arrive inside the window (`evidence/nonadditivity.md`, section 3). A C1 record acts
+on its window plus a finite physiological tail: a pharmacokinetic effect (non-response, double take) decays without ever reaching zero
+(9.3 mmHg on day 0, 1.8e-5 mmHg on day 7 with the committed prior), so some finite horizon must be stated; it is a parameter of the
+experiment configuration (`run_options.background.c1_footprint_tail_ms`) recorded with its reason, taken from the generator's own decay
+and not from a clinical value, and it stays `awaiting_human_value` until a human states which residual effect counts as negligible. The
+autoregressive noise of the latent pressure is never changed by an injection (it is drawn from its own stream), so it adds no tail. Every
+record also extends its footprint over the events it produced (`truth_indices`) and over the events of later days that it explains
+(`explains_in_later_days`: the day-end COUNT after a double take). A record that changed nothing (`realised` false) has no footprint. The
+evaluation widens every footprint by a margin (default: the matching tolerance) so that a detection that belongs to an injection, matched
+or just outside the tolerance, is not counted as background. The footprints of different subtypes may overlap; the time outside every
+footprint is the exposure of the background false alarms.
+
 ## Robot reports
 
 Each visit of the robot produces a `NODE_STATE` event of the source `robot` with `payload.state` `active` and

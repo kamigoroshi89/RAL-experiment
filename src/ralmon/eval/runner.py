@@ -33,6 +33,14 @@ Scoring conventions (ADR-064, ADR-066; they refine E3, which says "per patient-d
 * The closing-step truth is C1 only (ADR-066, builder.md): a C2 or C3 event that starts at the first instant of the tail
   day is not part of it, and the limit is reported (``analysis.run.closing_step``).
 
+Per template and background (WS08-T08, ADR-071 (b), ADR-072 (b)). Besides the eleven metrics, ``metrics.json`` holds the top-level
+keys ``per_template`` (every metric per template, the equal-weight aggregate without RESP, RESP apart) and ``background`` (the false
+alarms outside every injection footprint per patient-day of time outside every footprint, and the excess of each injected C1
+subtype over the natural background). The footprints come from the injection log of the truth sidecar
+(``ralmon.eval.background``; the evaluation reads truth, a detector never does); the finite tail of a C1 injection is
+``run_options.background.c1_footprint_tail_ms`` (``awaiting_human_value`` until a human states it: flag
+``C1_FOOTPRINT_TAIL_AWAITING``, a hard failure of a headline run). The layout is in the README of WS08.
+
 Guards (``evaluate_guards``). Each condition of the fairness audit that decides whether a comparison is legitimate is a
 guard with an id. Always a HARD failure (``GuardError``, nothing is written for the seed): ``B1_VACUOUS`` (B1 ran with fewer
 rules than R1 to R4 on some plan). A HARD failure in a ``headline`` run and a FLAG in the metadata otherwise:
@@ -98,16 +106,21 @@ from ralmon.benchmark import (
 )
 from ralmon.benchmark import split_patients as _builder_split_patients
 from ralmon.conformal import BonferroniAllocation, SplitConformal
+from ralmon.eval.background import PatientBackground, patient_footprints
 from ralmon.eval.metrics import (
+    AGGREGATE_TEMPLATES,
     CLASSES,
     LABEL_COLUMNS,
     STREAM_BOOTSTRAP,
+    TEMPLATE_COLUMNS,
+    TEMPLATES,
     MatchConfig,
     Matching,
     bin_index,
     bootstrap_weights,
     ci_with_report,
     empirical_coverage,
+    excess_table,
     expected_calibration_error,
     latency_percentiles,
     match_events,
@@ -117,11 +130,19 @@ from ralmon.eval.metrics import (
     residual_coverage,
     table_abstention_rate,
     table_accuracy_answered,
+    table_aggregate_metric,
+    table_background_fa_per_day,
     table_delay_mean,
     table_early_fraction,
+    table_excess_detected,
+    table_excess_events,
+    table_excess_recall,
     table_fa_per_day,
     table_macro_f1,
     table_prf,
+    table_template_metric,
+    template_of_event,
+    template_table,
 )
 from ralmon.eval.ours import (
     CompositeForecaster,
@@ -284,6 +305,11 @@ class RunOptions:
       says which guard each lifts.
     * ``detector_params``: operating parameters of the detectors (``timing_tail_ms``, ``forecaster``, ``B2``, ``B4``, ``B5``,
       ``B5-bonferroni``, ``ours``); none has a default.
+    * ``c1_footprint_tail_ms`` / ``c1_footprint_tail_reason`` / ``footprint_margin_ms`` (``run_options.background``, WS08-T08,
+      ADR-071 (b)): the finite physiological tail that a C1 injection adds to its window when the time WITHOUT injections is
+      computed (None: ``awaiting_human_value``, the footprint is then the window only, a flag, and a hard failure of a
+      headline run), the reason recorded with it, and the margin that widens every footprint (None: the matching
+      tolerance). None of them is a clinical value.
     """
 
     alpha_grid: tuple[float, ...]
@@ -302,6 +328,12 @@ class RunOptions:
     allow_fixture_only: bool = False
     accepted_decisions: tuple[str, ...] = ()
     detector_params: Mapping[str, Any] = field(default_factory=dict)
+    c1_footprint_tail_ms: int | None = None
+    c1_footprint_tail_reason: str = ""
+    footprint_margin_ms: int | None = None
+
+
+AWAITING_HUMAN_VALUE: Final = "awaiting_human_value"
 
 
 def _read_yaml(path: Path) -> Any:
@@ -534,6 +566,7 @@ def _parse_options(doc: Any, base: Path) -> RunOptions:
         "allow_fixture_only",
         "accepted_decisions",
         "detector_params",
+        "background",
     )
     _keys(
         doc,
@@ -596,6 +629,7 @@ def _parse_options(doc: Any, base: Path) -> RunOptions:
     validate_accepted_decisions(accepted)
     params = doc.get("detector_params", {})
     _need(isinstance(params, Mapping), "run_options.detector_params must be a mapping")
+    tail, tail_reason, margin = _parse_background(doc.get("background", {}))
     return RunOptions(
         alpha_grid=levels,
         n_bootstrap=doc["n_bootstrap"],
@@ -613,7 +647,48 @@ def _parse_options(doc: Any, base: Path) -> RunOptions:
         allow_fixture_only=allow,
         accepted_decisions=tuple(accepted),
         detector_params=dict(params),
+        c1_footprint_tail_ms=tail,
+        c1_footprint_tail_reason=tail_reason,
+        footprint_margin_ms=margin,
     )
+
+
+def _parse_background(doc: Any) -> tuple[int | None, str, int | None]:
+    """``run_options.background``: the C1 footprint tail (an integer of ms, or ``awaiting_human_value``, or absent), its
+    reason (required with a number: a parameter is recorded with its reason) and the footprint margin (ms or null)."""
+    _keys(
+        doc,
+        (),
+        ("c1_footprint_tail_ms", "c1_footprint_tail_reason", "footprint_margin_ms"),
+        "run_options.background",
+    )
+    raw = doc.get("c1_footprint_tail_ms", AWAITING_HUMAN_VALUE)
+    tail: int | None
+    if raw == AWAITING_HUMAN_VALUE:
+        tail = None
+    else:
+        _need(
+            _is_int(raw) and raw >= 0,
+            "run_options.background.c1_footprint_tail_ms must be a non-negative integer (ms) or "
+            f"{AWAITING_HUMAN_VALUE!r}",
+        )
+        tail = int(raw)
+    reason = doc.get("c1_footprint_tail_reason", "")
+    _need(
+        isinstance(reason, str),
+        "run_options.background.c1_footprint_tail_reason must be a string",
+    )
+    _need(
+        tail is None or bool(reason.strip()),
+        "run_options.background.c1_footprint_tail_ms is a parameter of the experiment: it is recorded with its reason "
+        "(c1_footprint_tail_reason), taken from the generator's own pharmacokinetics and not from a clinical value",
+    )
+    margin = doc.get("footprint_margin_ms")
+    _need(
+        margin is None or (_is_int(margin) and margin >= 0),
+        "run_options.background.footprint_margin_ms must be a non-negative integer (ms) or null",
+    )
+    return tail, reason, None if margin is None else int(margin)
 
 
 def _resolve_path(base: Path, value: str) -> str:
@@ -685,6 +760,13 @@ def dump_experiment(
         "allow_fixture_only": options.allow_fixture_only,
         "accepted_decisions": list(options.accepted_decisions),
         "detector_params": dict(options.detector_params),
+        "background": {
+            "c1_footprint_tail_ms": AWAITING_HUMAN_VALUE
+            if options.c1_footprint_tail_ms is None
+            else options.c1_footprint_tail_ms,
+            "c1_footprint_tail_reason": options.c1_footprint_tail_reason,
+            "footprint_margin_ms": options.footprint_margin_ms,
+        },
     }
     document = {
         "experiment_id": config.experiment_id,
@@ -834,6 +916,7 @@ class RunFacts:
     int_gate_unknown: tuple[str, ...] = ()
     min_alpha: float | None = None
     calibration_episodes: Mapping[str, int] = field(default_factory=dict)
+    background_tail_awaiting: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -944,6 +1027,13 @@ def evaluate_guards(facts: RunFacts, options: RunOptions) -> GuardReport:
             "ALPHA_BELOW_CALIBRATION_RESOLUTION",
             f"the smallest alpha {facts.min_alpha} is below 1 / (n + 1) for the calibration sets {too_few}: the "
             "finite-sample quantile is infinite, nothing is emitted and the coverage is vacuous (E6)",
+        )
+    if facts.background_tail_awaiting:
+        conditional(
+            "C1_FOOTPRINT_TAIL_AWAITING",
+            "run_options.background.c1_footprint_tail_ms is awaiting_human_value: the footprint of a C1 injection is its "
+            "window only, so the pharmacokinetic consequences of a non-response or a double take count as background "
+            "false alarms (ADR-071 (b))",
         )
     if has_ours and not facts.has_device_profile:
         conditional(
@@ -1450,6 +1540,10 @@ class _Scored:
     table: np.ndarray
     n_dropped_tail: int
     false_alarm_kinds: Counter[str]
+    template_table: np.ndarray  # per-template sums, one row per patient-day (WS08-T08)
+    event_days: list[
+        int
+    ]  # the unit of each ground-truth event, in the order of ``matching.gt``
 
 
 def _unit_of_detection(t_ms: int, last_day: int, tail_start: int) -> int:
@@ -1464,13 +1558,16 @@ def _score_patient(
     detections: Sequence[Detection],
     n_days: int,
     match: MatchConfig,
+    background: PatientBackground | None = None,
 ) -> _Scored:
     last_day = n_days - 1
     tail_start = n_days * T_DAY_MS
     matching = match_events([e for e, _ in events], detections, match, n_days=n_days)
     det_days = [_unit_of_detection(d.t_ms, last_day, tail_start) for d in matching.det]
     # a matched detection counts through its event; a duplicate or a false alarm in the unscored tail is dropped
-    table = matching.table([day for _, day in events], det_days, n_days)
+    event_days = [day for _, day in events]
+    table = matching.table(event_days, det_days, n_days)
+    by_template = template_table(matching, event_days, det_days, n_days, background)
     dropped = sum(
         1
         for i in (*matching.false_alarm_index, *matching.duplicate_index)
@@ -1487,7 +1584,7 @@ def _score_patient(
             kinds["predicted_violation"] += 1
         else:
             kinds["violated"] += 1
-    return _Scored(matching, table, dropped, kinds)
+    return _Scored(matching, table, dropped, kinds, by_template, event_days)
 
 
 # ---- the run ---------------------------------------------------------------------------------------------------------
@@ -1695,6 +1792,239 @@ def _subtype_recall(matching: Matching) -> dict[str, Any]:
     }
 
 
+# ---- per template and background (WS08-T08) ----------------------------------------------------------------------------
+
+RESP_EXCLUSION_REASON: Final[str] = (
+    "RESP excluded from the aggregate (ADR-072 (b)): with the committed drug model the steady-state violations of RESP are "
+    "mostly an artefact of the specification (the drug swing between trough and peak is below delta_resp) and RESP "
+    "recognises non-response at chance level (AUC 0.55 per dose, ADR-072 context); it is reported apart, per template"
+)
+
+
+def _tcol(name: str) -> int:
+    return TEMPLATE_COLUMNS.index(name)
+
+
+def _template_stat(template: str, key: str) -> Callable[[np.ndarray], float]:
+    def stat(row: np.ndarray) -> float:
+        return table_template_metric(row, template, key)
+
+    return stat
+
+
+def _aggregate_stat(key: str) -> Callable[[np.ndarray], float]:
+    def stat(row: np.ndarray) -> float:
+        return table_aggregate_metric(row, key)
+
+    return stat
+
+
+def _template_block(
+    table: np.ndarray, weights: _Weights, template: str, label: str
+) -> dict[str, Any]:
+    """The metrics of one template (``null`` leaves for a template without a truth event, never 0 and never NaN)."""
+    total = table.sum(axis=0)
+    n_events = round(float(total[_tcol(f"{template}_gt")]))
+    n_matched = round(float(total[_tcol(f"{template}_tp")]))
+    if n_events == 0:
+        return {
+            "n_events": 0,
+            "n_matched": n_matched,
+            "precision": None,
+            "recall": None,
+            "f1": None,
+            "delay_ms": None,
+        }
+
+    def leaf(key: str) -> dict[str, Any]:
+        return weights.scalar(
+            table, _template_stat(template, key), f"{label}.{template}.{key}"
+        )
+
+    return {
+        "n_events": n_events,
+        "n_matched": n_matched,
+        "precision": leaf("precision"),
+        "recall": leaf("recall"),
+        "f1": leaf("f1"),
+        "delay_ms": {
+            "n_matched": n_matched,
+            "mean": leaf("delay_mean"),
+            "fraction_early": leaf("fraction_early"),
+        },
+    }
+
+
+def _per_template_block(
+    table: np.ndarray, weights: _Weights, detector: str
+) -> dict[str, Any]:
+    """``per_template.<det>``: the six templates of the aggregate, RESP apart, and the equal-weight aggregate."""
+    label = f"per_template.{detector}"
+    total = table.sum(axis=0)
+    present = [t for t in AGGREGATE_TEMPLATES if total[_tcol(f"{t}_gt")] > 0]
+    return {
+        "templates": {
+            t: _template_block(table, weights, t, label) for t in AGGREGATE_TEMPLATES
+        },
+        "resp": _template_block(table, weights, "RESP", label),
+        "aggregate": {
+            "templates": list(AGGREGATE_TEMPLATES),
+            "templates_with_events": present,
+            "weights": "equal",
+            "precision": weights.scalar(
+                table, _aggregate_stat("precision"), f"{label}.aggregate.precision"
+            ),
+            "recall": weights.scalar(
+                table, _aggregate_stat("recall"), f"{label}.aggregate.recall"
+            ),
+            "f1": weights.scalar(table, _aggregate_stat("f1"), f"{label}.aggregate.f1"),
+            "delay_ms_mean": weights.scalar(
+                table, _aggregate_stat("delay_mean"), f"{label}.aggregate.delay_ms_mean"
+            ),
+        },
+    }
+
+
+def _background_fa_block(
+    table: np.ndarray, weights: _Weights, detector: str
+) -> dict[str, Any]:
+    """``background.false_alarms_per_patient_day.<det>``: false alarms outside every footprint per patient-day of time
+    outside every footprint (ADR-071 (b)), with the counts that make the rate."""
+    total = table.sum(axis=0)
+    block = weights.scalar(
+        table,
+        table_background_fa_per_day,
+        f"background.false_alarms_per_patient_day.{detector}",
+    )
+    block["n_false_alarms_background"] = round(float(total[_tcol("fa_background")]))
+    block["n_false_alarms_in_footprint"] = round(float(total[_tcol("fa_in_footprint")]))
+    block["exposure_patient_days"] = _num(float(total[_tcol("exposure_days")]))
+    return block
+
+
+def _excess_blocks(
+    detector: str,
+    keys: Mapping[str, str | None],
+    test_patients: Sequence[str],
+    test_days: Mapping[str, Sequence[ObservedDay]],
+    scored: Mapping[str, _Scored],
+    backgrounds: Mapping[str, PatientBackground],
+    weights: _Weights,
+) -> dict[str, Any]:
+    """``background.excess_over_background.<det>``: for each injected C1 subtype, the rate inside its footprints minus the
+    rate in the windows without injections (events of its template; ``events``, ``detected``, ``recall``)."""
+    out: dict[str, Any] = {}
+    for key, template in sorted(keys.items()):
+        subtype = key.split("/", 1)[1]
+        if template is None:
+            out[subtype] = {
+                "template": None,
+                "events": None,
+                "detected": None,
+                "recall": None,
+                "counts": None,
+            }
+            continue
+        table = np.vstack(
+            [
+                excess_table(
+                    scored[p].matching,
+                    scored[p].event_days,
+                    len(test_days[p]),
+                    backgrounds[p],
+                    key,
+                    template,
+                )
+                for p in test_patients
+            ]
+        )
+        total = table.sum(axis=0)
+        label = f"background.excess_over_background.{detector}.{subtype}"
+        out[subtype] = {
+            "template": template,
+            "events": weights.scalar(table, table_excess_events, f"{label}.events"),
+            "detected": weights.scalar(
+                table, table_excess_detected, f"{label}.detected"
+            ),
+            "recall": weights.scalar(table, table_excess_recall, f"{label}.recall"),
+            "counts": {
+                "events_in_windows": round(float(total[0])),
+                "detected_in_windows": round(float(total[1])),
+                "exposure_in_windows_days": _num(float(total[2])),
+                "events_background": round(float(total[3])),
+                "detected_background": round(float(total[4])),
+                "exposure_background_days": _num(float(total[5])),
+            },
+        }
+    return out
+
+
+def _excess_keys(
+    backgrounds: Mapping[str, PatientBackground],
+    events: Mapping[str, Sequence[tuple[GroundTruthEvent, int]]],
+) -> dict[str, str | None]:
+    """The injected C1 subtypes with a footprint (``C1/<subtype>``) and the template of each: the template of the C1
+    events of that subtype in the truth, None when there is not exactly one (the excess is then not computed)."""
+    keys = {k for bg in backgrounds.values() for k in bg.keys if k.startswith("C1/")}
+    out: dict[str, str | None] = {}
+    for key in sorted(keys):
+        subtype = key.split("/", 1)[1]
+        found = {
+            template_of_event(e)
+            for pairs in events.values()
+            for e, _ in pairs
+            if e.cls.value == "C1" and e.subtype == subtype
+        }
+        out[key] = next(iter(found)) if len(found) == 1 else None
+    return out
+
+
+def _background_facts(
+    test_patients: Sequence[str],
+    test_days: Mapping[str, Sequence[ObservedDay]],
+    truth: Mapping[str, Any],
+    backgrounds: Mapping[str, PatientBackground],
+    options: RunOptions,
+    margin_ms: int,
+) -> dict[str, Any]:
+    """``analysis.run.background``: what does not depend on the detector (the footprints, the exposure, the natural events
+    per patient-day by template; ADR-071 (a) asks for the background to be declared)."""
+    n_days = sum(len(test_days[p]) for p in test_patients)
+    records = sum(len(log) for p in test_patients for log in truth[p][2].values())
+    unrealised = sum(
+        1
+        for p in test_patients
+        for log in truth[p][2].values()
+        for entry in log
+        if not entry.get("realised", True)
+    )
+    exposure = (
+        sum(sum(backgrounds[p].exposure_ms()) for p in test_patients) / 86_400_000
+    )
+    per_template: dict[str, dict[str, int]] = {
+        t: {"natural": 0, "injected": 0} for t in TEMPLATES
+    }
+    for p in test_patients:
+        for event, _ in truth[p][0]:
+            per_template[template_of_event(event)][
+                "injected" if event.injected else "natural"
+            ] += 1
+    return {
+        "n_injection_records": records,
+        "n_unrealised_records": unrealised,
+        "n_footprints": sum(len(backgrounds[p].footprints) for p in test_patients),
+        "exposure_patient_days": exposure,
+        "exposure_fraction": exposure / n_days if n_days else None,
+        "c1_footprint_tail_ms": options.c1_footprint_tail_ms,
+        "footprint_margin_ms": margin_ms,
+        "events_by_template": per_template,
+        "natural_events_per_patient_day": {
+            t: v["natural"] / n_days if n_days else None
+            for t, v in per_template.items()
+        },
+    }
+
+
 def _preflight_registry(env: DetectorEnvironment, names: Sequence[str]) -> None:
     """Fail before the run, not in the middle of it, when the registry cannot feed the proposed method.
 
@@ -1753,18 +2083,36 @@ def _plan_cache(
 
 def _truth_events(
     reader_full: Any, patient: str
-) -> tuple[list[tuple[GroundTruthEvent, int]], int]:
-    """The events of a patient with the day of their file, then the closing-step events with the last scored day."""
+) -> tuple[
+    list[tuple[GroundTruthEvent, int]],
+    int,
+    dict[int, list[Any]],
+    dict[int, list[GroundTruthEvent]],
+]:
+    """The events of a patient with the day of their file, then the closing-step events with the last scored day; with them
+    the injection log of every scored day and the ground truth of every day (the tail day included), which the footprints
+    of ``ralmon.eval.background`` read."""
     days = reader_full.days(patient)
     events: list[tuple[GroundTruthEvent, int]] = []
+    logs: dict[int, list[Any]] = {}
+    by_day: dict[int, list[GroundTruthEvent]] = {}
     try:
         for d in days:
-            events.extend((e, d) for e in reader_full.truth(patient, d).ground_truth)
+            record = reader_full.truth(patient, d)
+            events.extend((e, d) for e in record.ground_truth)
+            by_day[d] = list(record.ground_truth)
+            log = record.injection_log
+            if not isinstance(log, list):
+                raise TypeError(f"day {d} has an injection log that is not a list")
+            logs[d] = log
         closing = reader_full.closing_step_truth(patient)
+        tail = reader_full.tail_day(patient)
+        if tail is not None:
+            by_day[tail] = list(reader_full.truth(patient, tail).ground_truth)
     except Exception as exc:
         raise ConfigError(f"truth of patient {patient!r}: {exc}") from exc
     events.extend((e, days[-1]) for e in closing)
-    return events, len(closing)
+    return events, len(closing), logs, by_day
 
 
 def _at_shared_step(item: Detection) -> bool:
@@ -2007,6 +2355,7 @@ def run_experiment(
             if any(baseline_has_alpha(n) for n in config.detectors)
             else None
         ),
+        background_tail_awaiting=options.c1_footprint_tail_ms is None,
     )
     evaluate_guards(static, options).raise_if_failed()
     folders: list[Path] = []
@@ -2113,7 +2462,28 @@ def _run_seed(
     report.raise_if_failed()
 
     truth = {p: _truth_events(reader_full, p) for p in test_patients}
-    n_closing = sum(c for _, c in truth.values())
+    n_closing = sum(t[1] for t in truth.values())
+    margin_ms = (
+        config.match.tolerance_ms
+        if options.footprint_margin_ms is None
+        else options.footprint_margin_ms
+    )
+    try:
+        backgrounds = {
+            p: PatientBackground(
+                patient_footprints(
+                    truth[p][2],
+                    truth[p][3],
+                    c1_tail_ms=options.c1_footprint_tail_ms or 0,
+                ),
+                len(test_days[p]),
+                margin_ms=margin_ms,
+            )
+            for p in test_patients
+        }
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"injection log: {exc}") from exc
+    excess_keys = _excess_keys(backgrounds, {p: truth[p][0] for p in test_patients})
     patients_of_units = [p for p, _ in units]
     n_clusters = len(set(patients_of_units))
     weights = _Weights(
@@ -2136,10 +2506,17 @@ def _run_seed(
     tables: dict[str, np.ndarray] = {}
     mains: dict[str, Any] = {}
     curves: dict[str, list[dict[str, Any]]] = {}
+    per_template: dict[str, Any] = {}
+    background_fa: dict[str, Any] = {}
+    excess: dict[str, Any] = {}
     for inst in instances:
         scored = {
             p: _score_patient(
-                truth[p][0], inst.detections[p], len(test_days[p]), config.match
+                truth[p][0],
+                inst.detections[p],
+                len(test_days[p]),
+                config.match,
+                backgrounds[p],
             )
             for p in test_patients
         }
@@ -2215,10 +2592,19 @@ def _run_seed(
         metrics["attribution_confusion"][name] = block
         metrics["accuracy_vs_coverage"][name] = points
         subtype[name] = _subtype_recall(matching)
+        template_sums = np.vstack([scored[p].template_table for p in test_patients])
+        per_template[name] = _per_template_block(template_sums, weights, name)
+        background_fa[name] = _background_fa_block(template_sums, weights, name)
+        excess[name] = _excess_blocks(
+            name, excess_keys, test_patients, test_days, scored, backgrounds, weights
+        )
         if isinstance(inst.detector, OursDetector):
             ours_info[name] = _ours_block(inst, units, weights, metrics, options)
         # not applicable to a detector without an entry above
     for name in config.detectors:
+        per_template.setdefault(name, None)
+        background_fa.setdefault(name, None)
+        excess.setdefault(name, None)
         for metric in METRIC_NAMES:
             metrics[metric].setdefault(name, None)
         metrics["recall_vs_false_alarm_curve"][name] = sorted(
@@ -2264,12 +2650,29 @@ def _run_seed(
             },
             "ours": ours_info,
             "int_gate": gates,
+            "background": _background_facts(
+                test_patients, test_days, truth, backgrounds, options, margin_ms
+            ),
         }
     }
     document: dict[str, Any] = dict(metrics)
+    document["per_template"] = per_template
+    document["background"] = {
+        "false_alarms_per_patient_day": background_fa,
+        "excess_over_background": excess,
+    }
     document["analysis"] = analysis
     document["meta"] = _meta(
-        config, options, seed, manifest, env, test_patients, units, report, facts
+        config,
+        options,
+        seed,
+        manifest,
+        env,
+        test_patients,
+        units,
+        report,
+        facts,
+        margin_ms,
     )
     _run_hooks(
         document,
@@ -2310,8 +2713,44 @@ def _meta(
     units: Sequence[tuple[str, int]],
     report: GuardReport,
     facts: RunFacts,
+    margin_ms: int,
 ) -> dict[str, Any]:
+    tail = options.c1_footprint_tail_ms
     return {
+        "aggregate": {
+            "weights": "equal",
+            "templates": list(AGGREGATE_TEMPLATES),
+            "excluded": ["RESP"],
+            "excluded_reason": RESP_EXCLUSION_REASON,
+            "precision": (
+                "TP_t / (TP_t + FA): FA are the background false alarms pooled over the templates, because most detections "
+                "carry no template (E3); a template without a truth event is null"
+            ),
+        },
+        "background": {
+            "rule": (
+                "ADR-071 (b): false alarms are measured on the windows without injections (outside every injection "
+                "footprint); natural truth events are truth and a noise alarm is a false alarm; the exposure is the "
+                "patient-time outside the footprints; the injected C1 subtypes are read as the excess over the background"
+            ),
+            "axis": "t_rx",
+            "c1_footprint_tail_ms": tail,
+            "c1_footprint_tail_status": (
+                "awaiting_human_value" if tail is None else "set"
+            ),
+            "c1_footprint_tail_reason": options.c1_footprint_tail_reason,
+            "c1_footprint_tail_note": (
+                "awaiting_human_value: the footprint of a C1 injection is the window only (no physiological tail)"
+                if tail is None
+                else "the footprint of a C1 injection is its window plus this tail (a parameter, not a clinical value)"
+            ),
+            "footprint_margin_ms": margin_ms,
+            "footprint_margin_source": (
+                "match.tolerance_ms"
+                if options.footprint_margin_ms is None
+                else "run_options.background.footprint_margin_ms"
+            ),
+        },
         "experiment_id": config.experiment_id,
         "seed": seed,
         "n_test_patients": len(test_patients),
@@ -2375,6 +2814,7 @@ def _meta(
                 "int_gate_unknown": list(facts.int_gate_unknown),
                 "min_alpha": facts.min_alpha,
                 "calibration_episodes": dict(facts.calibration_episodes),
+                "background_tail_awaiting": facts.background_tail_awaiting,
             },
         },
     }
