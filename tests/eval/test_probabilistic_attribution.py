@@ -28,7 +28,7 @@ from ralmon.eval import pairs as P
 from ralmon.monitor import VerdictState
 from ralmon.spec import TemplateId
 from tests.attribution.test_likelihood_rule import TEST_VALUES, build_rule
-from tests.eval.helpers import C1, C2, C3, alert, ms
+from tests.eval.helpers import C1, C2, C3, alert
 from tests.fixtures.attribution import load_fixture_registry, make_record, vector
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -128,7 +128,9 @@ def test_log_score_and_brier_hand_values() -> None:
     assert br["RANGE"] == pytest.approx(0.58 / 3, abs=1e-12)
     assert ls["AGGREGATE"] == pytest.approx(ls["RANGE"], abs=1e-12)  # one template
     assert set(ls) == {*M.TEMPLATES, "AGGREGATE"}
-    assert ls["SCHED"] is None  # a template without a scored alert is undefined, never 0
+    assert (
+        ls["SCHED"] is None
+    )  # a template without a scored alert is undefined, never 0
 
 
 def test_per_template_and_equal_weight_aggregate_without_resp() -> None:
@@ -152,7 +154,9 @@ def test_per_template_and_equal_weight_aggregate_without_resp() -> None:
     summary = M.attribution_score_summary(items)
     assert summary is not None
     assert summary.templates_averaged == ("RANGE", "SCHED")
-    assert summary.n["RANGE"] == 3 and summary.n["SCHED"] == 1 and summary.n["RESP"] == 1
+    assert (
+        summary.n["RANGE"] == 3 and summary.n["SCHED"] == 1 and summary.n["RESP"] == 1
+    )
     assert summary.aggregate_excluded == ("RESP",)
 
 
@@ -246,7 +250,9 @@ def _label(
     )
 
 
-def test_tight_labelling_needs_the_faulty_device_in_the_data_scope_and_an_active_window() -> None:
+def test_tight_labelling_needs_the_faulty_device_in_the_data_scope_and_an_active_window() -> (
+    None
+):
     """A ble_dropout (C2) on the ECG during [10:00, 11:00] and a COUNT alert decided at 10:30: the ECG is in the data scope of
     no template (COUNT: the dispenser), so under the TIGHT labelling the dropout is not the cause (the alert has no cause and is
     left out, counted); under the LOOSE labelling a dropout anywhere in the window counts and the alert is C2. The same
@@ -262,9 +268,13 @@ def test_tight_labelling_needs_the_faulty_device_in_the_data_scope_and_an_active
     assert tight.labelled == ()
     assert tight.excluded["no_compatible_event"] == 1
     dispenser = [T.EventContext(("sched", "resp", "hold", "count"), "dispenser")]
-    assert [x.true_class for x in _label([ecg], [count_alert], dispenser, "tight").labelled] == ["C2"]
+    assert [
+        x.true_class for x in _label([ecg], [count_alert], dispenser, "tight").labelled
+    ] == ["C2"]
     late = p_alert(11 * HOUR + 30_000, "hold", (0.2, 0.7, 0.1))
-    assert [x.true_class for x in _label([ecg], [late], dispenser, "loose").labelled] == ["C2"]
+    assert [
+        x.true_class for x in _label([ecg], [late], dispenser, "loose").labelled
+    ] == ["C2"]
     assert _label([ecg], [late], dispenser, "tight").labelled == ()
     # the cuff is in the data scope of HOLD and the dispenser too; the cuff is not in the scope of COUNT
     cuff = [T.EventContext(("sched", "resp", "hold", "count"), "cuff")]
@@ -296,7 +306,11 @@ def test_c1_events_use_their_template_and_first_decidable_instant() -> None:
         assert _label([sched], [early], None, lab).labelled == ()
         assert _label([sched], [wrong], None, lab).labelled == ()
     got = _label([sched], [ok], None, "tight").labelled[0]
-    assert (got.true_class, got.true_subtype, got.template) == ("C1", "measurement_refusal", "sched")
+    assert (got.true_class, got.true_subtype, got.template) == (
+        "C1",
+        "measurement_refusal",
+        "sched",
+    )
 
 
 def test_ambiguous_alerts_prefer_injected_events_and_are_otherwise_dropped() -> None:
@@ -304,10 +318,15 @@ def test_ambiguous_alerts_prefer_injected_events_and_are_otherwise_dropped() -> 
     cannot be told apart by that rule the alert is dropped and counted as ambiguous."""
     c1 = event("C1", "spontaneous_range", 0, None, "range", injected=False)
     c2 = event("C2", "stuck_at", 0, HOUR)
-    ctx = [T.EventContext(None, None), T.EventContext(("range", "hold", "resp"), "cuff")]
+    ctx = [
+        T.EventContext(None, None),
+        T.EventContext(("range", "hold", "resp"), "cuff"),
+    ]
     a = p_alert(30_000, "range", (0.4, 0.4, 0.2))
     res = _label([c1, c2], [a], ctx, "loose")
-    assert [x.true_class for x in res.labelled] == ["C2"] and res.labelled[0].n_compatible == 2
+    assert [x.true_class for x in res.labelled] == ["C2"] and res.labelled[
+        0
+    ].n_compatible == 2
     c1i = event("C1", "hypertensive_spike", 0, None, "range", injected=True)
     res2 = _label([c1i, c2], [a], [T.EventContext(None, None), ctx[1]], "loose")
     assert res2.labelled == () and res2.excluded["ambiguous"] == 1
@@ -318,13 +337,21 @@ def test_predicted_violations_and_cascade_effects_are_folded_by_default() -> Non
     folded (left out, counted) unless the policy says include, and the policy is recorded."""
     sched = event("C1", "measurement_refusal", 8 * HOUR, 9 * HOUR, "sched")
     root = p_alert(9 * HOUR, "sched", (0.9, 0.05, 0.05), key="r")
-    effect = p_alert(9 * HOUR + 10_000, "sched", (0.9, 0.05, 0.05), key="e", caused_by="r")
+    effect = p_alert(
+        9 * HOUR + 10_000, "sched", (0.9, 0.05, 0.05), key="e", caused_by="r"
+    )
     predicted = p_alert(
-        9 * HOUR - 5_000, "sched", None, key="q", verdict=VerdictState.PREDICTED_VIOLATION
+        9 * HOUR - 5_000,
+        "sched",
+        None,
+        key="q",
+        verdict=VerdictState.PREDICTED_VIOLATION,
     )
     res = _label([sched], [root, effect, predicted], None, "tight")
     assert len(res.labelled) == 1 and res.labelled[0].alert is root
-    assert res.excluded["cascade_effect"] == 1 and res.excluded["predicted_violation"] == 1
+    assert (
+        res.excluded["cascade_effect"] == 1 and res.excluded["predicted_violation"] == 1
+    )
     inc = _label([sched], [root, effect], None, "tight", effects="include")
     assert len(inc.labelled) == 2
     with pytest.raises(ValueError, match="effects"):
@@ -429,7 +456,11 @@ def test_no_ground_truth_in_the_attributor() -> None:
     )
     # the scoring side is the one that takes the truth
     assert "gt" in inspect.signature(T.label_alerts).parameters
-    for fn in (M.attribution_log_score, M.attribution_brier, M.attribution_calibration_curve):
+    for fn in (
+        M.attribution_log_score,
+        M.attribution_brier,
+        M.attribution_calibration_curve,
+    ):
         assert "latent" not in " ".join(inspect.signature(fn).parameters)
     # the detector side: OursDetector.run takes an observed day only
     from ralmon.eval.ours import OursDetector
@@ -504,7 +535,9 @@ def test_pair_llr_between_subtypes(rule) -> None:  # type: ignore[no-untyped-def
     m = member("pr", "B", ev, sub_a="dispenser_bounce", sub_b="double_take")
     lam = P.pair_llr([m], rule)
     assert lam[0] == pytest.approx(math.log((1 - EPS) / EPS), abs=1e-12)
-    rev = P.pair_llr([member("pr", "B", ev, sub_a="double_take", sub_b="dispenser_bounce")], rule)
+    rev = P.pair_llr(
+        [member("pr", "B", ev, sub_a="double_take", sub_b="dispenser_bounce")], rule
+    )
     assert rev[0] == pytest.approx(-lam[0], abs=1e-12)
     # a member without evidence has no Lambda (nan), it is not 0
     none = P.pair_llr([dataclasses.replace(m, evidence=None)], rule)
@@ -528,7 +561,9 @@ def test_llr_is_prior_free() -> None:
         },
     )
     rec = make_record("count")
-    assert base.posterior_subtypes(rec, ev) != pytest.approx(other.posterior_subtypes(rec, ev))
+    assert base.posterior_subtypes(rec, ev) != pytest.approx(
+        other.posterior_subtypes(rec, ev)
+    )
     a = P.pair_llr([member("p", "A", ev)], base)[0]
     b = P.pair_llr([member("p", "A", ev)], other)[0]
     assert a == b  # exactly: the same cells, no prior
@@ -538,7 +573,10 @@ def test_identical_streams_give_zero_llr(rule) -> None:  # type: ignore[no-untyp
     """Indistinguishable stratum: both members have the same evidence at the common template, so D = Lambda_A - Lambda_B is
     exactly 0, while Lambda itself is not 0 (the lean of the catalogue and the cells)."""
     ev = count_vector(0.0, 5_000)
-    a, b = member("p", "A", ev, indistinguishable=True), member("p", "B", ev, indistinguishable=True)
+    a, b = (
+        member("p", "A", ev, indistinguishable=True),
+        member("p", "B", ev, indistinguishable=True),
+    )
     res = P.pair_result(a, b, rule)
     assert res.d == 0.0
     assert res.lambda_a == res.lambda_b != 0.0
@@ -556,8 +594,12 @@ def test_direction_and_pair_statistic(rule) -> None:  # type: ignore[no-untyped-
     ea, eb = count_vector(1.5, 20_000), count_vector(0.0, 5_000)
     res = P.pair_result(member("p", "A", ea), member("p", "B", eb), rule)
     q = EPS + (1 - 2 * EPS) * QC
-    assert res.lambda_a == pytest.approx(math.log((1 - EPS) ** 2 / (EPS * (1 - q))), abs=1e-9)
-    assert res.lambda_b == pytest.approx(math.log(EPS * EPS / ((1 - EPS) * q)), abs=1e-9)
+    assert res.lambda_a == pytest.approx(
+        math.log((1 - EPS) ** 2 / (EPS * (1 - q))), abs=1e-9
+    )
+    assert res.lambda_b == pytest.approx(
+        math.log(EPS * EPS / ((1 - EPS) * q)), abs=1e-9
+    )
     assert res.d == pytest.approx(res.lambda_a - res.lambda_b, abs=1e-12)
     assert res.d == pytest.approx(5.278 + 8.507, abs=2e-3)
     assert res.a_right and res.b_right and res.both_right and res.d_positive
@@ -576,24 +618,39 @@ def test_pair_strata_summaries(rule) -> None:  # type: ignore[no-untyped-def]
     same = count_vector(0.0, 5_000)
     ea, eb = count_vector(1.5, 20_000), count_vector(0.0, 5_000)
     pairs = [
-        (member("i1", "A", same, indistinguishable=True), member("i1", "B", same, indistinguishable=True)),
-        (member("i2", "A", ea, indistinguishable=True), member("i2", "B", ea, indistinguishable=True)),
+        (
+            member("i1", "A", same, indistinguishable=True),
+            member("i1", "B", same, indistinguishable=True),
+        ),
+        (
+            member("i2", "A", ea, indistinguishable=True),
+            member("i2", "B", ea, indistinguishable=True),
+        ),
         (member("d1", "A", ea), member("d1", "B", eb)),
         (member("d2", "A", eb), member("d2", "B", ea)),
         (member("d3", "A", ea), member("d3", "B", eb)),
     ]
     results = [P.pair_result(a, b, rule) for a, b in pairs]
-    out = P.summarize_strata(results)
+    out = P.summarize_strata(results, level=0.95)
     ind, dist = out["indistinguishable"], out["distinguishable"]
     assert ind["n_pairs"] == 2 and ind["n_d_exactly_zero"] == 2
     assert ind["abs_lambda"]["n"] == 4  # both members of both pairs
-    lam = [abs(results[0].lambda_a), abs(results[0].lambda_b), abs(results[1].lambda_a), abs(results[1].lambda_b)]
+    lam = [
+        abs(results[0].lambda_a),
+        abs(results[0].lambda_b),
+        abs(results[1].lambda_a),
+        abs(results[1].lambda_b),
+    ]
     assert ind["abs_lambda"]["mean"] == pytest.approx(sum(lam) / 4)
     assert ind["abs_lambda"]["min"] == pytest.approx(min(lam))
-    assert dist["n_pairs"] == 3 and dist["n_both_right"] == 2 and dist["n_d_positive"] == 2
+    assert (
+        dist["n_pairs"] == 3 and dist["n_both_right"] == 2 and dist["n_d_positive"] == 2
+    )
     assert dist["both_right_rate"] == pytest.approx(2 / 3)
     assert dist["both_right_wilson"][0] < 2 / 3 < dist["both_right_wilson"][1]
-    assert dist["n_members"] == 6 and dist["n_member_right"] == 4  # d1 and d3 both members, d2 none
+    assert (
+        dist["n_members"] == 6 and dist["n_member_right"] == 4
+    )  # d1 and d3 both members, d2 none
     for stratum in (ind, dist):
         assert "precision" not in stratum and "f1" not in stratum
 
@@ -615,7 +672,9 @@ def test_mcnemar_exact_on_discordant_pairs() -> None:
     assert r2["p"] == pytest.approx(0.109375, abs=1e-12)
     r0 = P.pair_direction_mcnemar([True, False], [True, False])
     assert r0["b"] == r0["c"] == 0 and r0["p"] == 1.0
-    assert P.pair_direction_mcnemar([True] * 6, [False] * 6)["p"] == pytest.approx(2 / 64)
+    assert P.pair_direction_mcnemar([True] * 6, [False] * 6)["p"] == pytest.approx(
+        2 / 64
+    )
     with pytest.raises(ValueError, match="length"):
         P.pair_direction_mcnemar([True], [True, False])
 
@@ -625,7 +684,9 @@ def test_directions_are_aligned_by_pair_id(rule) -> None:  # type: ignore[no-unt
     right = P.pair_result(member("d1", "A", ea), member("d1", "B", eb), rule)
     wrong = P.pair_result(member("d2", "A", eb), member("d2", "B", ea), rule)
     other = P.pair_result(member("d3", "A", ea), member("d3", "B", eb), rule)
-    x, y, ids = P.align_directions([right, wrong], [dataclasses.replace(wrong, pair_id="d1"), other])
+    x, y, ids = P.align_directions(
+        [right, wrong], [dataclasses.replace(wrong, pair_id="d1"), other]
+    )
     assert ids == ["d1"] and x == [True] and y == [False]
 
 
@@ -638,10 +699,33 @@ def test_set_coverage_and_size_hand_values() -> None:
     mean size 10/4 = 2.5. Per template RANGE 1/2 at size 1.5, SCHED 1/1 at 3, COUNT 0/1 at 4. Per true class: C1 (RANGE, RANGE)
     1/2; C2 (SCHED) 1/1; C3 (COUNT) 0/1. Per true subtype: a 1/1, b 0/1, d 1/1, z 0/1."""
     items = [
-        labelled("range", (0.5, 0.3, 0.2), "C1", subtype="a", patient="p1", cause_set=("a", "b")),
-        labelled("range", (0.5, 0.3, 0.2), "C1", subtype="b", patient="p2", cause_set=("a",)),
-        labelled("sched", (0.5, 0.3, 0.2), "C2", subtype="d", patient="p1", cause_set=("c", "d", "e")),
-        labelled("count", (0.5, 0.3, 0.2), "C3", subtype="z", patient="p3", cause_set=("a", "b", "c", "d")),
+        labelled(
+            "range",
+            (0.5, 0.3, 0.2),
+            "C1",
+            subtype="a",
+            patient="p1",
+            cause_set=("a", "b"),
+        ),
+        labelled(
+            "range", (0.5, 0.3, 0.2), "C1", subtype="b", patient="p2", cause_set=("a",)
+        ),
+        labelled(
+            "sched",
+            (0.5, 0.3, 0.2),
+            "C2",
+            subtype="d",
+            patient="p1",
+            cause_set=("c", "d", "e"),
+        ),
+        labelled(
+            "count",
+            (0.5, 0.3, 0.2),
+            "C3",
+            subtype="z",
+            patient="p3",
+            cause_set=("a", "b", "c", "d"),
+        ),
     ]
     out = S.set_metrics(items, n_resamples=100, level=0.95, seed=0)
     assert out is not None
@@ -650,13 +734,21 @@ def test_set_coverage_and_size_hand_values() -> None:
     assert g["coverage"] == pytest.approx(0.5) and g["mean_size"] == pytest.approx(2.5)
     assert g["size_counts"] == {"1": 1, "2": 1, "3": 1, "4": 1}
     pt = out["per_template"]
-    assert pt["RANGE"]["coverage"] == pytest.approx(0.5) and pt["RANGE"]["mean_size"] == pytest.approx(1.5)
+    assert pt["RANGE"]["coverage"] == pytest.approx(0.5) and pt["RANGE"][
+        "mean_size"
+    ] == pytest.approx(1.5)
     assert pt["SCHED"]["coverage"] == 1.0 and pt["COUNT"]["coverage"] == 0.0
     assert pt["HOLD"] is None  # no alert: undefined, not 0
     pc = out["per_true_class"]
-    assert pc["C1"]["coverage"] == pytest.approx(0.5) and pc["C2"]["coverage"] == 1.0 and pc["C3"]["coverage"] == 0.0
+    assert (
+        pc["C1"]["coverage"] == pytest.approx(0.5)
+        and pc["C2"]["coverage"] == 1.0
+        and pc["C3"]["coverage"] == 0.0
+    )
     ps = out["per_true_subtype"]
-    assert ps["a"]["coverage"] == 1.0 and ps["b"]["coverage"] == 0.0 and ps["z"]["n"] == 1
+    assert (
+        ps["a"]["coverage"] == 1.0 and ps["b"]["coverage"] == 0.0 and ps["z"]["n"] == 1
+    )
     assert out["set_source"] == "alert.cause_set"
     lo, hi = out["overall"]["wilson"]
     assert 0.0 < lo < 0.5 < hi < 1.0
@@ -666,7 +758,11 @@ def test_a_method_without_sets_is_null_and_the_hierarchical_kappa_is_a_set() -> 
     """``ours-hier`` has no cause_set: its kappa is scored as a set (kappa C2 -> every subtype of C2 applicable at the template;
     UNDETERMINED -> every applicable subtype). Without the applicable table there is no set and the metric is null."""
     applicable = {
-        "range": {"C1": ("hypertensive_spike", "spontaneous_range"), "C2": ("stuck_at", "cuff_silent_bias"), "C3": ("replay",)}
+        "range": {
+            "C1": ("hypertensive_spike", "spontaneous_range"),
+            "C2": ("stuck_at", "cuff_silent_bias"),
+            "C3": ("replay",),
+        }
     }
     assert S.kappa_as_set("C2", applicable["range"]) == ("stuck_at", "cuff_silent_bias")
     assert S.kappa_as_set("UNDETERMINED", applicable["range"]) == (
@@ -678,12 +774,22 @@ def test_a_method_without_sets_is_null_and_the_hierarchical_kappa_is_a_set() -> 
     )
     hier = [
         labelled("range", None, "C2", subtype="stuck_at", kappa=C2),
-        labelled("range", None, "C1", subtype="hypertensive_spike", kappa=AttributedCause.UNDETERMINED),
+        labelled(
+            "range",
+            None,
+            "C1",
+            subtype="hypertensive_spike",
+            kappa=AttributedCause.UNDETERMINED,
+        ),
         labelled("range", None, "C1", subtype="hypertensive_spike", kappa=C2),
     ]
-    out = S.set_metrics(hier, applicable=applicable, n_resamples=100, level=0.95, seed=0)
+    out = S.set_metrics(
+        hier, applicable=applicable, n_resamples=100, level=0.95, seed=0
+    )
     assert out is not None and out["set_source"] == "kappa_as_set"
-    assert out["overall"]["covered"] == 2 and out["overall"]["mean_size"] == pytest.approx((2 + 5 + 2) / 3)
+    assert out["overall"]["covered"] == 2 and out["overall"][
+        "mean_size"
+    ] == pytest.approx((2 + 5 + 2) / 3)
     assert S.set_metrics(hier, n_resamples=100, level=0.95, seed=0) is None
     assert S.set_metrics([], n_resamples=100, level=0.95, seed=0) is None
 
@@ -713,18 +819,28 @@ def test_coverage_per_patient_cluster_bootstrap() -> None:
     assert pp["coverage_by_patient"] == {"P1": 1.0, "P2": 0.0, "P3": 1.0}
     assert pp["median_coverage"] == 1.0
     boot = out["cluster_bootstrap"]
-    assert boot["unit"] == "patient" and boot["n_resamples"] == 200 and boot["level"] == 0.9
+    assert (
+        boot["unit"] == "patient"
+        and boot["n_resamples"] == 200
+        and boot["level"] == 0.9
+    )
     lo, hi = boot["coverage"]
     assert 0.0 <= lo <= 0.6 <= hi <= 1.0
     wlo, whi = out["overall"]["wilson"]
     assert (hi - lo) > (whi - wlo)
     again = S.set_metrics(items, n_resamples=200, level=0.9, seed=3)
     assert again is not None and again["cluster_bootstrap"] == boot
-    all_in = [dataclasses.replace(i, alert=dataclasses.replace(i.alert, cause_set=("a",))) for i in items]
+    all_in = [
+        dataclasses.replace(i, alert=dataclasses.replace(i.alert, cause_set=("a",)))
+        for i in items
+    ]
     full = S.set_metrics(all_in, n_resamples=200, level=0.9, seed=3)
     assert full is not None and full["cluster_bootstrap"]["coverage"] == [1.0, 1.0]
     one = S.set_metrics(items[:4], n_resamples=200, level=0.9, seed=3)
-    assert one is not None and one["cluster_bootstrap"]["coverage"] == [None, None]  # one patient: no interval
+    assert one is not None and one["cluster_bootstrap"]["coverage"] == [
+        None,
+        None,
+    ]  # one patient: no interval
 
 
 # ---- equal coverage ---------------------------------------------------------------------------------------------------
@@ -760,11 +876,14 @@ def calibration_part() -> list[T.LabelledAlert]:
         item(f"c{i + 1}", "range", t, POST_LIK, POST_PRIOR, ("a", "b"))
         for i, t in enumerate(truths)
     ]
-    out += [item(f"s{i + 1}", "sched", "a", POST_SCHED, POST_SCHED, ("a", "b")) for i in range(2)]
+    out += [
+        item(f"s{i + 1}", "sched", "a", POST_SCHED, POST_SCHED, ("a", "b"))
+        for i in range(2)
+    ]
     return out
 
 
-def test_part() -> list[T.LabelledAlert]:
+def make_test_part() -> list[T.LabelledAlert]:
     truths = ["a", "b", "c", "a"]
     out = [
         item(f"t{i + 1}", "range", t, POST_LIK, POST_PRIOR, ("a", "b"))
@@ -782,7 +901,7 @@ def run_equal(**kw: Any) -> dict[str, Any]:
         "population": "main",
     }
     args.update(kw)
-    return S.equal_coverage(calibration_part(), test_part(), **args)
+    return S.equal_coverage(calibration_part(), make_test_part(), **args)
 
 
 def test_equal_coverage_comparison_hand_values() -> None:
@@ -796,16 +915,26 @@ def test_equal_coverage_comparison_hand_values() -> None:
     out = run_equal()
     lik = out["methods"]["lik"]["alphas"]["0.2"]["marginal"]
     assert (lik["n"], lik["covered"]) == (5, 4)
-    assert lik["coverage"] == pytest.approx(0.8) and lik["mean_size"] == pytest.approx(2.0)
+    assert lik["coverage"] == pytest.approx(0.8) and lik["mean_size"] == pytest.approx(
+        2.0
+    )
     assert lik["per_template"]["RANGE"]["coverage"] == pytest.approx(0.75)
     assert lik["per_template"]["SCHED"]["coverage"] == 1.0
     prior = out["methods"]["prior"]["alphas"]["0.2"]["marginal"]
     assert prior["coverage"] == 1.0 and prior["mean_size"] == pytest.approx(2.8)
     # at the same alpha the likelihood sets are smaller than the prior-only sets
     assert lik["mean_size"] < prior["mean_size"]
-    assert out["population"] == "main" and out["n_calibration"] == 11 and out["n_test"] == 5
+    assert (
+        out["population"] == "main"
+        and out["n_calibration"] == 11
+        and out["n_test"] == 5
+    )
     thr = out["methods"]["lik"]["alphas"]["0.2"]["marginal"]["threshold"]
-    assert thr["value"] == pytest.approx(0.7) and thr["fallback"] is False and thr["n"] == 11
+    assert (
+        thr["value"] == pytest.approx(0.7)
+        and thr["fallback"] is False
+        and thr["n"] == 11
+    )
 
 
 def test_the_hierarchical_kappa_set_is_compared_at_its_own_coverage() -> None:
@@ -817,11 +946,17 @@ def test_the_hierarchical_kappa_set_is_compared_at_its_own_coverage() -> None:
     out = run_equal()
     fixed = out["fixed"]["hier"]
     assert fixed["calibration"]["covered"] == 10 and fixed["calibration"]["n"] == 11
-    assert fixed["test"]["covered"] == 4 and fixed["test"]["mean_size"] == pytest.approx(2.0)
+    assert fixed["test"]["covered"] == 4 and fixed["test"][
+        "mean_size"
+    ] == pytest.approx(2.0)
     assert fixed["alpha_at_calibration_coverage"] == "1/11"
     at = fixed["methods_at_alpha"]["lik"]["marginal"]
-    assert at["n"] == 5 and at["coverage"] == 1.0 and at["mean_size"] == pytest.approx(2.8)
-    assert fixed["methods_at_alpha"]["prior"]["marginal"]["mean_size"] == pytest.approx(2.8)
+    assert (
+        at["n"] == 5 and at["coverage"] == 1.0 and at["mean_size"] == pytest.approx(2.8)
+    )
+    assert fixed["methods_at_alpha"]["prior"]["marginal"]["mean_size"] == pytest.approx(
+        2.8
+    )
 
 
 def test_mondrian_reports_the_fallback_and_top1_fill_per_template() -> None:
@@ -847,10 +982,18 @@ def test_top1_fill_is_counted_per_template() -> None:
     """Nine calibration alerts, posterior a .9 / b .1, truth a: every score is 1 - 0.9 and the threshold is that score. A test
     alert with posterior a .3 / b .7 has scores 0.7 and 0.3, both above it: the pure rule gives an empty set, the calibrator adds
     the most probable subtype (b) and flags it: top1_fill share 1 at RANGE, coverage 0 (truth a)."""
-    cal = [item(f"c{i}", "range", "a", {"a": 0.9, "b": 0.1}, {"a": 0.9, "b": 0.1}) for i in range(9)]
+    cal = [
+        item(f"c{i}", "range", "a", {"a": 0.9, "b": 0.1}, {"a": 0.9, "b": 0.1})
+        for i in range(9)
+    ]
     test = [item("t1", "range", "a", {"a": 0.3, "b": 0.7}, {"a": 0.3, "b": 0.7})]
     out = S.equal_coverage(
-        cal, test, methods=("lik",), alphas=(0.2,), model_version="m1", population="main"
+        cal,
+        test,
+        methods=("lik",),
+        alphas=(0.2,),
+        model_version="m1",
+        population="main",
     )
     cell = out["methods"]["lik"]["alphas"]["0.2"]["marginal"]
     assert cell["per_template"]["RANGE"]["n_top1_fill"] == 1
@@ -861,18 +1004,35 @@ def test_top1_fill_is_counted_per_template() -> None:
 
 def test_calibration_and_test_patients_must_be_disjoint() -> None:
     cal = calibration_part()
-    test = test_part()
+    test = make_test_part()
     test[0] = dataclasses.replace(test[0], patient_id="c1")
     with pytest.raises(PatientLeakError):
-        S.equal_coverage(cal, test, methods=("lik",), alphas=(0.2,), model_version="m1", population="main")
+        S.equal_coverage(
+            cal,
+            test,
+            methods=("lik",),
+            alphas=(0.2,),
+            model_version="m1",
+            population="main",
+        )
 
 
 def test_a_true_subtype_outside_the_applicable_set_is_counted() -> None:
     """The ground truth can name a subtype that is not a key of the posterior (not applicable at the template): the score is 1,
     the set never contains it, and the count is reported (``n_true_not_applicable``)."""
-    cal = [item(f"c{i}", "range", "zz" if i == 0 else "a", POST_LIK, POST_PRIOR) for i in range(9)]
+    cal = [
+        item(f"c{i}", "range", "zz" if i == 0 else "a", POST_LIK, POST_PRIOR)
+        for i in range(9)
+    ]
     test = [item("t1", "range", "zz", POST_LIK, POST_PRIOR)]
-    out = S.equal_coverage(cal, test, methods=("lik",), alphas=(0.2,), model_version="m1", population="main")
+    out = S.equal_coverage(
+        cal,
+        test,
+        methods=("lik",),
+        alphas=(0.2,),
+        model_version="m1",
+        population="main",
+    )
     assert out["n_calibration_true_not_applicable"] == 1
     assert out["n_test_true_not_applicable"] == 1
 
@@ -886,17 +1046,27 @@ def test_pair_calibration_is_separate() -> None:
     calibration: posterior a .6 / b .3 / c .1, truth a x6, b x2, c x1 (scores 0.4 x6, 0.7 x2, 0.9: threshold 0.7 at
     alpha 0.2). Pairs calibration: ten alerts with truth c (score 0.9 each; k = ceil(11 * 0.8) = 9): threshold 0.9, so the pair sets are {a, b, c}
     and they cover the pair test alerts (truth c) while the transferred sets {a, b} do not."""
-    main_cal = [item(f"c{i + 1}", "range", t, POST_LIK, POST_PRIOR) for i, t in enumerate(["a"] * 6 + ["b"] * 2 + ["c"])]
+    main_cal = [
+        item(f"c{i + 1}", "range", t, POST_LIK, POST_PRIOR)
+        for i, t in enumerate(["a"] * 6 + ["b"] * 2 + ["c"])
+    ]
     pair_cal = [item(f"pc{i}", "range", "c", POST_LIK, POST_PRIOR) for i in range(10)]
     pair_test = [item(f"pt{i}", "range", "c", POST_LIK, POST_PRIOR) for i in range(4)]
     out = S.pair_set_calibration(
-        main_cal, pair_cal, pair_test, methods=("lik",), alphas=(0.2,), model_version="m1"
+        main_cal,
+        pair_cal,
+        pair_test,
+        methods=("lik",),
+        alphas=(0.2,),
+        model_version="m1",
     )
     sep, tr = out["separate"], out["transfer_from_main"]
     assert sep["population"] == "pairs" and tr["population"] == "main"
     s = sep["methods"]["lik"]["alphas"]["0.2"]["marginal"]
     t = tr["methods"]["lik"]["alphas"]["0.2"]["marginal"]
-    assert s["threshold"]["value"] == pytest.approx(0.9) and t["threshold"]["value"] == pytest.approx(0.7)
+    assert s["threshold"]["value"] == pytest.approx(0.9) and t["threshold"][
+        "value"
+    ] == pytest.approx(0.7)
     assert s["coverage"] == 1.0 and t["coverage"] == 0.0
     assert s["mean_size"] == 3.0 and t["mean_size"] == 2.0
     assert sep["n_calibration"] == 10 and tr["n_calibration"] == 9
@@ -909,11 +1079,19 @@ def test_pair_calibration_is_separate() -> None:
 def test_the_metadata_statements_are_qualified() -> None:
     """The exchangeability statement is marginal, exact only for one alert per patient and approximate otherwise; the phrase
     'distribution-free coverage' never appears without its qualification; the guard strings are copied from the set builder."""
-    from ralmon.conformal.sets import ASSUMPTIONS_SETS, GUARANTEE_SETS, GUARANTEE_SETS_MONDRIAN
+    from ralmon.conformal.sets import (
+        ASSUMPTIONS_SETS,
+        GUARANTEE_SETS,
+        GUARANTEE_SETS_MONDRIAN,
+    )
 
     meta = S.sets_metadata()
     text = " ".join(str(v) for v in meta.values()).lower()
-    assert "marginal" in text and "one designated alert per patient" in text and "approximate" in text
+    assert (
+        "marginal" in text
+        and "one designated alert per patient" in text
+        and "approximate" in text
+    )
     assert "distribution-free" not in text.replace("never claimed", "")
     assert meta["guarantee_marginal"] == GUARANTEE_SETS
     assert meta["guarantee_mondrian"] == GUARANTEE_SETS_MONDRIAN
@@ -921,5 +1099,125 @@ def test_the_metadata_statements_are_qualified() -> None:
     assert "top1_fill" in meta and "full_set_fallback" in meta
     assert meta["cell_scope"]["status"] == "not implemented"
     assert meta["family"]["status"] == "not implemented"
-    assert "decided after" in meta["labelling"]["choice"] or "after seeing" in meta["labelling"]["choice"]
-    assert meta["labelling"]["primary"] == "tight" and meta["labelling"]["reported_next_to_it"] == "loose"
+    assert (
+        "decided after" in meta["labelling"]["choice"]
+        or "after seeing" in meta["labelling"]["choice"]
+    )
+    assert (
+        meta["labelling"]["primary"] == "tight"
+        and meta["labelling"]["reported_next_to_it"] == "loose"
+    )
+
+
+# ---- matching of the pair members ---------------------------------------------------------------------------------------
+
+
+def test_pair_members_are_matched_by_template_and_onset() -> None:
+    """Member A (double take, a C1 event of COUNT at 20:00) can only be matched to a COUNT alert decided at or after 20:00; member B
+    (bounce at 20:00, templates count, hold, resp, int) to an alert of any of those. The common template is COUNT, the only one
+    both can violate: A's earliest alert there is 20:00:10 (the 19:00 one is before the onset), B's is 20:00:20 (its HOLD alert at
+    20:00:05 is on another template). A member without an injected event of the group has no match; a presence_spoof is a co-event
+    and is not the mechanism."""
+    group = "double_take_vs_bounce"
+    ev_a = [
+        event("C1", "double_take", 20 * HOUR, None, "count", injected=True, group=group)
+    ]
+    ev_b = [
+        event(
+            "C2", "dispenser_bounce", 20 * HOUR, None, None, injected=True, group=group
+        ),
+        event(
+            "C3", "presence_spoof", 20 * HOUR, None, None, injected=True, group=group
+        ),
+    ]
+    ctx_b = [
+        T.EventContext(("count", "hold", "resp", "int"), "dispenser"),
+        T.EventContext(("int",), None),
+    ]
+    alerts_a = [
+        p_alert(19 * HOUR, "count", (0.3, 0.4, 0.3), key="early"),
+        p_alert(20 * HOUR + 10_000, "count", (0.3, 0.4, 0.3), key="a1"),
+        p_alert(20 * HOUR + 5_000, "resp", (0.3, 0.4, 0.3), key="wrong-template"),
+    ]
+    alerts_b = [
+        p_alert(20 * HOUR + 20_000, "count", (0.3, 0.4, 0.3), key="b2"),
+        p_alert(20 * HOUR + 5_000, "hold", (0.3, 0.4, 0.3), key="b1"),
+    ]
+    ma = P.match_member(ev_a, None, alerts_a, group=group)
+    mb = P.match_member(ev_b, ctx_b, alerts_b, group=group)
+    assert ma is not None and mb is not None
+    assert ma.event.subtype == "double_take" and mb.event.subtype == "dispenser_bounce"
+    assert [a.xi.instance_key for a in ma.candidates] == ["a1"]
+    assert [a.xi.instance_key for a in mb.candidates] == [
+        "b1",
+        "b2",
+    ]  # by decision time
+    got = P.common_match(ma, mb)
+    assert got is not None
+    template, left, right = got
+    assert (template, left.xi.instance_key, right.xi.instance_key) == (
+        "count",
+        "a1",
+        "b2",
+    )
+    assert P.match_member([], None, alerts_a, group=group) is None
+    assert P.match_member(ev_a, None, alerts_a, group="another_group") is None
+    only_hold = P.match_member(ev_b, ctx_b, [alerts_b[1]], group=group)
+    assert (
+        only_hold is not None and P.common_match(ma, only_hold) is None
+    )  # no common alert: no pair
+    # the primary template of the group goes first when several templates are shared
+    wide = P.MemberMatch(
+        ma.event,
+        0,
+        ("count", "hold"),
+        (alerts_a[1], p_alert(20 * HOUR + 30_000, "hold", None, key="a2")),
+    )
+    both = P.common_match(wide, mb, primary="hold")
+    assert both is not None and both[0] == "hold"
+
+
+# ---- the inputs a detector hands to the scoring side ------------------------------------------------------------------------
+
+
+def test_alert_inputs_from_the_rule_give_the_posterior_the_prior_and_the_kappa_set(
+    rule,
+) -> None:  # type: ignore[no-untyped-def]
+    """``lik`` is the rule's posterior; ``prior`` the same rule on an evidence vector with every field unavailable (factor 1), so it is
+    ``prior_t(class) * pi``: at COUNT with the uniform designs the C1 components (3) share 1/3, the C2 (5) 1/3 and the C3 (3
+    components, two of them the levels of ``dispense_forgery``) 1/3 (`dispense_forgery` has two components, so 2/9 of the C3 mass).
+    The hierarchical kappa C2 as a set is every C2 subtype applicable at COUNT; UNDETERMINED every applicable subtype."""
+    ev = count_vector(0.0, 5_000)
+    rec = make_record("count")
+    got = S.alert_inputs_from_rule(rule, rec, ev, hierarchical_kappa="C2")
+    assert got.posteriors["lik"] == pytest.approx(
+        dict(rule.posterior_subtypes(rec, ev))
+    )
+    prior = got.posteriors["prior"]
+    assert sum(prior.values()) == pytest.approx(1.0)
+    assert prior["double_take"] == pytest.approx(1 / 9)
+    assert prior["dispenser_bounce"] == pytest.approx(1 / 15)
+    assert prior["dispense_forgery"] == pytest.approx(2 / 9)
+    assert prior["dispenser_physical_tamper"] == pytest.approx(1 / 9)
+    assert got.fixed_sets["hier"] == (
+        "ble_dropout",
+        "dispenser_bounce",
+        "message_drop",
+        "process_kill",
+        "uncommanded_lifecycle_transition",
+    )
+    assert got.evidence is ev
+    und = S.alert_inputs_from_rule(rule, rec, ev, hierarchical_kappa="UNDETERMINED")
+    assert set(und.fixed_sets["hier"]) == set(prior)
+    assert S.alert_inputs_from_rule(rule, rec, ev).fixed_sets == {}
+
+
+def test_wilson_interval_hand_value() -> None:
+    """k = 5 of n = 10 at 0.95: centre 0.5, half width z sqrt(0.025 + z^2 / 400) / (1 + z^2 / 10) = 0.2634, so [0.2366, 0.7634]."""
+    lo, hi = S.wilson_interval(5, 10, 0.95)
+    assert lo == pytest.approx(0.2366, abs=2e-4) and hi == pytest.approx(
+        0.7634, abs=2e-4
+    )
+    assert all(math.isnan(x) for x in S.wilson_interval(0, 0, 0.95))
+    assert S.wilson_interval(0, 5, 0.95)[0] == pytest.approx(0.0, abs=1e-12)
+    assert S.wilson_interval(5, 5, 0.95)[1] == pytest.approx(1.0, abs=1e-12)

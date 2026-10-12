@@ -38,6 +38,18 @@ which depends on how many events the template has and never enters an aggregate 
 EXCESS over the natural background (``excess_table``): events per injection record minus what the natural rate gives for the
 same footprint time (``table_excess_events_per_record``), for the events of the template of the subtype.
 
+Probabilistic attribution (WS08-T09, ADR-074). ``attribution_log_score``, ``attribution_brier`` and
+``attribution_calibration_curve`` score ``Alert.p_kappa`` against the class of the cause of the alert PER TEMPLATE (the template
+of the alert), with the equal-weight aggregate and RESP apart as in ADR-072. The cause comes from ``label_alerts``
+(``ralmon.eval.attribution_truth``: the TIGHT labelling is primary and the LOOSE one is reported next to it); the functions take
+the labelled alerts, not a ``Matching``, because the matching is one-to-one and template-agnostic (the contract text of
+``#metrics`` 0.2.0 says ``matching``: recorded in the Notes of the task). A method without ``p_kappa`` gets ``None``. The log
+score is the mean of ``-ln p`` of the true class (nats per alert; ``inf`` if a true class has probability 0, counted apart),
+the Brier score the mean over alerts of ``sum over C1, C2, C3 of (p_c - y_c)^2`` (range 0 to 2). The calibration curve pools the
+one-vs-rest pairs ``(p_c, y_c)`` of the three classes into equal-width bins; ``calibration_detail`` adds the curve per class and
+the top-label curve with its expected calibration error. An empty bin has count 0 and undefined (``nan``) mean and frequency,
+never an accuracy of 0.
+
 The sums of a matching are kept in a table (``Matching.table``, one row per unit of the bootstrap), and every scalar metric
 of the runner is a function of the summed table, so that a bootstrap replicate is a matrix product and the interval of a
 ratio is the interval of the ratio of the resampled sums.
@@ -47,10 +59,10 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Collection, Hashable, Sequence
+from collections.abc import Callable, Collection, Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -58,6 +70,7 @@ from numpy.typing import NDArray
 from ralmon.attribution import Alert, AttributedCause, Detection
 from ralmon.benchmark import BenchmarkDay, GroundTruthEvent, InjectedClass
 from ralmon.conformal import PredictedViolation
+from ralmon.eval.attribution_truth import LabelledAlert
 from ralmon.eval.background import DAY_MS, PatientBackground
 from ralmon.monitor import VerdictState
 from ralmon.signals import DurationMs, TimeMs
@@ -68,6 +81,7 @@ __all__ = [
     "COLUMNS",
     "EXCESS_COLUMNS",
     "LABEL_COLUMNS",
+    "SCORE_COLUMNS",
     "STREAM_AVAILABILITY",
     "STREAM_BOOTSTRAP",
     "STREAM_CALIBRATION",
@@ -75,6 +89,7 @@ __all__ = [
     "STREAM_SPLIT",
     "TEMPLATES",
     "TEMPLATE_COLUMNS",
+    "AttributionScoreSummary",
     "BootstrapError",
     "MatchConfig",
     "MatchedPair",
@@ -83,8 +98,13 @@ __all__ = [
     "abstention_rate",
     "accuracy_vs_coverage",
     "aggregate_templates",
+    "attribution_brier",
+    "attribution_calibration_curve",
+    "attribution_calibration_detail",
     "attribution_confusion",
+    "attribution_log_score",
     "attribution_macro_f1",
+    "attribution_score_summary",
     "bin_index",
     "bootstrap_ci",
     "bootstrap_statistic",
@@ -108,6 +128,7 @@ __all__ = [
     "recall_vs_false_alarm_curve",
     "reliability_bins",
     "residual_coverage",
+    "score_table",
     "severity_rank_agreement",
     "table_abstention_rate",
     "table_accuracy_answered",
@@ -124,6 +145,8 @@ __all__ = [
     "table_fa_per_day",
     "table_macro_f1",
     "table_prf",
+    "table_score_aggregate",
+    "table_score_metric",
     "table_template_metric",
     "template_of_event",
     "template_table",
@@ -1125,6 +1148,264 @@ def abstention_rate(matching: Matching) -> float | None:
     if matching.attributes is not True:
         return None
     return table_abstention_rate(matching.table().sum(axis=0))
+
+
+# ---- probabilistic attribution: log score, Brier score, calibration curves (WS08-T09, ADR-074) -----------------------------
+
+
+def _class_probabilities(item: LabelledAlert) -> dict[str, float] | None:
+    """``p_kappa`` of an alert by class name (C1, C2, C3; a missing class has probability 0); None without a posterior."""
+    posterior = item.alert.p_kappa
+    if posterior is None:
+        return None
+    named = {str(getattr(k, "value", k)): float(v) for k, v in posterior.items()}
+    return {c: named.get(c, 0.0) for c in CLASSES}
+
+
+def _template_key(item: LabelledAlert) -> str:
+    name = item.template.upper()
+    if name not in TEMPLATES:
+        raise ValueError(f"unknown template {item.template!r} of a labelled alert")
+    return name
+
+
+def _loss(probabilities: Mapping[str, float], truth: str) -> tuple[float, float]:
+    """``(-ln p(truth), Brier)`` of one alert; ``-ln 0`` is ``inf``."""
+    p = probabilities[truth]
+    log_loss = math.inf if p <= 0.0 else -math.log(p)
+    brier = math.fsum(
+        (probabilities[c] - (1.0 if c == truth else 0.0)) ** 2 for c in CLASSES
+    )
+    return log_loss, brier
+
+
+@dataclass(frozen=True, slots=True)
+class AttributionScoreSummary:
+    """The scores of a set of labelled alerts, per template (upper case, ``TEMPLATES``) and aggregated.
+
+    ``log_score`` and ``brier`` are ``None`` for a template without a scored alert (undefined, never 0); ``log_score`` is ``inf``
+    when a true class had probability 0 (``n_zero_probability`` counts them). The aggregate is the plain mean over the templates
+    of ``AGGREGATE_TEMPLATES`` that have a scored alert (``templates_averaged``): RESP is reported apart (ADR-072 (b))."""
+
+    n: Mapping[str, int]
+    log_score: Mapping[str, float | None]
+    brier: Mapping[str, float | None]
+    n_zero_probability: Mapping[str, int]
+    n_without_p_kappa: int
+    templates_averaged: tuple[str, ...]
+    aggregate_log_score: float | None
+    aggregate_brier: float | None
+    aggregate_excluded: tuple[str, ...] = ("RESP",)
+
+
+def attribution_score_summary(
+    labelled: Sequence[LabelledAlert],
+) -> AttributionScoreSummary | None:
+    """Score the labelled alerts; ``None`` when none of them carries ``p_kappa`` (the method does not apply)."""
+    log_sum = dict.fromkeys(TEMPLATES, 0.0)
+    brier_sum = dict.fromkeys(TEMPLATES, 0.0)
+    count = dict.fromkeys(TEMPLATES, 0)
+    zero = dict.fromkeys(TEMPLATES, 0)
+    without = 0
+    for item in labelled:
+        probabilities = _class_probabilities(item)
+        if probabilities is None:
+            without += 1
+            continue
+        t = _template_key(item)
+        log_loss, brier = _loss(probabilities, item.true_class)
+        count[t] += 1
+        brier_sum[t] += brier
+        if math.isinf(log_loss):
+            zero[t] += 1
+        else:
+            log_sum[t] += log_loss
+    if sum(count.values()) == 0:
+        return None
+    log_score: dict[str, float | None] = {}
+    brier_score: dict[str, float | None] = {}
+    for t in TEMPLATES:
+        if count[t] == 0:
+            log_score[t] = brier_score[t] = None
+            continue
+        log_score[t] = math.inf if zero[t] else log_sum[t] / count[t]
+        brier_score[t] = brier_sum[t] / count[t]
+    averaged = tuple(t for t in AGGREGATE_TEMPLATES if count[t] > 0)
+    agg_log: float | None = None
+    agg_brier: float | None = None
+    if averaged:
+        agg_log = math.fsum(
+            math.inf if (v := log_score[t]) is None else v for t in averaged
+        ) / len(averaged)
+        agg_brier = math.fsum(float(brier_score[t] or 0.0) for t in averaged) / len(
+            averaged
+        )
+    return AttributionScoreSummary(
+        count,
+        log_score,
+        brier_score,
+        zero,
+        without,
+        averaged,
+        agg_log,
+        agg_brier,
+    )
+
+
+def attribution_log_score(
+    labelled: Sequence[LabelledAlert],
+) -> dict[str, float | None] | None:
+    """Mean ``-ln p_kappa(true class)`` per template (``TEMPLATES``, upper case) and ``AGGREGATE`` (equal weights, RESP apart);
+    ``None`` for a method without ``p_kappa``; a template without a scored alert is ``None``."""
+    summary = attribution_score_summary(labelled)
+    if summary is None:
+        return None
+    return {**summary.log_score, "AGGREGATE": summary.aggregate_log_score}
+
+
+def attribution_brier(
+    labelled: Sequence[LabelledAlert],
+) -> dict[str, float | None] | None:
+    """Mean Brier score (``sum over C1, C2, C3 of (p_c - y_c)^2``) per template and ``AGGREGATE``; ``None`` without ``p_kappa``."""
+    summary = attribution_score_summary(labelled)
+    if summary is None:
+        return None
+    return {**summary.brier, "AGGREGATE": summary.aggregate_brier}
+
+
+def _curve_points(
+    labelled: Sequence[LabelledAlert],
+) -> dict[str, list[tuple[dict[str, float], str]]] | None:
+    per: dict[str, list[tuple[dict[str, float], str]]] = {t: [] for t in TEMPLATES}
+    any_posterior = False
+    for item in labelled:
+        probabilities = _class_probabilities(item)
+        if probabilities is None:
+            continue
+        any_posterior = True
+        per[_template_key(item)].append((probabilities, item.true_class))
+    return per if any_posterior else None
+
+
+def _top_label(probabilities: Mapping[str, float]) -> str:
+    """The predicted class: the largest ``p_c``; a tie goes to the first of C1, C2, C3 (declared, not a finding)."""
+    return max(CLASSES, key=lambda c: probabilities[c])
+
+
+def attribution_calibration_detail(
+    labelled: Sequence[LabelledAlert], bins: int
+) -> dict[str, dict[str, Any]] | None:
+    """Per template with a scored alert: the pooled one-vs-rest curve, the curve of each class, the top-label curve and its
+    expected calibration error (``ReliabilityBin`` lists on equal-width bins of ``[0, 1]``). ``None`` without ``p_kappa``."""
+    per = _curve_points(labelled)
+    if per is None:
+        return None
+    out: dict[str, dict[str, Any]] = {}
+    for t, items in per.items():
+        if not items:
+            continue
+        pooled_p: list[float] = []
+        pooled_y: list[bool] = []
+        by_class: dict[str, tuple[list[float], list[bool]]] = {
+            c: ([], []) for c in CLASSES
+        }
+        top_p: list[float] = []
+        top_y: list[bool] = []
+        for probabilities, truth in items:
+            for c in CLASSES:
+                pooled_p.append(probabilities[c])
+                pooled_y.append(c == truth)
+                by_class[c][0].append(probabilities[c])
+                by_class[c][1].append(c == truth)
+            predicted = _top_label(probabilities)
+            top_p.append(probabilities[predicted])
+            top_y.append(predicted == truth)
+        out[t] = {
+            "n_alerts": len(items),
+            "pooled": reliability_bins(pooled_p, pooled_y, bins),
+            "per_class": {
+                c: reliability_bins(by_class[c][0], by_class[c][1], bins)
+                for c in CLASSES
+            },
+            "top_label": reliability_bins(top_p, top_y, bins),
+            "ece_top_label": expected_calibration_error(top_p, top_y, bins),
+        }
+    return out
+
+
+def attribution_calibration_curve(
+    labelled: Sequence[LabelledAlert], bins: int
+) -> dict[str, list[tuple[float, float, int]]] | None:
+    """Per template ``(mean p, observed frequency, count)`` of each equal-width bin of the pooled one-vs-rest curve; an empty bin
+    is ``(nan, nan, 0)``, not an accuracy of 0; a template without a scored alert has ``[]``; ``None`` without ``p_kappa``."""
+    detail = attribution_calibration_detail(labelled, bins)
+    if detail is None:
+        return None
+    return {
+        t: [(b.mean_rho, b.observed_rate, b.n) for b in detail[t]["pooled"]]
+        if t in detail
+        else []
+        for t in TEMPLATES
+    }
+
+
+#: the columns of the score table of a set of labelled alerts: four sums per template. ``<T>_log_sum`` is the sum of ``-ln p`` over
+#: the alerts whose true class has a positive probability, ``<T>_n_zero`` counts the others.
+_SCORE_PARTS: Final[tuple[str, ...]] = ("n", "log_sum", "brier_sum", "n_zero")
+SCORE_COLUMNS: Final[tuple[str, ...]] = tuple(
+    f"{t}_{part}" for t in TEMPLATES for part in _SCORE_PARTS
+)
+_SCOL: Final[dict[str, int]] = {name: i for i, name in enumerate(SCORE_COLUMNS)}
+
+
+def score_table(
+    labelled: Sequence[LabelledAlert],
+    unit_of: Callable[[LabelledAlert], int],
+    n_units: int,
+) -> Table:
+    """The sums of the scores, one row per unit of the bootstrap (``unit_of`` gives the row of an alert; -1 leaves it out)."""
+    table = np.zeros((n_units, len(SCORE_COLUMNS)), dtype=np.float64)
+    for item in labelled:
+        probabilities = _class_probabilities(item)
+        unit = unit_of(item)
+        if probabilities is None or unit < 0:
+            continue
+        if unit >= n_units:
+            raise ValueError(f"unit {unit} is outside 0..{n_units - 1}")
+        t = _template_key(item)
+        log_loss, brier = _loss(probabilities, item.true_class)
+        table[unit, _SCOL[f"{t}_n"]] += 1
+        table[unit, _SCOL[f"{t}_brier_sum"]] += brier
+        if math.isinf(log_loss):
+            table[unit, _SCOL[f"{t}_n_zero"]] += 1
+        else:
+            table[unit, _SCOL[f"{t}_log_sum"]] += log_loss
+    return table
+
+
+def table_score_metric(total: Table, template: str, key: str) -> float:
+    """``log_score`` (over the alerts whose true class has a positive probability: finite) or ``brier`` of one template from a
+    summed row; ``nan`` without an alert."""
+    if template not in TEMPLATES:
+        raise ValueError(f"unknown template {template!r}")
+    n = float(total[_SCOL[f"{template}_n"]])
+    zero = float(total[_SCOL[f"{template}_n_zero"]])
+    if key == "log_score":
+        return _ratio(float(total[_SCOL[f"{template}_log_sum"]]), n - zero)
+    if key == "brier":
+        return _ratio(float(total[_SCOL[f"{template}_brier_sum"]]), n)
+    raise ValueError(f"unknown score {key!r}")
+
+
+def table_score_aggregate(total: Table, key: str) -> float:
+    """The equal-weight mean of ``table_score_metric`` over the aggregate templates (RESP apart) that have an alert."""
+    values = [
+        table_score_metric(total, t, key)
+        for t in AGGREGATE_TEMPLATES
+        if float(total[_SCOL[f"{t}_n"]]) > 0
+    ]
+    values = [v for v in values if not math.isnan(v)]
+    return math.fsum(values) / len(values) if values else math.nan
 
 
 def latency_percentiles(latencies_ms: Sequence[float]) -> dict[str, float]:

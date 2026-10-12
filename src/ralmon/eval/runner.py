@@ -107,6 +107,9 @@ from ralmon.benchmark import (
 )
 from ralmon.benchmark import split_patients as _builder_split_patients
 from ralmon.conformal import BonferroniAllocation, SplitConformal
+from ralmon.eval import attribution_report as AR
+from ralmon.eval.attribution_sets import applicable_from_table
+from ralmon.eval.attribution_truth import EventContext, day_contexts
 from ralmon.eval.background import PatientBackground, patient_footprints
 from ralmon.eval.metrics import (
     AGGREGATE_TEMPLATES,
@@ -210,6 +213,16 @@ METRIC_NAMES: Final[tuple[str, ...]] = (
     "accuracy_vs_coverage",
     "latency_percentiles",
     "severity_rank_agreement",
+)
+#: the top-level keys added by WS08-T09 (ADR-074), metric first then the detector; ``null`` for a method they do not apply to
+_ATTRIBUTION_KEYS: Final[tuple[str, ...]] = (
+    "attribution_log_score",
+    "attribution_brier",
+    "attribution_calibration_curve",
+    "attribution_sets",
+    "attribution_equal_coverage",
+    "pair_llr",
+    "pair_direction_mcnemar",
 )
 BASELINE_NAMES: Final[tuple[str, ...]] = (
     "B1",
@@ -315,6 +328,10 @@ class RunOptions:
       computed (None: ``awaiting_human_value``, the footprint is then the window only, a flag, and a hard failure of a
       headline run), the reason recorded with it, and the margin that widens every footprint (None: the matching
       tolerance). None of them is a clinical value.
+    * ``attribution`` (``run_options.attribution``, WS08-T09, ADR-074): the parameters of the scoring of the probabilistic
+      attribution, ``loose_after_ms`` (``awaiting_human_value``), ``set_alphas``, ``effects`` and ``pair_primary_templates``
+      (``ralmon.eval.attribution_report.AttributionOptions``; None: not configured, the blocks of a detector that has a posterior
+      say what they wait for).
     """
 
     alpha_grid: tuple[float, ...]
@@ -336,6 +353,7 @@ class RunOptions:
     c1_footprint_tail_ms: int | None = None
     c1_footprint_tail_reason: str = ""
     footprint_margin_ms: int | None = None
+    attribution: AR.AttributionOptions | None = None
 
 
 AWAITING_HUMAN_VALUE: Final = "awaiting_human_value"
@@ -572,6 +590,7 @@ def _parse_options(doc: Any, base: Path) -> RunOptions:
         "accepted_decisions",
         "detector_params",
         "background",
+        "attribution",
     )
     _keys(
         doc,
@@ -635,6 +654,12 @@ def _parse_options(doc: Any, base: Path) -> RunOptions:
     params = doc.get("detector_params", {})
     _need(isinstance(params, Mapping), "run_options.detector_params must be a mapping")
     tail, tail_reason, margin = _parse_background(doc.get("background", {}))
+    attribution: AR.AttributionOptions | None = None
+    if doc.get("attribution") is not None:
+        try:
+            attribution = AR.parse_options(doc["attribution"])
+        except AR.AttributionConfigError as exc:
+            raise ConfigError(str(exc)) from exc
     return RunOptions(
         alpha_grid=levels,
         n_bootstrap=doc["n_bootstrap"],
@@ -655,6 +680,7 @@ def _parse_options(doc: Any, base: Path) -> RunOptions:
         c1_footprint_tail_ms=tail,
         c1_footprint_tail_reason=tail_reason,
         footprint_margin_ms=margin,
+        attribution=attribution,
     )
 
 
@@ -773,6 +799,8 @@ def dump_experiment(
             "footprint_margin_ms": options.footprint_margin_ms,
         },
     }
+    if options.attribution is not None:
+        run_options["attribution"] = AR.dump_options(options.attribution)
     document = {
         "experiment_id": config.experiment_id,
         "benchmark_manifest": _portable(config.benchmark_manifest, base),
@@ -1610,6 +1638,10 @@ def _clean(value: Any) -> Any:
     if isinstance(value, (float, np.floating)):
         number = float(value)
         return number if math.isfinite(number) else None
+    if isinstance(value, Fraction):
+        return str(
+            value
+        )  # a level of the set calibration: "1/11", never a binary float
     if value is None or isinstance(value, str):
         return value
     raise TypeError(f"cannot write {type(value).__name__} to metrics.json")
@@ -2183,12 +2215,15 @@ def _truth_events(
     int,
     dict[int, list[Any]],
     dict[int, list[GroundTruthEvent]],
+    list[EventContext],
 ]:
     """The events of a patient with the day of their file, then the closing-step events with the last scored day; with them
-    the injection log of every scored day and the ground truth of every day (the tail day included), which the footprints
-    of ``ralmon.eval.background`` read."""
+    the injection log of every scored day, the ground truth of every day (the tail day included), which the footprints of
+    ``ralmon.eval.background`` read, and the context of every event in the order of the first list (the templates it can
+    violate and the faulty device, from the injection log; ``ralmon.eval.attribution_truth``)."""
     days = reader_full.days(patient)
     events: list[tuple[GroundTruthEvent, int]] = []
+    contexts: list[EventContext] = []
     logs: dict[int, list[Any]] = {}
     by_day: dict[int, list[GroundTruthEvent]] = {}
     try:
@@ -2200,6 +2235,7 @@ def _truth_events(
             if not isinstance(log, list):
                 raise TypeError(f"day {d} has an injection log that is not a list")
             logs[d] = log
+            contexts.extend(day_contexts(record.ground_truth, log))
         closing = reader_full.closing_step_truth(patient)
         tail = reader_full.tail_day(patient)
         if tail is not None:
@@ -2207,7 +2243,8 @@ def _truth_events(
     except Exception as exc:
         raise ConfigError(f"truth of patient {patient!r}: {exc}") from exc
     events.extend((e, days[-1]) for e in closing)
-    return events, len(closing), logs, by_day
+    contexts.extend(day_contexts(closing, []))
+    return events, len(closing), logs, by_day, contexts
 
 
 def _at_shared_step(item: Detection) -> bool:
@@ -2475,6 +2512,58 @@ def run_experiment(
     return folders
 
 
+def _applicable_table() -> tuple[
+    dict[str, dict[str, tuple[str, ...]]] | None, str | None
+]:
+    """The subtypes applicable per template and class from ``configs/attribution_likelihood.yaml`` (structure only: no cell value is
+    read), by which the kappa of the hierarchical rule is scored as a set; ``(None, None)`` outside the repository."""
+    root = _repo_root()
+    if root is None:
+        return None, None
+    path = root / "configs" / "attribution_likelihood.yaml"
+    if not path.is_file():
+        return None, None
+    from ralmon.attribution.likelihood import load_likelihood_table
+
+    table = load_likelihood_table(path)
+    return applicable_from_table(
+        table
+    ), f"configs/attribution_likelihood.yaml (sha256 {table.sha256})"
+
+
+def _calibration_records(
+    inst: _Instance,
+    patients: Sequence[str],
+    reader_obs: Any,
+    reader_full: Any,
+    env: DetectorEnvironment,
+    options: RunOptions,
+) -> list[AR.PatientRecord]:
+    """The records of the calibration patients (detections of the instance, truth for the scoring side), for the calibration of the
+    sets. The run leaves the counters and the run details of the instance as they were."""
+    stats, runs = Counter(inst.stats), dict(inst.runs)
+    b1_rules, clipped = list(inst.b1_rules), inst.n_clipped
+    records: list[AR.PatientRecord] = []
+    for patient in patients:
+        days = [reader_obs.observed(patient, d) for d in reader_obs.days(patient)]
+        detections = _run_patient(inst, patient, days, env, options)
+        events, _n_closing, _logs, _by_day, contexts = _truth_events(
+            reader_full, patient
+        )
+        records.append(
+            AR.PatientRecord(
+                patient,
+                tuple(e for e, _ in events),
+                tuple(detections),
+                tuple(contexts),
+                len(days),
+            )
+        )
+    inst.stats, inst.runs = stats, runs
+    inst.b1_rules, inst.n_clipped = b1_rules, clipped
+    return records
+
+
 def _run_seed(
     config: ExperimentConfig,
     options: RunOptions,
@@ -2604,6 +2693,9 @@ def _run_seed(
     per_template: dict[str, Any] = {}
     background_fa: dict[str, Any] = {}
     excess: dict[str, Any] = {}
+    attribution: dict[str, dict[str, Any]] = {key: {} for key in _ATTRIBUTION_KEYS}
+    attribution_calibration: dict[str, list[AR.PatientRecord]] = {}
+    applicable, applicable_source = _applicable_table()
     for inst in instances:
         scored = {
             p: _score_patient(
@@ -2695,6 +2787,45 @@ def _run_seed(
         excess[name] = _excess_blocks(
             name, excess_keys, test_patients, test_days, scored, backgrounds, weights
         )
+        attr_options = options.attribution or AR.AttributionOptions()
+        wants_calibration = (
+            attr_options.loose_after_ms is not None
+            and attr_options.set_alphas is not None
+            and getattr(inst.detector, "alert_inputs", None) is not None
+        )
+        calibration_records = (
+            _calibration_records(
+                inst, by_split["calibration"], reader_obs, reader_full, env, options
+            )
+            if wants_calibration
+            else []
+        )
+        test_records = [
+            AR.PatientRecord(
+                p,
+                scored[p].matching.gt,
+                scored[p].matching.det,
+                tuple(truth[p][4]),
+                len(test_days[p]),
+            )
+            for p in test_patients
+        ]
+        for key, value in AR.instance_blocks(
+            name=name,
+            detector=inst.detector,
+            test=test_records,
+            calibration=calibration_records,
+            options=attr_options,
+            applicable=applicable,
+            units=units,
+            weights=weights,
+            bins=options.ece_bins,
+            n_resamples=options.n_bootstrap,
+            level=options.ci_level,
+            seed=seed,
+        ).items():
+            attribution[key][name] = value
+        attribution_calibration[name] = calibration_records
         if isinstance(inst.detector, OursDetector):
             ours_info[name] = _ours_block(inst, units, weights, metrics, options)
         # not applicable to a detector without an entry above
@@ -2708,9 +2839,21 @@ def _run_seed(
             curves[name], key=lambda e: (e["alpha"] is None, e["alpha"] or 0.0)
         )
     context_split = {k: v for k, v in by_split.items()}
-    twins_info = _twins_block(
+    twins_info, twin_patients = _twins_block(
         config, options, env, reader_full, reader_obs, twin_ids, mains
     )
+    pair_info = _pair_metrics(
+        config,
+        options,
+        seed,
+        mains,
+        twin_patients,
+        attribution_calibration,
+        attribution,
+    )
+    for key in _ATTRIBUTION_KEYS:
+        for name in config.detectors:
+            attribution[key].setdefault(name, None)
     analysis: dict[str, Any] = {
         "run": {
             "split": {k: list(v) for k, v in context_split.items()},
@@ -2754,6 +2897,8 @@ def _run_seed(
     }
     document: dict[str, Any] = dict(metrics)
     document["per_template"] = per_template
+    for key in _ATTRIBUTION_KEYS:
+        document[key] = attribution[key]
     document["background"] = {
         "false_alarms_per_patient_day": background_fa,
         "excess_over_background": excess,
@@ -2771,6 +2916,19 @@ def _run_seed(
         facts,
         margin_ms,
     )
+    document["meta"]["attribution"] = AR.meta_block(
+        options.attribution,
+        calibration_patients=by_split["calibration"],
+        test_patients=test_patients,
+        ece_bins=options.ece_bins,
+        applicable_source=applicable_source,
+    )
+    document["meta"]["attribution"]["pairs"].update(pair_info)
+    document["meta"]["attribution"]["rules"] = {
+        name: dict(detector.likelihood_rule.metadata)
+        for name, detector in sorted(mains.items())
+        if getattr(detector, "likelihood_rule", None) is not None
+    }
     _run_hooks(
         document,
         RunContext(
@@ -3012,6 +3170,20 @@ def _ours_block(
     }
 
 
+def _indistinguishable_flag(
+    logs: Mapping[int, Sequence[Mapping[str, Any]]],
+) -> bool | None:
+    """The per-pair flag ``indistinguishable_by_construction`` of a member's injection log (the stratum of a pair is never the
+    variant id); None when the log does not carry it."""
+    flags = {
+        bool(entry["indistinguishable_by_construction"])
+        for log in logs.values()
+        for entry in log
+        if isinstance(entry.get("indistinguishable_by_construction"), bool)
+    }
+    return next(iter(flags)) if len(flags) == 1 else None
+
+
 def _twins_block(
     config: ExperimentConfig,
     options: RunOptions,
@@ -3020,19 +3192,23 @@ def _twins_block(
     reader_obs: Any,
     twin_ids: Sequence[str],
     mains: Mapping[str, Any],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, list[AR.PairPatient]]]:
+    """``analysis.run.twins`` and, for each main detector, the twins with the detections of THAT detector (for the pair metrics)."""
     if options.twins == "exclude":
-        return {"policy": "exclude"}
+        return {"policy": "exclude"}, {}
     if options.twins == "include":
-        return {"policy": "include", "n_units": len(twin_ids)}
+        return {"policy": "include", "n_units": len(twin_ids)}, {}
     info: dict[str, Any] = {}
+    patients: dict[str, list[AR.PairPatient]] = {}
     days_by = {
         p: [reader_obs.observed(p, d) for d in reader_obs.days(p)] for p in twin_ids
     }
     truth = {p: _truth_events(reader_full, p) for p in twin_ids}
+    manifest = reader_full.manifest.patients
     for name, detector in sorted(mains.items()):
         inst = _Instance(name, None, detector, True)
         parts = []
+        members: list[AR.PairPatient] = []
         for p in twin_ids:
             dets = _run_patient(inst, p, days_by[p], env, options)
             parts.append(
@@ -3040,8 +3216,29 @@ def _twins_block(
                     truth[p][0], dets, len(days_by[p]), config.match
                 ).matching
             )
+            entry = manifest[p]
+            members.append(
+                AR.PairPatient(
+                    p,
+                    str(entry.get("pair", p)),
+                    str(entry.get("member", "")),
+                    str(entry.get("group", "")),
+                    None
+                    if entry.get("variant_id") is None
+                    else str(entry["variant_id"]),
+                    _indistinguishable_flag(truth[p][2]),
+                    AR.PatientRecord(
+                        p,
+                        tuple(e for e, _ in truth[p][0]),
+                        tuple(dets),
+                        tuple(truth[p][4]),
+                        len(days_by[p]),
+                    ),
+                )
+            )
         if not parts:
             continue
+        patients[name] = members
         prf = per_class_prf(Matching.concat(parts))
         info[name] = {
             "per_class_prf": {
@@ -3049,7 +3246,72 @@ def _twins_block(
             },
             "n_patient_days": sum(len(d) for d in days_by.values()),
         }
-    return {"policy": "separate", "n_units": len(twin_ids), "detectors": info}
+    return {"policy": "separate", "n_units": len(twin_ids), "detectors": info}, patients
+
+
+def _pair_metrics(
+    config: ExperimentConfig,
+    options: RunOptions,
+    seed: int,
+    mains: Mapping[str, Any],
+    twin_patients: Mapping[str, Sequence[AR.PairPatient]],
+    calibration_records: Mapping[str, Sequence[AR.PatientRecord]],
+    attribution: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """The pair quantities of ADR-074 (3): ``pair_llr``, ``pair_direction_mcnemar`` and the separate calibration of the pairs (put
+    under ``attribution_equal_coverage.<det>.pairs``). Returns the entries of ``meta.attribution.pairs``."""
+    attr = options.attribution or AR.AttributionOptions()
+    applies = {
+        name: getattr(d, "likelihood_rule", None) is not None
+        and getattr(d, "alert_inputs", None) is not None
+        for name, d in mains.items()
+    }
+    if options.twins != "separate":
+        status = f"twins policy is {options.twins!r}: the confounder pairs are not run"
+        for name, ok in applies.items():
+            if ok:
+                attribution["pair_llr"][name] = {"status": status}
+        return {"status": status}
+    if attr.loose_after_ms is None:
+        # the pair quantities need no labelling; the set calibration of the pairs does, through the main population
+        pass
+    pair_ids = sorted({m.pair_id for ms in twin_patients.values() for m in ms})
+    split = split_patients(pair_ids, config.split, seed) if pair_ids else {}
+    test_pairs = [p for p in pair_ids if split.get(p) == "test"]
+    cal_pairs = [p for p in pair_ids if split.get(p) == "calibration"]
+    level, boot = options.ci_level, (options.n_bootstrap, options.ci_level, seed)
+    outcomes: dict[str, AR.PairOutcome] = {}
+    for name, detector in sorted(mains.items()):
+        if not applies[name] or name not in twin_patients:
+            outcomes[name] = AR.PairOutcome(None, (), None)
+            continue
+        outcomes[name] = AR.pair_outcome(
+            detector=detector,
+            twins=twin_patients[name],
+            test_pairs=test_pairs,
+            calibration_pairs=cal_pairs,
+            calibration_records=calibration_records.get(name, ()),
+            options=attr,
+            level=level,
+            bootstrap=boot,
+        )
+    for name, outcome in outcomes.items():
+        attribution["pair_llr"][name] = outcome.llr
+        if outcome.sets is not None:
+            eq = attribution["attribution_equal_coverage"].get(name)
+            if not isinstance(eq, dict):
+                eq = {"primary_labelling": "tight", "labellings": {}}
+            eq["pairs"] = outcome.sets
+            attribution["attribution_equal_coverage"][name] = eq
+    for name, block in AR.mcnemar_blocks(outcomes).items():
+        attribution["pair_direction_mcnemar"][name] = block
+    return {
+        "status": "run",
+        "n_pairs": len(pair_ids),
+        "test_pairs": test_pairs,
+        "calibration_pairs": cal_pairs,
+        "split": "the pairs (not their members) are split by the seed with the experiment's fractions",
+    }
 
 
 def _run_hooks(document: dict[str, Any], context: RunContext) -> None:
