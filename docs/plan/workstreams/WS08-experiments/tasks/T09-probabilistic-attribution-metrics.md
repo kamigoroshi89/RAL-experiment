@@ -3,7 +3,7 @@ id: WS08-T09
 title: "Metrics for probabilistic attribution: log score, Brier, calibration curves, pair likelihood ratio, McNemar on direction (ADR-074)"
 workstream: WS08-experiments
 owner: agent
-status: ready
+status: in_progress
 depends_on: ["WS08-T08", "WS02-T06", "WS05-T14"]
 critical_path: true
 non_negotiable: false
