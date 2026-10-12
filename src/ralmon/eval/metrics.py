@@ -81,6 +81,7 @@ __all__ = [
     "COLUMNS",
     "EXCESS_COLUMNS",
     "LABEL_COLUMNS",
+    "P_KAPPA_SUM_TOLERANCE",
     "SCORE_COLUMNS",
     "STREAM_AVAILABILITY",
     "STREAM_BOOTSTRAP",
@@ -1153,13 +1154,29 @@ def abstention_rate(matching: Matching) -> float | None:
 # ---- probabilistic attribution: log score, Brier score, calibration curves (WS08-T09, ADR-074) -----------------------------
 
 
+#: numerical tolerance on the sum of ``p_kappa`` (floating-point rounding of a softmax), not a modelling value
+P_KAPPA_SUM_TOLERANCE: Final[float] = 1e-9
+
+
 def _class_probabilities(item: LabelledAlert) -> dict[str, float] | None:
-    """``p_kappa`` of an alert by class name (C1, C2, C3; a missing class has probability 0); None without a posterior."""
+    """``p_kappa`` of an alert by class name (C1, C2, C3; a missing class has probability 0); None without a posterior.
+
+    The posterior is validated (finite, non-negative, summing to 1 within ``P_KAPPA_SUM_TOLERANCE``: ``ValueError`` otherwise) and
+    each probability is then clamped to ``[0, 1]``, so that ``1 + 2e-16`` from rounding does not break the bins."""
     posterior = item.alert.p_kappa
     if posterior is None:
         return None
     named = {str(getattr(k, "value", k)): float(v) for k, v in posterior.items()}
-    return {c: named.get(c, 0.0) for c in CLASSES}
+    values = [named.get(c, 0.0) for c in CLASSES]
+    if (
+        not all(math.isfinite(v) and v >= 0.0 for v in values)
+        or abs(math.fsum(values) - 1.0) > P_KAPPA_SUM_TOLERANCE
+    ):
+        raise ValueError(
+            f"p_kappa of the alert at {item.alert.t_ms} must be finite, non-negative and sum to 1 within "
+            f"{P_KAPPA_SUM_TOLERANCE}, got {values!r}"
+        )
+    return {c: min(1.0, v) for c, v in zip(CLASSES, values, strict=True)}
 
 
 def _template_key(item: LabelledAlert) -> str:

@@ -5,10 +5,11 @@ alert tuple (``alert``), the hierarchical rule with abstention (``rule``), the a
 propagation (``attributor``), the nursing-staff text (``render``) and the evidence extractor (``extract``).
 The likelihood attributor of ADR-074 (``LikelihoodRule``, ``load_likelihood_table``, ``AwaitingValueError``) is in the
 submodule ``ralmon.attribution.likelihood``; ``RuleAttributor`` takes it as its ``rule`` (the hierarchical rule stays the
-default, ``ours-hier``). Those names, and ``empty_evidence``, are also importable from this package root (outside ``__all__``, WS08-T09:
-``tests/test_layering.py`` requires cross-package imports through the root); the likelihood module loads on first use. Helpers outside the contract table (``Decision``, ``AbstentionReason``, ``DeviceProfile`` and ``DeviceCapabilities``
-(also importable from this package root, for ``ralmon.eval.device_capabilities``), ``alert_from_record``,
-``render_text``, ``empty_evidence``) are importable from the submodules and are not in ``__all__``.
+default, ``ours-hier``). Those names, and ``empty_evidence``, are also importable from this package root, outside ``__all__``
+(``tests/test_layering.py`` requires cross-package imports through the root; the likelihood module loads on first use). Other helpers
+outside the contract table (``Decision``, ``AbstentionReason``, ``alert_from_record``, ``render_text``) are importable from the
+submodules and are not in ``__all__``; ``DeviceProfile`` and ``DeviceCapabilities`` are also importable from this package root, for
+``ralmon.eval.device_capabilities``.
 """
 
 from __future__ import annotations

@@ -42,6 +42,7 @@ NEW_KEYS = (
     "attribution_equal_coverage",
     "pair_llr",
     "pair_direction_mcnemar",
+    "attribution_labelling",
 )
 H = 3_600_000
 D = 86_400_000
@@ -295,7 +296,7 @@ def test_the_smoke_run_has_the_new_keys(tmp_path: Path) -> None:
         assert set(m[key]) == set(config.detectors), key
         for name in ("B1", "B3"):
             assert m[key][name] is None, (key, name)
-        if key != "attribution_sets":
+        if key not in ("attribution_sets", "attribution_labelling"):
             assert m[key]["ours"] is None, key
     sets = m["attribution_sets"]["ours"]
     assert sets["primary_labelling"] == "tight" and set(sets["labellings"]) == {
@@ -822,20 +823,12 @@ def test_the_runner_reports_the_ambiguous_class_and_the_subtype_table(
     assert "manipulation_failure" in block["point_subtypes"]
     assert block["headline_for_point_subtypes"] == "loose"
     sets = m["attribution_sets"]["ours-s1"]["labellings"]
-    assert (
-        sets["tight"] is None
-        or sets["tight"]["overall"]["n"] == 0
-        or "manipulation_failure" not in sets["tight"]["per_true_subtype"]
-    )
+    assert sets["tight"] is None  # the only alert is ambiguous: no tight table
+    assert sets["loose"]["per_true_subtype"]["manipulation_failure"]["covered"] == 1
     meta = m["meta"]["attribution"]["labelling"]
     assert (
         "loose" in meta["point_c2_headline"]
         and "C1 and C3" in meta["loose_after_ms_scope"]
-    )
-    assert (
-        m["attribution_labelling"]["B1"] is None
-        if "B1" in m["attribution_labelling"]
-        else True
     )
 
 

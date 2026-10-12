@@ -233,6 +233,7 @@ _ATTRIBUTION_KEYS: Final[tuple[str, ...]] = (
     "attribution_equal_coverage",
     "pair_llr",
     "pair_direction_mcnemar",
+    "attribution_labelling",
 )
 BASELINE_NAMES: Final[tuple[str, ...]] = (
     "B1",
@@ -3282,9 +3283,6 @@ def _pair_metrics(
             if ok:
                 attribution["pair_llr"][name] = {"status": status}
         return {"status": status}
-    if attr.loose_after_ms is None:
-        # the pair quantities need no labelling; the set calibration of the pairs does, through the main population
-        pass
     pair_ids = sorted({m.pair_id for ms in twin_patients.values() for m in ms})
     split = split_patients(pair_ids, config.split, seed) if pair_ids else {}
     test_pairs = [p for p in pair_ids if split.get(p) == "test"]

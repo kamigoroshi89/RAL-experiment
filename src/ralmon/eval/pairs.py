@@ -61,6 +61,7 @@ __all__ = [
     "pair_llr",
     "pair_result",
     "summarize_strata",
+    "unshared_pairs",
 ]
 
 #: injected events that accompany the mechanism of a pair without being it (group 2 with a robot has the forgery and a spoof)
@@ -185,6 +186,17 @@ def align_directions(
     return [by_x[i].both_right for i in ids], [by_y[i].both_right for i in ids], ids
 
 
+def unshared_pairs(
+    x: Sequence[PairResult], y: Sequence[PairResult]
+) -> tuple[list[str], list[str]]:
+    """The pairs matched (given a result) by ``x`` only and by ``y`` only: McNemar uses the shared ones, the others are reported."""
+    ids_x, ids_y = [r.pair_id for r in x], [r.pair_id for r in y]
+    return (
+        [i for i in ids_x if i not in set(ids_y)],
+        [i for i in ids_y if i not in set(ids_x)],
+    )
+
+
 # ---- strata --------------------------------------------------------------------------------------------------------------------
 
 
@@ -279,6 +291,8 @@ def match_member(
         for a in alerts
         if isinstance(a, Alert)
         and a.verdict is VerdictState.VIOLATED
+        and a.caused_by
+        is None  # a cascade effect carries its root's posterior: the root is the alert of the mechanism
         and a.t_ms >= event.onset_ms
         and (templates is None or _template(a) in templates)
     ]

@@ -353,6 +353,7 @@ def test_metrics_json_top_level_keys(hand_run: dict[str, Any]) -> None:
         "attribution_equal_coverage",
         "pair_llr",
         "pair_direction_mcnemar",
+        "attribution_labelling",
     }
     assert set(METRICS) <= set(m)  # a metric that does not apply is null, never omitted
     assert META_KEYS <= set(m["meta"])

@@ -67,6 +67,7 @@ __all__ = [
     "equal_coverage",
     "kappa_as_set",
     "pair_set_calibration",
+    "role_swap_check",
     "set_metrics",
     "sets_metadata",
     "threshold_json",
@@ -253,39 +254,48 @@ def _size_stat(row: np.ndarray) -> float:
     return float(row[2] / row[1]) if row[1] > 0 else math.nan
 
 
-def _per_patient(
-    rows: Sequence[_Row], n_resamples: int, level: float, seed: int
-) -> tuple[dict[str, Any], dict[str, Any]]:
+def _patient_summary(rows: Sequence[_Row]) -> dict[str, Any]:
+    """The coverage of each patient, its median and its minimum (descriptive)."""
     patients, table = _patient_table(rows)
     per = {p: float(table[i, 0] / table[i, 1]) for i, p in enumerate(patients)}
     values = np.array(list(per.values()), dtype=np.float64)
-    summary = {
+    return {
         "n_patients": len(patients),
         "coverage_by_patient": per,
         "median_coverage": float(np.median(values)),
         "min_coverage": float(values.min()),
     }
+
+
+def _patient_bootstrap(
+    rows: Sequence[_Row], n_resamples: int, level: float, seed: int
+) -> dict[str, Any]:
+    """The cluster bootstrap over patients. It resamples only the patients that HAVE alerts and the statistic is a ratio of sums
+    (covered over alerts): a conditional ratio estimator, not an estimate for a patient population that includes patients with no
+    alert."""
+    patients, table = _patient_table(rows)
     boot: dict[str, Any] = {
         "unit": "patient",
         "n_resamples": n_resamples,
         "level": level,
         "n_patients": len(patients),
+        "resamples": "only the patients that have alerts; the statistic is a ratio of sums",
     }
     if len(patients) < 2:
         boot["coverage"] = [None, None]
         boot["mean_size"] = [None, None]
-    else:
-        for name, stat in (("coverage", _cov_stat), ("mean_size", _size_stat)):
-            lo, hi = bootstrap_statistic(
-                table,
-                stat,
-                n_resamples=n_resamples,
-                level=level,
-                seed=seed,
-                clusters=patients,
-            )
-            boot[name] = [_num(lo), _num(hi)]
-    return summary, boot
+        return boot
+    for name, stat in (("coverage", _cov_stat), ("mean_size", _size_stat)):
+        lo, hi = bootstrap_statistic(
+            table,
+            stat,
+            n_resamples=n_resamples,
+            level=level,
+            seed=seed,
+            clusters=patients,
+        )
+        boot[name] = [_num(lo), _num(hi)]
+    return boot
 
 
 def set_metrics(
@@ -322,7 +332,8 @@ def set_metrics(
         )
     if not rows:
         return None
-    per_patient, boot = _per_patient(rows, n_resamples, level, seed)
+    per_patient = _patient_summary(rows)
+    boot = _patient_bootstrap(rows, n_resamples, level, seed)
     return {
         "n_alerts": len(rows),
         "n_without_set": n_without,
@@ -477,10 +488,14 @@ def _cell(
             t: threshold_json(calibrator.threshold(t.lower(), alpha))
             for t in sorted({r.template for r in rows})
         }
+    out["per_true_subtype"] = {
+        name: _group([r for r in rows if r.true_subtype == name], level)
+        for name in sorted({r.true_subtype for r in rows})
+    }
+    out["per_patient"] = _patient_summary(rows)
     if bootstrap is not None:
         n_resamples, ci_level, seed = bootstrap
-        _, boot = _per_patient(rows, n_resamples, ci_level, seed)
-        out["cluster_bootstrap"] = boot
+        out["cluster_bootstrap"] = _patient_bootstrap(rows, n_resamples, ci_level, seed)
     return out
 
 
@@ -615,6 +630,35 @@ def equal_coverage(
     return out
 
 
+def role_swap_check(
+    calibration: Sequence[LabelledAlert],
+    test: Sequence[LabelledAlert],
+    *,
+    methods: Sequence[str],
+    alphas: Sequence[Level],
+    model_version: str,
+    population: str,
+    modes: Sequence[str] = MODES,
+    min_cell_size: int | None = None,
+    bootstrap: tuple[int, float, int] | None = None,
+) -> dict[str, Any]:
+    """The role-swap check of the exchangeability: calibrate on the TEST patients and evaluate on the CALIBRATION patients (the two parts
+    are patient-disjoint, ``PatientLeakError`` otherwise), reported next to the main result. If the patients of the two parts are
+    exchangeable the coverage is about the same either way; a difference is a sign that they are not."""
+    return equal_coverage(
+        test,
+        calibration,
+        methods=methods,
+        alphas=alphas,
+        model_version=model_version,
+        population=f"{population} role swap",
+        modes=modes,
+        fixed_methods=(),
+        min_cell_size=min_cell_size,
+        bootstrap=bootstrap,
+    )
+
+
 def pair_set_calibration(
     main_calibration: Sequence[LabelledAlert],
     pair_calibration: Sequence[LabelledAlert],
@@ -675,9 +719,14 @@ def sets_metadata() -> dict[str, Any]:
             "Coverage is marginal (or within a Mondrian cell). The finite-sample bound of split conformal prediction needs exchangeable "
             "ALERTS: patient-level exchangeability of the calibration and test parts is not enough when a patient contributes several "
             "correlated alerts, so the bound is exact only for one designated alert per patient and otherwise coverage is approximate and "
-            "checked empirically (cluster bootstrap over patients, coverage per patient, role-swap check); ties make it conservative; "
+            "checked empirically (cluster bootstrap over patients, coverage per patient, and the role-swap check, reported as role_swap next "
+            "to the equal-coverage result: calibrate on the test patients, evaluate on the calibration patients); ties make it conservative; "
             "nothing is claimed for another population (the transfer from the main population to the pairs is reported as a failure). "
             "Coverage claims are always qualified in this way."
+        ),
+        "cluster_bootstrap": (
+            "The cluster bootstrap resamples only patients that have alerts and the statistic is a ratio of sums (covered alerts over "
+            "alerts): a conditional ratio estimator, not an estimate for a population that includes patients without alerts"
         ),
         "top1_fill": (
             "top1_fill: the pure conformal rule gave an empty set and the most probable subtype was added; it can only raise coverage "
@@ -703,5 +752,20 @@ def sets_metadata() -> dict[str, Any]:
             "primary": "tight",
             "reported_next_to_it": "loose",
             "choice": LABELLING_STATEMENT,
+            "ambiguous": (
+                "A point or per-tick C2 fault (end_ms None: nav_delay, manipulation_failure, dispenser_bounce) is active only at its "
+                "instant. When the loose rule accepts an injected C2 event that the tight rule rejects only by time, the tight label of the "
+                "alert is AMBIGUOUS (own bucket, never the natural C1 cause), excluded from the tight tables and reported per injected "
+                "subtype with its loose label (attribution_labelling)"
+            ),
+            "point_c2_headline": (
+                "For the three point subtypes (nav_delay, manipulation_failure, dispenser_bounce) the headline figure is the LOOSE one; "
+                "the loose window loose_after_ms stays an awaiting_human_value with no default"
+            ),
+            "loose_after_ms_scope": (
+                "loose_after_ms is the allowance after the end of an event window: it defines the loose labelling and, under the tight "
+                "labelling, it also controls the C1 and C3 events (their time rule is the loose one); the tight rule closes the window only "
+                "for C2 events"
+            ),
         },
     }

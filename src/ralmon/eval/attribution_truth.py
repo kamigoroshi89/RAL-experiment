@@ -27,6 +27,14 @@ THE CHOICE OF THE TIGHT LABELLING WAS MADE AFTER SEEING THE RESULT of the recomp
 by 0.007 nats under the loose labelling and improve it under the tight one): it is a decision of gab, not a finding, and the
 paper states the order of events (``LABELLING_STATEMENT``).
 
+AMBIGUOUS (B1, decided by gab; no horizon is invented). A point or per-tick C2 fault (``end_ms`` None: ``nav_delay``,
+``manipulation_failure``, ``dispenser_bounce``) is active only at its instant, so the tight rule rejects it for any later alert. When the
+LOOSE rule accepts an injected C2 event that the tight rule rejects only by TIME (the faulty device is in the data scope), the tight
+label of the alert is AMBIGUOUS, never the natural C1 cause that happens to be compatible too: the alert leaves the tight tables and is
+counted in its own bucket (``LabelResult.ambiguous``, ``excluded["ambiguous"]``), reported per injected subtype and with its loose
+label. A fault OUTSIDE the data scope stays a definite non-cause. The headline figure of the three point subtypes is the LOOSE one. A
+structural link ("the alert of the instance the fault targets") would be a later refinement.
+
 From the compatible events the cause is: the class they all share; else the class of the INJECTED events if exactly one class
 is injected; else the alert is ambiguous and left out (counted). The true subtype is the subtype of the first injected event of
 that class (then by onset). An alert with no compatible event is a false alarm for this purpose and is left out (counted). A
@@ -53,13 +61,16 @@ __all__ = [
     "LABELLING_STATEMENT",
     "ROBOT_SCOPE",
     "AlertInputs",
+    "AmbiguousAlert",
     "EventContext",
     "LabelResult",
     "LabelledAlert",
+    "ambiguous_summary",
     "both_labellings",
     "day_contexts",
     "event_templates",
     "label_alerts",
+    "subtype_alert_table",
 ]
 
 LABELLINGS: Final[tuple[str, ...]] = ("tight", "loose")
@@ -143,18 +154,38 @@ class LabelledAlert:
 
 
 @dataclass(frozen=True, slots=True)
+class AmbiguousAlert:
+    """An alert whose TIGHT label is AMBIGUOUS (B1, decided by gab): it is compatible under the loose rule with an injected C2 event
+    that the tight rule rejects only because of TIME (the faulty device is in the data scope, the alert is decided outside the
+    window: a point or per-tick fault is active only at its instant). The tight label must not become the natural C1 cause in that
+    case, so the alert has its own bucket, with the injected subtypes in question and its LOOSE label (``loose_class`` and
+    ``loose_subtype``, None when the loose rule gives none)."""
+
+    patient_id: str
+    alert: Alert
+    template: str
+    injected_subtypes: tuple[str, ...]
+    loose_class: str | None
+    loose_subtype: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class LabelResult:
-    """The labelled alerts and the counts of those left out, by reason."""
+    """The labelled alerts, the AMBIGUOUS ones (tight labelling only) and the counts of those left out, by reason."""
 
     labelled: tuple[LabelledAlert, ...]
     excluded: Mapping[str, int]
+    ambiguous: tuple[AmbiguousAlert, ...] = ()
 
 
+#: the reasons an alert is left out: ``ambiguous`` is the AMBIGUOUS class of the tight labelling (own bucket, reported apart);
+#: ``class_conflict`` is an alert compatible with events of two classes that the injected-first rule cannot resolve
 _EXCLUDED_KEYS: Final[tuple[str, ...]] = (
     "not_an_alert",
     "predicted_violation",
     "cascade_effect",
     "no_compatible_event",
+    "class_conflict",
     "ambiguous",
 )
 
@@ -251,6 +282,25 @@ def _compatible(
     return ref <= alert.t_ms <= max(ref, end) + slack
 
 
+def _point_ambiguity(
+    alert: Alert,
+    compatible_loose: Sequence[tuple[int, GroundTruthEvent]],
+    compatible_tight: Sequence[tuple[int, GroundTruthEvent]],
+    contexts: Sequence[EventContext],
+) -> list[GroundTruthEvent]:
+    """The injected C2 events that the loose rule accepts and the tight rule rejects only by TIME (scope passes)."""
+    tight_ids = {i for i, _ in compatible_tight}
+    template = _alert_template(alert)
+    return [
+        e
+        for i, e in compatible_loose
+        if e.cls is InjectedClass.C2
+        and e.injected
+        and i not in tight_ids
+        and _in_scope(contexts[i].target, template)
+    ]
+
+
 def _cause_of(
     compatible: Sequence[tuple[int, GroundTruthEvent]],
 ) -> tuple[int, GroundTruthEvent] | None:
@@ -299,6 +349,7 @@ def label_alerts(
     if len(ctxs) != len(gt):
         raise ValueError("contexts must align with the ground truth")
     excluded = dict.fromkeys(_EXCLUDED_KEYS, 0)
+    ambiguous: list[AmbiguousAlert] = []
     out: list[LabelledAlert] = []
     for item in det:
         if not isinstance(item, Alert):
@@ -317,12 +368,35 @@ def label_alerts(
                 item, e, ctxs[i], labelling=labelling, after_ms=loose_after_ms
             )
         ]
+        if labelling == "tight":
+            loose_set = [
+                (i, e)
+                for i, e in enumerate(gt)
+                if _compatible(
+                    item, e, ctxs[i], labelling="loose", after_ms=loose_after_ms
+                )
+            ]
+            lost = _point_ambiguity(item, loose_set, compatible, ctxs)
+            if lost:
+                loose_cause = _cause_of(loose_set)
+                ambiguous.append(
+                    AmbiguousAlert(
+                        patient_id,
+                        item,
+                        _alert_template(item),
+                        tuple(sorted({e.subtype for e in lost})),
+                        None if loose_cause is None else loose_cause[1].cls.value,
+                        None if loose_cause is None else loose_cause[1].subtype,
+                    )
+                )
+                excluded["ambiguous"] += 1
+                continue
         if not compatible:
             excluded["no_compatible_event"] += 1
             continue
         cause = _cause_of(compatible)
         if cause is None:
-            excluded["ambiguous"] += 1
+            excluded["class_conflict"] += 1
             continue
         index, event = cause
         out.append(
@@ -337,7 +411,7 @@ def label_alerts(
                 len(compatible),
             )
         )
-    return LabelResult(tuple(out), excluded)
+    return LabelResult(tuple(out), excluded, tuple(ambiguous))
 
 
 def both_labellings(
@@ -362,6 +436,45 @@ def both_labellings(
         )
         for name in LABELLINGS
     }
+
+
+def subtype_alert_table(
+    results: Mapping[str, LabelResult], injected_subtypes: Sequence[str]
+) -> dict[str, dict[str, int]]:
+    """Injected subtype x alert count under the TIGHT label, the AMBIGUOUS bucket of the tight labelling and the LOOSE label, ZEROS
+    SHOWN (a subtype with no tight alert is visible). ``results`` has the keys ``tight`` and ``loose``."""
+    table: dict[str, dict[str, int]] = {}
+    for name in injected_subtypes:
+        table[name] = {
+            "tight": sum(
+                1 for x in results["tight"].labelled if x.true_subtype == name
+            ),
+            "ambiguous": sum(
+                1 for a in results["tight"].ambiguous if name in a.injected_subtypes
+            ),
+            "loose": sum(
+                1 for x in results["loose"].labelled if x.true_subtype == name
+            ),
+        }
+    return table
+
+
+def ambiguous_summary(
+    ambiguous: Sequence[AmbiguousAlert],
+) -> dict[str, dict[str, Any]]:
+    """The AMBIGUOUS alerts per injected subtype with the count of their LOOSE labels (``class/subtype``, or ``none``)."""
+    out: dict[str, dict[str, Any]] = {}
+    for item in ambiguous:
+        label = (
+            "none"
+            if item.loose_class is None
+            else f"{item.loose_class}/{item.loose_subtype}"
+        )
+        for name in item.injected_subtypes:
+            entry = out.setdefault(name, {"n": 0, "loose_labels": {}})
+            entry["n"] += 1
+            entry["loose_labels"][label] = entry["loose_labels"].get(label, 0) + 1
+    return {k: out[k] for k in sorted(out)}
 
 
 #: the type of the optional detector hook that supplies the inputs of an alert: ``(patient_id, alert) -> AlertInputs | None``

@@ -25,12 +25,12 @@ import math
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final, Protocol
+from typing import Any, Final, NamedTuple, Protocol
 
 import numpy as np
 
 from ralmon.attribution import Alert, Detection
-from ralmon.benchmark import GroundTruthEvent
+from ralmon.benchmark import GroundTruthEvent, InjectedClass
 from ralmon.eval import attribution_sets as S
 from ralmon.eval import metrics as M
 from ralmon.eval import pairs as P
@@ -39,9 +39,13 @@ from ralmon.eval.attribution_truth import (
     LABELLING_STATEMENT,
     LABELLINGS,
     AlertInputs,
+    AmbiguousAlert,
     EventContext,
     LabelledAlert,
+    LabelResult,
+    ambiguous_summary,
     label_alerts,
+    subtype_alert_table,
 )
 from ralmon.eval.background import DAY_MS
 
@@ -76,6 +80,7 @@ _BLOCKS: Final[tuple[str, ...]] = (
     "attribution_calibration_curve",
     "attribution_sets",
     "attribution_equal_coverage",
+    "attribution_labelling",
 )
 
 
@@ -255,16 +260,25 @@ def _status(needs: Sequence[str], message: str) -> dict[str, Any]:
 # ---- labelling of a part of the split ---------------------------------------------------------------------------------------------
 
 
+class _Labelled(NamedTuple):
+    """The labelled alerts of a part of the split, the counts of those left out and the AMBIGUOUS alerts (tight labelling)."""
+
+    labelled: list[LabelledAlert]
+    excluded: dict[str, int]
+    ambiguous: list[AmbiguousAlert]
+
+
 def label_records(
     records: Sequence[PatientRecord],
     labelling: str,
     options: AttributionOptions,
     inputs: Callable[[str, Alert], AlertInputs | None] | None,
-) -> tuple[list[LabelledAlert], dict[str, int]]:
+) -> _Labelled:
     """The labelled alerts of the records under one labelling, with the counts of those left out; an alert decided after the
     scored axis (in the unscored tail day) is left out as in the other metrics. ``inputs`` is the detector's hook (or None)."""
     assert options.loose_after_ms is not None
     out: list[LabelledAlert] = []
+    ambiguous: list[AmbiguousAlert] = []
     excluded: Counter[str] = Counter()
     for rec in records:
         result = label_alerts(
@@ -277,6 +291,12 @@ def label_records(
             effects=options.effects,
         )
         excluded.update(result.excluded)
+        for amb in result.ambiguous:
+            if amb.alert.t_ms > rec.n_days * DAY_MS:
+                excluded["unscored_tail"] += 1
+                excluded["ambiguous"] -= 1
+                continue
+            ambiguous.append(amb)
         for item in result.labelled:
             if item.alert.t_ms > rec.n_days * DAY_MS:
                 excluded["unscored_tail"] += 1
@@ -286,7 +306,7 @@ def label_records(
                     item, inputs=inputs(rec.patient_id, item.alert)
                 )
             out.append(item)
-    return out, dict(sorted(excluded.items()))
+    return _Labelled(out, dict(sorted(excluded.items())), ambiguous)
 
 
 # ---- scores ---------------------------------------------------------------------------------------------------------------------
@@ -310,7 +330,12 @@ def _score_leaf(
         leaf["mean"] = _null_leaf()
         leaf["reason"] = (
             f"zero probability of the true class for {zero} alert(s): -ln 0 is infinite, so the mean is not finite "
-            "(null, not a number)"
+            "(null, not a number); mean_finite is the mean over the other alerts"
+        )
+        leaf["mean_finite"] = weights.scalar(
+            table,
+            lambda row: M.table_score_metric(row, template, key),
+            f"{label}.finite",
         )
         return leaf
 
@@ -448,6 +473,7 @@ def instance_blocks(
             out["attribution_sets"] = _status(needs, message)
         if hook is not None:
             out["attribution_equal_coverage"] = _status(needs, message)
+        out["attribution_labelling"] = _status(needs, message)
         return out
     index = {unit: i for i, unit in enumerate(units)}
     n_days = {r.patient_id: r.n_days for r in test}
@@ -467,7 +493,7 @@ def instance_blocks(
             cache[key] = hook(patient, alert)
         return cache[key]
 
-    parts: dict[str, tuple[list[LabelledAlert], dict[str, int]]] = {
+    parts: dict[str, _Labelled] = {
         lab: label_records(test, lab, options, inputs if hook else None)
         for lab in LABELLINGS
     }
@@ -517,12 +543,49 @@ def instance_blocks(
         out["attribution_equal_coverage"] = _equal_block(
             detector, parts, calibration, options, inputs, (n_resamples, level, seed)
         )
+    out["attribution_labelling"] = _labelling_block(test, parts)
     return out
+
+
+def _labelling_block(
+    test: Sequence[PatientRecord], parts: Mapping[str, _Labelled]
+) -> dict[str, Any]:
+    """How the two labellings divide the injected subtypes (B1): the table injected subtype x alert count under the tight label, the
+    AMBIGUOUS bucket of the tight labelling and the loose label, ZEROS SHOWN, the ambiguous alerts per injected subtype with their loose
+    labels, and the point subtypes (injected C2 events with no window), whose headline figure is the LOOSE one."""
+    injected = sorted({e.subtype for rec in test for e in rec.gt if e.injected})
+    point = sorted(
+        {
+            e.subtype
+            for rec in test
+            for e in rec.gt
+            if e.injected and e.cls is InjectedClass.C2 and e.end_ms is None
+        }
+    )
+    results = {
+        lab: LabelResult(
+            tuple(parts[lab].labelled), parts[lab].excluded, tuple(parts[lab].ambiguous)
+        )
+        for lab in LABELLINGS
+    }
+    return {
+        "primary_labelling": "tight",
+        "injected_subtype_table": subtype_alert_table(results, injected),
+        "ambiguous": ambiguous_summary(parts["tight"].ambiguous),
+        "n_ambiguous": len(parts["tight"].ambiguous),
+        "point_subtypes": point,
+        "headline_for_point_subtypes": "loose",
+        "note": (
+            "ambiguous: the loose rule accepts an injected C2 event that the tight rule rejects only by time (a point or per-tick fault is "
+            "active only at its instant); the alert is excluded from the tight tables and shown with its loose label; for the point "
+            "subtypes the headline figure is the loose one"
+        ),
+    }
 
 
 def _equal_block(
     detector: Any,
-    parts: Mapping[str, tuple[list[LabelledAlert], dict[str, int]]],
+    parts: Mapping[str, _Labelled],
     calibration: Sequence[PatientRecord],
     options: AttributionOptions,
     inputs: Callable[[str, Alert], AlertInputs | None],
@@ -541,7 +604,7 @@ def _equal_block(
     version = _model_version(detector)
     labellings: dict[str, Any] = {}
     for lab in LABELLINGS:
-        cal, cal_excluded = label_records(calibration, lab, options, inputs)
+        cal, cal_excluded, _ = label_records(calibration, lab, options, inputs)
         test = parts[lab][0]
         methods = _methods_in(cal, test)
         if not methods:
@@ -557,6 +620,15 @@ def _equal_block(
             bootstrap=bootstrap,
         )
         labellings[lab]["calibration_excluded"] = cal_excluded
+        labellings[lab]["role_swap"] = S.role_swap_check(
+            cal,
+            test,
+            methods=methods,
+            alphas=options.set_alphas,
+            model_version=version,
+            population="main",
+            bootstrap=bootstrap,
+        )
     return {
         "primary_labelling": "tight",
         "labellings": labellings,
@@ -742,7 +814,7 @@ def _pair_sets(
             "n_calibration_alerts": len(pair_cal),
             "n_test_alerts": len(pair_test),
         }
-    main_cal, _ = label_records(calibration_records, "tight", options, hook)
+    main_cal = label_records(calibration_records, "tight", options, hook).labelled
     methods = _methods_in(pair_cal, pair_test)
     if not methods or not main_cal:
         return {
@@ -777,8 +849,11 @@ def mcnemar_blocks(
             if other == name or theirs.llr is None:
                 continue
             x, y, ids = P.align_directions(outcome.results, theirs.results)
+            only_this, only_other = P.unshared_pairs(outcome.results, theirs.results)
             table = P.pair_direction_mcnemar(x, y)
             versus[other] = {
+                "only_this": only_this,
+                "only_other": only_other,
                 **table,
                 "n_pairs": len(ids),
                 "indicator": "both members point to their own cause",
@@ -825,6 +900,9 @@ def meta_block(
             "primary": "tight",
             "reported_next_to_it": "loose",
             "choice": LABELLING_STATEMENT,
+            "ambiguous": meta["labelling"]["ambiguous"],
+            "point_c2_headline": meta["labelling"]["point_c2_headline"],
+            "loose_after_ms_scope": meta["labelling"]["loose_after_ms_scope"],
             "loose_after_ms": options.loose_after_ms,
             "loose_after_ms_status": AWAITING
             if options.loose_after_ms is None
@@ -840,6 +918,7 @@ def meta_block(
             "guarantee_mondrian": meta["guarantee_mondrian"],
             "assumptions": meta["assumptions"],
             "exchangeability": meta["exchangeability"],
+            "cluster_bootstrap": meta["cluster_bootstrap"],
             "top1_fill": meta["top1_fill"],
             "full_set_fallback": meta["full_set_fallback"],
             "fixed_methods": meta["fixed_methods"],
