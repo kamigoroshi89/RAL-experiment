@@ -733,3 +733,155 @@ def test_the_rule_metadata_is_in_the_file(tmp_path: Path) -> None:
         "pi_designs",
     }
     assert meta["sensitivity_values"]["eps"]["value"] == TEST_VALUES["eps"]
+
+
+# ---- fix round: the ambiguous class, mean_finite, role swap ----------------------------------------------------------------
+
+
+def point_fault_benchmark(tmp_path: Path) -> Path:
+    """The mini benchmark whose p02 day 0 holds a point ``manipulation_failure`` (C2, injected) at 08:00 and a natural C1
+    ``spontaneous_resp`` window 08:05-08:10 (the scenario of the review)."""
+    bench = tmp_path / "bench"
+    shutil.copytree(MINI, bench)
+    path = bench / "truth" / "p02" / "0.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["ground_truth"] = [
+        {
+            "cls": "C2",
+            "subtype": "manipulation_failure",
+            "onset_ms": ms(8),
+            "end_ms": None,
+            "injected": True,
+            "template_id": None,
+            "confounder_group": None,
+        },
+        {
+            "cls": "C1",
+            "subtype": "spontaneous_resp",
+            "onset_ms": ms(8, 5),
+            "end_ms": ms(8, 10),
+            "injected": False,
+            "template_id": "resp",
+            "confounder_group": None,
+        },
+    ]
+    doc["injection_log"] = [
+        {
+            "cls": "C2",
+            "subtype": "manipulation_failure",
+            "onset_ms": ms(8),
+            "end_ms": None,
+            "realised": True,
+            "params": {},
+            "details": {"target": "robot", "templates": ["sched", "resp", "hold"]},
+            "truth_indices": [0],
+            "explains_in_later_days": [],
+        }
+    ]
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return bench
+
+
+def test_the_runner_reports_the_ambiguous_class_and_the_subtype_table(
+    tmp_path: Path,
+) -> None:
+    script = {
+        ("p02", 0): [
+            keyed(
+                p_alert(
+                    ms(8, 10),
+                    "resp",
+                    (0.3, 0.4, 0.3),
+                    cause_set=("manipulation_failure",),
+                ),
+                "r1",
+            )
+        ]
+    }
+    doc = attribution_document()
+    doc["run_options"]["attribution"]["loose_after_ms"] = 24 * H  # TEST VALUE
+    doc["benchmark_manifest"] = str(point_fault_benchmark(tmp_path))
+    m = run(tmp_path, doc, factory(script))
+    labs = m["attribution_log_score"]["ours-s1"]["labellings"]
+    assert (
+        labs["tight"]["resp"]["n_alerts"] == 0
+        and labs["tight"]["excluded"]["ambiguous"] == 1
+    )
+    assert labs["loose"]["resp"]["n_alerts"] == 1
+    block = m["attribution_labelling"]["ours-s1"]
+    table = block["injected_subtype_table"]
+    assert table["manipulation_failure"] == {"tight": 0, "ambiguous": 1, "loose": 1}
+    assert table["replay"] == {
+        "tight": 0,
+        "ambiguous": 0,
+        "loose": 0,
+    }  # zeros are shown
+    assert block["ambiguous"]["manipulation_failure"]["loose_labels"] == {
+        "C2/manipulation_failure": 1
+    }
+    assert "manipulation_failure" in block["point_subtypes"]
+    assert block["headline_for_point_subtypes"] == "loose"
+    sets = m["attribution_sets"]["ours-s1"]["labellings"]
+    assert (
+        sets["tight"] is None
+        or sets["tight"]["overall"]["n"] == 0
+        or "manipulation_failure" not in sets["tight"]["per_true_subtype"]
+    )
+    meta = m["meta"]["attribution"]["labelling"]
+    assert (
+        "loose" in meta["point_c2_headline"]
+        and "C1 and C3" in meta["loose_after_ms_scope"]
+    )
+    assert (
+        m["attribution_labelling"]["B1"] is None
+        if "B1" in m["attribution_labelling"]
+        else True
+    )
+
+
+def test_mean_finite_next_to_a_null_log_score_mean(tmp_path: Path) -> None:
+    script = {
+        ("p05", 0): [
+            keyed(
+                p_alert(
+                    ms(14) + 30_000,
+                    "range",
+                    (0.0, 0.5, 0.5),
+                    cause_set=("hypertensive_spike",),
+                ),
+                "r1",
+            ),
+            keyed(
+                p_alert(
+                    ms(14) + 40_000,
+                    "range",
+                    (0.5, 0.3, 0.2),
+                    cause_set=("hypertensive_spike",),
+                ),
+                "r2",
+            ),
+        ]
+    }
+    m = run(tmp_path, attribution_document(), factory(script))
+    leaf = m["attribution_log_score"]["ours-s1"]["labellings"]["tight"]["templates"][
+        "RANGE"
+    ]
+    assert (
+        leaf["n_alerts"] == 2
+        and leaf["n_zero_probability"] == 1
+        and leaf["mean"]["value"] is None
+    )
+    assert leaf["mean_finite"]["value"] == pytest.approx(-math.log(0.5))
+
+
+def test_the_role_swap_is_reported_next_to_the_equal_coverage(tmp_path: Path) -> None:
+    script, inputs = eq_script()
+    doc = attribution_document(set_alphas=[0.5])
+    doc["split"] = {"train": 0.34, "calibration": 0.33, "test": 0.33}
+    m = run(tmp_path, doc, factory(script, inputs))
+    eq = m["attribution_equal_coverage"]["ours-s1"]["labellings"]["tight"]
+    swap = eq["role_swap"]
+    assert (
+        swap["n_calibration"] == eq["n_test"] and swap["n_test"] == eq["n_calibration"]
+    )
+    assert "role" in swap["population"]

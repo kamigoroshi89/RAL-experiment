@@ -315,7 +315,7 @@ def test_c1_events_use_their_template_and_first_decidable_instant() -> None:
 
 def test_ambiguous_alerts_prefer_injected_events_and_are_otherwise_dropped() -> None:
     """Two compatible events of two classes: if exactly one class is injected it is the cause (the C2 here); if the classes
-    cannot be told apart by that rule the alert is dropped and counted as ambiguous."""
+    cannot be told apart by that rule the alert is dropped and counted as a class conflict."""
     c1 = event("C1", "spontaneous_range", 0, None, "range", injected=False)
     c2 = event("C2", "stuck_at", 0, HOUR)
     ctx = [
@@ -329,7 +329,7 @@ def test_ambiguous_alerts_prefer_injected_events_and_are_otherwise_dropped() -> 
     ].n_compatible == 2
     c1i = event("C1", "hypertensive_spike", 0, None, "range", injected=True)
     res2 = _label([c1i, c2], [a], [T.EventContext(None, None), ctx[1]], "loose")
-    assert res2.labelled == () and res2.excluded["ambiguous"] == 1
+    assert res2.labelled == () and res2.excluded["class_conflict"] == 1
 
 
 def test_predicted_violations_and_cascade_effects_are_folded_by_default() -> None:
@@ -1284,3 +1284,196 @@ def test_a_point_c2_event_is_the_tight_cause_only_at_its_own_instant() -> None:
     assert len(_label([bounce], [at], ctx, "tight").labelled) == 1
     assert _label([bounce], [later], ctx, "tight").labelled == ()
     assert len(_label([bounce], [later], ctx, "loose").labelled) == 1
+
+
+# ---- fix round (review of WS08-T09): the AMBIGUOUS class of the tight labelling, clamp, role swap, minor --------------------
+
+
+def reviewer_scenario() -> tuple[list[GroundTruthEvent], list[T.EventContext], Alert]:
+    """A point ``manipulation_failure`` (C2, injected) at 08:00, a natural C1 ``spontaneous_resp`` window 08:05-08:10 and a RESP alert
+    decided at 08:10; the allowance of the loose labelling is 24 h (a TEST VALUE)."""
+    gt = [
+        event("C2", "manipulation_failure", 8 * HOUR, None, None, injected=True),
+        event(
+            "C1",
+            "spontaneous_resp",
+            8 * HOUR + 5 * 60_000,
+            8 * HOUR + 10 * 60_000,
+            "resp",
+            injected=False,
+        ),
+    ]
+    ctx = [
+        T.EventContext(("sched", "resp", "hold"), "robot"),
+        T.EventContext(None, None),
+    ]
+    return gt, ctx, p_alert(8 * HOUR + 10 * 60_000, "resp", (0.3, 0.4, 0.3), key="r")
+
+
+def test_a_point_c2_fault_makes_the_tight_label_ambiguous_never_c1() -> None:
+    """B1 (decided by gab). The point C2 fault is compatible with the alert under the LOOSE rule (allowance 24 h) and not under the
+    tight one (the window is the instant 08:00); the natural C1 window is compatible with both. Before the fix the tight label was the
+    natural C1 cause. Now the tight label is AMBIGUOUS (its own counted bucket, with the injected subtype and the loose label), and the
+    loose label is ('C2', 'manipulation_failure')."""
+    gt, ctx, a = reviewer_scenario()
+    day = 24 * HOUR
+    tight = _label(gt, [a], ctx, "tight", loose_after_ms=day)
+    loose = _label(gt, [a], ctx, "loose", loose_after_ms=day)
+    assert tight.labelled == ()
+    assert tight.excluded["ambiguous"] == 1
+    (amb,) = tight.ambiguous
+    assert amb.alert is a and amb.template == "resp" and amb.patient_id == "p1"
+    assert amb.injected_subtypes == ("manipulation_failure",)
+    assert (amb.loose_class, amb.loose_subtype) == ("C2", "manipulation_failure")
+    assert [(x.true_class, x.true_subtype) for x in loose.labelled] == [
+        ("C2", "manipulation_failure")
+    ]
+    assert loose.ambiguous == () and loose.excluded["ambiguous"] == 0
+
+
+def test_a_fault_outside_the_data_scope_is_a_definite_non_cause_not_ambiguous() -> None:
+    """The ambiguity is only about TIME (the device is in the scope, the alert is outside the window). An ECG dropout on a COUNT alert is
+    not the cause by scope, so the tight label is the natural C1 cause (the point of the tight labelling), not AMBIGUOUS."""
+    ecg = event("C2", "ble_dropout", 10 * HOUR, 11 * HOUR)
+    natural = event("C1", "spontaneous_count", 10 * HOUR, None, "count", injected=False)
+    ctx = [T.EventContext(("count",), "ecg"), T.EventContext(None, None)]
+    a = p_alert(10 * HOUR + 1, "count", (0.2, 0.7, 0.1))
+    tight = _label([ecg, natural], [a], ctx, "tight")
+    assert [(x.true_class, x.true_subtype) for x in tight.labelled] == [
+        ("C1", "spontaneous_count")
+    ]
+    assert tight.ambiguous == ()
+
+
+def test_a_late_alert_of_a_windowed_fault_in_the_scope_is_ambiguous_too() -> None:
+    """A dropout of the dispenser that ended 30 s before the alert was decided may still be its cause (monitor latency): the tight rule
+    cannot say it is not, so the alert is AMBIGUOUS when the loose rule accepts it."""
+    drop = event("C2", "ble_dropout", 10 * HOUR, 11 * HOUR)
+    ctx = [T.EventContext(("count",), "dispenser")]
+    late = p_alert(11 * HOUR + 30_000, "count", (0.2, 0.7, 0.1))
+    tight = _label([drop], [late], ctx, "tight")
+    assert tight.labelled == () and len(tight.ambiguous) == 1
+    assert (tight.ambiguous[0].loose_class, tight.ambiguous[0].loose_subtype) == (
+        "C2",
+        "ble_dropout",
+    )
+
+
+def test_the_injected_subtype_table_shows_zeros() -> None:
+    """injected subtype x alert count under tight, ambiguous and loose, zeros shown: the reviewer scenario gives
+    manipulation_failure 0 tight, 1 ambiguous, 1 loose; nav_delay (injected, no alert) is 0, 0, 0 and is listed."""
+    gt, ctx, a = reviewer_scenario()
+    both = T.both_labellings(gt, [a], ctx, loose_after_ms=24 * HOUR, patient_id="p1")
+    table = T.subtype_alert_table(both, ["manipulation_failure", "nav_delay"])
+    assert table == {
+        "manipulation_failure": {"tight": 0, "ambiguous": 1, "loose": 1},
+        "nav_delay": {"tight": 0, "ambiguous": 0, "loose": 0},
+    }
+    summary = T.ambiguous_summary(both["tight"].ambiguous)
+    assert summary == {
+        "manipulation_failure": {"n": 1, "loose_labels": {"C2/manipulation_failure": 1}}
+    }
+
+
+def test_the_probability_is_validated_and_clamped() -> None:
+    """I1. A posterior that sums to 1 within 1e-9 may hold 1 + 2e-16 for a class: it is clamped to 1 and nothing raises; a posterior
+    that does not sum to 1 is refused."""
+    items = [labelled("range", (1.0000000000000002, 0.0, 0.0), "C1")]
+    curve = M.attribution_calibration_curve(items, 4)
+    assert curve is not None and sum(b[2] for b in curve["RANGE"]) == 3
+    ls = M.attribution_log_score(items)
+    assert ls is not None and ls["RANGE"] == 0.0
+    br = M.attribution_brier(items)
+    assert br is not None and br["RANGE"] == pytest.approx(0.0, abs=1e-12)
+    with pytest.raises(ValueError, match="sum"):
+        M.attribution_log_score([labelled("range", (0.5, 0.3, 0.3), "C1")])
+
+
+def test_the_role_swap_check_exchanges_calibration_and_test() -> None:
+    """I2. The role-swap check calibrates on the test patients and evaluates on the calibration patients (patient-disjoint), under
+    its own population label; it equals ``equal_coverage`` with the roles exchanged."""
+    cal, test = calibration_part(), make_test_part()
+    swapped = S.role_swap_check(
+        cal,
+        test,
+        methods=("lik",),
+        alphas=(0.5,),
+        model_version="m1",
+        population="main",
+    )
+    direct = S.equal_coverage(
+        test,
+        cal,
+        methods=("lik",),
+        alphas=(0.5,),
+        model_version="m1",
+        population="main role swap",
+        fixed_methods=(),
+    )
+    assert swapped == direct
+    assert swapped["n_calibration"] == len(test) and swapped["n_test"] == len(cal)
+    assert "role" in swapped["population"]
+
+
+def test_the_calibrated_cells_keep_the_per_patient_and_per_subtype_groups() -> None:
+    """I2. ``_cell`` used to discard the summary. The marginal ``lik`` cell of the hand case (test truths a, b, c, a at RANGE and b at
+    SCHED, one alert per patient t1..t5, coverage 1, 1, 0, 1, 1) has per_true_subtype a: 2 alerts, 2 covered, c: 1 alert, 0
+    covered, and per_patient median 1.0 and minimum 0.0."""
+    cell = run_equal()["methods"]["lik"]["alphas"]["0.2"]["marginal"]
+    assert (
+        cell["per_true_subtype"]["a"]["n"] == 2
+        and cell["per_true_subtype"]["a"]["covered"] == 2
+    )
+    assert (
+        cell["per_true_subtype"]["c"]["n"] == 1
+        and cell["per_true_subtype"]["c"]["covered"] == 0
+    )
+    assert (
+        cell["per_patient"]["median_coverage"] == 1.0
+        and cell["per_patient"]["min_coverage"] == 0.0
+    )
+    assert cell["per_patient"]["n_patients"] == 5
+
+
+def test_pairs_matched_by_one_method_only_are_reported(rule) -> None:  # type: ignore[no-untyped-def]
+    ea, eb = count_vector(1.5, 20_000), count_vector(0.0, 5_000)
+    r = {
+        k: P.pair_result(member(k, "A", ea), member(k, "B", eb), rule)
+        for k in ("d1", "d2", "d3")
+    }
+    only_x, only_y = P.unshared_pairs([r["d1"], r["d2"]], [r["d1"], r["d3"]])
+    assert (only_x, only_y) == (["d2"], ["d3"])
+    from ralmon.eval import attribution_report as AR
+
+    a = AR.PairOutcome({}, (r["d1"], r["d2"]), None)
+    b = AR.PairOutcome({}, (r["d1"], r["d3"]), None)
+    got = AR.mcnemar_blocks({"A": a, "B": b})["A"]["vs"]["B"]
+    assert (
+        got["n_pairs"] == 1
+        and got["only_this"] == ["d2"]
+        and got["only_other"] == ["d3"]
+    )
+
+
+def test_a_cascade_effect_is_not_a_candidate_alert_of_a_pair_member() -> None:
+    group = "double_take_vs_bounce"
+    ev = [
+        event("C1", "double_take", 20 * HOUR, None, "count", injected=True, group=group)
+    ]
+    root = p_alert(20 * HOUR + 10_000, "count", (0.3, 0.4, 0.3), key="root")
+    effect = p_alert(
+        20 * HOUR + 5_000, "count", (0.3, 0.4, 0.3), key="eff", caused_by="root"
+    )
+    m = P.match_member(ev, None, [effect, root], group=group)
+    assert m is not None and [a.xi.instance_key for a in m.candidates] == ["root"]
+
+
+def test_the_metadata_states_the_cluster_bootstrap_and_the_role_swap() -> None:
+    meta = S.sets_metadata()
+    assert "only patients that have alerts" in meta["cluster_bootstrap"]
+    assert "role_swap" in meta["exchangeability"]
+    assert (
+        "point" in meta["labelling"]["point_c2_headline"]
+        and "loose" in meta["labelling"]["point_c2_headline"]
+    )
+    assert "C1 and C3" in meta["labelling"]["loose_after_ms_scope"]
