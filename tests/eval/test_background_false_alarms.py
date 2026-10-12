@@ -182,6 +182,11 @@ def test_events_that_a_record_explains_in_a_later_day_are_part_of_its_footprint(
         (2 * D, 2 * D),
     ]
     assert {f.subtype for f in fps} == {"double_take"}
+    # one record, two linked spans: only the window counts as an injection record
+    assert [f.linked for f in sorted(fps, key=lambda f: f.start_ms)] == [False, True, True]
+    bg = PatientBackground(fps, 2, margin_ms=0)
+    assert bg.records("C1/double_take") == (1, 0)
+    assert bg.records("C1/unknown") == (0, 0)
 
 
 # 7
