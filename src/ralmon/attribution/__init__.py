@@ -3,7 +3,9 @@
 The package turns violated verdict records into alerts: ``EvidenceVector`` and its parts (``evidence``), the
 alert tuple (``alert``), the hierarchical rule with abstention (``rule``), the attributor with cascade root-cause
 propagation (``attributor``), the nursing-staff text (``render``) and the evidence extractor (``extract``).
-Helpers outside the contract table (``Decision``, ``AbstentionReason``, ``DeviceProfile`` and ``DeviceCapabilities``
+The likelihood attributor of ADR-074 (``LikelihoodRule``, ``load_likelihood_table``, ``AwaitingValueError``) is in the
+submodule ``ralmon.attribution.likelihood``; ``RuleAttributor`` takes it as its ``rule`` (the hierarchical rule stays the
+default, ``ours-hier``). Helpers outside the contract table (``Decision``, ``AbstentionReason``, ``DeviceProfile`` and ``DeviceCapabilities``
 (also importable from this package root, for ``ralmon.eval.device_capabilities``), ``alert_from_record``,
 ``render_text``, ``empty_evidence``) are importable from the submodules and are not in ``__all__``.
 """

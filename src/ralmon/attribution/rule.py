@@ -28,15 +28,17 @@ never raised: the alert path does not raise on evidence. The four thresholds are
 construction and have no default (H-1): ``hr_coherence_tolerance``, ``ecg_sqi_floor``, ``ppg_sqi_floor`` and
 ``ble_link_quality_floor`` (which must not exceed 1.0, H-2).
 
-``decide`` returns the decision record <kappa, row, reason, decisive fields, unavailable fields> (OP-AR-15); the
-``AttributionRule`` Protocol of the contract has only ``attribute``.
+``decide`` returns the decision record <kappa, row, reason, decisive fields, unavailable fields> (OP-AR-15). The
+``AttributionRule`` Protocol of the contract (``#attribution`` 0.3.0) has ``attribute`` and, next to it, ``posterior``
+and ``posterior_subtypes``, which this rule answers with ``None`` (it is not probabilistic); the likelihood attributor
+of ``ralmon.attribution.likelihood`` (ADR-074) answers them.
 """
 
 from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Final, Protocol
@@ -91,6 +93,15 @@ class AttributionRule(Protocol):
         self, violated: VerdictRecord, evidence: EvidenceVector
     ) -> AttributedCause: ...
 
+    # #attribution 0.3.0 (ADR-074): the probabilistic outputs; None for a rule that has none (HierarchicalRule)
+    def posterior(
+        self, violated: VerdictRecord, evidence: EvidenceVector
+    ) -> Mapping[AttributedCause, float] | None: ...
+
+    def posterior_subtypes(
+        self, violated: VerdictRecord, evidence: EvidenceVector
+    ) -> Mapping[str, float] | None: ...
+
 
 class AbstentionReason(str, Enum):
     """The three reasons of an UNDETERMINED result (section Abstention): rows 8, 6 and 7."""
@@ -107,16 +118,38 @@ class Decision:
     ``evidence_used`` lists the decisive fields in precedence order (AD-17); ``missing`` lists, for an
     UNDETERMINED result of reason ``insufficient``, the fields of the exclusion set (or of the qualifier) that were
     unavailable, in contract order.
+
+    For a decision of the likelihood attributor (``p_kappa`` set) ``evidence_used`` is different: it lists the fields
+    whose reading FAVOURS the class with the largest posterior (empty on a tie), most favourable first; it is not "the
+    fields that decided kappa" and it is not causal (``ralmon.attribution.likelihood``).
     """
 
     kappa: AttributedCause
     row: int | None  # 1 to 8; None for a predicted alert (the rule is not evaluated)
     reason: AbstentionReason | None
-    evidence_used: tuple[str, ...]
+    evidence_used: tuple[
+        str, ...
+    ]  # hierarchical rule: the decisive fields; likelihood rule: the fields that FAVOUR the top class
     missing: tuple[str, ...]
     #: The value of each decisive field (a mapping as sorted pairs), so that the text can state the reading
     #: itself and not only the name of the field: "no intake observed" is not "intake observed".
     readings: tuple[tuple[str, object], ...] = ()
+    # ---- the probabilistic part (ADR-074): None for the hierarchical rule, the predicted decision and a provenance
+    # mismatch. ``row`` and ``reason`` are None for a likelihood decision (they belong to the decision table).
+    #: Class posterior (keys C1, C2, C3; sums to 1) = ``Alert.p_kappa``.
+    p_kappa: Mapping[AttributedCause, float] | None = None
+    #: Subtype posterior over the subtypes applicable at the template (sums to 1).
+    posterior_subtypes: Mapping[str, float] | None = None
+    #: The set of subtype names reported (``Alert.cause_set``): by decreasing probability, ties by name.
+    cause_set: tuple[str, ...] | None = None
+    #: log P(reading class of the field | component): component id -> field -> value (a grouped cell is one
+    #: entry under the key "member+member"). The sum over the fields of a component is log P(e | component).
+    contributions: Mapping[str, Mapping[str, float]] | None = None
+    #: The same for each class: class -> field -> log of the POSTERIOR-weighted mean, over the components of the class,
+    #: of P(reading class | component) (the weights are the posteriors of the components renormalised to the class).
+    class_contributions: Mapping[str, Mapping[str, float]] | None = None
+    #: The declared threshold ``tau`` the label was compared with.
+    abstention_threshold: float | None = None
 
 
 def predicted_decision() -> Decision:
@@ -242,6 +275,25 @@ class HierarchicalRule:
         self, violated: VerdictRecord, evidence: EvidenceVector
     ) -> AttributedCause:
         return self.decide(violated, evidence).kappa
+
+    def posterior(
+        self, violated: VerdictRecord, evidence: EvidenceVector
+    ) -> Mapping[AttributedCause, float] | None:
+        """No probability: the hierarchical rule is a decision table (``#attribution`` 0.3.0)."""
+        return None
+
+    def posterior_subtypes(
+        self, violated: VerdictRecord, evidence: EvidenceVector
+    ) -> Mapping[str, float] | None:
+        """No posterior over subtypes (``#attribution`` 0.3.0)."""
+        return None
+
+    def reading_class(self, path: str, value: object) -> tuple[str, bool]:
+        """The reading class of one field of 0.1.0 (A, D, U, K, F, G) and whether the value was out of domain.
+
+        The likelihood attributor classifies the readings with the same thresholds as this rule (ADR-074).
+        """
+        return self._classify(path, value)
 
     # ---- readings -----------------------------------------------------------------------------------------
 

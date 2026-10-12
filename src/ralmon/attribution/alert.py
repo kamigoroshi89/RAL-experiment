@@ -161,7 +161,8 @@ def alert_from_record(
     """The one function that derives the fields of an ``Alert`` from the record, the decision and the template.
 
     ``decision`` carries the attributed cause and the decisive fields (those of the rule, or those of the root
-    for a cascade effect, or the undetermined decision of a predicted record). ``anchor_ms`` and ``variant``
+    for a cascade effect, or the undetermined decision of a predicted record) and, for the likelihood attributor,
+    the class posterior and the set of subtypes (``Alert.p_kappa``, ``Alert.cause_set``; ``None`` otherwise). ``anchor_ms`` and ``variant``
     (``"likely"`` or ``"possible"`` for a predicted alert) only enter the text.
     """
     from ralmon.attribution.render import render_text
@@ -189,6 +190,8 @@ def alert_from_record(
         priority=as_priority(registry.get(template.priority_param)),
         root_cause_of=tuple(root_cause_of),
         caused_by=caused_by,
+        p_kappa=dict(decision.p_kappa) if decision.p_kappa is not None else None,
+        cause_set=tuple(decision.cause_set) if decision.cause_set is not None else None,
     )
     text = render_text(
         alert,

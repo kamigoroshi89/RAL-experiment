@@ -186,35 +186,61 @@ def reference_posterior(
     prior: Mapping[str, float] | None = None,
     mask: frozenset[str] = frozenset(),
     grouped_off: bool = False,
+    pi_weights: Mapping[str, float] | None = None,
+    cross_device: bool = False,
 ) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
-    """(component, subtype, class) posteriors; pseudo-code of the specification, design ``uniform`` (weight 1 per component)."""
+    """(component, subtype, class) posteriors; pseudo-code of the specification.
+
+    ``pi_weights`` maps a component id to its relative weight inside its class (default 1: the design ``uniform``).
+    ``cross_device`` adds the cross-device group (variant ``reference_plus_cross_device``): the three members are one
+    joint cell at the templates of the group, and the common cause is applicable there as a nuisance component.
+    """
     prior = prior or {c: 1 / 3 for c in CLASSES}
-    comps = applicable(cfg, template)
+    weights = pi_weights or {}
+    comps = list(applicable(cfg, template))
+    cross = cfg["grouped_cells"]["cross_device_signal_quality"]
+    cross_here = cross_device and template in cross["templates"]
+    if cross_here:
+        cause = cross["common_cause"]["component"]
+        if cause not in {c["id"] for c in comps}:
+            comps.append(components_by_id(cfg)[cause])
     support = {c["class"] for c in comps}
     z = sum(prior[c] for c in support)
     reads = cfg["templates"][template]["reads"]
     log_post: dict[str, float] = {}
     for comp in comps:
-        n_class = sum(1 for c in comps if c["class"] == comp["class"])
-        lp = math.log(prior[comp["class"]] / z) + math.log(1 / n_class)
+        class_weight = sum(
+            weights.get(c["id"], 1.0) for c in comps if c["class"] == comp["class"]
+        )
+        share = weights.get(comp["id"], 1.0) / class_weight
+        lp = math.log(prior[comp["class"]] / z) + math.log(share)
         pair = cfg["grouped_cells"]["ble_seq_gap"]["fields"]
-        if (
+        grouped_here = (
             cfg["grouped_cells"]["ble_seq_gap"]["reference_mode"] == "grouped"
             and not grouped_off
-        ):
+        )
+        if grouped_here:
             avail = {f: (None if f in mask else readings.get(f)) for f in pair}
             if any(v is not None for v in avail.values()):
                 lp += math.log(joint_prob(cfg, "ble_seq_gap", comp["id"], avail, par))
+        if cross_here:
+            avail = {
+                f: (None if f in mask else readings.get(f)) for f in cross["fields"]
+            }
+            if any(v is not None for v in avail.values()):
+                lp += math.log(
+                    joint_prob(
+                        cfg, "cross_device_signal_quality", comp["id"], avail, par
+                    )
+                )
         for field in reads:
             reading = readings.get(field)
             if reading is None or field in mask:
                 continue  # unavailable: factor 1
-            if (
-                field in pair
-                and not grouped_off
-                and cfg["grouped_cells"]["ble_seq_gap"]["reference_mode"] == "grouped"
-            ):
+            if field in pair and grouped_here:
                 continue  # the pair is ONE joint cell in the reference
+            if field in cross["fields"] and cross_here:
+                continue  # the cross-device members are one joint cell in the variant
             pa = p_asserted(cfg, comp["id"], field, par)
             lp += math.log(pa if reading == "A" else 1 - pa)
         log_post[comp["id"]] = lp
