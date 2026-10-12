@@ -22,6 +22,22 @@ has no attribution to score, stays in the detection metrics, is left out of the 
 attribution metrics and is counted in ``Matching.unresolved_attribution``. A detector whose detections carry no label gets
 ``None`` from every attribution metric (they do not apply to it).
 
+Per template and background (WS08-T08, ADR-071 (b), ADR-072 (b)). Every metric also exists PER TEMPLATE
+(``template_table``, ``table_template_metric``): the template of a C1 event is its ``template_id``; a C2 event is counted under
+SYS and a C3 event under INT, which are CLASS PROXIES (they carry no template of their own; they are not the violations of the
+SYS and INT templates). The aggregate is the mean over the templates with EQUAL weights, RESP excluded
+(``AGGREGATE_TEMPLATES``; RESP is reported apart), of the templates that have a truth event. One rule makes the leaves of an
+aggregate comparable: for a template WITH events, recall, precision and F1 are 0 when it has no true positive (never missing);
+only the delay is undefined without a match, and the exact list of templates averaged is reported with every leaf
+(``aggregate_templates``). A template without a truth event is undefined (``nan``, ``null`` in the file). Per-template
+PRECISION and F1 exist only for a detector whose detections carry a template (an ``Alert`` with ``tau``): ``TP_t / (TP_t +
+FA_t)`` with ``FA_t`` the unmatched alerts of template ``t`` outside every injection footprint (``ralmon.eval.background``);
+a plain ``Detection`` gets only ``precision_pooled_fa``, ``TP_t / (TP_t + FA)`` with the false alarms pooled over templates,
+which depends on how many events the template has and never enters an aggregate F1. The false-alarm RATE of ADR-071 (b) is
+``FA`` over the patient-time outside the footprints (``table_background_fa_per_day``). An injected C1 subtype is read as an
+EXCESS over the natural background (``excess_table``): events per injection record minus what the natural rate gives for the
+same footprint time (``table_excess_events_per_record``), for the events of the template of the subtype.
+
 The sums of a matching are kept in a table (``Matching.table``, one row per unit of the bootstrap), and every scalar metric
 of the runner is a function of the summed table, so that a bootstrap replicate is a matrix product and the interval of a
 ratio is the interval of the ratio of the resampled sums.
@@ -42,18 +58,23 @@ from numpy.typing import NDArray
 from ralmon.attribution import Alert, AttributedCause, Detection
 from ralmon.benchmark import BenchmarkDay, GroundTruthEvent, InjectedClass
 from ralmon.conformal import PredictedViolation
+from ralmon.eval.background import DAY_MS, PatientBackground
 from ralmon.monitor import VerdictState
 from ralmon.signals import DurationMs, TimeMs
 
 __all__ = [
+    "AGGREGATE_TEMPLATES",
     "CLASSES",
     "COLUMNS",
+    "EXCESS_COLUMNS",
     "LABEL_COLUMNS",
     "STREAM_AVAILABILITY",
     "STREAM_BOOTSTRAP",
     "STREAM_CALIBRATION",
     "STREAM_FORECASTER",
     "STREAM_SPLIT",
+    "TEMPLATES",
+    "TEMPLATE_COLUMNS",
     "BootstrapError",
     "MatchConfig",
     "MatchedPair",
@@ -61,6 +82,7 @@ __all__ = [
     "ReliabilityBin",
     "abstention_rate",
     "accuracy_vs_coverage",
+    "aggregate_templates",
     "attribution_confusion",
     "attribution_macro_f1",
     "bin_index",
@@ -71,6 +93,8 @@ __all__ = [
     "ci_with_report",
     "detection_delay_ms",
     "empirical_coverage",
+    "excess_counts",
+    "excess_table",
     "expected_calibration_error",
     "false_alarms_per_patient_day",
     "first_decidable_ms",
@@ -87,12 +111,22 @@ __all__ = [
     "severity_rank_agreement",
     "table_abstention_rate",
     "table_accuracy_answered",
+    "table_aggregate_metric",
+    "table_background_fa_per_day",
     "table_coverage_answered",
     "table_delay_mean",
     "table_early_fraction",
+    "table_excess_detected",
+    "table_excess_detected_per_record",
+    "table_excess_events",
+    "table_excess_events_per_record",
+    "table_excess_recall",
     "table_fa_per_day",
     "table_macro_f1",
     "table_prf",
+    "table_template_metric",
+    "template_of_event",
+    "template_table",
 ]
 
 # algorithmic labels of the random streams of E2: one integer per component, fixed once, never reused
@@ -570,6 +604,338 @@ def table_accuracy_answered(total: Table) -> float:
     cells = _confusion(total)
     answered = sum(v for (_, p), v in cells.items() if p != "UNDETERMINED")
     return _ratio(sum(cells[(c, c)] for c in CLASSES), answered)
+
+
+# ---- per template, background false alarms, excess (WS08-T08) -------------------------------------------------------------
+
+#: the templates of the benchmark, in the order of the outputs (ADR-072 (b) names RANGE, SCHED, HOLD, COUNT, SYS and INT)
+TEMPLATES: Final[tuple[str, ...]] = (
+    "RANGE",
+    "SCHED",
+    "HOLD",
+    "COUNT",
+    "RESP",
+    "SYS",
+    "INT",
+)
+#: the templates of the equal-weight aggregate: all but RESP (ADR-072 (b): RESP is reported apart)
+AGGREGATE_TEMPLATES: Final[tuple[str, ...]] = tuple(t for t in TEMPLATES if t != "RESP")
+_TEMPLATE_PARTS: Final[tuple[str, ...]] = (
+    "gt",
+    "tp",
+    "fa",
+    "delay_n",
+    "delay_sum_ms",
+    "delay_early_n",
+)
+#: the columns of the per-template table: six counts per template (``<T>_fa`` are the background false alarms of ALERTS whose
+#: ``tau`` is that template; a plain detection has none), then the background false alarms of all detections, the false
+#: alarms that fall in a footprint and the patient-time outside the footprints (in days), shared by all the templates
+TEMPLATE_COLUMNS: Final[tuple[str, ...]] = (
+    *(f"{t}_{c}" for t in TEMPLATES for c in _TEMPLATE_PARTS),
+    "fa_background",
+    "fa_in_footprint",
+    "exposure_days",
+)
+_TCOL: Final[dict[str, int]] = {name: i for i, name in enumerate(TEMPLATE_COLUMNS)}
+#: the columns of the excess table of an injected subtype (events of one template)
+EXCESS_COLUMNS: Final[tuple[str, ...]] = (
+    "records",
+    "events_in",
+    "detected_in",
+    "exposure_in_days",
+    "events_bg",
+    "detected_bg",
+    "exposure_bg_days",
+)
+_XCOL: Final[dict[str, int]] = {name: i for i, name in enumerate(EXCESS_COLUMNS)}
+
+
+def template_of_event(event: GroundTruthEvent) -> str:
+    """The template of a ground-truth event: its ``template_id`` for C1 (upper case), SYS for C2, INT for C3.
+
+    SYS and INT are CLASS PROXIES: a C2 and a C3 event carry no template (``GroundTruthEvent.template_id`` is None), so a C2
+    event is counted under SYS and a C3 event under INT. They are not the violations of the SYS and INT templates."""
+    if event.cls is InjectedClass.C2:
+        return "SYS"
+    if event.cls is InjectedClass.C3:
+        return "INT"
+    name = (event.template_id or "").upper()
+    if name not in TEMPLATES:
+        raise ValueError(
+            f"a C1 event must name one of the templates {TEMPLATES}, got template_id {event.template_id!r}"
+        )
+    return name
+
+
+def _alert_template(item: Detection) -> str | None:
+    """The template of a detection that carries one (an ``Alert``, by ``tau``); None for a plain ``Detection``."""
+    if not isinstance(item, Alert):
+        return None
+    name = str(getattr(item.tau, "value", item.tau)).upper()
+    return name if name in TEMPLATES else None
+
+
+def _check_units(
+    matching: Matching,
+    event_days: Sequence[int],
+    n_units: int,
+    background: PatientBackground | None,
+) -> None:
+    if len(event_days) != len(matching.gt):
+        raise ValueError("event_days must align with the ground truth of the matching")
+    if isinstance(n_units, bool) or not isinstance(n_units, int) or n_units < 1:
+        raise ValueError(f"n_units must be a positive integer, got {n_units!r}")
+    for u in event_days:
+        if not 0 <= u < n_units:
+            raise ValueError(f"unit {u} is outside 0..{n_units - 1}")
+    if background is not None and background.n_days != n_units:
+        raise ValueError(
+            f"the background covers {background.n_days} days but the table has {n_units} units"
+        )
+
+
+def template_table(
+    matching: Matching,
+    event_days: Sequence[int],
+    det_days: Sequence[int],
+    n_units: int,
+    background: PatientBackground | None = None,
+) -> Table:
+    """The per-template sums of a matching, one row per patient-day (``TEMPLATE_COLUMNS``).
+
+    ``event_days`` and ``det_days`` have the meaning they have in ``Matching.table`` (the unit of each ground-truth event
+    and of each detection; -1 for a detection in no unit). A false alarm is a BACKGROUND false alarm when its instant lies
+    in no footprint of ``background`` and a ``fa_in_footprint`` otherwise; with ``background`` None there is no footprint
+    (every false alarm is background and the exposure is the whole time). A background false alarm of an ``Alert`` is also
+    a false alarm of the template ``tau``. Duplicates are not false alarms."""
+    _check_units(matching, event_days, n_units, background)
+    if len(det_days) != len(matching.det):
+        raise ValueError("det_days must align with the detections of the matching")
+    for u in det_days:
+        if not -1 <= u < n_units:
+            raise ValueError(f"unit {u} is outside -1..{n_units - 1}")
+    table = np.zeros((n_units, len(TEMPLATE_COLUMNS)), dtype=np.float64)
+    for i, event in enumerate(matching.gt):
+        table[event_days[i], _TCOL[f"{template_of_event(event)}_gt"]] += 1
+    for p in matching.pairs:
+        u, t = event_days[p.gt_index], template_of_event(p.gt)
+        table[u, _TCOL[f"{t}_tp"]] += 1
+        table[u, _TCOL[f"{t}_delay_n"]] += 1
+        table[u, _TCOL[f"{t}_delay_sum_ms"]] += p.delay_ms
+        if p.delay_ms < 0:
+            table[u, _TCOL[f"{t}_delay_early_n"]] += 1
+    for i in matching.false_alarm_index:
+        if det_days[i] < 0:
+            continue
+        item = matching.det[i]
+        if background is not None and not background.outside(item.t_ms):
+            table[det_days[i], _TCOL["fa_in_footprint"]] += 1
+            continue
+        table[det_days[i], _TCOL["fa_background"]] += 1
+        template = _alert_template(item)
+        if template is not None:
+            table[det_days[i], _TCOL[f"{template}_fa"]] += 1
+    if background is None:
+        table[:, _TCOL["exposure_days"]] = 1.0
+    else:
+        table[:, _TCOL["exposure_days"]] = [
+            x / DAY_MS for x in background.exposure_ms()
+        ]
+    return table
+
+
+def table_template_metric(
+    total: Table, template: str, key: str, *, templated: bool = False
+) -> float:
+    """``recall``, ``precision``, ``f1``, ``precision_pooled_fa``, ``delay_mean`` or ``fraction_early`` of one template, from
+    a summed row.
+
+    ``nan`` when the template has no truth event. For a template WITH events, recall, precision and F1 are 0 when it has no
+    true positive (also when the detector emitted nothing for it): they are never missing, so that the aggregate of every
+    leaf averages the same templates. ``precision`` and ``f1`` exist only for a detector whose detections carry a template
+    (``templated``): ``TP_t / (TP_t + FA_t)`` with ``FA_t`` the background false alarms of the alerts of that template; for
+    a plain detection they are ``nan``. ``precision_pooled_fa`` is ``TP_t / (TP_t + FA)`` with all background false
+    alarms pooled over the templates, true positives counted anywhere and false alarms only outside the footprints: it
+    depends on the number of events of the template as much as on the detector, and never enters an aggregate F1. The
+    delay (``delay_mean``, ``fraction_early``) is ``nan`` without a match."""
+    if template not in TEMPLATES:
+        raise ValueError(f"unknown template {template!r}")
+    n_gt = float(total[_TCOL[f"{template}_gt"]])
+    if n_gt <= 0:
+        return math.nan
+    tp = float(total[_TCOL[f"{template}_tp"]])
+    recall = tp / n_gt
+    if key == "recall":
+        return recall
+    if key == "precision_pooled_fa":
+        return 0.0 if tp <= 0 else tp / (tp + float(total[_TCOL["fa_background"]]))
+    if key in ("precision", "f1"):
+        if not templated:
+            return math.nan
+        precision = (
+            0.0 if tp <= 0 else tp / (tp + float(total[_TCOL[f"{template}_fa"]]))
+        )
+        if key == "precision":
+            return precision
+        return (
+            0.0
+            if precision + recall == 0
+            else 2 * precision * recall / (precision + recall)
+        )
+    n = float(total[_TCOL[f"{template}_delay_n"]])
+    if key == "delay_mean":
+        return _ratio(float(total[_TCOL[f"{template}_delay_sum_ms"]]), n)
+    if key == "fraction_early":
+        return _ratio(float(total[_TCOL[f"{template}_delay_early_n"]]), n)
+    raise ValueError(f"unknown template metric {key!r}")
+
+
+def aggregate_templates(
+    total: Table,
+    key: str,
+    templates: Sequence[str] = AGGREGATE_TEMPLATES,
+    *,
+    templated: bool = False,
+) -> tuple[str, ...]:
+    """The templates that ``table_aggregate_metric`` averages for ``key``: those with a defined value. Recall, precision and
+    F1 are defined for every template with an event (rule of ``table_template_metric``); the delay only for the templates
+    with a match; precision and F1 for no template when the detector is not ``templated``."""
+    return tuple(
+        t
+        for t in templates
+        if not math.isnan(table_template_metric(total, t, key, templated=templated))
+    )
+
+
+def table_aggregate_metric(
+    total: Table,
+    key: str,
+    templates: Sequence[str] = AGGREGATE_TEMPLATES,
+    *,
+    templated: bool = False,
+) -> float:
+    """The equal-weight mean of ``key`` over ``aggregate_templates``; ``nan`` when there is none. RESP is not in the default
+    set (ADR-072 (b)); pass ``templates`` to see what the aggregate would be with it."""
+    used = aggregate_templates(total, key, templates, templated=templated)
+    if not used:
+        return math.nan
+    return sum(
+        table_template_metric(total, t, key, templated=templated) for t in used
+    ) / len(used)
+
+
+def table_background_fa_per_day(total: Table) -> float:
+    """Background false alarms per patient-day of time outside every injection footprint (ADR-071 (b))."""
+    return _ratio(
+        float(total[_TCOL["fa_background"]]), float(total[_TCOL["exposure_days"]])
+    )
+
+
+def excess_table(
+    matching: Matching,
+    event_days: Sequence[int],
+    n_units: int,
+    background: PatientBackground,
+    key: str,
+    template: str,
+) -> Table:
+    """The sums for the excess of the injected subtype ``key`` (``<class>/<subtype>``) over the background, one row per unit.
+
+    The events are the truth events of ``template`` (natural and injected alike) that lie on the scored axis
+    ``[0, n_days * D)`` (the span the exposure covers; an event at the end of the axis, the day-end COUNT of the last day,
+    is in neither count), assigned by their onset: ``*_in`` when it lies in a footprint of the subtype, ``*_bg`` when it lies
+    in no footprint at all (an event in the footprint of another subtype is in neither); ``detected`` counts the matched
+    ones. ``records`` is the number of injection records of the subtype. The exposures are the time inside the footprints of
+    the subtype and the time outside every footprint, in days."""
+    _check_units(matching, event_days, n_units, background)
+    if template not in TEMPLATES:
+        raise ValueError(f"unknown template {template!r}")
+    matched = {p.gt_index for p in matching.pairs}
+    table = np.zeros((n_units, len(EXCESS_COLUMNS)), dtype=np.float64)
+    for i, event in enumerate(matching.gt):
+        if template_of_event(event) != template or not background.on_axis(
+            event.onset_ms
+        ):
+            continue
+        if background.inside(event.onset_ms, key):
+            where = "in"
+        elif background.outside(event.onset_ms):
+            where = "bg"
+        else:
+            continue
+        table[event_days[i], _XCOL[f"events_{where}"]] += 1
+        if i in matched:
+            table[event_days[i], _XCOL[f"detected_{where}"]] += 1
+    table[:, _XCOL["records"]] = background.records(key)
+    table[:, _XCOL["exposure_in_days"]] = [
+        x / DAY_MS for x in background.window_ms(key)
+    ]
+    table[:, _XCOL["exposure_bg_days"]] = [x / DAY_MS for x in background.exposure_ms()]
+    return table
+
+
+def excess_counts(total: Table) -> dict[str, float]:
+    """The columns of a summed excess row by name."""
+    return {name: float(total[i]) for i, name in enumerate(EXCESS_COLUMNS)}
+
+
+def _rates(total: Table, numerator: str) -> tuple[float, float]:
+    inside = _ratio(
+        float(total[_XCOL[f"{numerator}_in"]]), float(total[_XCOL["exposure_in_days"]])
+    )
+    background = _ratio(
+        float(total[_XCOL[f"{numerator}_bg"]]), float(total[_XCOL["exposure_bg_days"]])
+    )
+    return inside, background
+
+
+def _per_record(total: Table, numerator: str) -> float:
+    """``(count in the footprints - background rate x exposure in the footprints) / records``."""
+    records = float(total[_XCOL["records"]])
+    exposure_bg = float(total[_XCOL["exposure_bg_days"]])
+    if records <= 0 or exposure_bg <= 0:
+        return math.nan
+    rate = float(total[_XCOL[f"{numerator}_bg"]]) / exposure_bg
+    expected = rate * float(total[_XCOL["exposure_in_days"]])
+    return (float(total[_XCOL[f"{numerator}_in"]]) - expected) / records
+
+
+def table_excess_events_per_record(total: Table) -> float:
+    """Events of the template per injection record in excess of what the natural background rate gives for the same
+    footprint time. It is the headline figure of the excess: it does not scale with the length of the footprint (a parameter
+    of the experiment), which only enters through the small expected-background term."""
+    return _per_record(total, "events")
+
+
+def table_excess_detected_per_record(total: Table) -> float:
+    """The same for the matched events."""
+    return _per_record(total, "detected")
+
+
+def table_excess_events(total: Table) -> float:
+    """SECONDARY: events per patient-day inside the footprints of the subtype minus the same rate in the windows without
+    injections. It depends on the length of the footprint (the C1 tail and the margin)."""
+    inside, background = _rates(total, "events")
+    return inside - background
+
+
+def table_excess_detected(total: Table) -> float:
+    """SECONDARY: matched events per patient-day inside the footprints minus the same rate outside every footprint."""
+    inside, background = _rates(total, "detected")
+    return inside - background
+
+
+def table_excess_recall(total: Table) -> float:
+    """Recall of the template inside the footprints of the subtype minus its recall outside every footprint (it does not
+    depend on the length of the footprint through an exposure)."""
+    inside = _ratio(
+        float(total[_XCOL["detected_in"]]), float(total[_XCOL["events_in"]])
+    )
+    background = _ratio(
+        float(total[_XCOL["detected_bg"]]), float(total[_XCOL["events_bg"]])
+    )
+    return inside - background
 
 
 # ---- the metric functions of the contract -----------------------------------------------------------------------------

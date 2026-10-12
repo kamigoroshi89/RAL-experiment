@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from ralmon.benchmark.builder import (
         split_patients as split_patients,
     )
+    from ralmon.benchmark.labelling import LINK_TABLE as LINK_TABLE
     from ralmon.benchmark.priors import (
         AdherenceParams,
         DeviceErrorModel,
@@ -65,7 +66,16 @@ _BUILDER_NAMES = frozenset(
 )
 
 
+# ``LINK_TABLE`` (injection subtype to template, the vocabulary of the labeller) is read by ``ralmon.eval``; like the builder
+# names it is importable from the package root and stays outside ``__all__`` (WS08-T08).
+_LABELLING_NAMES = frozenset({"LINK_TABLE"})
+
+
 def __getattr__(name: str) -> Any:
+    if name in _LABELLING_NAMES:
+        value = getattr(importlib.import_module("ralmon.benchmark.labelling"), name)
+        globals()[name] = value
+        return value
     if name in _PRIORS_NAMES:
         value = getattr(importlib.import_module("ralmon.benchmark.priors"), name)
         globals()[name] = value

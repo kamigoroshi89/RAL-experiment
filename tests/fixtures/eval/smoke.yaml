@@ -26,6 +26,10 @@ run_options:
   registry: registry.yaml                    # the fixture registry, relative to this file
   allow_fixture_only: true
   required_analysis: []
+  background:                                # WS08-T08; test values, none is a clinical value or a proposal
+    c1_footprint_tail_ms: 3600000            # test value: 1 h of tail after a C1 injection window
+    c1_footprint_tail_reason: "test value without a source, written for the smoke run; not a clinical value"
+    footprint_margin_ms: 60000               # test value: one monitor step (equal to the matching tolerance)
   detector_params:
     timing_tail_ms: 90000000                 # test value: 25 h, long enough for the day-end COUNT
     forecaster: {continuous: persistence}
