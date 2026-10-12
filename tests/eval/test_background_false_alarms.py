@@ -183,7 +183,11 @@ def test_events_that_a_record_explains_in_a_later_day_are_part_of_its_footprint(
     ]
     assert {f.subtype for f in fps} == {"double_take"}
     # one record, two linked spans: only the window counts as an injection record
-    assert [f.linked for f in sorted(fps, key=lambda f: f.start_ms)] == [False, True, True]
+    assert [f.linked for f in sorted(fps, key=lambda f: f.start_ms)] == [
+        False,
+        True,
+        True,
+    ]
     bg = PatientBackground(fps, 2, margin_ms=0)
     assert bg.records("C1/double_take") == (1, 0)
     assert bg.records("C1/unknown") == (0, 0)
@@ -309,7 +313,9 @@ def test_natural_events_are_truth_and_noise_alarms_are_false_alarms() -> None:
     from ralmon.eval.metrics import table_template_metric
 
     assert table_template_metric(total, "RANGE", "recall") == 1.0
-    assert table_template_metric(total, "RANGE", "precision") == 0.5  # 1 / (1 + 1)
+    assert (
+        table_template_metric(total, "RANGE", "precision_pooled_fa") == 0.5
+    )  # 1 / (1 + 1)
 
 
 def test_a_detection_matched_to_an_injected_event_inside_its_window_is_a_true_positive_not_a_false_alarm() -> (

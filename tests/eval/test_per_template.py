@@ -156,7 +156,9 @@ def test_metrics_are_available_per_template(tmp_path: Path) -> None:
         assert e["recall"]["value"] == pytest.approx(recall), name
         assert set(e["recall"]) == SCALAR
         if delay is None:
-            assert e["delay_ms"]["mean"]["value"] is None  # nothing matched: no delay, not zero
+            assert (
+                e["delay_ms"]["mean"]["value"] is None
+            )  # nothing matched: no delay, not zero
         else:
             assert e["delay_ms"]["mean"]["value"] == pytest.approx(delay), name
         assert e["delay_ms"]["n_matched"] == n_tp
@@ -210,7 +212,10 @@ def test_templated_detector_gets_precision_and_f1_per_template(tmp_path: Path) -
         assert e["f1"]["value"] == pytest.approx(f1), name
         assert e["precision_pooled_fa"]["value"] == pytest.approx(pooled), name
         assert set(e["precision"]) >= SCALAR
-    assert block["resp"]["precision"]["value"] == 0.0 and block["resp"]["f1"]["value"] == 0.0
+    assert (
+        block["resp"]["precision"]["value"] == 0.0
+        and block["resp"]["f1"]["value"] == 0.0
+    )
     assert t["HOLD"]["precision"] is None  # no truth event
     agg = block["aggregate"]
     assert agg["precision"]["value"] == pytest.approx(7 / 30)
@@ -221,7 +226,9 @@ def test_templated_detector_gets_precision_and_f1_per_template(tmp_path: Path) -
     for key in ("precision", "recall", "f1"):
         assert agg[key]["templates_averaged"] == every, key
     assert agg["delay_ms_mean"]["templates_averaged"] == ["RANGE", "SCHED"]
-    assert "pooled" not in json.dumps(agg)  # the pooled-FA precision does not enter the aggregate
+    assert "pooled" not in json.dumps(
+        agg
+    )  # the pooled-FA precision does not enter the aggregate
 
 
 def test_a_plain_detector_has_no_aggregate_precision_or_f1_but_has_recall_and_delay(
@@ -236,18 +243,40 @@ def test_a_plain_detector_has_no_aggregate_precision_or_f1_but_has_recall_and_de
     assert agg["weights"] == "equal"
     assert agg["precision"] is None and agg["f1"] is None
     assert agg["recall"]["value"] == pytest.approx(0.8)
-    assert agg["recall"]["templates_averaged"] == ["RANGE", "SCHED", "COUNT", "SYS", "INT"]
+    assert agg["recall"]["templates_averaged"] == [
+        "RANGE",
+        "SCHED",
+        "COUNT",
+        "SYS",
+        "INT",
+    ]
     assert agg["delay_ms_mean"]["value"] == pytest.approx(-3750.0)
-    assert agg["delay_ms_mean"]["templates_averaged"] == ["RANGE", "SCHED", "COUNT", "SYS"]
+    assert agg["delay_ms_mean"]["templates_averaged"] == [
+        "RANGE",
+        "SCHED",
+        "COUNT",
+        "SYS",
+    ]
     assert set(agg["recall"]) >= SCALAR
 
 
 def test_a_template_with_no_truth_event_is_null_not_zero() -> None:
     total = row(RANGE_gt=3, RANGE_tp=1, RANGE_fa=2, fa_background=2, exposure_days=4)
     assert table_template_metric(total, "RANGE", "recall") == pytest.approx(1 / 3)
-    assert table_template_metric(total, "RANGE", "precision", templated=True) == pytest.approx(1 / 3)
-    for key in ("precision", "recall", "f1", "precision_pooled_fa", "delay_mean", "fraction_early"):
-        assert math.isnan(table_template_metric(total, "HOLD", key, templated=True)), key
+    assert table_template_metric(
+        total, "RANGE", "precision", templated=True
+    ) == pytest.approx(1 / 3)
+    for key in (
+        "precision",
+        "recall",
+        "f1",
+        "precision_pooled_fa",
+        "delay_mean",
+        "fraction_early",
+    ):
+        assert math.isnan(table_template_metric(total, "HOLD", key, templated=True)), (
+            key
+        )
     # a template that has events but no match: recall, precision and F1 are 0, the delay is undefined
     missed = row(SCHED_gt=2, SCHED_fa=1, fa_background=1)
     for key in ("recall", "precision", "f1", "precision_pooled_fa"):
@@ -280,8 +309,13 @@ def test_alert_false_alarms_are_attributed_to_the_template_of_the_alert() -> Non
         det(15 * H),
     ]
     matching = match_events([], dets, CFG, n_days=1)
-    table = template_table(matching, [], [0, 0, 0], 1, PatientBackground((), 1, margin_ms=0))
-    cols = {name: float(table[:, TEMPLATE_COLUMNS.index(name)].sum()) for name in TEMPLATE_COLUMNS}
+    table = template_table(
+        matching, [], [0, 0, 0], 1, PatientBackground((), 1, margin_ms=0)
+    )
+    cols = {
+        name: float(table[:, TEMPLATE_COLUMNS.index(name)].sum())
+        for name in TEMPLATE_COLUMNS
+    }
     assert cols["SCHED_fa"] == 1 and cols["SYS_fa"] == 1 and cols["RANGE_fa"] == 0
     assert cols["fa_background"] == 3
 
@@ -309,7 +343,9 @@ def test_per_template_counts_of_a_matching_by_hand() -> None:
     assert table_template_metric(total, "SYS", "delay_mean") == -40_000.0
     assert table_template_metric(total, "SYS", "fraction_early") == 1.0
     assert table_template_metric(total, "RANGE", "fraction_early") == 0.0
-    assert table_template_metric(total, "RANGE", "precision_pooled_fa") == 0.5  # 1 / (1 + 1)
+    assert (
+        table_template_metric(total, "RANGE", "precision_pooled_fa") == 0.5
+    )  # 1 / (1 + 1)
 
 
 # 2
@@ -325,12 +361,20 @@ def test_aggregate_is_the_equal_weight_mean_of_the_templates_without_resp() -> N
     )  # fmt: skip
     without = table_aggregate_metric(total, "recall")
     assert without == pytest.approx(17 / 30)
-    with_resp = table_aggregate_metric(total, "recall", templates=(*AGGREGATE_TEMPLATES, "RESP"))
+    with_resp = table_aggregate_metric(
+        total, "recall", templates=(*AGGREGATE_TEMPLATES, "RESP")
+    )
     assert with_resp == pytest.approx(17 / 36)
     assert without - with_resp == pytest.approx(17 / 180)
     pooled = (2 + 2 + 0 + 1 + 5) / (4 + 2 + 1 + 3 + 5)
     assert pooled == pytest.approx(2 / 3) and without != pytest.approx(pooled)
-    assert aggregate_templates(total, "recall") == ("RANGE", "SCHED", "HOLD", "COUNT", "SYS")
+    assert aggregate_templates(total, "recall") == (
+        "RANGE",
+        "SCHED",
+        "HOLD",
+        "COUNT",
+        "SYS",
+    )
 
 
 def test_aggregate_f1_is_the_mean_of_the_template_f1_and_delay_the_mean_of_the_template_delays() -> (
@@ -341,8 +385,12 @@ def test_aggregate_f1_is_the_mean_of_the_template_f1_and_delay_the_mean_of_the_t
         RANGE_gt=2, RANGE_tp=1, RANGE_fa=1, RANGE_delay_n=1, RANGE_delay_sum_ms=1000,
         SYS_gt=1, SYS_tp=1, SYS_fa=1, SYS_delay_n=1, SYS_delay_sum_ms=-3000, fa_background=2, exposure_days=1,
     )  # fmt: skip
-    assert table_aggregate_metric(total, "f1", templated=True) == pytest.approx((1 / 2 + 2 / 3) / 2)
-    assert table_aggregate_metric(total, "delay_mean") == pytest.approx((1000 - 3000) / 2)  # equal weights, not pooled
+    assert table_aggregate_metric(total, "f1", templated=True) == pytest.approx(
+        (1 / 2 + 2 / 3) / 2
+    )
+    assert table_aggregate_metric(total, "delay_mean") == pytest.approx(
+        (1000 - 3000) / 2
+    )  # equal weights, not pooled
 
 
 # I1: the reviewer's scenario
@@ -354,7 +402,15 @@ def test_aggregate_f1_averages_every_template_with_events_and_one_false_alarm_do
     (2/3) / 6 = 1/9, NOT the 2/3 of RANGE alone. One background false alarm of RANGE: precision 5/6, F1 = 2 (5/6)(1/2) /
     (5/6 + 1/2) = 5/8, aggregate 5/48 = 0.1041...: the aggregate moves by a factor 0.9375, not sixfold. A false alarm of
     SCHED leaves the aggregate F1 unchanged (SCHED has no true positive: F1 0 with or without it)."""
-    base = dict(RANGE_gt=10, RANGE_tp=5, SCHED_gt=2, HOLD_gt=2, COUNT_gt=2, SYS_gt=2, INT_gt=2)
+    base = {
+        "RANGE_gt": 10,
+        "RANGE_tp": 5,
+        "SCHED_gt": 2,
+        "HOLD_gt": 2,
+        "COUNT_gt": 2,
+        "SYS_gt": 2,
+        "INT_gt": 2,
+    }
     every = ("RANGE", "SCHED", "HOLD", "COUNT", "SYS", "INT")
     clean = row(**base, exposure_days=5)
     f1 = table_aggregate_metric(clean, "f1", templated=True)
@@ -369,8 +425,12 @@ def test_aggregate_f1_averages_every_template_with_events_and_one_false_alarm_do
     other = row(**base, SCHED_fa=1, fa_background=1, exposure_days=5)
     assert table_aggregate_metric(other, "f1", templated=True) == pytest.approx(1 / 9)
     # the precision average also keeps all six templates: (1 + 0 * 5) / 6, and with the false alarm (5/6) / 6
-    assert table_aggregate_metric(clean, "precision", templated=True) == pytest.approx(1 / 6)
-    assert table_aggregate_metric(one_fa, "precision", templated=True) == pytest.approx(5 / 36)
+    assert table_aggregate_metric(clean, "precision", templated=True) == pytest.approx(
+        1 / 6
+    )
+    assert table_aggregate_metric(one_fa, "precision", templated=True) == pytest.approx(
+        5 / 36
+    )
 
 
 def test_aggregate_is_undefined_when_no_template_has_an_event_and_resp_alone_does_not_make_one() -> (
@@ -378,7 +438,9 @@ def test_aggregate_is_undefined_when_no_template_has_an_event_and_resp_alone_doe
 ):
     assert math.isnan(table_aggregate_metric(row(), "recall"))
     only_resp = row(RESP_gt=3, RESP_tp=3, fa_background=1, exposure_days=1)
-    assert math.isnan(table_aggregate_metric(only_resp, "recall"))  # RESP is not in the aggregate
+    assert math.isnan(
+        table_aggregate_metric(only_resp, "recall")
+    )  # RESP is not in the aggregate
     assert table_template_metric(only_resp, "RESP", "recall") == 1.0
 
 
@@ -408,7 +470,9 @@ def test_every_detector_gets_a_per_template_entry_even_a_scripted_one_with_no_de
     m = read_metrics(run_doc(tmp_path, hand_document(), factory_for({}))[0])
     t = m["per_template"]["ours-s1"]["templates"]
     assert t["RANGE"]["recall"]["value"] == 0.0
-    assert t["RANGE"]["precision_pooled_fa"]["value"] == 0.0  # events but no true positive: 0
+    assert (
+        t["RANGE"]["precision_pooled_fa"]["value"] == 0.0
+    )  # events but no true positive: 0
     assert t["RANGE"]["precision"] is None  # no detection carries a template
     assert t["RANGE"]["delay_ms"]["mean"]["value"] is None
     assert "NaN" not in json.dumps(m)
@@ -494,9 +558,13 @@ def test_the_excess_per_record_hardly_moves_with_the_footprint_length_the_rate_p
 def test_an_event_at_the_end_of_the_scored_axis_is_in_no_excess_count() -> None:
     """The exposure covers [0, n_days * D); an event whose onset is exactly n_days * D (the day-end COUNT of the last day, a
     closing-step event) is outside the axis and is counted neither inside the footprints nor in the background."""
-    bg = PatientBackground((Footprint("double_take", "C1", 20 * H, 2 * D), ), 2, margin_ms=0)
+    bg = PatientBackground(
+        (Footprint("double_take", "C1", 20 * H, 2 * D),), 2, margin_ms=0
+    )
     gt = [
-        event("C1", "count", 2 * D, 2 * D, injected=True),  # onset on the axis end; the footprint reaches it
+        event(
+            "C1", "count", 2 * D, 2 * D, injected=True
+        ),  # onset on the axis end; the footprint reaches it
         event("C1", "count", 10 * H, injected=False),  # a real background event
     ]
     matching = match_events(gt, [], CFG, n_days=2)
@@ -504,7 +572,9 @@ def test_an_event_at_the_end_of_the_scored_axis_is_in_no_excess_count() -> None:
     counts = excess_counts(total)
     assert counts["events_in"] == 0 and counts["events_bg"] == 1
     outside = PatientBackground((), 2, margin_ms=0)
-    total = excess_table(matching, [1, 0], 2, outside, "C1/double_take", "COUNT").sum(axis=0)
+    total = excess_table(matching, [1, 0], 2, outside, "C1/double_take", "COUNT").sum(
+        axis=0
+    )
     assert excess_counts(total)["events_bg"] == 1  # not 2
 
 
@@ -531,19 +601,33 @@ def test_excess_over_background() -> None:
     total = injected.sum(axis=0)
     assert table_excess_events_per_record(total) == pytest.approx(17 / 18)
     lo, hi = bootstrap_statistic(
-        injected, table_excess_events_per_record, n_resamples=200, level=0.95, seed=3, clusters=patients
+        injected,
+        table_excess_events_per_record,
+        n_resamples=200,
+        level=0.95,
+        seed=3,
+        clusters=patients,
     )
     assert 0 < lo <= 17 / 18 <= hi
 
     none = table([0, 1, 0, 1, 0, 1, 0, 1], [4, 5, 4, 5, 4, 5, 4, 5])
-    assert table_excess_events_per_record(none.sum(axis=0)) == pytest.approx(0.0, abs=1e-12)
+    assert table_excess_events_per_record(none.sum(axis=0)) == pytest.approx(
+        0.0, abs=1e-12
+    )
     lo, hi = bootstrap_statistic(
-        none, table_excess_events_per_record, n_resamples=200, level=0.95, seed=3, clusters=patients
+        none,
+        table_excess_events_per_record,
+        n_resamples=200,
+        level=0.95,
+        seed=3,
+        clusters=patients,
     )
     assert lo < 0 < hi
 
 
-def test_excess_is_undefined_without_exposure_or_without_events_or_without_records() -> None:
+def test_excess_is_undefined_without_exposure_or_without_events_or_without_records() -> (
+    None
+):
     total = np.zeros(len(EXCESS_COLUMNS))
     for stat in (
         table_excess_events,
@@ -570,7 +654,9 @@ def spike_bench(tmp_path: Path, record: dict[str, object]) -> Path:
     return bench
 
 
-def test_the_runner_reports_the_excess_of_an_injected_c1_subtype(tmp_path: Path) -> None:
+def test_the_runner_reports_the_excess_of_an_injected_c1_subtype(
+    tmp_path: Path,
+) -> None:
     """The mini benchmark with a spike record covering 13:00-15:00 of p05 day 0 (the RANGE event at 14:00 of that patient
     is in the footprint; the RANGE event of p01 at 14:00 is outside every footprint). Both are detected by SCRIPT.
     Footprint: 1 record, 1 event, 1 detected, 2 H = 1/12 day; outside: 1 event, 1 detected, 12 - 1/12 = 143/12 days.
@@ -579,7 +665,9 @@ def test_the_runner_reports_the_excess_of_an_injected_c1_subtype(tmp_path: Path)
     bench = spike_bench(
         tmp_path, entry("C1", "hypertensive_spike", ms(13), ms(15), truth_indices=(0,))
     )
-    m = read_metrics(run_doc(tmp_path, background_document(bench), factory_for(SCRIPT))[0])
+    m = read_metrics(
+        run_doc(tmp_path, background_document(bench), factory_for(SCRIPT))[0]
+    )
     block = m["background"]["excess_over_background"]["ours-s1"]["hypertensive_spike"]
     assert block["template"] == "RANGE"
     assert block["events_per_record"]["value"] == pytest.approx(142 / 143)
@@ -596,7 +684,7 @@ def test_the_runner_reports_the_excess_of_an_injected_c1_subtype(tmp_path: Path)
     assert "secondary" in block["note"] and "footprint" in block["note"]
     meta = m["meta"]["background"]
     assert "ci_cluster" in meta["excess_interval_note"]
-    assert "time of day" in meta["excess_counterfactual_note"]
+    assert "time-of-day" in meta["excess_counterfactual_note"]
     assert "NaN" not in json.dumps(m)
 
 
@@ -609,7 +697,9 @@ def test_the_template_of_an_excess_subtype_comes_from_the_builder_vocabulary_not
     bench = spike_bench(
         tmp_path, entry("C1", "drug_nonresponse", ms(13), ms(15), truth_indices=())
     )
-    m = read_metrics(run_doc(tmp_path, background_document(bench), factory_for(SCRIPT))[0])
+    m = read_metrics(
+        run_doc(tmp_path, background_document(bench), factory_for(SCRIPT))[0]
+    )
     block = m["background"]["excess_over_background"]["ours-s1"]["drug_nonresponse"]
     assert block["template"] == "RESP"
     assert block["counts"]["n_injection_records"] == 1
@@ -624,5 +714,7 @@ def test_the_template_of_an_excess_subtype_comes_from_the_builder_vocabulary_not
 def test_a_benchmark_without_injected_c1_records_has_an_empty_excess_block(
     tmp_path: Path,
 ) -> None:
-    m = read_metrics(run_doc(tmp_path, background_document(None), factory_for(SCRIPT))[0])
+    m = read_metrics(
+        run_doc(tmp_path, background_document(None), factory_for(SCRIPT))[0]
+    )
     assert m["background"]["excess_over_background"]["ours-s1"] == {}

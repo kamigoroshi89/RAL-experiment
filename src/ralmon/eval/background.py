@@ -53,13 +53,15 @@ _CLASSES: Final[tuple[str, ...]] = ("C1", "C2", "C3")
 class Footprint:
     """A closed interval ``[start_ms, end_ms]`` of the patient's continuing axis on which an injection acts.
 
-    ``axis`` is always ``"t_rx"`` (module docstring)."""
+    ``axis`` is always ``"t_rx"`` (module docstring). ``linked`` is False for the window of an injection record (the record is
+    counted once, by this footprint) and True for the span of an event that the record explains."""
 
     subtype: str
     cls: str
     start_ms: int
     end_ms: int
     axis: str = "t_rx"
+    linked: bool = False
 
     def __post_init__(self) -> None:
         if self.end_ms < self.start_ms:
@@ -115,18 +117,21 @@ def record_footprint(
     end = onset if raw_end is None else _need_int(raw_end, "end_ms")
     if cls == "C1":
         end += c1_tail_ms
-    spans = [(onset, end)]
+    linked: list[tuple[int, int]] = []
     for index in entry.get("truth_indices", ()):
-        spans.append(_span(truth_by_day, day_index, _need_int(index, "truth_indices")))
+        linked.append(_span(truth_by_day, day_index, _need_int(index, "truth_indices")))
     for item in entry.get("explains_in_later_days", ()):
-        spans.append(
+        linked.append(
             _span(
                 truth_by_day,
                 _need_int(item["day_index"], "day_index"),
                 _need_int(item["truth_index"], "truth_index"),
             )
         )
-    return tuple(Footprint(subtype, cls, a, b) for a, b in spans)
+    return (
+        Footprint(subtype, cls, onset, end),
+        *(Footprint(subtype, cls, a, b, linked=True) for a, b in linked),
+    )
 
 
 def patient_footprints(
@@ -188,14 +193,20 @@ class PatientBackground:
         self.margin_ms = margin_ms
         self.day_ms = day_ms
         axis_end = n_days * day_ms
+        self._axis_end = axis_end
         by_key: dict[str, list[tuple[int, int]]] = {}
+        records: dict[str, list[int]] = {}
         for fp in self.footprints:
+            if not fp.linked and 0 <= fp.start_ms < axis_end:
+                days = records.setdefault(subtype_key(fp), [0] * n_days)
+                days[fp.start_ms // day_ms] += 1
             lo, hi = (
                 max(0, fp.start_ms - margin_ms),
                 min(axis_end, fp.end_ms + margin_ms),
             )
             if lo <= hi:
                 by_key.setdefault(subtype_key(fp), []).append((lo, hi))
+        self._records = {k: tuple(v) for k, v in records.items()}
         self._all = _merge([x for xs in by_key.values() for x in xs])
         self._by_key = {k: _merge(v) for k, v in by_key.items()}
         self._key_starts = {k: [a for a, _ in v] for k, v in self._by_key.items()}
@@ -212,6 +223,15 @@ class PatientBackground:
                 if hi > lo:
                     covered[d] += hi - lo
         return tuple(covered)
+
+    def on_axis(self, t_ms: int) -> bool:
+        """True when ``t_ms`` lies on the scored axis ``[0, n_days * day_ms)``, the span that the exposure covers."""
+        return 0 <= t_ms < self._axis_end
+
+    def records(self, key: str) -> tuple[int, ...]:
+        """Per scored day, the number of injection records of the subtype ``key`` whose window starts that day (a linked
+        span of an explained event is not a record)."""
+        return self._records.get(key, (0,) * self.n_days)
 
     @property
     def keys(self) -> tuple[str, ...]:

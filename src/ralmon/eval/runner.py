@@ -99,6 +99,7 @@ from ralmon.baselines import (
     B5ConformalSTL,
 )
 from ralmon.benchmark import (
+    LINK_TABLE,
     BenchmarkDay,
     GroundTruthEvent,
     ObservedDay,
@@ -116,10 +117,12 @@ from ralmon.eval.metrics import (
     TEMPLATES,
     MatchConfig,
     Matching,
+    aggregate_templates,
     bin_index,
     bootstrap_weights,
     ci_with_report,
     empirical_coverage,
+    excess_counts,
     excess_table,
     expected_calibration_error,
     latency_percentiles,
@@ -135,7 +138,9 @@ from ralmon.eval.metrics import (
     table_delay_mean,
     table_early_fraction,
     table_excess_detected,
+    table_excess_detected_per_record,
     table_excess_events,
+    table_excess_events_per_record,
     table_excess_recall,
     table_fa_per_day,
     table_macro_f1,
@@ -1799,88 +1804,163 @@ RESP_EXCLUSION_REASON: Final[str] = (
     "mostly an artefact of the specification (the drug swing between trough and peak is below delta_resp) and RESP "
     "recognises non-response at chance level (AUC 0.55 per dose, ADR-072 context); it is reported apart, per template"
 )
+CLASS_PROXIES: Final[dict[str, str]] = {"SYS": "C2 events", "INT": "C3 events"}
+CLASS_PROXY_NOTE: Final[str] = (
+    "SYS means the C2 events and INT the C3 events: class proxies (the ground truth gives C2 and C3 events no template), "
+    "not the violations of the SYS and INT templates"
+)
+AVERAGE_RULE: Final[str] = (
+    "Every aggregate leaf is the equal-weight mean, over the templates listed in its own templates_averaged, of the "
+    "per-template value. Recall, precision and F1 of a template WITH events are 0 when it has no true positive (never "
+    "missing), so these three leaves average the same templates: the templates with a truth event, RESP excluded. The "
+    "delay is undefined without a match: its leaf averages the templates with at least one match. In a bootstrap "
+    "replicate a template without an event in the resample is left out of that replicate"
+)
+PRECISION_RULE: Final[str] = (
+    "Per-template precision (TP_t / (TP_t + FA_t), FA_t the unmatched alerts of template t outside every injection "
+    "footprint) and F1 exist only for a detector whose detections carry a template (Alert.tau); they are 0 for a "
+    "template with events and no true positive, null for a plain Detection (B1 to B5 emit plain detections; ours emits "
+    "Alerts), and so are the aggregate precision and F1. The aggregate recall and delay exist for every detector"
+)
+PRECISION_POOLED_FA_NOTE: Final[str] = (
+    "precision_pooled_fa is TP_t / (TP_t + FA) with the background false alarms of all detections pooled over the "
+    "templates, true positives counted anywhere (inside footprints too) and false alarms only outside the footprints; it "
+    "depends on how many events the template has as much as on the detector, and it never enters an aggregate F1"
+)
+EXCESS_INTERVAL_NOTE: Final[str] = (
+    "of the excess leaves only the cluster intervals ci_cluster_lo and ci_cluster_hi (patients resampled) are usable: the "
+    "patient-day intervals ci_lo and ci_hi treat the days of a patient as independent"
+)
+EXCESS_COUNTERFACTUAL_NOTE: Final[str] = (
+    "the counterfactual is the natural rate in the windows without injections; it ignores the time-of-day structure "
+    "(natural RANGE and HOLD events cluster near the dosing times), so it is a fair counterfactual only if the injection "
+    "windows are placed like the rest of the day"
+)
+EXCESS_NOTE: Final[str] = (
+    "events_per_record and detected_per_record are the excess count per injection record: (events in the footprints - "
+    "background rate x exposure in the footprints) / records; the per_patient_day figures are secondary and depend on the "
+    "footprint (the C1 tail and the margin)"
+)
 
 
 def _tcol(name: str) -> int:
     return TEMPLATE_COLUMNS.index(name)
 
 
-def _template_stat(template: str, key: str) -> Callable[[np.ndarray], float]:
+def _template_stat(
+    template: str, key: str, templated: bool
+) -> Callable[[np.ndarray], float]:
     def stat(row: np.ndarray) -> float:
-        return table_template_metric(row, template, key)
+        return table_template_metric(row, template, key, templated=templated)
 
     return stat
 
 
-def _aggregate_stat(key: str) -> Callable[[np.ndarray], float]:
+def _aggregate_stat(key: str, templated: bool) -> Callable[[np.ndarray], float]:
     def stat(row: np.ndarray) -> float:
-        return table_aggregate_metric(row, key)
+        return table_aggregate_metric(row, key, templated=templated)
 
     return stat
+
+
+def _is_templated(inst: _Instance) -> bool:
+    """Whether the detections of an instance carry a template: the proposed method (alerts), or every emitted detection is
+    an ``Alert``. A detector that emits plain detections, or nothing and is not the proposed method, is not templated."""
+    if isinstance(inst.detector, OursDetector):
+        return True
+    items = [d for ds in inst.detections.values() for d in ds]
+    return bool(items) and all(isinstance(d, Alert) for d in items)
 
 
 def _template_block(
-    table: np.ndarray, weights: _Weights, template: str, label: str
+    table: np.ndarray,
+    weights: _Weights,
+    template: str,
+    label: str,
+    templated: bool,
 ) -> dict[str, Any]:
-    """The metrics of one template (``null`` leaves for a template without a truth event, never 0 and never NaN)."""
+    """The metrics of one template (``null`` leaves for a template without a truth event, never NaN)."""
     total = table.sum(axis=0)
     n_events = round(float(total[_tcol(f"{template}_gt")]))
     n_matched = round(float(total[_tcol(f"{template}_tp")]))
+    proxy: dict[str, Any] = {"class_proxy": True} if template in CLASS_PROXIES else {}
     if n_events == 0:
         return {
             "n_events": 0,
             "n_matched": n_matched,
             "precision": None,
+            "precision_pooled_fa": None,
             "recall": None,
             "f1": None,
             "delay_ms": None,
+            **proxy,
         }
 
     def leaf(key: str) -> dict[str, Any]:
         return weights.scalar(
-            table, _template_stat(template, key), f"{label}.{template}.{key}"
+            table,
+            _template_stat(template, key, templated),
+            f"{label}.{template}.{key}",
         )
 
     return {
         "n_events": n_events,
         "n_matched": n_matched,
-        "precision": leaf("precision"),
+        "precision": leaf("precision") if templated else None,
+        "precision_pooled_fa": leaf("precision_pooled_fa"),
         "recall": leaf("recall"),
-        "f1": leaf("f1"),
+        "f1": leaf("f1") if templated else None,
         "delay_ms": {
             "n_matched": n_matched,
             "mean": leaf("delay_mean"),
             "fraction_early": leaf("fraction_early"),
         },
+        **proxy,
     }
 
 
+def _aggregate_leaf(
+    table: np.ndarray, weights: _Weights, key: str, label: str, templated: bool
+) -> dict[str, Any] | None:
+    """One leaf of the aggregate with the exact list of templates averaged (None when no template can be averaged)."""
+    used = aggregate_templates(table.sum(axis=0), key, templated=templated)
+    if not used:
+        return None
+    leaf = weights.scalar(table, _aggregate_stat(key, templated), label)
+    leaf["templates_averaged"] = list(used)
+    return leaf
+
+
 def _per_template_block(
-    table: np.ndarray, weights: _Weights, detector: str
+    table: np.ndarray, weights: _Weights, detector: str, templated: bool
 ) -> dict[str, Any]:
     """``per_template.<det>``: the six templates of the aggregate, RESP apart, and the equal-weight aggregate."""
     label = f"per_template.{detector}"
     total = table.sum(axis=0)
     present = [t for t in AGGREGATE_TEMPLATES if total[_tcol(f"{t}_gt")] > 0]
+
+    def leaf(key: str, name: str, available: bool = True) -> dict[str, Any] | None:
+        if not available:
+            return None
+        return _aggregate_leaf(
+            table, weights, key, f"{label}.aggregate.{name}", templated
+        )
+
     return {
+        "templated": templated,
         "templates": {
-            t: _template_block(table, weights, t, label) for t in AGGREGATE_TEMPLATES
+            t: _template_block(table, weights, t, label, templated)
+            for t in AGGREGATE_TEMPLATES
         },
-        "resp": _template_block(table, weights, "RESP", label),
+        "resp": _template_block(table, weights, "RESP", label, templated),
         "aggregate": {
             "templates": list(AGGREGATE_TEMPLATES),
             "templates_with_events": present,
             "weights": "equal",
-            "precision": weights.scalar(
-                table, _aggregate_stat("precision"), f"{label}.aggregate.precision"
-            ),
-            "recall": weights.scalar(
-                table, _aggregate_stat("recall"), f"{label}.aggregate.recall"
-            ),
-            "f1": weights.scalar(table, _aggregate_stat("f1"), f"{label}.aggregate.f1"),
-            "delay_ms_mean": weights.scalar(
-                table, _aggregate_stat("delay_mean"), f"{label}.aggregate.delay_ms_mean"
-            ),
+            "precision": leaf("precision", "precision", templated),
+            "recall": leaf("recall", "recall"),
+            "f1": leaf("f1", "f1", templated),
+            "delay_ms_mean": leaf("delay_mean", "delay_ms_mean"),
         },
     }
 
@@ -1911,18 +1991,22 @@ def _excess_blocks(
     backgrounds: Mapping[str, PatientBackground],
     weights: _Weights,
 ) -> dict[str, Any]:
-    """``background.excess_over_background.<det>``: for each injected C1 subtype, the rate inside its footprints minus the
-    rate in the windows without injections (events of its template; ``events``, ``detected``, ``recall``)."""
+    """``background.excess_over_background.<det>``: for each injected C1 subtype, the excess over the natural background of the
+    events of its template: ``events_per_record`` and ``detected_per_record`` (headline), ``recall`` (the difference of
+    recalls) and the secondary ``*_per_patient_day``."""
     out: dict[str, Any] = {}
     for key, template in sorted(keys.items()):
         subtype = key.split("/", 1)[1]
         if template is None:
             out[subtype] = {
                 "template": None,
-                "events": None,
-                "detected": None,
+                "events_per_record": None,
+                "detected_per_record": None,
                 "recall": None,
+                "events_per_patient_day": None,
+                "detected_per_patient_day": None,
                 "counts": None,
+                "note": EXCESS_NOTE,
             }
             continue
         table = np.vstack(
@@ -1938,44 +2022,57 @@ def _excess_blocks(
                 for p in test_patients
             ]
         )
-        total = table.sum(axis=0)
+        counts = excess_counts(table.sum(axis=0))
         label = f"background.excess_over_background.{detector}.{subtype}"
+
+        def leaf(
+            stat: Callable[[np.ndarray], float],
+            name: str,
+            t: np.ndarray = table,
+            lab: str = label,
+        ) -> dict[str, Any]:
+            return weights.scalar(t, stat, f"{lab}.{name}")
+
         out[subtype] = {
             "template": template,
-            "events": weights.scalar(table, table_excess_events, f"{label}.events"),
-            "detected": weights.scalar(
-                table, table_excess_detected, f"{label}.detected"
+            "events_per_record": leaf(
+                table_excess_events_per_record, "events_per_record"
             ),
-            "recall": weights.scalar(table, table_excess_recall, f"{label}.recall"),
+            "detected_per_record": leaf(
+                table_excess_detected_per_record, "detected_per_record"
+            ),
+            "recall": leaf(table_excess_recall, "recall"),
+            "events_per_patient_day": leaf(
+                table_excess_events, "events_per_patient_day"
+            ),
+            "detected_per_patient_day": leaf(
+                table_excess_detected, "detected_per_patient_day"
+            ),
             "counts": {
-                "events_in_windows": round(float(total[0])),
-                "detected_in_windows": round(float(total[1])),
-                "exposure_in_windows_days": _num(float(total[2])),
-                "events_background": round(float(total[3])),
-                "detected_background": round(float(total[4])),
-                "exposure_background_days": _num(float(total[5])),
+                "n_injection_records": round(counts["records"]),
+                "events_in_windows": round(counts["events_in"]),
+                "detected_in_windows": round(counts["detected_in"]),
+                "exposure_in_windows_days": _num(counts["exposure_in_days"]),
+                "events_background": round(counts["events_bg"]),
+                "detected_background": round(counts["detected_bg"]),
+                "exposure_background_days": _num(counts["exposure_bg_days"]),
             },
+            "note": EXCESS_NOTE,
         }
     return out
 
 
 def _excess_keys(
     backgrounds: Mapping[str, PatientBackground],
-    events: Mapping[str, Sequence[tuple[GroundTruthEvent, int]]],
 ) -> dict[str, str | None]:
-    """The injected C1 subtypes with a footprint (``C1/<subtype>``) and the template of each: the template of the C1
-    events of that subtype in the truth, None when there is not exactly one (the excess is then not computed)."""
+    """The injected C1 subtypes with a footprint (``C1/<subtype>``) and the template of each, from the static link table
+    of the labeller (``LINK_TABLE``, the vocabulary of the builder), not from the truth events present: None for a subtype
+    that the table does not know."""
     keys = {k for bg in backgrounds.values() for k in bg.keys if k.startswith("C1/")}
     out: dict[str, str | None] = {}
     for key in sorted(keys):
-        subtype = key.split("/", 1)[1]
-        found = {
-            template_of_event(e)
-            for pairs in events.values()
-            for e, _ in pairs
-            if e.cls.value == "C1" and e.subtype == subtype
-        }
-        out[key] = next(iter(found)) if len(found) == 1 else None
+        name = LINK_TABLE.get(key.split("/", 1)[1])
+        out[key] = name.upper() if name is not None else None
     return out
 
 
@@ -1998,9 +2095,7 @@ def _background_facts(
         for entry in log
         if not entry.get("realised", True)
     )
-    exposure = (
-        sum(sum(backgrounds[p].exposure_ms()) for p in test_patients) / 86_400_000
-    )
+    exposure = sum(sum(backgrounds[p].exposure_ms()) for p in test_patients) / T_DAY_MS
     per_template: dict[str, dict[str, int]] = {
         t: {"natural": 0, "injected": 0} for t in TEMPLATES
     }
@@ -2483,7 +2578,7 @@ def _run_seed(
         }
     except (TypeError, ValueError) as exc:
         raise ConfigError(f"injection log: {exc}") from exc
-    excess_keys = _excess_keys(backgrounds, {p: truth[p][0] for p in test_patients})
+    excess_keys = _excess_keys(backgrounds)
     patients_of_units = [p for p, _ in units]
     n_clusters = len(set(patients_of_units))
     weights = _Weights(
@@ -2593,7 +2688,9 @@ def _run_seed(
         metrics["accuracy_vs_coverage"][name] = points
         subtype[name] = _subtype_recall(matching)
         template_sums = np.vstack([scored[p].template_table for p in test_patients])
-        per_template[name] = _per_template_block(template_sums, weights, name)
+        per_template[name] = _per_template_block(
+            template_sums, weights, name, _is_templated(inst)
+        )
         background_fa[name] = _background_fa_block(template_sums, weights, name)
         excess[name] = _excess_blocks(
             name, excess_keys, test_patients, test_days, scored, backgrounds, weights
@@ -2722,10 +2819,11 @@ def _meta(
             "templates": list(AGGREGATE_TEMPLATES),
             "excluded": ["RESP"],
             "excluded_reason": RESP_EXCLUSION_REASON,
-            "precision": (
-                "TP_t / (TP_t + FA): FA are the background false alarms pooled over the templates, because most detections "
-                "carry no template (E3); a template without a truth event is null"
-            ),
+            "class_proxies": dict(CLASS_PROXIES),
+            "class_proxy_note": CLASS_PROXY_NOTE,
+            "average_rule": AVERAGE_RULE,
+            "precision_rule": PRECISION_RULE,
+            "precision_pooled_fa": PRECISION_POOLED_FA_NOTE,
         },
         "background": {
             "rule": (
@@ -2744,6 +2842,8 @@ def _meta(
                 if tail is None
                 else "the footprint of a C1 injection is its window plus this tail (a parameter, not a clinical value)"
             ),
+            "excess_interval_note": EXCESS_INTERVAL_NOTE,
+            "excess_counterfactual_note": EXCESS_COUNTERFACTUAL_NOTE,
             "footprint_margin_ms": margin_ms,
             "footprint_margin_source": (
                 "match.tolerance_ms"

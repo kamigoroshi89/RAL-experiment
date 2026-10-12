@@ -119,6 +119,13 @@ evaluation widens every footprint by a margin (default: the matching tolerance) 
 or just outside the tolerance, is not counted as background. The footprints of different subtypes may overlap; the time outside every
 footprint is the exposure of the background false alarms.
 
+The injected C1 subtypes are read as an excess over the natural background: the count of events of their template per injection record
+beyond what the natural rate (events outside every footprint per day outside every footprint) gives for the same footprint time. This
+counterfactual ignores the time-of-day structure of the natural events (natural RANGE and HOLD events cluster near the dosing times), so
+it is fair only if the injection windows are placed like the rest of the day; onsets are anchored to readings or dose ticks (`evidence/nonadditivity.md`), and whether that
+matches the clock of the natural events is not checked here. The count per record does not scale with the footprint length (a parameter), the rate
+per patient-day does and is secondary. Only the cluster intervals (patients resampled) of the excess are usable.
+
 ## Robot reports
 
 Each visit of the robot produces a `NODE_STATE` event of the source `robot` with `payload.state` `active` and
