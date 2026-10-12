@@ -1,0 +1,59 @@
+# Mini likelihood experiment of WS08-T10 (ADR-074). ILLUSTRATIVE, UNVERIFIED, FIXTURE-ONLY: it runs the proposed method with the
+# likelihood attributor, the hierarchical variant and one baseline on the hand-written mini benchmark of this directory, checks
+# that the plumbing writes the probabilistic-attribution keys and produces no result. EVERY NUMBER BELOW IS A TEST VALUE without a
+# source, written here before the run (E9) and never tuned: the `sensitivity_values` are one point of the sensitivity grid of
+# docs/models/attribution-likelihood.md for each awaiting row ("sensitivity, not a proposal"), none is a clinical or device value.
+# `headline: false`: the runner refuses `headline: true` on a fixture-only benchmark or registry.
+experiment_id: likelihood
+benchmark_manifest: mini_benchmark          # relative to this file
+detectors: [B3, ours, ours-hier]
+seeds: [0]
+split: {train: 0.34, calibration: 0.33, test: 0.33}   # 6 patients: 2, 2, 2 (largest remainder)
+match: {tolerance_ms: 60000, time_reference: first_decidable}   # test value: one monitor step
+alpha: 0.5                                   # test value: the calibration set is tiny
+monitor:
+  step_ms: 60000
+  reorder_delay_ms: 0
+  predictive: true
+  alpha: 0.5
+  variant: likely
+  registry_version: "0.0.0"
+run_options:
+  headline: false
+  alpha_grid: [0.5]
+  n_bootstrap: 50                            # test value
+  ci_level: 0.95                             # test value
+  ece_bins: 5                                # test value
+  registry: registry.yaml                    # the fixture registry, relative to this file
+  allow_fixture_only: true
+  twins: separate                            # the confounder pair is run and reported apart (pair metrics)
+  required_analysis: []
+  background:                                # test values, none is a clinical value or a proposal
+    c1_footprint_tail_ms: 3600000            # test value: 1 h of tail after a C1 injection window
+    c1_footprint_tail_reason: "test value without a source, written for the smoke run; not a clinical value"
+    footprint_margin_ms: 60000               # test value: one monitor step (equal to the matching tolerance)
+  attribution:                               # WS08-T09 options; test values, none is a clinical value or a proposal
+    loose_after_ms: 60000                    # test value: one monitor step (equal to the matching tolerance)
+    set_alphas: [0.5]                        # test value: the equal-coverage target (the calibration part is tiny)
+    pair_primary_templates: {double_take_vs_bounce: count}   # test value: the common template of the one fixture pair
+  detector_params:
+    timing_tail_ms: 90000000                 # test value: 25 h, long enough for the day-end COUNT
+    forecaster: {continuous: persistence}
+    ours:
+      device_profile:                        # the capabilities of the fixture devices (no diagnostics report)
+        cuff: {cuff_resolution: 1.0}         # test value: a display that shows integers
+      likelihood:                            # WS08-T10; the LikelihoodRule of ADR-074
+        diagnostics_profile: without_diagnostics
+        set_alpha: 0.5                       # test value: the target of the calibrated set (the calibration part is tiny)
+        set_mode: marginal
+        sensitivity_values:                  # TEST VALUES: one point of the sensitivity grid per awaiting row, not proposals
+          eps: 0.01
+          qc: 0.5
+          q_stale: 0.5
+          rep_nat: 0.0197
+          delta: 0.0
+          dispense_bounce_interval_ms: 10000
+          tau: 0.67
+          cumulative_level: 0.9
+          class_priors: uniform
+          pi_designs: uniform
