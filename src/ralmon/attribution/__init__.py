@@ -5,12 +5,17 @@ alert tuple (``alert``), the hierarchical rule with abstention (``rule``), the a
 propagation (``attributor``), the nursing-staff text (``render``) and the evidence extractor (``extract``).
 The likelihood attributor of ADR-074 (``LikelihoodRule``, ``load_likelihood_table``, ``AwaitingValueError``) is in the
 submodule ``ralmon.attribution.likelihood``; ``RuleAttributor`` takes it as its ``rule`` (the hierarchical rule stays the
-default, ``ours-hier``). Helpers outside the contract table (``Decision``, ``AbstentionReason``, ``DeviceProfile`` and ``DeviceCapabilities``
-(also importable from this package root, for ``ralmon.eval.device_capabilities``), ``alert_from_record``,
-``render_text``, ``empty_evidence``) are importable from the submodules and are not in ``__all__``.
+default, ``ours-hier``). Those names, and ``empty_evidence``, are also importable from this package root, outside ``__all__``
+(``tests/test_layering.py`` requires cross-package imports through the root; the likelihood module loads on first use). Other helpers
+outside the contract table (``Decision``, ``AbstentionReason``, ``alert_from_record``, ``render_text``) are importable from the
+submodules and are not in ``__all__``; ``DeviceProfile`` and ``DeviceCapabilities`` are also importable from this package root, for
+``ralmon.eval.device_capabilities``.
 """
 
 from __future__ import annotations
+
+import importlib
+from typing import Any
 
 from ralmon.attribution.alert import (
     Alert,
@@ -29,6 +34,7 @@ from ralmon.attribution.evidence import (
     SignalQualityEvidence,
     SystemHealthEvidence,
 )
+from ralmon.attribution.evidence import empty_evidence as empty_evidence
 from ralmon.attribution.extract import (
     DeviceCapabilities as DeviceCapabilities,
 )
@@ -61,3 +67,19 @@ __all__ = [
     "SystemHealthEvidence",
     "extract_evidence",
 ]
+
+
+# The likelihood attributor loads on first use (it reads no file at import, but it is the heaviest module of the package); its names
+# are importable from the package root and stay outside ``__all__`` (the table of ``#package-public-api`` is frozen), because
+# ``ralmon.eval`` reads them and ``tests/test_layering.py`` requires imports through the package root (WS08-T09).
+_LIKELIHOOD_NAMES = frozenset(
+    {"AwaitingValueError", "LikelihoodRule", "LikelihoodTable", "load_likelihood_table"}
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LIKELIHOOD_NAMES:
+        value = getattr(importlib.import_module("ralmon.attribution.likelihood"), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

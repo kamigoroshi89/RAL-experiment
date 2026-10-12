@@ -654,7 +654,7 @@ Rules: baselines receive the same clinical knowledge as the proposed method (ban
 
 ## Metrics
 
-Version 0.2.0 (ADR-074: probabilistic-attribution metrics; before: 0.1.0). Owner WS08. Consumers: WS06, WS09. Sources: analisi §5.5, §5.6, §10.
+Version 0.3.0 (ADR-074 amendment 7: signatures of the probabilistic-attribution metrics as implemented by WS08-T09; 0.2.0: ADR-074 first listing; 0.1.0: original). Owner WS08. Consumers: WS06, WS09. Sources: analisi §5.5, §5.6, §10.
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -671,17 +671,17 @@ def empirical_coverage(pred: Sequence[PredictedViolation], truth_sigma: Sequence
 def mean_interval_width(intervals: Sequence[tuple[float, float]]) -> float: ...
 def expected_calibration_error(rho: Sequence[float], outcome: Sequence[bool], bins: int) -> float: ...
 def attribution_confusion(matching: "Matching") -> Mapping[tuple[str, str], int]: ...   # includes UNDETERMINED
-def attribution_log_score(matching: "Matching") -> Mapping[str, float | None]: ...        # per template, from Alert.p_kappa; ADR-074 (4); None without p_kappa
-def attribution_brier(matching: "Matching") -> Mapping[str, float | None]: ...           # per template
-def attribution_calibration_curve(matching: "Matching", bins: int) -> Mapping[str, Sequence[tuple[float, float, int]]]: ...  # per template: (mean p, observed frequency, count)
-def pair_llr(members: Sequence["PairMember"]) -> Sequence[float]: ...                     # Lambda = log P(e|c_A) - log P(e|c_B), prior-free; ADR-074 (3)
-def pair_direction_mcnemar(x: Sequence[bool], y: Sequence[bool]) -> Mapping[str, float]: ...  # b, c, exact two-sided p on the discordant pairs
+def attribution_log_score(alerts: Sequence["LabelledAlert"]) -> Mapping[str, float | None] | None: ...   # per template, from Alert.p_kappa against the labelled class (ADR-074 (4)); None without p_kappa; labelled alerts come from label_alerts (tight labelling primary, loose next to it)
+def attribution_brier(alerts: Sequence["LabelledAlert"]) -> Mapping[str, float | None] | None: ...      # per template
+def attribution_calibration_curve(alerts: Sequence["LabelledAlert"], bins: int) -> Mapping[str, Sequence[tuple[float, float, int]]] | None: ...  # per template: (mean p, observed frequency, count); empty bins reported empty
+def pair_llr(members: Sequence["PairMember"], rule: "LikelihoodRule") -> Sequence[float]: ...           # Lambda = log P(e|c_A) - log P(e|c_B) between the two specific subtypes via the rule helpers; prior-free (ADR-074 (3))
+def pair_direction_mcnemar(x: Sequence[bool], y: Sequence[bool]) -> Mapping[str, float]: ...             # b, c, exact two-sided p on the discordant pairs
 def accuracy_vs_coverage(matching: "Matching") -> Sequence[tuple[float, float]]: ...
 def latency_percentiles(latencies_ms: Sequence[float]) -> Mapping[str, float]: ...       # p50, p95, p99
 def severity_rank_agreement(auto: Sequence[float], clinician: Sequence[float]) -> float: ... # Kendall tau or Spearman
 ```
 
-Rules: bootstrap confidence intervals over patient-days; at least 5 seeds (analisi §5.1); coverage is reported both in distribution and under shift (calibrate on one cohort, test on the other).
+Rules: bootstrap confidence intervals over patient-days (headline: cluster bootstrap over patients); at least 5 seeds (analisi §5.1); coverage is reported both in distribution and under shift (calibrate on one cohort, test on the other). Further helpers of the probabilistic attribution (set coverage and size, equal-coverage comparison with `SubtypeSetCalibrator`, separate pair calibration and transfer, role-swap check, `label_alerts`, `AlertInputs`) and the top-level keys of `metrics.json` that carry them (`attribution_log_score`, `attribution_brier`, `attribution_calibration_curve`, `attribution_sets`, `attribution_equal_coverage`, `attribution_labelling`, `pair_llr`, `pair_direction_mcnemar`) are specified in `docs/plan/workstreams/WS08-experiments/README.md` (layout) and the WS08-T09 Notes; a method without `p_kappa` or sets gets `null`.
 
 ## Experiment config and outputs
 
