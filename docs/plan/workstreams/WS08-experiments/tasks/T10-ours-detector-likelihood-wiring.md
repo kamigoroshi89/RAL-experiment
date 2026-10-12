@@ -3,7 +3,7 @@ id: WS08-T10
 title: "OursDetector with the likelihood rule: alert_inputs, set_selector from calibrated sets, ours-hier and A4 variants, end-to-end run (ADR-074)"
 workstream: WS08-experiments
 owner: agent
-status: in_progress
+status: done
 depends_on: ["WS08-T09", "WS05-T12", "WS05-T14"]
 critical_path: true
 non_negotiable: true
