@@ -41,6 +41,16 @@ subtype over the natural background). The footprints come from the injection log
 ``run_options.background.c1_footprint_tail_ms`` (``awaiting_human_value`` until a human states it: flag
 ``C1_FOOTPRINT_TAIL_AWAITING``, a hard failure of a headline run). The layout is in the README of WS08.
 
+Probabilistic attribution (WS08-T09, ADR-074). Besides the eleven metrics and ``per_template`` / ``background``, ``metrics.json`` holds the
+top-level keys ``attribution_log_score``, ``attribution_brier``, ``attribution_calibration_curve``, ``attribution_sets``,
+``attribution_equal_coverage``, ``pair_llr`` and ``pair_direction_mcnemar`` (``ralmon.eval.attribution_report``; layout in the README of
+WS08): metric first, then the detector, ``null`` for a method without ``p_kappa`` (and without sets). A detector can offer two optional
+hooks, ``alert_inputs(patient_id, alert) -> AlertInputs | None`` (the subtype posteriors, the fixed sets and the evidence vector of an
+alert, no truth) and ``likelihood_rule`` (a ``LikelihoodRule``, for the pair quantity); the runner then also runs it on the calibration
+patients (the counters of the detections are left as they were) to calibrate the sets. The truth of an alert comes from the injection log
+and the ground truth (``ralmon.eval.attribution_truth``): the scoring side reads it, a detector never does. ``run_options.attribution``
+holds ``loose_after_ms`` (``awaiting_human_value``), ``set_alphas``, ``effects`` and ``pair_primary_templates``.
+
 Guards (``evaluate_guards``). Each condition of the fairness audit that decides whether a comparison is legitimate is a
 guard with an id. Always a HARD failure (``GuardError``, nothing is written for the seed): ``B1_VACUOUS`` (B1 ran with fewer
 rules than R1 to R4 on some plan). A HARD failure in a ``headline`` run and a FLAG in the metadata otherwise:

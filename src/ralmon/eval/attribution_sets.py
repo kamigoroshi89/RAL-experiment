@@ -212,18 +212,22 @@ class _Row:
     size: int
 
 
-def _group(rows: Sequence[_Row], level: float) -> dict[str, Any] | None:
+def _group(rows: Sequence[_Row], level: float | None) -> dict[str, Any] | None:
+    """The statistics of a group of alerts; ``level`` is the confidence of the Wilson interval (None: not computed)."""
     if not rows:
         return None
     n = len(rows)
     covered = sum(1 for r in rows if r.covered)
-    lo, hi = wilson_interval(covered, n, level)
+    wilson: list[float | None] | None = None
+    if level is not None:
+        lo, hi = wilson_interval(covered, n, level)
+        wilson = [_num(lo), _num(hi)]
     counts = Counter(r.size for r in rows)
     return {
         "n": n,
         "covered": covered,
         "coverage": covered / n,
-        "wilson": [_num(lo), _num(hi)],
+        "wilson": wilson,
         "mean_size": sum(r.size for r in rows) / n,
         "size_counts": {str(k): counts[k] for k in sorted(counts)},
     }
@@ -438,7 +442,7 @@ def _cell(
         )
     if not rows:
         return None
-    level = bootstrap[1] if bootstrap is not None else 0.95
+    level = bootstrap[1] if bootstrap is not None else None
     out = _group(rows, level)
     assert out is not None
     per_template: dict[str, Any] = {}
@@ -484,7 +488,7 @@ def _cell(
 
 
 def _fixed_group(
-    items: Sequence[LabelledAlert], method: str, level: float
+    items: Sequence[LabelledAlert], method: str, level: float | None
 ) -> tuple[dict[str, Any] | None, int, int]:
     rows = [
         _Row(
@@ -583,7 +587,7 @@ def equal_coverage(
                 for key, alpha in zip(keys, alphas, strict=True)
             },
         }
-    level = bootstrap[1] if bootstrap is not None else 0.95
+    level = bootstrap[1] if bootstrap is not None else None
     names = (
         list(fixed_methods)
         if fixed_methods is not None

@@ -543,7 +543,7 @@ def _equal_block(
     for lab in LABELLINGS:
         cal, cal_excluded = label_records(calibration, lab, options, inputs)
         test = parts[lab][0]
-        methods = S_methods(cal, test)
+        methods = _methods_in(cal, test)
         if not methods:
             labellings[lab] = None
             continue
@@ -564,7 +564,7 @@ def _equal_block(
     }
 
 
-def S_methods(*parts: Sequence[LabelledAlert]) -> list[str]:
+def _methods_in(*parts: Sequence[LabelledAlert]) -> list[str]:
     """The posterior methods present in the inputs of the labelled alerts, in order of first appearance."""
     seen: dict[str, None] = {}
     for part in parts:
@@ -743,7 +743,7 @@ def _pair_sets(
             "n_test_alerts": len(pair_test),
         }
     main_cal, _ = label_records(calibration_records, "tight", options, hook)
-    methods = S_methods(pair_cal, pair_test)
+    methods = _methods_in(pair_cal, pair_test)
     if not methods or not main_cal:
         return {
             "status": "no posterior for the pair alerts or no calibration alert of the main population",

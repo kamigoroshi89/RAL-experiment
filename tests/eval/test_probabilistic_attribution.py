@@ -1221,3 +1221,13 @@ def test_wilson_interval_hand_value() -> None:
     assert all(math.isnan(x) for x in S.wilson_interval(0, 0, 0.95))
     assert S.wilson_interval(0, 5, 0.95)[0] == pytest.approx(0.0, abs=1e-12)
     assert S.wilson_interval(5, 5, 0.95)[1] == pytest.approx(1.0, abs=1e-12)
+
+
+def test_the_static_c3_table_agrees_with_the_likelihood_catalogue(table) -> None:  # type: ignore[no-untyped-def]
+    """The templates a C3 subtype can change (the injection log of a C3 record lists none) are those of the components of the
+    likelihood table, over the knowledge levels of the subtype."""
+    by_subtype: dict[str, set[str]] = {}
+    for component in table.components:
+        if component.cls == "C3":
+            by_subtype.setdefault(component.subtype, set()).update(component.templates)
+    assert {k: set(v) for k, v in T.C3_EVENT_TEMPLATES.items()} == by_subtype
